@@ -13,6 +13,8 @@ struct LibraryView: View {
     /// The photo zooms out of its thumbnail and back into it.
     @Namespace private var zoom
     @State private var addingToAlbum: [AssetID]?
+    /// "Einstellungen öffnen" in an empty list when no main area counts (as on the overview).
+    @State private var showSettings = false
     /// Thumbnails shown so far; more on request, so large libraries stay smooth and every
     /// photo can still be reached.
     @State private var shown = Self.page
@@ -77,6 +79,9 @@ struct LibraryView: View {
             PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
                 .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
+        .sheet(isPresented: $showSettings) {
+            NavigationRoot { SettingsView() }
+        }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {
                 // Animated like the other ways out, so the tab bar does not snap back.
@@ -94,10 +99,10 @@ struct LibraryView: View {
     private func content(_ members: [LibraryBuckets.Item]) -> some View {
         if bucket == .suggestions {
             // Numbers as plural strings (design review W5: "1 Fotos und Videos").
-            Text("\(model.openProposals.count) Vorschläge für \(members.count) Fotos und Videos")
+            Text("\(model.openProposals.count) Vorschläge für \(members.count) \(members.count.formatted()) Fotos und Videos")
                 .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
         } else {
-            Text("\(members.count) Fotos und Videos")
+            Text("\(members.count) \(members.count.formatted()) Fotos und Videos")
                 .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
         }
 
@@ -105,8 +110,20 @@ struct LibraryView: View {
             // Photos with a suggestion: show the suggestions themselves, ready to open.
             proposalList
         } else if members.isEmpty {
-            ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
-                                   description: Text(emptyDescription))
+            if SortedCountCard.EmptyList.make(bucket, settings: model.settings) == .noMainAreaChosen {
+                // Nothing counts as sorted: the way to change that, as on the overview's card.
+                ContentUnavailableView {
+                    Label(emptyTitle, systemImage: "circle.dashed")
+                } description: {
+                    Text(emptyDescription)
+                } actions: {
+                    Button("Einstellungen öffnen") { showSettings = true }
+                        .accessibilityIdentifier("library.openSettings")
+                }
+            } else {
+                ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
+                                       description: Text(emptyDescription))
+            }
         } else {
             grid(members)
             if members.count > shown {
@@ -237,7 +254,7 @@ struct LibraryView: View {
         ToolbarItem(placement: .bottomBar) {
             // The bar keeps its height, so the count stays on one line and stops growing at the
             // first accessibility size; the large content viewer shows it in full.
-            Text("\(selection.count) ausgewählt")
+            Text("\(selection.count.formatted()) ausgewählt")
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .lineLimit(1)
@@ -274,20 +291,29 @@ struct LibraryView: View {
         if b == .suggestions { selecting = false }
     }
 
+    /// With no main area counted, "Nicht sortiert" and "Sortiert" say what the overview says,
+    /// not "Alles sortiert" (`SortedCountCard.EmptyList`, finding N-01).
     private var emptyTitle: LocalizedStringKey {
-        bucket == .unorganized ? "Alles sortiert" : "Keine Fotos"
+        switch SortedCountCard.EmptyList.make(bucket, settings: model.settings) {
+        case .noMainAreaChosen: "Kein Bereich zählt als sortiert"
+        case .allSorted: "Alles sortiert"
+        case .noPhotos: "Keine Fotos"
+        }
     }
 
     private var emptyDescription: LocalizedStringKey {
-        switch bucket {
-        case .unorganized:
+        switch SortedCountCard.EmptyList.make(bucket, settings: model.settings) {
+        case .noMainAreaChosen:
+            return "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen."
+        case .allSorted:
             // "Nur 2026": the list holds what the ring counts, the photos of that year.
             if case .year(let year) = model.analysisScope {
-                return "Alle Fotos aus \(String(year)) liegen in deinen Hauptbereichen."
+                return "Alle gezählten Fotos aus \(String(year)) liegen in passenden Alben."
             }
-            return "Alle Fotos liegen in deinen Hauptbereichen."
-        case .ignored: return "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen."
-        default: return "In diesem Bereich gibt es gerade nichts."
+            return "Alle gezählten Fotos liegen in passenden Alben."
+        case .noPhotos:
+            if bucket == .ignored { return "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen." }
+            return "In diesem Bereich gibt es gerade nichts."
         }
     }
 }
@@ -302,7 +328,7 @@ struct IgnoreUndoBar: View {
         if let undo = model.lastIgnored {
             HStack(spacing: Theme.Spacing.m) {
                 Label {
-                    Text("\(undo.assets.count) Fotos ignoriert")
+                    Text("\(undo.assets.count) \(undo.assets.count.formatted()) Fotos ignoriert")
                 } icon: {
                     Image(systemName: "eye.slash")
                 }
@@ -370,7 +396,7 @@ struct AssetDetailView: View {
                         Text("Tippe auf einen Vorschlag, um ihn anzusehen und auszuwählen.")
                     }
                 } else if let reason = reasonText {
-                    Section("Warum nicht sortiert?") {
+                    Section("Warum unsortiert?") {
                         Text(reason).foregroundStyle(.secondary)
                     }
                 }
@@ -404,7 +430,7 @@ struct AssetDetailView: View {
                     if isIgnored {
                         Text("Albumist zählt das Foto dann wieder mit und kann es wieder vorschlagen.")
                     } else {
-                        Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit zurücknehmen.")
+                        Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit rückgängig machen.")
                     }
                 }
             }
@@ -428,6 +454,14 @@ struct AssetDetailView: View {
         let inScope = model.analysisScope.includes(facts, calendar: .sortlyDefault)
         switch model.resolver.ringPart(state, inScope: inScope) {
         case .outsideMainAreas, .outsideScope: return "Nicht mitgezählt"
+        case .unsorted:
+            // Not „Unsortiert“ right above the albums the photo is in: the areas it lacks an
+            // album of („Noch in keinem Album für „Reisen““), the rule of the status itself.
+            let missing = UnsortedReason.missingAreas(state, primaryAreas: model.resolver.primaryAreas)
+            guard !missing.isEmpty else { return model.resolver.overall(state).label }
+            let open = Locale.current.quotationBeginDelimiter ?? "\"", close = Locale.current.quotationEndDelimiter ?? "\""
+            let names = missing.map { open + String(localized: $0.titleResource) + close }
+            return "Noch in keinem Album für \(names.formatted(.list(type: .or)))"
         default: return model.resolver.overall(state).label
         }
     }
@@ -448,13 +482,18 @@ struct AssetDetailView: View {
 
     private var reasonText: LocalizedStringKey? {
         guard let state = model.states[facts.id] else { return "Die Analyse ist für dieses Foto noch nicht fertig." }
+        // No main area counts: the ring counts no photo ("Nicht mitgezählt" above), as the
+        // overview says (finding N-01). Ignored and excluded photos say so below.
+        if SortedCountCard.photoInfoNamesNoMainArea(state, settings: model.settings) {
+            return "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen."
+        }
         switch model.resolver.overall(state) {
         case .fullyOrganized: return nil
         case .ignored: return "Du hast dieses Foto ignoriert."
         case .excluded: return "Dieses Foto ist von der Analyse ausgeschlossen, zum Beispiel weil es ausgeblendet ist."
         default:
             // Outside the chosen year the ring does not count the photo ("Nicht mitgezählt" above).
-            // Only for photos that are not sorted: a sorted photo needs no "Warum nicht sortiert?" (review 18.11.).
+            // Only for photos that are not sorted: a sorted photo needs no "Warum unsortiert?" (review 18.11.).
             if case .year(let year) = model.analysisScope,
                model.resolver.ringPart(state, inScope: model.analysisScope.includes(facts, calendar: .sortlyDefault)) == .outsideScope {
                 return "Albumist zählt gerade nur Fotos aus \(String(year))."
@@ -526,7 +565,7 @@ struct AddToAlbumSheet: View {
                 }
             }
             .searchable(text: $query, prompt: Text("Album suchen"))
-            .navigationTitle(Text("\(assets.count) Fotos hinzufügen"))
+            .navigationTitle(Text("\(assets.count) \(assets.count.formatted()) Fotos hinzufügen"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // A round close button: the wider "Abbrechen" pushed the title off centre.

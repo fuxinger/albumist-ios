@@ -40,6 +40,9 @@ struct PlanReviewView: View {
     /// The screen loads once; coming back from another tab keeps the result and its undo.
     @State private var didLoad = false
     private static let top = "plan.top"
+    /// Padding around the screen's content; the sorting show keeps it free when it fits itself
+    /// to the screen (`SortingShow.screenPadding`).
+    private static let contentPadding = Theme.Spacing.l
 
     /// The facts are made again for another plan, or when the albums in Photos changed.
     private struct FactsKey: Equatable {
@@ -63,7 +66,7 @@ struct PlanReviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                     if let show {
-                        SortingShow(albums: show) {
+                        SortingShow(albums: show, screenPadding: Self.contentPadding) {
                             withAnimation(.smooth(duration: 0.45)) { self.show = nil }
                         }
                         .transition(.opacity)
@@ -92,7 +95,7 @@ struct PlanReviewView: View {
                         }
                     }
                 }
-                .padding(Theme.Spacing.l)
+                .padding(Self.contentPadding)
                 .id(Self.top)
             }
             // The button in reach while the plan scrolls under it (review P3-05 = G3-05). In the
@@ -276,10 +279,10 @@ struct PlanReviewView: View {
             Card {
                 // Names what was cut off: creating albums or taking them back.
                 let isUndo = model.interruptedPlan?.reverts != nil
-                Label(isUndo ? LocalizedStringKey("Erst das unterbrochene Zurücknehmen abschließen") : LocalizedStringKey("Erst das unterbrochene Anlegen abschließen"),
+                Label(isUndo ? LocalizedStringKey("Erst das unterbrochene Rückgängigmachen abschließen") : LocalizedStringKey("Erst das unterbrochene Anlegen abschließen"),
                       systemImage: "pause.circle").font(.headline)
                 Text(isUndo
-                     ? LocalizedStringKey("Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt zurückgenommen.")
+                     ? LocalizedStringKey("Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt rückgängig gemacht.")
                      : LocalizedStringKey("Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt."))
                     .font(.subheadline).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -530,7 +533,7 @@ struct ResultCard: View {
                 if failed > 0 {
                     Group {
                         if isUndo {
-                            Text("\(failed) Schritte konnten nicht ausgeführt werden. Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist.")
+                            Text("\(failed) Schritte konnten nicht ausgeführt werden. Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist.")
                         } else {
                             Text("\(failed) Schritte konnten nicht ausgeführt werden. Die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
                         }
@@ -539,7 +542,7 @@ struct ResultCard: View {
                     .multilineTextAlignment(.center)
                 }
                 if summary.unavailableAssets > 0 && !isUndo {
-                    Text("\(summary.unavailableAssets) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
+                    Text("\(summary.unavailableAssets) \(summary.unavailableAssets.formatted()) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
                         .font(.footnote).foregroundStyle(.noteText)
                         .multilineTextAlignment(.center)
                 }
@@ -662,7 +665,7 @@ enum ConflictText {
         case .albumChangedSincePreview(let id):
             return String(localized: "„\(title(id))“ wurde inzwischen geändert. Bitte prüfe den Vorschlag erneut.")
         case .assetsUnavailable(let count):
-            return String(localized: "\(count) Fotos sind nicht mehr in der Mediathek.")
+            return String(localized: "\(count) \(count.formatted()) Fotos sind nicht mehr in der Mediathek.")
         case .writeAccessMissing:
             return String(localized: "Albumist hat keinen vollen Zugriff auf deine Fotos.")
         }
@@ -800,7 +803,7 @@ private struct PlanAlbumRow: View {
             Spacer(minLength: Theme.Spacing.s)
             VStack(alignment: .trailing, spacing: 2) {
                 badge
-                Text("\(album.addedCount) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+                Text("\(album.addedCount) \(album.addedCount.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
             }
         }
         .accessibilityElement(children: .combine)

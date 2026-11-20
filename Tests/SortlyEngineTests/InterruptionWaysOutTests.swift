@@ -11,7 +11,7 @@ import SortlyTestSupport
 /// (`SortlyStore`, in memory) and the test library. The app "dies" at every step boundary:
 /// before and after every write to Photos and after every journal write. Then each way out is
 /// taken. Whatever happens, the library afterwards is as it was before the plan, or the app
-/// names what stays (`UndoRemainder`, P2-01). Before, "Alles zurücknehmen" right after Photos
+/// names what stays (`UndoRemainder`, P2-01). Before, "Alles rückgängig machen" right after Photos
 /// made an album or folder left it behind empty, and after photos went into the user's album
 /// it left them there, and the plan disappeared from the history without a word.
 @Suite("Interrupted at every step, then each way out (review P2)", .serialized)
@@ -243,7 +243,7 @@ struct InterruptionWaysOutTests {
             return kept
         }
 
-        /// "Alles zurücknehmen" for an interrupted plan (`AppModel.undoInterruptedPlan`): the
+        /// "Alles rückgängig machen" for an interrupted plan (`AppModel.undoInterruptedPlan`): the
         /// outcome and what the app names.
         func takeBack(_ interrupted: ChangePlan) async throws -> (InterruptedPlanUndo.Outcome, UndoRemainder) {
             let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted)
@@ -428,7 +428,7 @@ struct InterruptionWaysOutTests {
         #expect(leftUnclear > 0)
     }
 
-    /// "Alles zurücknehmen" right after Photos created an album, and right after Albumist's
+    /// "Alles rückgängig machen" right after Photos created an album, and right after Albumist's
     /// photos reached the user's own album: what stays in Photos, what Albumist still knows of
     /// it, and the same suggestions carried out again (they come back to the selection).
     @Test(arguments: [true, false])

@@ -33,7 +33,7 @@ struct DeleteQuestionNoteTests {
     /// an interrupted plan, and the removal of one of Albumist's albums.
     static let deletingCalls = ["undo(", "undoInterruptedPlan(", "removalPlan("]
     /// The ways that run such a plan without a dialog of their own: going on with an
-    /// interrupted undo ("Rest zurücknehmen") or an interrupted removal ("Rest anlegen"), and
+    /// interrupted undo ("Rest rückgängig machen") or an interrupted removal ("Rest anlegen"), and
     /// carrying out a plan built elsewhere in the preview (the removal of an album from "Alben
     /// von Albumist", or the retry of one). `execute(` runs every plan the preview shows; only
     /// `PlanReviewView` calls it, and it shows removals, so it is checked there. Calls of a
@@ -81,7 +81,7 @@ struct DeleteQuestionNoteTests {
         #expect(!UndoPlanner().undoPlan(for: made, current: filledByUser, owned: ["a1": ["x"]]).deletesCollections)
     }
 
-    /// An interrupted undo ("Rest zurücknehmen") says it while a deletion is still open, not
+    /// An interrupted undo ("Rest rückgängig machen") says it while a deletion is still open, not
     /// after it ran.
     @Test func onlyOpenDeletionsCount() {
         var undo = Self.plan([
@@ -93,7 +93,7 @@ struct DeleteQuestionNoteTests {
         #expect(!undo.deletesCollections)
     }
 
-    /// "Alles zurücknehmen" of an interrupted plan: the album whose step was cut off counts when
+    /// "Alles rückgängig machen" of an interrupted plan: the album whose step was cut off counts when
     /// it is there under the id Photos gave it, as the undo will settle it.
     @Test func undoOfAnInterruptedPlanCountsTheAlbumMadeBeforeTheInterruption() {
         let current = CollectionInventory([CollectionSnapshot(id: "a1", title: "Rom")])

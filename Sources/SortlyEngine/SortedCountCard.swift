@@ -30,7 +30,10 @@ import SortlyCore
 ///   analysis does not work. The hold ends only with new suggestions or a run that went through
 ///   (`RecountState.next`), so a Pause kept the spinner turning for as long as it lasted.
 /// - `noMainAreaChosen`: no main area counts (none chosen in the settings, or the chosen ones
-///   turned off, which the start allows): every photo stayed open for good ("0 von 300").
+///   turned off, which the start allows): every photo stayed open for good ("0 von 300"). The
+///   count behind it has no photo in the ring then (`Progress.total` 0): each is outside the main
+///   areas, ignored or excluded, and the library's lists, the search and the photo info say the
+///   same, never "Nicht sortiert" (finding N-01).
 /// - `nothingToSort` ("Nichts zu sortieren"): counted, and every photo is left out, for example
 ///   every photo the ring would count is ignored (question to Fuchs, 18.11.: text or "0 von 0").
 /// - `ring`: "82 von 176 sortiert".
@@ -191,7 +194,8 @@ public enum SortedCountCard: Equatable, Sendable {
 
     public static func make(_ input: Input) -> SortedCountCard {
         let counted = countedAreas(input.settings)
-        // Nothing can ever be sorted: no ring that stays at 0 % and no count to hold.
+        // Nothing can ever be sorted: no ring that stays at 0 % and no count to hold. First, so
+        // its empty ring (finding N-01) never reads as "Nichts zu sortieren".
         if counted.isEmpty { return .noMainAreaChosen }
         // A spinner only while the analysis works, for a held count too.
         if let held = input.recount { return input.analysisWorks ? .recounting(held) : .recountWaiting(held) }
@@ -213,5 +217,41 @@ public enum SortedCountCard: Equatable, Sendable {
     /// "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: …" names these.
     public static func countedAreas(_ settings: OrganizationSettings) -> Set<OrganizationArea> {
         settings.primaryAreas.intersection(settings.enabledAreas)
+    }
+}
+
+// MARK: The library's lists and the photo info when no main area counts
+
+extension SortedCountCard {
+    /// What an empty list of the library tab says (`LibraryView.emptyTitle`, `emptyDescription`).
+    /// With no main area counted, "Nicht sortiert" and "Sortiert" are empty because nothing can
+    /// be sorted (finding N-01): they say what the overview says ("Kein Bereich zählt als
+    /// sortiert", "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche
+    /// zählen."), not "Alles sortiert".
+    public enum EmptyList: Equatable, Sendable {
+        /// "Kein Bereich zählt als sortiert" with the hint to the settings.
+        case noMainAreaChosen
+        /// "Alles sortiert": "Alle Fotos liegen in deinen Hauptbereichen." (with "Nur 2026"
+        /// "Alle Fotos aus 2026 …").
+        case allSorted
+        /// "Keine Fotos" with the list's own line.
+        case noPhotos
+
+        public static func make(_ bucket: InboxBucket, settings: OrganizationSettings) -> EmptyList {
+            let noneCounts = SortedCountCard.countedAreas(settings).isEmpty
+            switch bucket {
+            case .unorganized, .organized: return noneCounts ? .noMainAreaChosen : bucket == .unorganized ? .allSorted : .noPhotos
+            default: return .noPhotos
+            }
+        }
+    }
+
+    /// The photo info gives the hint to the settings as its "why" ("Wähle in den Einstellungen
+    /// unter „Zählt als sortiert“, welche Bereiche zählen."): no main area counts, so the ring
+    /// does not count the photo ("Nicht mitgezählt"), and the user did not ignore or exclude it
+    /// (those say so themselves). Finding N-01.
+    public static func photoInfoNamesNoMainArea(_ state: AssetOrganizationState, settings: OrganizationSettings) -> Bool {
+        countedAreas(settings).isEmpty && !OrganizationStatusResolver.isIgnored(state)
+            && !OrganizationStatusResolver.isExcluded(state)
     }
 }

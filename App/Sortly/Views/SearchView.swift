@@ -34,7 +34,7 @@ struct SearchView: View {
     /// Shown only before the library is analysed (afterwards the library's own starting points).
     /// Translated (design review W6: English devices saw "Strand 2024"); the search understands
     /// both languages, see `SearchExampleTests`.
-    private let examples: [LocalizedStringResource] = ["Strand 2024", "Italien", "Rechnungen", "Videos", "Nicht sortiert", "Screenshots Bestellung"]
+    private let examples: [LocalizedStringResource] = ["Strand 2024", "Italien", "Rechnungen", "Videos", "Unsortiert", "Screenshots Bestellung"]
 
     private var isEmptyQuery: Bool { query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -132,7 +132,7 @@ struct SearchView: View {
                         }
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
-                        .accessibilityValue(Text("\(suggestion.count) Fotos"))
+                        .accessibilityValue(Text("\(suggestion.count) \(suggestion.count.formatted()) Fotos"))
                         .accessibilityIdentifier("search.example")
                     }
                 }
@@ -164,7 +164,7 @@ struct SearchView: View {
                 .buttonStyle(.plain)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text(verbatim: suggestion.label))
-                .accessibilityValue(Text("\(suggestion.count) Fotos"))
+                .accessibilityValue(Text("\(suggestion.count) \(suggestion.count.formatted()) Fotos"))
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("search.suggestion")
             }
@@ -223,7 +223,7 @@ struct SearchView: View {
             .scrollIndicators(.hidden)
         }
         HStack {
-            Text("\(result.ids.count.formatted()) Treffer").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+            Text("\(result.ids.count) \(result.ids.count.formatted()) Treffer").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
                 .accessibilityIdentifier("search.count")
             Spacer()
             // The search becomes an album in Photos (through the normal preview).
@@ -342,7 +342,7 @@ struct SearchTokenChip: View {
         .background(tint.opacity(0.12), in: Capsule())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: spoken))
-        .accessibilityValue(token.count.map { Text("\($0) Fotos") } ?? Text(verbatim: ""))
+        .accessibilityValue(token.count.map { Text("\($0) \($0.formatted()) Fotos") } ?? Text(verbatim: ""))
         .accessibilityIdentifier(ignored ? "search.ignored" : "search.token")
     }
 }

@@ -29,7 +29,7 @@ struct ManagedAlbumsView: View {
                             .foregroundStyle(.primary)
                     }
                 } footer: {
-                    Text("Tippe auf ein Album, um Albumists Änderungen daran zurückzunehmen. Fotos, die du selbst hinzugefügt hast, bleiben drin. Deine Originale bleiben immer in der Mediathek.")
+                    Text("Tippe auf ein Album, um Albumists Änderungen daran rückgängig zu machen. Fotos, die du selbst hinzugefügt hast, bleiben drin. Deine Originale bleiben immer in der Mediathek.")
                 }
             }
         }
@@ -37,7 +37,7 @@ struct ManagedAlbumsView: View {
         .navigationTitle("Alben von Albumist")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
-            pending.map { Text("„\($0.lastKnownTitle)“ zurücknehmen?") } ?? Text(""),
+            pending.map { Text("„\($0.lastKnownTitle)“ rückgängig machen?") } ?? Text(""),
             isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
             titleVisibility: .visible,
             presenting: pending
@@ -52,7 +52,7 @@ struct ManagedAlbumsView: View {
                 DeleteQuestionNote.message(Text("Albumist hat dieses Album angelegt. Es wird gelöscht. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen."),
                                            deletes: model.removalDeletesAlbum(state))
             } else {
-                Text("Die \(state.addedBySortly.count) Fotos, die Albumist hinzugefügt hat, werden aus dem Album genommen. Alles andere bleibt, wie es ist.")
+                Text("Die \(state.addedBySortly.count) \(state.addedBySortly.count.formatted()) Fotos, die Albumist hinzugefügt hat, werden aus dem Album genommen. Alles andere bleibt, wie es ist.")
             }
         }
         .alert("Nichts zu tun", isPresented: $nothingToDo) {
@@ -75,9 +75,9 @@ struct ManagedAlbumsView: View {
                 Text(state.lastKnownTitle).font(.body.weight(.medium))
                 Group {
                     if state.createdBySortly {
-                        Text("Neu angelegt · \(state.addedBySortly.count) Fotos von Albumist")
+                        Text("Neu angelegt · \(state.addedBySortly.count) \(state.addedBySortly.count.formatted()) Fotos von Albumist")
                     } else {
-                        Text("Ergänzt · \(state.addedBySortly.count) Fotos von Albumist")
+                        Text("Ergänzt · \(state.addedBySortly.count) \(state.addedBySortly.count.formatted()) Fotos von Albumist")
                     }
                 }
                 .font(.footnote).foregroundStyle(.noteText)
@@ -85,7 +85,7 @@ struct ManagedAlbumsView: View {
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityHint(Text("Änderungen von Albumist zurücknehmen"))
+        .accessibilityHint(Text("Änderungen von Albumist rückgängig machen"))
     }
 
     private func prepare(_ state: ManagedAlbumState) async {

@@ -113,4 +113,22 @@ struct PlanReceiptTests {
         #expect(!receipt.isComplete)
         #expect(receipt.albumsCreated == 1)
     }
+
+    /// Second review of P3-09: the receipt of an undo plan said „Vollständig angelegt“, because
+    /// only a removal had its own word and an undo takes photos out too. The kind of work
+    /// decides the word: „angelegt“, „entfernt“, „rückgängig gemacht“.
+    @Test func theKindOfWorkNamesTheReceipt() {
+        func plan(_ steps: [PlanStep], reverts: SortlyID? = nil) -> ChangePlan {
+            ChangePlan(id: SortlyID("p"), createdAt: Date(), confirmedAt: Date(), status: .completed, baseline: [:],
+                       baselineCollectionIDs: [], steps: steps, conflicts: [], notes: [], resolvedKeys: [:], reverts: reverts)
+        }
+        let create = PlanStep(id: "c", operation: .createAlbum(key: "A", title: "Rom", parent: .topLevel), sourceID: SortlyID("rom"))
+        let takeOut = PlanStep(id: "r", operation: .removeAssets(album: "rom", assets: ["x"]), sourceID: SortlyID("rom"))
+        let delete = PlanStep(id: "d", operation: .deleteCollection("rom", title: "Rom"), sourceID: SortlyID("rom"))
+        #expect(PlanReceipt.Kind(plan([create])) == .created)
+        #expect(PlanReceipt.Kind(plan([takeOut, delete])) == .removed)
+        // An undo takes photos out and deletes albums, and is still an undo.
+        #expect(PlanReceipt.Kind(plan([takeOut, delete], reverts: SortlyID("earlier"))) == .undone)
+        #expect(PlanReceipt.Kind(plan([], reverts: SortlyID("earlier"))) == .undone)
+    }
 }

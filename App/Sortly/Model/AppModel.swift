@@ -2797,7 +2797,7 @@ final class AppModel {
     /// branch: an interrupted undo was called "Anlegen" too).
     private var interruptedPlanFirst: String {
         interruptedPlan?.reverts != nil
-            ? String(localized: "Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
+            ? String(localized: "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
             : String(localized: "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
     }
 
@@ -3127,14 +3127,14 @@ final class AppModel {
                 persistDecisions()
             case .partlyUndone:
                 // The receipt offers "Rest rückgängig machen".
-                message = .failure([String(localized: "Nicht alles ließ sich zurücknehmen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest zurücknehmen."),
+                message = .failure([String(localized: "Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen."),
                                     execution.failure].compactMap { $0 }.joined(separator: "\n\n"))
             case .notStarted:
                 // Nothing was taken back: the receipt offers "Rückgängig machen" (review of 6c6ef79).
                 // Keeps the reason storing earlier results failed (e.g. a full disk), which
                 // finalize put into `message` (review of 6b34b20).
                 let reasons = [execution.failure, message?.text].compactMap { $0 }
-                message = .failure(([String(localized: "Albumist konnte den unterbrochenen Vorgang gerade nicht zurücknehmen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn zurücknehmen.")]
+                message = .failure(([String(localized: "Albumist konnte den unterbrochenen Vorgang gerade nicht rückgängig machen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn rückgängig machen.")]
                                     + reasons.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }).joined(separator: "\n\n"))
             case .undoInterrupted, .resultsNotStored:
                 // Offered on the overview again: the undo that was cut off, or the one that
@@ -3285,7 +3285,7 @@ final class AppModel {
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
             message = AppMessage(title: interruptedPlan?.reverts != nil
-                                 ? String(localized: "Erst das unterbrochene Zurücknehmen abschließen")
+                                 ? String(localized: "Erst das unterbrochene Rückgängigmachen abschließen")
                                  : String(localized: "Erst das unterbrochene Anlegen abschließen"),
                                  text: interruptedPlanFirst)
             return
@@ -3320,7 +3320,7 @@ final class AppModel {
         return await DeleteQuestion(library: library).undo(executed, albums: albums, waiting: waiting, earlierUndos: earlier, cached: inventory)
     }
 
-    /// Whether "Alles zurücknehmen" for the interrupted plan deletes an album or folder.
+    /// Whether "Alles rückgängig machen" for the interrupted plan deletes an album or folder.
     func interruptedUndoDeletesCollections() async -> Bool {
         guard let interrupted = interruptedPlan, interrupted.reverts == nil else { return false }
         return await DeleteQuestion(library: library).interruptedUndo(interrupted, cached: inventory)
@@ -3337,7 +3337,7 @@ final class AppModel {
     static func remainderMessage(_ remainder: UndoRemainder, inHistory: Bool) -> AppMessage? {
         guard !remainder.isEmpty else { return nil }
         func name(_ path: [String], _ title: String) -> String { (path + [title]).joined(separator: " › ") }
-        var lines = [String(localized: "Albumist hat zurückgenommen, was sicher von Albumist war.")]
+        var lines = [String(localized: "Albumist hat rückgängig gemacht, was sicher von Albumist war.")]
         for c in remainder.collections {
             let n = name(c.folderPath, c.title)
             lines.append(c.isFolder ? String(localized: "Der Ordner „\(n)“ bleibt in Fotos.") : String(localized: "Das Album „\(n)“ bleibt in Fotos."))

@@ -34,7 +34,7 @@ struct CountryPhotosView: View {
                                 Text("Ohne Datum").font(.title3.weight(.bold))
                             }
                             Spacer()
-                            Text("\(group.photos.count) Fotos").font(.subheadline).foregroundStyle(Theme.secondaryText).monospacedDigit() // on the photo wash
+                            Text("\(group.photos.count) \(group.photos.count.formatted()) Fotos").font(.subheadline).foregroundStyle(Theme.secondaryText).monospacedDigit() // on the photo wash
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityAddTraits(.isHeader)
@@ -87,7 +87,7 @@ struct CountryPhotosView: View {
     }
 
     private func summary(_ country: CountryPhotos) -> String {
-        var parts = [String(localized: "\(country.photoCount) Fotos")]
+        var parts = [String(localized: "\(country.photoCount) \(country.photoCount.formatted()) Fotos")]
         if country.tripCount > 0 { parts.append(String(localized: "\(country.tripCount) Reisen")) }
         if year == nil, let first = country.firstVisit {
             parts.append(String(localized: "seit \(String(Calendar.current.component(.year, from: first)))"))
@@ -100,7 +100,7 @@ struct CountryPhotosView: View {
             IconTile(systemName: "rectangle.stack.badge.plus", tint: Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Album „\(model.userTitles[proposal.id] ?? proposal.title)“ anlegen").font(.body.weight(.medium))
-                Text("Vorschlag mit \(proposal.assetIDs.count) Fotos").font(.footnote).foregroundStyle(.noteText)
+                Text("Vorschlag mit \(proposal.assetIDs.count) \(proposal.assetIDs.count.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText)
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)

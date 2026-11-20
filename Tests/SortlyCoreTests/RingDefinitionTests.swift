@@ -6,7 +6,7 @@ import SortlyTestSupport
 /// One meaning of "sortiert" (decisions Fuchs 18.11.; Fable review P1-05, P1-06):
 /// 1. Ignored photos do not count in the ring: they are neither sorted nor open, so they leave
 ///    "x" and "y" of "x von y sortiert", and the ring can reach 100 %.
-/// 2. The list "Sortiert" in the library tab shows the ring's number, and "Nicht sortiert" the
+/// 2. The list "Sortiert" in the library tab shows the ring's number, and "Unsortiert" the
 ///    rest of its total. Both come from `OrganizationStatusResolver.ringPart`.
 @Suite("Ring and library lists: one meaning of sorted")
 struct RingDefinitionTests {
@@ -152,7 +152,7 @@ struct RingDefinitionTests {
     }
 
     /// For 600 random small libraries: "Sortiert" holds exactly the ring's sorted photos,
-    /// "Nicht sortiert" the rest of its total, "Ignoriert" the ignored ones, and every photo is
+    /// "Unsortiert" the rest of its total, "Ignoriert" the ignored ones, and every photo is
     /// counted once.
     @Test func listSortedShowsTheRingsNumberForManyLibraries() {
         var g = SplitMix(seed: 1811)
@@ -163,7 +163,7 @@ struct RingDefinitionTests {
             let lists = Self.lists(states, resolver: resolver)
             let label = "library \(round): ring \(p.fully) von \(p.total)"
             #expect(lists[.organized].count == p.fully, "\(label), Sortiert \(lists[.organized].count)")
-            #expect(lists[.unorganized].count == p.total - p.fully, "\(label), Nicht sortiert \(lists[.unorganized].count)")
+            #expect(lists[.unorganized].count == p.total - p.fully, "\(label), Unsortiert \(lists[.unorganized].count)")
             #expect(lists[.ignored].count == p.ignored, "\(label), Ignoriert \(lists[.ignored].count)")
             #expect(p.total == p.fully + p.partially + p.unorganized + p.pending, "\(label)")
             #expect(p.allPhotos == states.count, "\(label)")
@@ -183,13 +183,140 @@ struct RingDefinitionTests {
     }
 
     /// The ring counts only the chosen part of the library ("Nur 2026"); a photo outside it is
-    /// neither in "Sortiert" nor in "Nicht sortiert", but stays in "Ignoriert" when ignored, so
+    /// neither in "Sortiert" nor in "Unsortiert", but stays in "Ignoriert" when ignored, so
     /// it can be brought back.
     @Test func photosOutsideTheChosenPartAreOnlyInAll() {
         #expect(Self.resolver.buckets(Self.sorted("s"), inScope: false) == [.all])
         #expect(Self.resolver.buckets(Self.open("o"), inScope: false) == [.all, .suggestions])
         #expect(Self.resolver.buckets(Self.open("i", ignored: true), inScope: false) == [.all, .ignored])
         #expect(Self.resolver.ringPart(Self.sorted("s"), inScope: false) == .outsideScope)
+    }
+
+    // MARK: - No main area counts (finding N-01)
+
+    /// With no main area counted, the overview says "Kein Bereich zählt als sortiert"
+    /// (`SortedCountCard.noMainAreaChosen`): there is nothing to sort towards. The library's lists
+    /// and the photo info said "Nicht sortiert" for every photo, the ignored ones too (finding
+    /// N-01). Now no photo is counted: each is outside the main areas, ignored or excluded, so
+    /// ring total (0) + outside main areas + ignored + excluded is every photo.
+    /// - `[]`: none chosen ("Zählt als sortiert" empty).
+    /// - `[.trips]`: chosen but turned off, so the states have no entry for it (`LibraryStatus`
+    ///   gives a state only the areas that are on).
+    @Test(arguments: [Set<OrganizationArea>(), [.trips]])
+    func withNoCountedAreaNoPhotoIsUnsorted(primary: Set<OrganizationArea>) {
+        let resolver = OrganizationStatusResolver(primaryAreas: primary)
+        // "Länder und Orte" and "Bildschirmfotos" are on, neither counts.
+        func state(_ id: AssetID, _ places: AreaFacts, ignored: Bool = false, excluded: Bool = false) -> AssetOrganizationState {
+            resolver.state(for: id, facts: [.places: places, .screenshots: AreaFacts(applicable: false)],
+                           ignored: ignored, excluded: excluded)
+        }
+        let notCounted = [
+            state("open", AreaFacts(proposed: true)), state("inAlbum", AreaFacts(inMatchingExistingAlbum: true)),
+            state("analysing", AreaFacts(analyzed: false)), state("plain", AreaFacts()),
+            // Every area turned off: the state has no area at all.
+            resolver.state(for: "bare", facts: [:]),
+        ]
+        let ignored = [state("ignored", AreaFacts(proposed: true), ignored: true),
+                       resolver.state(for: "bareIgnored", facts: [:], ignored: true)]
+        let excluded = [state("excluded", AreaFacts(), excluded: true),
+                        state("both", AreaFacts(), ignored: true, excluded: true),
+                        resolver.state(for: "bareExcluded", facts: [:], ignored: true, excluded: true)]
+        let all = notCounted + ignored + excluded
+
+        // Per photo (the photo info: `ringPart` first, then `overall`).
+        for s in notCounted {
+            #expect(resolver.ringPart(s) == .outsideMainAreas, "\(s.assetID): \(resolver.ringPart(s))")
+            #expect(resolver.isOutsideMainAreas(s), "\(s.assetID)")
+            #expect(resolver.overall(s) == .fullyOrganized, "\(s.assetID): nothing open, like a photo no main area fits")
+            #expect(resolver.buckets(s) == [.all], "\(s.assetID): \(resolver.buckets(s))")
+        }
+        for s in ignored {
+            #expect(resolver.ringPart(s) == .ignored, "\(s.assetID): \(resolver.ringPart(s))")
+            #expect(resolver.overall(s) == .ignored, "\(s.assetID): the photo info offers \"Nicht mehr ignorieren\"")
+            #expect(!resolver.isOutsideMainAreas(s), "\(s.assetID)")
+            #expect(resolver.buckets(s) == [.all, .ignored], "\(s.assetID): \(resolver.buckets(s))")
+        }
+        for s in excluded {
+            #expect(resolver.ringPart(s) == .excluded, "\(s.assetID): \(resolver.ringPart(s))")
+            #expect(resolver.overall(s) == .excluded, "\(s.assetID)")
+            #expect(resolver.buckets(s) == [.all, .excluded], "\(s.assetID): \(resolver.buckets(s))")
+        }
+        // Outside the chosen year: ignored and excluded keep their lists, the rest is only in "Alle".
+        #expect(resolver.ringPart(notCounted[0], inScope: false) == .outsideScope)
+        #expect(resolver.ringPart(ignored[0], inScope: false) == .ignored)
+        #expect(resolver.ringPart(excluded[0], inScope: false) == .excluded)
+
+        // The ring: nothing counted, every photo in exactly one group.
+        let p = resolver.progress(all)
+        #expect(p.total == 0 && p.fully == 0 && p.partially == 0 && p.unorganized == 0 && p.pending == 0, "\(p)")
+        #expect(p.outsideMainAreas == notCounted.count && p.ignored == ignored.count && p.excluded == excluded.count, "\(p)")
+        #expect(p.total + p.outsideMainAreas + p.ignored + p.excluded == all.count)
+        #expect(p.allPhotos == all.count)
+
+        // The lists agree with the ring and the card: nothing in "Nicht sortiert" or "Sortiert".
+        let lists = Self.lists(all, resolver: resolver)
+        #expect(lists[.unorganized].isEmpty, "\(lists[.unorganized].map(\.id))")
+        #expect(lists[.organized].isEmpty, "\(lists[.organized].map(\.id))")
+        #expect(lists[.suggestions].isEmpty, "a suggestion of an area that does not count is no open task here")
+        #expect(Set(lists[.ignored].map(\.id)) == Set(ignored.map(\.assetID)))
+        #expect(Set(lists[.excluded].map(\.id)) == Set(excluded.map(\.assetID)))
+        #expect(lists[.all].count == all.count)
+    }
+
+    /// The new fields read as `false` from a state encoded without them, and round-trip.
+    @Test func stateDecodesWithoutTheNewFields() throws {
+        let resolver = OrganizationStatusResolver(primaryAreas: [.places])
+        let ignored = resolver.state(for: "i", facts: [.places: AreaFacts(proposed: true)], ignored: true)
+        let data = try JSONEncoder().encode(ignored)
+        #expect(try JSONDecoder().decode(AssetOrganizationState.self, from: data) == ignored)
+        var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["isIgnored"] as? Bool == true)
+        object["isIgnored"] = nil
+        object["isExcluded"] = nil
+        let old = try JSONDecoder().decode(AssetOrganizationState.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(!old.isIgnored && !old.isExcluded)
+        #expect(old.areas == ignored.areas && old.assetID == ignored.assetID)
+        #expect(resolver.overall(old) == .ignored, "its areas still say it")
+    }
+
+    /// Random small libraries in which no main area counts (none chosen, or the chosen ones
+    /// absent from the states because they are off): no photo is counted, the lists "Sortiert"
+    /// and "Nicht sortiert" stay empty, and every photo is outside the main areas, ignored or
+    /// excluded.
+    @Test func withNoCountedAreaTheGroupsStillAddUpForManyLibraries() {
+        var g = SplitMix(seed: 2011)
+        for round in 0..<300 {
+            let (counting, states) = Self.randomLibrary(&g)
+            // The same photos with the main areas removed from their states (turned off), or
+            // with none chosen.
+            let resolver: OrganizationStatusResolver
+            let shown: [AssetOrganizationState]
+            if round % 2 == 0 {
+                resolver = OrganizationStatusResolver(primaryAreas: [])
+                shown = states
+            } else {
+                resolver = counting
+                shown = states.map { s in
+                    var s = s
+                    for area in counting.primaryAreas { s.areas[area] = nil }
+                    return s
+                }
+            }
+            let p = resolver.progress(shown)
+            let lists = Self.lists(shown, resolver: resolver)
+            let label = "library \(round): \(p)"
+            #expect(p.total == 0, "\(label)")
+            #expect(p.outsideMainAreas + p.ignored + p.excluded == shown.count, "\(label)")
+            #expect(lists[.organized].isEmpty && lists[.unorganized].isEmpty, "\(label)")
+            #expect(lists[.ignored].count == p.ignored && lists[.excluded].count == p.excluded, "\(label)")
+            // Ignored and excluded photos keep their status (the counting resolver sees the same).
+            for (s, original) in zip(shown, states) {
+                let before = counting.overall(original)
+                if before == .ignored || before == .excluded {
+                    #expect(resolver.overall(s) == before, "\(label): \(s.assetID)")
+                }
+            }
+        }
     }
 }
 

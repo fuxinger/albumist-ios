@@ -423,7 +423,7 @@ final class SortlyFlowUITests: XCTestCase {
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
     }
 
-    /// Two photos from the library into a new album: opens its plan ("Umsetzen").
+    /// Two photos from the library into a new album: opens its plan ("Anlegen").
     private func openManualPlan(_ title: String) -> Bool {
         guard tap(tabButton("Mediathek"), "library for \(title)") else { return false }
         let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
@@ -904,7 +904,7 @@ final class SortlyFlowUITests: XCTestCase {
             // first button is there before them (review).
             sleep(2)
             shot("14-library")
-            // After the plan ran, "Nicht sortiert" can be empty: show the sorted photos instead.
+            // After the plan ran, "Unsortiert" can be empty: show the sorted photos instead.
             if !photo.waitForExistence(timeout: 3), tap(button("Sortiert"), "sorted photos") {
                 let sortedAt = Date()
                 // The sorted photos (not asserted: the tap on one below is), and their thumbnails
@@ -1130,7 +1130,7 @@ final class SortlyFlowUITests: XCTestCase {
                     // "Rückgängig gemacht" is also the section title of a partial undo; on the
                     // first real iPhone nothing was taken back and the test would not have
                     // noticed (15.11.). Everything must be gone.
-                    let partial = anything("Nicht alles ließ sich zurücknehmen").exists || anything("teilweise rückgängig").exists
+                    let partial = anything("Nicht alles ließ sich rückgängig machen").exists || anything("teilweise rückgängig").exists
                     let removedRow = anything("Entfernte Alben und Ordner").exists
                     print(!partial && removedRow ? "UI_STEP_OK undo took back everything" : "UI_STEP_MISSING undo took back everything (partial \(partial), removed row \(removedRow))")
                     XCTAssertFalse(partial, "Undo was only partial")
@@ -1233,7 +1233,7 @@ final class SortlyFlowUITests: XCTestCase {
             if tap(app.buttons["ignore.undo"], "undo ignore") {
                 XCTAssertTrue(waitGone(note, timeout: 5), "The ignore note stayed after Widerrufen")
                 tap(app.buttons["Ignoriert"], "ignored area after undo")
-                // "Keine Fotos" shows only in an empty area other than "Nicht sortiert": up to the
+                // "Keine Fotos" shows only in an empty area other than "Unsortiert": up to the
                 // two seconds of the old pause, then the five below, as before.
                 let noPhotos = anything("Keine Fotos")
                 _ = UITestWait.holds(timeout: 2) { noPhotos.exists }
@@ -2047,7 +2047,7 @@ final class SortlyFlowUITests: XCTestCase {
         // The receipt loads after the screen opens (an empty list until then): its share button
         // comes with it. Not asserted: the check below is.
         _ = UITestWait.holds(timeout: 20) { app.buttons["Liste teilen"].exists }
-        let partial = anything("Teilweise umgesetzt").waitForExistence(timeout: 5)
+        let partial = anything("Teilweise angelegt").waitForExistence(timeout: 5)
         print(partial ? "UI_STEP_OK kept plan is partial" : "UI_STEP_MISSING kept plan is partial")
         XCTAssertTrue(partial, "The kept plan does not say it is partial")
         shot("51-kept-receipt"); audit("kept receipt")

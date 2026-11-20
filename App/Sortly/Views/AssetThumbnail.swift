@@ -410,7 +410,18 @@ struct ThumbnailGrid: View {
                         .overlay {
                             if index == shown.count - 1, let more = PreviewPicker.moreCount(total: all, shown: shown.count) {
                                 Color.black.opacity(0.45)
+                                // Shown in full at every size (review P3-18: "+…" instead of
+                                // "+24" at the largest text, in a quarter of the small iPhone's
+                                // width). Like a badge on a photo it stops growing at the first
+                                // accessibility size, keeps to one line and shrinks a little
+                                // rather than end in "…". VoiceOver reads the full count in the
+                                // label of the button around the mosaic ("Alle 31 Fotos ansehen").
                                 Text("+\(more)").font(.headline).foregroundStyle(.white)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.5)
+                                    .padding(.horizontal, Theme.Spacing.xs)
+                                    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                                    .accessibilityIdentifier("thumbnails.more")
                             }
                         }
                 }

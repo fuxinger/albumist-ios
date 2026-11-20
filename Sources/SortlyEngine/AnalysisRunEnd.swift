@@ -146,7 +146,7 @@ public enum AnalysisStartCause: Sendable, Equatable, CaseIterable {
     /// A tap that asks for the analysis: "Fortsetzen", "Analyse neu aufbauen", another part of
     /// the library, a change in the settings that needs a run (only without a Pause).
     case tap
-    /// A change of the user's that needs a run to apply it: a split, a merge, "Aufheben" in the
+    /// A change of the user's that needs a run to apply it: a split, a merge, "Rückgängig machen" in the
     /// trip workshop, "Reisen wieder automatisch erkennen" in the settings; also an answer in
     /// "Dein Zuhause" that needs a run (`AppModel.changeRecurringPlaces(rerun: true)`, which no
     /// caller uses today: "Ja" and the other changes there make the suggestions again without a

@@ -223,3 +223,27 @@ public struct PlanReceipt: Hashable, Sendable {
         failedSteps == 0 && leftSteps == 0 && unconfirmedSteps == 0 && unavailablePhotos == 0 && problems.isEmpty
     }
 }
+
+extension PlanReceipt {
+    /// What the plan did, which names its receipt: „Vollständig angelegt“, „Vollständig
+    /// entfernt“, „Vollständig rückgängig gemacht“ (second review of P3-09: an undo takes photos
+    /// out and deletes albums like a removal, and its receipt said „Vollständig angelegt“).
+    public enum Kind: Sendable, Equatable {
+        /// Created or extended albums („angelegt“).
+        case created
+        /// A removal from „Alben von Albumist“, or its retry („entfernt“).
+        case removed
+        /// Took back an earlier plan („rückgängig gemacht“).
+        case undone
+
+        public init(_ plan: ChangePlan) {
+            if plan.reverts != nil {
+                self = .undone
+            } else if !plan.removalSources.isEmpty {
+                self = .removed
+            } else {
+                self = .created
+            }
+        }
+    }
+}

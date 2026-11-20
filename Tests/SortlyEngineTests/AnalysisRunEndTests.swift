@@ -348,7 +348,7 @@ struct AnalysisRunEndTests {
 
 /// Owner decision 18.11.2026 ("Analyse läuft dann weiter"): a Pause of the user stands until the
 /// user goes on. Nothing that happens by itself ends it; a tap does, and so does a change of the
-/// user's that needs a run to apply it (a split, a merge, "Aufheben", "Reisen wieder automatisch
+/// user's that needs a run to apply it (a split, a merge, "Rückgängig machen", "Reisen wieder automatisch
 /// erkennen"): its run starts at once, like a tap. Before, the change was stored and nothing
 /// applied it until "Fortsetzen", and the trip workshop kept its spinner with no word why.
 @Suite("Run start: what a Pause does to it")

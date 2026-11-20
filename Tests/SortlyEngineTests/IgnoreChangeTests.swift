@@ -108,6 +108,36 @@ struct IgnoreChangeTests {
         #expect(shown == IgnoreChange.Shown(lib.count(excluded)))
     }
 
+    /// With no main area counted, or with every area off (the states have no area then),
+    /// "Ignorieren" still puts the photo into "Ignoriert" at once, as the recount does, and
+    /// "Nicht mehr ignorieren" takes it back out (finding N-01: such a photo was "Nicht sortiert"
+    /// whether ignored or not).
+    @Test(arguments: [false, true])
+    func ignoringWithNoCountedAreaShowsWhatTheRecountGives(everyAreaOff: Bool) async throws {
+        let analysed = try await library()
+        var settings = analysed.settings
+        if everyAreaOff { settings.enabledAreas = [] } else { settings.primaryAreas = [] }
+        let lib = Library(facts: analysed.facts, snapshot: analysed.snapshot, contents: analysed.contents, settings: settings)
+        let resolver = OrganizationStatusResolver(primaryAreas: settings.primaryAreas)
+        let picked = [lib.facts[0].id, lib.facts[lib.facts.count / 2].id, lib.facts[lib.facts.count - 1].id]
+        let before = IgnoreChange.Shown(lib.count([]))
+        if everyAreaOff { #expect(before.states.values.allSatisfy { $0.areas.isEmpty }) }
+        var shown = before
+        var changes = IgnoreChange()
+        changes.record(picked, ignore: true, in: &shown)
+        let after = lib.count(ignore(picked))
+        #expect(shown == IgnoreChange.Shown(after))
+        for id in picked {
+            let state = try #require(shown.states[id])
+            #expect(resolver.overall(state) == .ignored && resolver.ringPart(state) == .ignored, "\(id)")
+        }
+        #expect(resolver.progress(shown.states.values) == after.progress)
+        #expect(after.progress.total == 0 && after.progress.ignored == 3, "\(after.progress)")
+        #expect(after.progress.outsideMainAreas == lib.facts.count - 3, "\(after.progress)")
+        changes.record(picked, ignore: false, in: &shown)
+        #expect(shown == before)
+    }
+
     /// A count that began before the tap was stored read the overrides without it. Laid over
     /// it, the photo stays where the tap put it; a count that includes the tap ends it.
     @Test func olderCountDoesNotPutThePhotoBack() async throws {

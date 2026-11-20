@@ -2,7 +2,7 @@ import Foundation
 
 /// What a plan may have changed in Photos that its undo leaves as it is, because Albumist
 /// cannot prove it was its own doing (review P2-01, 18.11.2026). The undo never touches what
-/// may be the user's; instead the app names it, so "Alles zurücknehmen" never ends with
+/// may be the user's; instead the app names it, so "Alles rückgängig machen" never ends with
 /// something left in Photos that nobody was told about:
 /// - an album or folder found by its name after an interruption (`ExecutionRecord.adoptedKeys`):
 ///   it is never deleted. Since the id of every new album is written down inside the change

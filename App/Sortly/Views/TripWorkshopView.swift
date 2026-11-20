@@ -138,7 +138,7 @@ struct TripWorkshopView: View {
         Section {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 let dayCount = Text("\(days.count) Tage")
-                let photoCount = Text("\(proposal.assetIDs.count) Fotos mit Ort")
+                let photoCount = Text("\(proposal.assetIDs.count) \(proposal.assetIDs.count.formatted()) Fotos mit Ort")
                 Text(title(proposal)).font(.headline)
                 Text("\(dayCount) · \(photoCount)")
                     .font(.subheadline).foregroundStyle(.noteText)
@@ -150,8 +150,8 @@ struct TripWorkshopView: View {
         }
     }
 
-    /// What the user changed at this trip before, each with "Aufheben". `saysWhy`: no merge
-    /// rows follow, so this footer says why "Aufheben" waits.
+    /// What the user changed at this trip before, each with "Rückgängig machen" (P3-09: "Aufheben"
+    /// was a fourth word for it). `saysWhy`: no merge rows follow, so this footer says why it waits.
     @ViewBuilder
     private func changesSection(saysWhy: Bool) -> some View {
         let changes = model.tripChanges(around: proposal)
@@ -168,7 +168,7 @@ struct TripWorkshopView: View {
                         Button {
                             perform(.undone) { await model.undoTripChange(change) }
                         } label: {
-                            Text("Aufheben")
+                            Text("Rückgängig machen")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(minWidth: 44, minHeight: 44)
                                 .contentShape(Rectangle())
@@ -184,8 +184,8 @@ struct TripWorkshopView: View {
             } footer: {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     if saysWhy { TripChangeWaitNote() }
-                    Text("Aufheben lässt Albumist diese Reisen wieder selbst erkennen.")
-                    // During a Pause "Aufheben" starts the analysis again (decision 18.11.2026).
+                    Text("Machst du eine Änderung rückgängig, erkennt Albumist diese Reisen wieder selbst.")
+                    // During a Pause the undo starts the analysis again (decision 18.11.2026).
                     if model.analysis.isPausedByUser {
                         Text("Die pausierte Analyse läuft dann weiter.")
                     }
@@ -279,7 +279,7 @@ struct TripWorkshopView: View {
     }
 
     private func mergeButton(_ other: AlbumProposal, side: Side) -> some View {
-        let photos = Text("\(other.assetIDs.count) Fotos")
+        let photos = Text("\(other.assetIDs.count) \(other.assetIDs.count.formatted()) Fotos")
         return Button {
             merging = side
         } label: {
@@ -302,9 +302,9 @@ struct TripWorkshopView: View {
             let (first, second) = side == .before ? (other, proposal) : (proposal, other)
             let total = other.assetIDs.count + proposal.assetIDs.count
             if model.analysis.isPausedByUser {
-                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) Fotos. Die pausierte Analyse läuft dann weiter.")
+                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) \(total.formatted()) Fotos. Die pausierte Analyse läuft dann weiter.")
             } else {
-                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) Fotos.")
+                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) \(total.formatted()) Fotos.")
             }
         }
     }
@@ -329,7 +329,7 @@ struct TripWorkshopView: View {
                         switch outcome {
                         case .split: Text("Aus einer Reise sind zwei geworden.")
                         case .merged: Text("Die zwei Reisen sind jetzt eine.")
-                        case .undone: Text("Deine Änderung ist aufgehoben.")
+                        case .undone: Text("Deine Änderung ist rückgängig gemacht.")
                         }
                     }
                     .font(.headline)
@@ -338,7 +338,7 @@ struct TripWorkshopView: View {
                         if outcome == .undone {
                             Text("Albumist erkennt diese Reisen wieder selbst. Die Vorschläge sind schon angepasst.")
                         } else {
-                            Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen.")
+                            Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Rückgängig machen kannst du es hier an der Reise oder in den Einstellungen.")
                         }
                     }
                     .font(.subheadline).foregroundStyle(.noteText)
@@ -473,7 +473,7 @@ private struct DayRow: View {
             // The note sits under the date: on the right it pushed "Dienstag, 1. August" onto two lines.
             VStack(alignment: .leading, spacing: 2) {
                 Text(day.start.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                let count = Text("\(day.count) Fotos")
+                let count = Text("\(day.count) \(day.count.formatted()) Fotos")
                 Group {
                     if let note {
                         Text("\(count) · \(note)")
@@ -513,7 +513,7 @@ private struct PartRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(Self.span(part.start, part.end)).font(.subheadline)
-                Text("\(part.count) Fotos").font(.footnote).foregroundStyle(.noteText)
+                Text("\(part.count) \(part.count.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

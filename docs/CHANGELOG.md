@@ -50,6 +50,24 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Geändert
+- 20.11. (P3-09, P3-18, Entscheidung Fuchs 17.11. „Unsortiert“): Ein Wort für eine Sache.
+  „Rückgängig machen“ für alles, was Albumist angelegt hat („Alles rückgängig machen“, „Rest
+  rückgängig machen“, in der Reise-Werkstatt statt „Aufheben“, auch die Meldungen nach einem
+  unterbrochenen Rückgängigmachen: „Dort kannst du den Rest rückgängig machen.“), „Widerrufen“ nur im kurzen
+  Hinweis direkt danach; Belege sagen „Vollständig angelegt“, „Angelegt am“ (beim Entfernen
+  „entfernt“, beim Rückgängigmachen „Vollständig rückgängig gemacht“, „Teilweise rückgängig
+  gemacht“, auch in Albumzeilen und im geteilten Text) statt „umgesetzt“; „Unsortiert“ statt „Nicht sortiert“ (Liste, Foto-Info, Suche);
+  die Einstellung heißt nur noch „Zählt als sortiert“, die Übersicht nennt die Bereiche selbst
+  („Gezählt werden nur Fotos, die zu „Länder und Orte“ und „Reisen“ passen.“); die Wahl des Jahres
+  heißt in Einführung und Einstellungen „Albumist arbeitet mit“. Die Einführung sagt richtig,
+  was die Schalter tun („Für die markierten Bereiche macht Albumist Vorschläge.“). Nach einer
+  Prüfung steht „Gerade eben geprüft“ statt „Zuletzt geprüft jetzt“. Die Foto-Info sagt bei
+  einem unsortierten Foto, warum („Noch in keinem Album für „Länder und Orte“ oder „Reisen““).
+  Englisch entsprechend („Undo Everything“, „Created on“, „Unsorted“, „Checked just now“).
+- 20.11. (P3-09): Große Zahlen mit Tausenderpunkt auch in Sätzen mit Pluralform: „1.354 Fotos
+  von zu Hause“ statt „1354“ neben „82 von 1.176“ (Übersicht, Prüfbericht, Vorschläge und ihre
+  Begründungen, Mediathek, Belege, Suche, Länder, Reise-Werkstatt, Siri). „1 Foto“ bleibt Einzahl;
+  die Suche sagt auf Englisch „1 result“ statt „1 results“.
 - 18.11. (Entscheidungen Fuchs 1 und 2, Fable P1-05/P1-06): Eine Bedeutung für „sortiert“.
   Ignorierte Fotos zählen im Ring nicht mehr mit (weder sortiert noch offen); der Ring erreicht
   100 %, sobald alles nicht Ignorierte sortiert ist, und „Ignorieren“ vergrößert nie die Zahl
@@ -89,6 +107,14 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 20.11.: Größte Schrift (P3-18): Das Mosaik eines Vorschlags zeigt „+24“ statt „+…“; die Zahl wächst nur bis
+  zur ersten Bedienungshilfe-Größe, steht in einer Zeile und wird eher etwas
+  kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht
+  „Animation überspringen“ bei jeder Schriftgröße ohne Scrollen über der Tab-Leiste: Die Bilder der Show werden kleiner,
+  wo der Bildschirm nicht reicht, Zahlen und Knopf behalten ihre Größe (auf dem kleinen iPhone lag der Knopf auch bei
+  normaler Schrift unter der Tab-Leiste); quer auf dem iPhone stehen die Zahlen neben Bildern und Knopf, und Drehen
+  mitten in der Show lässt die Fotos weiterfliegen. Der Text des
+  Knopfs wächst bis AX2, so bricht „überspringen“ nicht mehr mitten im Wort.
 - 20.11.: Die Karte der laufenden Analyse zeigt auf einen Blick nur noch, was zählt: was gerade läuft (mit „Pause“),
   die Zahl, eine kurze Zeile („Fertig gegen 23:40“, warum es langsamer geht oder wartet, der Countdown für Apple),
   den Balken, „Schon fertig … Ansehen“ und „Details“. „Schritt 4 von 6“, „Gerade angesehen“, ob die Analyse im
@@ -116,6 +142,13 @@
   still: „Zuletzt 82 von 176 sortiert“, darunter „Wird weitergezählt, sobald die Analyse weiterläuft.“ „Gezählt
   werden nur …“ nennt nur eingeschaltete Hauptbereiche; „Nur ausgewählte Fotos“ nennt auch mit „Nur 2026“ alle
   freigegebenen Fotos (P3-03).
+- 20.11.: Zählt kein Hauptbereich als sortiert („Zählt als sortiert“ leer oder die gewählten Bereiche ausgeschaltet),
+  steht kein Foto mehr unter „Nicht sortiert“: vorher zeigten die Mediathek, die Suche „nicht sortiert“ und die
+  Foto-Infos jedes Foto als nicht sortiert, auch ignorierte, während die Übersicht „Kein Bereich zählt als sortiert“
+  sagte. Jetzt heißen solche Fotos in den Infos „Nicht mitgezählt“; ignorierte und ausgeschlossene Fotos bleiben unter
+  „Ignoriert“ und „Ausgeschlossen“ und lassen sich wieder „Nicht mehr ignorieren“, auch wenn jeder Bereich aus ist. Die
+  leeren Listen „Nicht sortiert“ und „Sortiert“ sagen dann „Kein Bereich zählt als sortiert“ mit dem Hinweis auf die
+  Einstellungen statt „Alles sortiert“, und die Foto-Infos nennen denselben Hinweis als Grund (N-01).
 - 20.11.: Kleine graue Texte (Fußnoten, Zahlen, Erklärungen auf Karten und in Listen) sind gut lesbar und bleiben doch heller als der Haupttext: das neue Grau `.noteText` (`Theme.noteText`, hell 5,9:1 auf weißen Karten statt 3,4:1, überall mindestens 4,6:1; dunkel 7,5:1 auf Karten, mindestens 4,7:1; mit erhöhtem Kontrast deutlich stärker) an 145 Stellen in 21 Dateien statt des System-Graus. Das dunklere `Theme.secondaryText` bleibt für Text auf dem Farbschein der Fotos. `secondary_text_rule.py` lehnt neues kleines System-Grau ab (P3-14).
 - 20.11.: Auswählen wie in Fotos: Solange Fotos ausgewählt werden, ist die Tab-Leiste ausgeblendet. „N aus Vorschlag
   entfernen“ lag hinter der Tab-Leiste und lässt sich jetzt antippen; in der Mediathek stehen „Zu Album hinzufügen“,

@@ -23,7 +23,7 @@ extension PhotosNotResponding: @retroactive LocalizedError {
             // A deletion: the question iOS asks before it may still be on screen (7).
             String(localized: "Die Rückfrage von iOS zum Löschen blieb ohne Antwort und ist vielleicht noch offen. Ob gelöscht wird, steht noch nicht fest. Sobald das geklärt ist, kannst du in der Übersicht fortsetzen.")
         case .write:
-            String(localized: "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als zurückgenommen. Sobald Fotos wieder reagiert, kannst du in der Übersicht fortsetzen.")
+            String(localized: "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als rückgängig gemacht. Sobald Fotos wieder reagiert, kannst du in der Übersicht fortsetzen.")
         case .read where neverBegan, .image where neverBegan, .thumbnail where neverBegan:
             // Given up before it got a thread: Photos was never asked, it is not Photos that is
             // slow (review of 045f297, S1).

@@ -409,7 +409,10 @@ struct OverviewNumbersTests {
         #expect(settings.primaryAreas == [.places, .trips])
         let w = try await world(settings: settings)
         let d = try await w.derived()
-        #expect(d.progress.fully == 0 && d.progress.total == d.photos, "\(Self.line(d))")
+        // Nothing counted either (finding N-01: the ring behind the card counted every photo as
+        // open, and the lists said "Nicht sortiert" for all of them).
+        #expect(d.progress.fully == 0 && d.progress.total == 0, "\(Self.line(d))")
+        #expect(d.progress.outsideMainAreas == d.photos, "\(Self.line(d))")
         #expect(SortedCountCard.countedAreas(settings).isEmpty)
         #expect(Self.card(d, settings) == .noMainAreaChosen)
         // None chosen in the settings ("Zählt als sortiert" all off).
@@ -417,6 +420,136 @@ struct OverviewNumbersTests {
         noneChosen.primaryAreas = []
         #expect(SortedCountCard.countedAreas(noneChosen).isEmpty)
         #expect(Self.card(d, noneChosen) == .noMainAreaChosen)
+    }
+
+    /// Finding N-01: with no main area counted the card said "Kein Bereich zählt als sortiert",
+    /// while the library's lists, the search and the photo info said "Nicht sortiert" for every
+    /// photo, the ignored ones too ("Nicht mehr ignorieren" was not offered for them). Now no
+    /// photo is counted: the lists "Sortiert" and "Nicht sortiert" are empty, ignored and excluded
+    /// photos keep their lists and status, and ring total (0) + outside main areas + ignored +
+    /// excluded is the analysis card's number, for all years and for "Nur 2026".
+    /// - `noneChosen`: "Zählt als sortiert" empty; else the chosen areas are turned off.
+    @Test(arguments: [OrganizationScope.all, .year(2026)], [false, true])
+    func withNoCountedAreaNoPhotoIsListedAsUnsorted(scope: OrganizationScope, noneChosen: Bool) async throws {
+        var settings = Self.germanSettings()
+        if noneChosen { settings.primaryAreas = [] } else { settings.enabledAreas = [.screenshots, .imageCategories] }
+        let w = try await world(settings: settings)
+        // One ignored photo from 2025, outside "Nur 2026"; one photo both ignored and excluded.
+        let ignored = Array(w.basel.prefix(2)) + [w.homeEarlier[0]]
+        let excluded = [w.rome[0], w.noPlace[0], w.basel[5]]
+        try await w.ignore(ignored + [w.basel[5]])
+        try await w.exclude(excluded)
+        let d = try await w.derived(scope: scope)
+        let facts = try await w.pipeline.currentFacts()
+        let resolver = OrganizationStatusResolver(primaryAreas: settings.primaryAreas)  // as `AppModel.resolver`
+
+        // The overview.
+        #expect(Self.card(d, settings) == .noMainAreaChosen)
+        // The ring behind it: nothing counted, every photo of the analysis card in one group.
+        let p = d.progress
+        #expect(p.total == 0 && p.fully == 0, "\(Self.line(d))")
+        #expect(p.total + p.outsideMainAreas + p.ignored + p.excluded == d.photos, "\(Self.line(d))")
+        #expect(p.allPhotos == d.photos)
+        #expect(p.ignored == (scope == .all ? 3 : 2), "\(Self.line(d))")
+        #expect(p.excluded == 3, "the photo ignored and excluded counts once, as excluded: \(Self.line(d))")
+        #expect(d.leftOut == LibraryStatus.LeftOut(), "home and no album are reasons of counted areas only")
+
+        // The library's lists (`AppModel.rebuildLibraryBuckets`).
+        let lists = try #require(LibraryBuckets.make(facts: facts, states: d.states, resolver: resolver, scope: scope,
+                                                     calendar: Fixture.calendar))
+        #expect(lists[.unorganized].isEmpty, "\"Nicht sortiert\" holds \(lists[.unorganized].count) photos")
+        #expect(lists[.organized].isEmpty, "\"Sortiert\" holds \(lists[.organized].count) photos")
+        // "Ignoriert" shows all years (decision of 18.11.).
+        #expect(Set(lists[.ignored].map(\.id)) == Set(ignored), "\(lists[.ignored].map(\.id))")
+        #expect(Set(lists[.excluded].map(\.id)) == Set(excluded), "\(lists[.excluded].map(\.id))")
+        #expect(lists[.all].count == facts.count)
+
+        // The search "nicht sortiert" (`LibraryStatus.searchStatuses`).
+        let search = LibraryStatus.searchStatuses(facts: facts, states: d.states, resolver: resolver, scope: scope,
+                                                  calendar: Fixture.calendar)
+        #expect(!search.values.contains(.unorganized) && !search.values.contains(.partiallyOrganized)
+                && !search.values.contains(.pending) && !search.values.contains(.fullyOrganized), "\(Set(search.values))")
+        #expect(Set(search.filter { $0.value == .ignored }.keys) == Set(ignored))
+        #expect(Set(search.filter { $0.value == .excluded }.keys) == Set(excluded))
+
+        // The photo info (`PhotoDetailSheet.statusLabel`, `isIgnored`, `reasonText`).
+        for f in facts {
+            let state = try #require(d.states[f.id])
+            let part = resolver.ringPart(state, inScope: scope == .all || scope.includes(f, calendar: Fixture.calendar))
+            #expect(!part.isCounted, "\(f.id) shows as \(resolver.overall(state)), \(part)")
+            if excluded.contains(f.id) {
+                #expect(part == .excluded && resolver.overall(state) == .excluded, "\(f.id): \(part)")
+            } else if ignored.contains(f.id) {
+                #expect(part == .ignored && resolver.overall(state) == .ignored, "\(f.id): \(part)")
+            } else {
+                #expect(part == .outsideMainAreas || part == .outsideScope, "\(f.id): \(part), \"Nicht mitgezählt\"")
+            }
+        }
+    }
+
+    /// With no main area counted, "Nicht sortiert" and "Sortiert" are empty (finding N-01). They
+    /// said "Alles sortiert – Alle Fotos liegen in deinen Hauptbereichen." and "Keine Fotos"; now
+    /// both say what the overview says, and so does the photo info of a photo the ring does not
+    /// count for that reason. Ignored and excluded photos keep their own words.
+    @Test func withNoCountedAreaTheListsAndThePhotoInfoSayWhy() {
+        var noneOn = Self.germanSettings()
+        noneOn.enabledAreas = [.screenshots, .imageCategories]
+        var noneChosen = Self.germanSettings()
+        noneChosen.primaryAreas = []
+        for settings in [noneOn, noneChosen] {
+            #expect(SortedCountCard.EmptyList.make(.unorganized, settings: settings) == .noMainAreaChosen)
+            #expect(SortedCountCard.EmptyList.make(.organized, settings: settings) == .noMainAreaChosen)
+            for other in [InboxBucket.ignored, .excluded, .uncertain, .all] {
+                #expect(SortedCountCard.EmptyList.make(other, settings: settings) == .noPhotos, "\(other)")
+            }
+        }
+        let counted = Self.germanSettings()
+        #expect(SortedCountCard.EmptyList.make(.unorganized, settings: counted) == .allSorted)
+        #expect(SortedCountCard.EmptyList.make(.organized, settings: counted) == .noPhotos)
+
+        // The photo info.
+        let resolver = OrganizationStatusResolver(primaryAreas: noneChosen.primaryAreas)
+        let plain = resolver.state(for: "p", facts: [.places: AreaFacts(proposed: true)])
+        let ignored = resolver.state(for: "i", facts: [.places: AreaFacts()], ignored: true)
+        let excluded = resolver.state(for: "e", facts: [:], excluded: true)
+        #expect(SortedCountCard.photoInfoNamesNoMainArea(plain, settings: noneChosen))
+        #expect(SortedCountCard.photoInfoNamesNoMainArea(plain, settings: noneOn))
+        #expect(!SortedCountCard.photoInfoNamesNoMainArea(ignored, settings: noneChosen))
+        #expect(!SortedCountCard.photoInfoNamesNoMainArea(excluded, settings: noneChosen))
+        #expect(!SortedCountCard.photoInfoNamesNoMainArea(plain, settings: counted))
+    }
+
+    /// The library tab shows `SortedCountCard.EmptyList` and the photo info asks
+    /// `photoInfoNamesNoMainArea` first, with the overview's words (the app does not build on
+    /// Linux, so this reads its code).
+    @Test func theLibraryShowsTheWordsDecidedHere() throws {
+        let library = try AppSource.read("App/Sortly/Views/LibraryView.swift")
+        let hint = "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen."
+        let title = try #require(AppSource.body(of: "private var emptyTitle", in: library))
+        let description = try #require(AppSource.body(of: "private var emptyDescription", in: library))
+        #expect(AppSource.code(title + description).contains("SortedCountCard.EmptyList.make(bucket"),
+                "the empty lists decide themselves")
+        #expect(title.contains("\"Kein Bereich zählt als sortiert\""), "\(title)")
+        #expect(description.contains("\"\(hint)\""), "\(description)")
+        let reason = try #require(AppSource.body(of: "private var reasonText", in: library))
+        let reasonCode = AppSource.code(reason)
+        let asks = try #require(reasonCode.range(of: "SortedCountCard.photoInfoNamesNoMainArea("),
+                                "the photo info does not name the missing main area")
+        // Asked before the switch that returns nothing for a photo that counts as done.
+        let done = try #require(reasonCode.range(of: "case .fullyOrganized"))
+        #expect(asks.lowerBound < done.lowerBound)
+        #expect(reason.contains("\"\(hint)\""), "\(reason)")
+        // The empty list offers the way out the overview's card offers ("Einstellungen öffnen",
+        // `OverviewView` `.noMainAreaChosen`), and opens the settings with it.
+        let overview = try AppSource.read("App/Sortly/Views/OverviewView.swift")
+        #expect(Self.caseBody(".noMainAreaChosen", in: overview).contains("\"Einstellungen öffnen\""))
+        let content = try #require(AppSource.body(of: "private func content", in: library))
+        let chosen = try #require(content.range(of: "== .noMainAreaChosen"), "the empty list has no branch for it")
+        let button = try #require(content.range(of: "Button(\"Einstellungen öffnen\") { showSettings = true }"),
+                                  "the empty list offers no way to the settings")
+        #expect(chosen.lowerBound < button.lowerBound)
+        let sheet = AppSource.code(AppSource.body(of: ".sheet(isPresented: $showSettings)", in: library) ?? "")
+        #expect(sheet.contains("SettingsView()"), "\(sheet)")
     }
 
     @Test func theSentenceNamesOnlyTheMainAreasThatAreOn() {

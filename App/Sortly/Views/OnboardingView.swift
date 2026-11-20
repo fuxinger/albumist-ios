@@ -95,7 +95,10 @@ struct OnboardingView: View {
         page(centered: false) {
             Text("Was soll Albumist sortieren?").font(.title.weight(.bold))
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Die markierten Bereiche zählen als deine Hauptsortierung. Du kannst das später jederzeit ändern.")
+            // What the marks do: suggestions. What counts as sorted is the setting "Zählt als
+            // sortiert" (places and trips unless changed); "Hauptsortierung" named that one, a third
+            // name for it, and the wrong one for these marks (P3-09).
+            Text("Für die markierten Bereiche macht Albumist Vorschläge. Du kannst das später jederzeit ändern.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(spacing: Theme.Spacing.s) {
@@ -227,12 +230,12 @@ struct OnboardingView: View {
             // A settings-style row with a menu instead of a wheel (HIG: menus for short lists).
             ViewThatFits(in: .horizontal) {
                 HStack {
-                    Text("Anfangen mit")
+                    Text("Albumist arbeitet mit")
                     Spacer(minLength: Theme.Spacing.m)
                     trialPicker(currentYear)
                 }
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text("Anfangen mit")
+                    Text("Albumist arbeitet mit")
                     trialPicker(currentYear)
                 }
             }
@@ -254,8 +257,10 @@ struct OnboardingView: View {
 
 extension OnboardingView {
     fileprivate func trialPicker(_ currentYear: Int) -> some View {
-        Picker("Anfangen mit", selection: $trialYear) {
-            Text("Die ganze Mediathek").tag(Int?.none)
+        // The same words as in the settings (P3-09: "Anfangen mit", "Albumist arbeitet mit" and
+        // "Probelauf" were three names for this choice).
+        Picker("Albumist arbeitet mit", selection: $trialYear) {
+            Text("Ganze Mediathek").tag(Int?.none)
             ForEach((0..<6).map { currentYear - $0 }, id: \.self) { year in
                 Text("Nur \(String(year))").tag(Int?.some(year))
             }

@@ -105,6 +105,11 @@ struct ProposalRow: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     var proposal: AlbumProposal
 
+    /// The photos the suggestion still holds (without the ones taken out of it).
+    private var photoCount: Int {
+        proposal.assetIDs.count - (model.removedFromProposals[proposal.id]?.count ?? 0)
+    }
+
     var body: some View {
         HStack(spacing: Theme.Spacing.m) {
             // Never a sensitive document (a bank card, owner's iPhone build 36): `coverID`.
@@ -114,7 +119,7 @@ struct ProposalRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.userTitles[proposal.id] ?? proposal.title).font(.body.weight(.medium)).lineLimit(typeSize.isAccessibilitySize ? 5 : 2)
                 // "Fotos" everywhere, not "Aufnahmen", "Bilder" or "Medien" (design review W4).
-                Text("\(proposal.assetIDs.count - (model.removedFromProposals[proposal.id]?.count ?? 0)) Fotos").font(.footnote).foregroundStyle(.noteText)
+                Text("\(photoCount) \(photoCount.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText)
                 if proposal.requiresUserName && model.userTitles[proposal.id] == nil {
                     // A place only the user can name: says what is missing instead of
                     // "Neues Album" (first device test 15.11.: 44 "Häufiger Ort N").
@@ -224,7 +229,7 @@ struct ProposalDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(preparing)
-                .accessibilityLabel(Text("Alle \(model.members(of: proposal).count) Fotos ansehen"))
+                .accessibilityLabel(Text("Alle \(model.members(of: proposal).count) \(model.members(of: proposal).count.formatted()) Fotos ansehen"))
                 // The label above replaces the tile's own text: VoiceOver says it here.
                 .accessibilityValue(model.previewHidden(for: proposal) ? Text("Vorschau ausgeblendet") : Text(verbatim: ""))
                 // The cover's colours glow behind the photos and end just below them, so the
@@ -306,7 +311,7 @@ struct ProposalDetailView: View {
                         .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " › "))
                     if !proposal.optionalAssetIDs.isEmpty {
                         // Says what the number is (design review N5: "Nur vorgeschlagen: 12").
-                        LabeledContent("Vielleicht passend") { Text("\(proposal.optionalAssetIDs.count) Fotos") }
+                        LabeledContent("Vielleicht passend") { Text("\(proposal.optionalAssetIDs.count) \(proposal.optionalAssetIDs.count.formatted()) Fotos") }
                     }
                     if proposal.isSensitive {
                         Label("Persönlicher Inhalt: wird nie automatisch ausgewählt.", systemImage: "lock")
@@ -334,7 +339,7 @@ struct ProposalDetailView: View {
         .confirmationDialog("Keine Reise?", isPresented: $confirmOftenHere, titleVisibility: .visible) {
             Button("Keine Reise, hier bin ich öfter") { answerOftenHere(true) }
         } message: {
-            Text("Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Zurücknehmen kannst du das in den Einstellungen.")
+            Text("Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Rückgängig machen kannst du das in den Einstellungen.")
         }
         .onAppear {
             // A name given before is where the field starts. A name typed here stays while
@@ -833,7 +838,7 @@ struct ProposalDetailView: View {
         case .keepExisting: "Album so lassen"
         case .extendExisting(let id):
             if let missing = missingPhotos(in: id), missing > 0 {
-                "\(missing) Fotos ergänzen"
+                "\(missing) \(missing.formatted()) Fotos ergänzen"
             } else {
                 "Album ergänzen"
             }
@@ -891,7 +896,7 @@ struct AdjustProposalView: View {
                     } label: {
                         VStack(alignment: .leading) {
                             Text(candidate.albumTitle)
-                            Text("\(candidate.metrics.intersection) gemeinsame Fotos").font(.footnote).foregroundStyle(.noteText)
+                            Text("\(candidate.metrics.intersection) \(candidate.metrics.intersection.formatted()) gemeinsame Fotos").font(.footnote).foregroundStyle(.noteText)
                         }
                     }
                     .foregroundStyle(.primary)
@@ -978,7 +983,7 @@ struct ProposalPhotosView: View {
                 }
             }
         }
-        .navigationTitle(Text("\(members.count) Fotos"))
+        .navigationTitle(Text("\(members.count) \(members.count.formatted()) Fotos"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -994,7 +999,7 @@ struct ProposalPhotosView: View {
                     Button(role: .destructive) {
                         confirmRemove = true
                     } label: {
-                        Text("\(selected.count) aus Vorschlag entfernen")
+                        Text("\(selected.count.formatted()) aus Vorschlag entfernen")
                     }
                     .disabled(selected.isEmpty)
                     .accessibilityIdentifier("proposalPhotos.remove")

@@ -119,7 +119,7 @@ struct UndoHardeningTests {
 
     /// Photos created the album or folder, and the app ended before Albumist wrote its id
     /// into the journal (the save right after the create never happened). Before, the next
-    /// launch found it by its name only, took it over as "adopted", and "Alles zurücknehmen"
+    /// launch found it by its name only, took it over as "adopted", and "Alles rückgängig machen"
     /// left it behind, empty, without a word. Now its id is written down inside the change,
     /// before Photos stores it (as the sample photos do): it is provably Albumist's, and the
     /// undo removes it. The library is then exactly as before the plan.
@@ -157,7 +157,7 @@ struct UndoHardeningTests {
 
     /// Photos added Albumist's photos to the user's own album, and the app ended before the
     /// step was settled. Whether Albumist or the user put them there cannot be proven, so the
-    /// undo leaves them. Before, "Alles zurücknehmen" then cancelled the plan: it left the
+    /// undo leaves them. Before, "Alles rückgängig machen" then cancelled the plan: it left the
     /// history, and nobody was told that 10 photos stayed in "Sommer". Now the plan stays in
     /// the history and the outcome names what stays.
     @Test func undoAfterTheAppEndedWhileAddingToTheUsersAlbumKeepsThePlanAndNamesTheRest() async throws {
@@ -541,7 +541,7 @@ struct UndoHardeningTests {
     /// (`UndoRemainder`, review P2-01): an album found by its name after an interruption (never
     /// deleted, it is empty) with the folders holding it, and photos an interrupted add may
     /// have put into the user's album (it cannot be proven whether Albumist or the user did).
-    /// Before, these were simply allowed, and "Alles zurücknehmen" left them without a word.
+    /// Before, these were simply allowed, and "Alles rückgängig machen" left them without a word.
     func expectUndone(_ executed: ChangePlan, _ undone: ChangePlan, _ library: InMemoryPhotoLibrary, case label: String) async throws {
         #expect(undone.status == .completed, "\(label): \(undone.steps.map(\.state))")
         let inv = try await library.currentInventory()

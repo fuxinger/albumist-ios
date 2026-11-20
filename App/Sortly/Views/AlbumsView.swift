@@ -43,7 +43,7 @@ struct AlbumsView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(suggestion.albumIDs.compactMap { model.inventory[$0]?.title }.formatted(.list(type: .and)))
                                         .font(.body.weight(.medium)).foregroundStyle(.primary)
-                                    Text("\(suggestion.albumIDs.count) Alben mit vielen gleichen Fotos · \(suggestion.distinctAssetCount) Fotos insgesamt")
+                                    Text("\(suggestion.albumIDs.count) Alben mit vielen gleichen Fotos · \(suggestion.distinctAssetCount) \(suggestion.distinctAssetCount.formatted()) Fotos insgesamt")
                                         .font(.footnote).foregroundStyle(.noteText)
                                 }
                                 Spacer(minLength: 8)
@@ -186,7 +186,7 @@ struct CollectionRow: View {
                 AlbumDetailView(album: collection)
             } label: {
                 label(symbol: collection.kind == .restrictedAlbum ? "person.2" : "rectangle.stack",
-                      detail: Text("\(collection.assetIDs.count) Fotos"))
+                      detail: Text("\(collection.assetIDs.count) \(collection.assetIDs.count.formatted()) Fotos"))
             }
         }
     }

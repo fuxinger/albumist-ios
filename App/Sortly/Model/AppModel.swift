@@ -367,6 +367,8 @@ final class AppModel {
     /// refresh there are no facts.
     var factsByID: FactsByID {
         access(keyPath: \.facts)
+        // Handed over with these facts, never with others (second review of P4-09, NIT-5).
+        assert(factsIndex.map { $0.facts.count == facts.count } ?? facts.isEmpty, "factsIndex is not made from the facts")
         return factsIndex ?? FactsByID()
     }
 

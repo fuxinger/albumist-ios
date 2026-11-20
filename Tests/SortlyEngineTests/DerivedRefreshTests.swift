@@ -408,6 +408,15 @@ struct DerivedRefreshAppTests {
         #expect(found >= 6, "the scan found only \(found) passes")
     }
 
+    /// Second review of P4-09, NIT-5: the facts by id are handed over apart from the facts; debug
+    /// builds check where they are read that they were made from these facts (the count).
+    @Test func debugBuildsCheckTheFactsByIDAgainstTheFacts() throws {
+        let model = try AppSource.read("App/Sortly/Model/AppModel.swift")
+        let getter = AppSource.code(AppSource.body(of: "var factsByID: FactsByID", in: model) ?? "")
+        let checks = AppSource.calls(of: "assert(", in: getter).contains { $0.contains("factsIndex") && $0.contains("facts.count == facts.count") }
+        #expect(checks, "factsByID does not check that factsIndex goes with the facts")
+    }
+
     /// The line of `source` at a position in Unicode scalars, trimmed.
     static func line(at offset: Int, in source: String) -> String {
         let scalars = Array(source.unicodeScalars)

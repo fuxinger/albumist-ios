@@ -20,6 +20,19 @@ struct PinGroupingTests {
         MapViewport(center: center, widthMeters: widthMeters, widthPoints: 390, heightPoints: 844)
     }
 
+    /// The globe shows the pins of the level its width calls for, never all levels at once: all of
+    /// them together grouped into one heap (review finding 13).
+    @Test func theGlobeShowsOneLevelAtATime() {
+        let pins = MapSummaryTests.summary.pins
+        #expect(Set(pins.map(\.level)) == Set(MapPinLevel.allCases))
+        for (width, level) in [(20_000_000.0, MapPinLevel.worldRegion), (4_000_000, .country), (1_000_000, .trip), (100_000, .place)] {
+            let groups = MapPins.onGlobe(pins, in: Self.view(MapFixture.Places.reykjavik, widthMeters: width))
+            #expect(!groups.isEmpty, "\(level)")
+            #expect(groups.allSatisfy { $0.pin.level == level }, "\(level)")
+            #expect(groups.count <= MapSummary.maxVisiblePins)
+        }
+    }
+
     /// Where `coordinate` is on screen, in points from the view's centre (x east, y north).
     static func screen(_ coordinate: GeoCoordinate, in view: MapViewport) -> (x: Double, y: Double) {
         let p = AzimuthalEquidistantProjection(center: view.center).project(coordinate)

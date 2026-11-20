@@ -14,7 +14,7 @@ struct MapArcsTests {
         // Rome's centre in 2019 and, five years later, a hotel by Ciampino airport 15 km away.
         let first = MapHandmade.trip("rome-2019", "2019-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 80)])
         let second = MapHandmade.trip("rome-2024", "2024-04-10", [MapHandmade.place(Place.ciampino, "Ciampino", "IT", photos: 120)])
-        let arcs = MapArcs.build(trips: [second, first], calendar: calendar)
+        let arcs = MapArcs.build(trips: [second, first])
         let arc = try #require(arcs.first)
         #expect(arcs.count == 1)
         #expect(arc.weight == 2)
@@ -28,7 +28,7 @@ struct MapArcsTests {
     @Test func romeAndFlorenceGetTwoArcs() {
         let rome = MapHandmade.trip("rome", "2019-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 80)])
         let florence = MapHandmade.trip("florence", "2021-09-12", [MapHandmade.place(MapFixture.Places.florence, "Florenz", "IT", photos: 60)])
-        let arcs = MapArcs.build(trips: [rome, florence], calendar: calendar)
+        let arcs = MapArcs.build(trips: [rome, florence])
         // 230 km apart: two arcs, equally strong, the one with the newer trip first.
         #expect(arcs.map(\.to) == [MapFixture.Places.florence, MapFixture.Places.rome])
         #expect(arcs.allSatisfy { $0.weight == 1 && $0.from == MapHandmade.home.coordinate })
@@ -39,7 +39,7 @@ struct MapArcsTests {
         let before = MapHandmade.trip("rome-2017", "2017-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 80)],
                                       home: MapHandmade.hamburgHome)
         let after = MapHandmade.trip("rome-2022", "2022-04-10", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 90)])
-        let arcs = MapArcs.build(trips: [after, before], calendar: calendar)
+        let arcs = MapArcs.build(trips: [after, before])
         #expect(arcs.count == 2)
         #expect(Set(arcs.map(\.from)) == [MapHandmade.hamburgHome.coordinate, MapHandmade.home.coordinate])
         #expect(arcs.allSatisfy { $0.weight == 1 && $0.to == MapFixture.Places.rome })
@@ -49,17 +49,17 @@ struct MapArcsTests {
     @Test func withoutAHomeThereAreNoArcs() {
         let rome = MapHandmade.trip("rome", "2019-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 80)], home: nil)
         let tokyo = MapHandmade.trip("tokyo", "2020-03-02", [MapHandmade.place(MapFixture.Places.tokyo, "Tokio", "JP", photos: 50)], home: nil)
-        #expect(MapArcs.build(trips: [rome, tokyo], calendar: calendar).isEmpty)
-        #expect(MapArcs.build(trips: [], calendar: calendar).isEmpty)
+        #expect(MapArcs.build(trips: [rome, tokyo]).isEmpty)
+        #expect(MapArcs.build(trips: []).isEmpty)
         // Only the trips whose home is known get one.
         let lisbon = MapHandmade.trip("lisbon", "2022-10-02", [MapHandmade.place(MapFixture.Places.lisbon, "Lissabon", "PT", photos: 40)])
-        #expect(MapArcs.build(trips: [rome, tokyo, lisbon], calendar: calendar).map(\.tripIDs) == [[SortlyID("lisbon")]])
+        #expect(MapArcs.build(trips: [rome, tokyo, lisbon]).map(\.tripIDs) == [[SortlyID("lisbon")]])
     }
 
     @Test func atMostMaxArcsTheStrongestAndNewest() throws {
         // 400 destinations; the first 20 visited three times, the next 40 twice.
         let trips = MapHandmade.manyDestinations(400) { $0 < 20 ? 2 : $0 < 60 ? 1 : 0 }
-        let arcs = MapArcs.build(trips: trips, calendar: calendar)
+        let arcs = MapArcs.build(trips: trips)
         #expect(arcs.count == MapSummary.maxArcs)
         #expect(arcs.filter { $0.weight == 3 }.count == 20)
         #expect(arcs.filter { $0.weight == 2 }.count == 40)
@@ -87,7 +87,7 @@ struct MapArcsTests {
         let east = MapHandmade.trip("taveuni-east", "2024-07-01", [MapHandmade.place(Place.taveuniEast, "Taveuni", "FJ", photos: 40)], home: auckland)
         let samoa = MapHandmade.trip("samoa", "2025-01-10", [MapHandmade.place(MapFixture.Places.apia, "Apia", "WS", photos: 30)], home: auckland)
         #expect(GeoMath.distance(Place.taveuniWest, Place.taveuniEast) < 10_000)
-        let arcs = MapArcs.build(trips: [samoa, east, west], calendar: calendar)
+        let arcs = MapArcs.build(trips: [samoa, east, west])
         #expect(arcs.count == 2)
         let fiji = try #require(arcs.first { $0.weight == 2 })
         #expect(fiji.to == Place.taveuniWest)
@@ -107,7 +107,7 @@ struct MapArcsTests {
         // longitude and 300 m apart on the ice.
         let station = MapHandmade.trip("station", "2024-01-05", [MapHandmade.place(Place.southPoleStation, nil, "AQ", photos: 30)])
         let pole = MapHandmade.trip("pole", "2025-01-05", [MapHandmade.place(Place.southPole, nil, "AQ", photos: 5)])
-        let arcs = MapArcs.build(trips: [town, airport, barentsburg, station, pole], calendar: calendar)
+        let arcs = MapArcs.build(trips: [town, airport, barentsburg, station, pole])
         #expect(arcs.count == 3)
         #expect(arcs.contains { $0.tripIDs == [SortlyID("longyearbyen"), SortlyID("airport")] && $0.to == MapFixture.Places.longyearbyen })
         #expect(arcs.contains { $0.tripIDs == [SortlyID("barentsburg")] })
@@ -117,31 +117,49 @@ struct MapArcsTests {
     @Test func idsAreStableAndDoNotShowHome() throws {
         let rome = MapHandmade.trip("rome", "2019-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 80)])
         let lisbon = MapHandmade.trip("lisbon", "2022-10-02", [MapHandmade.place(MapFixture.Places.lisbon, "Lissabon", "PT", photos: 40)])
-        let before = MapArcs.build(trips: [rome, lisbon], calendar: calendar)
+        let before = MapArcs.build(trips: [rome, lisbon])
         // An unrelated trip, even one with more photos, changes no id.
         let tokyo = MapHandmade.trip("tokyo", "2023-03-02", [MapHandmade.place(MapFixture.Places.tokyo, "Tokio", "JP", photos: 500)])
-        let after = MapArcs.build(trips: [tokyo, rome, lisbon], calendar: calendar)
+        let after = MapArcs.build(trips: [tokyo, rome, lisbon])
         for arc in before {
             #expect(after.first { $0.tripIDs == arc.tripIDs }?.id == arc.id)
         }
         let id = try #require(before.first { $0.tripIDs == [SortlyID("rome")] }?.id)
-        // "arc:<home>:<anchor trip>", the home only as a hash: no coordinate in a log.
-        let parts = id.split(separator: ":")
-        #expect(parts.count == 3 && parts.first == "arc" && parts.last == "rome")
-        #expect(parts.count == 3 && parts[1].count == 16 && parts[1].allSatisfy(\.isHexDigit))
-        // Another home makes another arc, and so another id.
+        // "arc:<anchor trip>": nothing of home in it, not even hashed (a hash of a rounded home
+        // is undone by trying every cell of the grid).
+        #expect(id == "arc:rome")
+        // Another home moves the arc's start, not its id.
         var moved = rome
         moved.home = MapHandmade.hamburgHome
-        #expect(MapArcs.build(trips: [moved], calendar: calendar).first?.id != id)
+        let movedArc = try #require(MapArcs.build(trips: [moved]).first)
+        #expect(movedArc.id == id && movedArc.from == MapHandmade.hamburgHome.coordinate)
+        // Two homes, two arcs to Rome, told apart by their trips.
+        var fromHamburg = MapHandmade.trip("rome-from-hamburg", "2016-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 90)])
+        fromHamburg.home = MapHandmade.hamburgHome
+        #expect(Set(MapArcs.build(trips: [rome, fromHamburg]).map(\.id)) == ["arc:rome", "arc:rome-from-hamburg"])
+    }
+
+    /// Concept §8: the house shows only at 300 to 3,000 km view width, and the arcs vanish with it
+    /// below 300 km, so neither points to home more closely than the house.
+    @Test func houseAndArcsShowOnlyWhereTheyGiveNoHomeAway() {
+        #expect(!MapHome.showsHouse(atWidth: 299_999))
+        #expect(MapHome.showsHouse(atWidth: 300_000) && MapHome.showsHouse(atWidth: 1_000_000) && MapHome.showsHouse(atWidth: 3_000_000))
+        #expect(!MapHome.showsHouse(atWidth: 3_000_001) && !MapHome.showsHouse(atWidth: 20_000_000))
+        #expect(!MapHome.showsHouse(atWidth: .nan) && !MapHome.showsHouse(atWidth: .infinity) && !MapHome.showsHouse(atWidth: -1))
+        #expect(!MapArcs.areShown(atWidth: 299_999) && !MapArcs.areShown(atWidth: 1_000))
+        #expect(MapArcs.areShown(atWidth: 300_000) && MapArcs.areShown(atWidth: 20_000_000))
+        #expect(!MapArcs.areShown(atWidth: .nan))
+        // The first camera never comes closer than where house and arcs show.
+        #expect(MapPins.minimumFocusRadiusMeters * 2 >= MapHome.houseMinimumWidthMeters)
     }
 
     @Test func sameTripsInAnyOrderGiveTheSameArcs() {
         var trips = MapHandmade.manyDestinations(60) { $0 % 7 == 0 ? 2 : 0 }
         trips.append(MapHandmade.trip("rome", "2019-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 80)]))
         trips.append(MapHandmade.trip("ciampino", "2020-05-02", [MapHandmade.place(Place.ciampino, nil, "IT", photos: 80)]))
-        let arcs = MapArcs.build(trips: trips, calendar: calendar)
+        let arcs = MapArcs.build(trips: trips)
         for seed in 1...5 as ClosedRange<UInt64> {
-            #expect(MapArcs.build(trips: MapHandmade.shuffled(trips, seed: seed), calendar: calendar) == arcs)
+            #expect(MapArcs.build(trips: MapHandmade.shuffled(trips, seed: seed)) == arcs)
         }
     }
 
@@ -154,7 +172,7 @@ struct MapArcsTests {
         let guidonia = MapHandmade.trip("guidonia", "2021-05-02", [MapHandmade.place(Place.guidonia, "Guidonia", "IT", photos: 20)])
         #expect(GeoMath.distance(MapFixture.Places.rome, Place.tivoli) > MapArcs.mergeMeters)
         #expect(GeoMath.distance(MapFixture.Places.rome, Place.guidonia) < MapArcs.mergeMeters)
-        let arcs = MapArcs.build(trips: [guidonia, tivoli, rome], calendar: calendar)
+        let arcs = MapArcs.build(trips: [guidonia, tivoli, rome])
         #expect(arcs.count == 2)
         let toTivoli = try #require(arcs.first { $0.to == Place.tivoli })
         #expect(toTivoli.tripIDs == [SortlyID("tivoli"), SortlyID("guidonia")])
@@ -171,32 +189,32 @@ struct MapArcsTests {
     @Test func equallyStrongTripsLeadByStartThenID() {
         let later = MapHandmade.trip("b-later", "2021-05-02", [MapHandmade.place(Place.ciampino, nil, "IT", photos: 50)])
         let earlier = MapHandmade.trip("z-earlier", "2019-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 50)])
-        #expect(MapArcs.build(trips: [later, earlier], calendar: calendar).map(\.to) == [MapFixture.Places.rome])
+        #expect(MapArcs.build(trips: [later, earlier]).map(\.to) == [MapFixture.Places.rome])
         // Same start too: the smaller id leads.
         let a = MapHandmade.trip("a", "2019-05-02", [MapHandmade.place(Place.ciampino, nil, "IT", photos: 50)])
         let b = MapHandmade.trip("b", "2019-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 50)])
-        #expect(MapArcs.build(trips: [b, a], calendar: calendar).map(\.to) == [Place.ciampino])
+        #expect(MapArcs.build(trips: [b, a]).map(\.to) == [Place.ciampino])
     }
 
-    @Test func yearsAreUniqueAndInTheGivenCalendar() throws {
-        // Started on New Year's Eve at 23:30 UTC: already 2023 on a device in Germany.
-        let newYear = MapHandmade.trip("new-year", "2022-12-31 23:30", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 50)])
+    @Test func yearsAreUniqueAndThoseOfTheLocalDays() throws {
+        // Started on New Year's Eve at 23:30 UTC in Rome: already 1 January 2023 there.
+        let newYear = MapHandmade.trip("new-year", "2022-12-31 23:30", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 50)],
+                                       timeZone: "Europe/Rome")
         let spring = MapHandmade.trip("spring", "2023-04-01", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 40)])
         let autumn = MapHandmade.trip("autumn", "2023-10-01", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 30)])
-        let utc = try #require(MapArcs.build(trips: [newYear, spring, autumn], calendar: calendar).first)
-        #expect(utc.years == [2022, 2023])
-        var berlin = Calendar(identifier: .gregorian)
-        berlin.timeZone = try #require(TimeZone(identifier: "Europe/Berlin"))
-        let german = try #require(MapArcs.build(trips: [newYear, spring, autumn], calendar: berlin).first)
-        #expect(german.years == [2023])
-        #expect(german.tripIDs == [SortlyID("new-year"), SortlyID("spring"), SortlyID("autumn")])
+        let arc = try #require(MapArcs.build(trips: [newYear, spring, autumn]).first)
+        #expect(arc.years == [2023])
+        #expect(arc.tripIDs == [SortlyID("new-year"), SortlyID("spring"), SortlyID("autumn")])
+        // On a clock still on New Year's Eve the same start is a trip of 2022.
+        let oldYear = MapHandmade.trip("new-year", "2022-12-31 23:30", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 50)])
+        #expect(try #require(MapArcs.build(trips: [oldYear, spring, autumn]).first).years == [2022, 2023])
     }
 
     @Test func thousandsOfDayTripsStayFast() {
         // Concept §9: the whole summary of 50,000 photos in under 300 ms, so about linear work.
         let trips = MapHandmade.dayTrips(5_000).trips
         var arcs: [MapArc] = []
-        let took = ContinuousClock().measure { arcs = MapArcs.build(trips: trips, calendar: calendar) }
+        let took = ContinuousClock().measure { arcs = MapArcs.build(trips: trips) }
         #expect(arcs.count == MapSummary.maxArcs)
         #expect(arcs.allSatisfy { $0.weight >= 1 && $0.tripIDs.count == $0.weight })
         #expect(took < .seconds(2), "5,000 trips took \(took)")
@@ -247,7 +265,7 @@ struct MapArcsTests {
         broken.geometry.destination = GeoCoordinate(latitude: .nan, longitude: 8)
         var nowhere = MapHandmade.trip("nowhere", "2022-07-01", [MapHandmade.place(MapFixture.Places.porto, "Porto", "PT", photos: 10)])
         nowhere.home = RoundedHome(coordinate: GeoCoordinate(latitude: .infinity, longitude: 0), countryCode: "DE")
-        let arcs = MapArcs.build(trips: [walk, broken, nowhere], calendar: calendar)
+        let arcs = MapArcs.build(trips: [walk, broken, nowhere])
         #expect(arcs.map(\.tripIDs) == [[SortlyID("walk")]])
         #expect(arcs.first?.to == MapFixture.Places.lisbon)
     }

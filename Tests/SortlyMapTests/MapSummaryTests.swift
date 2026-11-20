@@ -268,6 +268,19 @@ struct MapSummaryTests {
         #expect(running.numbers.metersTraveled >= Self.summary.numbers.metersTraveled)
         // What the map draws is always the current state.
         #expect(running.trips.count == 2)
+        // A held record or trip must still lead somewhere: the southernmost (Lisbon) and the
+        // easternmost (Passau) of the complete summary belong to trips the running analysis has
+        // not found again, so the current ones stand (review finding 7).
+        #expect(Self.summary.numbers.record(.southernmost)?.tripID == World.portugal)
+        #expect(Self.summary.numbers.record(.easternmost)?.tripID == World.passauTrip)
+        for record in running.numbers.records {
+            let places = running.trip(record.tripID)?.geometry.places.count ?? 0
+            #expect((0..<places).contains(record.placeIndex), "\(record.kind)")
+        }
+        #expect(running.numbers.record(.southernmost)?.tripID == World.straubingTrip)
+        if let longest = running.numbers.longestTripID { #expect(running.trip(longest) != nil) }
+        if let day = running.numbers.mostPhotosInADay { #expect(running.trip(day.tripID) != nil) }
+        if let favorite = running.numbers.favoriteCountry { #expect(running.countries.contains { $0.code == favorite.code }) }
         let done = MapSummary.build(partial.input(running: false), previous: Self.summary)
         #expect(!done.numbers.isPreliminary)
         #expect(done.numbers.trips == 2)
@@ -276,6 +289,88 @@ struct MapSummaryTests {
 
     /// Concept §8: the stored summary knows home only rounded, the diagnostic report no
     /// coordinate at all.
+    /// A library listing photos twice gives the map of listing them once: one photo three times
+    /// would otherwise make a place and a record (review finding 5).
+    @Test func aPhotoListedTwiceCountsOnce() throws {
+        var twice = Self.world
+        twice.facts += Self.world.facts.reversed()
+        #expect(MapSummary.build(twice.input(titles: [World.iceland: "Island, Ringstraße"])) == Self.summary)
+        // One photo at Longyearbyen listed three times, on a trip with three photos in Tromsø: no
+        // place at Longyearbyen, so no "Nördlichster Ort" there, and the trip has 4 photos.
+        var svalbard = Self.world
+        let tripID = SortlyID("svalbard")
+        let lone = MapFixture.photo("lyr", at: MapFixture.date("2025-03-02 12:00"), MapFixture.Places.longyearbyen, country: "NO",
+                                    town: "Longyearbyen")
+        let tromso = MapFixture.burst("tos", count: 3, at: MapFixture.at(69.6492, 18.9553), day: "2025-03-01", country: "NO", town: "Tromsø")
+        let members = MapFixture.members([lone, lone, lone] + tromso, of: tripID)
+        svalbard.facts += members
+        svalbard.trips.append(MapFixture.trip(tripID, members))
+        let summary = MapSummary.build(svalbard.input())
+        let trip = try #require(summary.trip(tripID))
+        #expect(trip.geometry.photoCount == 4)
+        #expect(trip.geometry.places.map(\.name) == ["Tromsø"])
+        #expect(summary.numbers.record(.northernmost)?.placeName == "Tromsø")
+    }
+
+    /// Photos of a trip taken at home (packing the evening before) never put anything on the
+    /// map: the exact home would be a place, a pin and the start of the route (review finding 2).
+    @Test func aTripsPhotosAtHomeAreNeverDrawn() throws {
+        var packing = Self.world
+        let packed = MapFixture.members(MapFixture.burst("packing", count: 4, at: World.home, day: "2024-04-01", hour: 18, jitterMeters: 10,
+                                                         country: "DE", town: "Regensburg", atHome: true), of: World.portugal)
+        packing.facts += packed
+        let index = try #require(packing.trips.firstIndex { $0.id == World.portugal })
+        packing.trips[index] = MapFixture.trip(World.portugal, packing.facts.filter { $0.tripID == World.portugal })
+        let summary = MapSummary.build(packing.input())
+        let trip = try #require(summary.trip(World.portugal))
+        let nearHome = { (coordinate: GeoCoordinate) in GeoMath.distance(coordinate, World.home) < 30_000 }
+        #expect(!trip.geometry.places.contains { nearHome($0.coordinate) })
+        #expect(!trip.geometry.dayPlaces.contains { nearHome($0.coordinate) })
+        #expect(!nearHome(trip.geometry.destination))
+        #expect(!summary.pins.contains { nearHome($0.coordinate) })
+        #expect(trip.geometry.countryPhotos["DE"] == nil)
+        // They are still photos of the trip, as its album shows them.
+        #expect(trip.geometry.photoCount == (Self.summary.trip(World.portugal)?.geometry.photoCount ?? 0) + 4)
+        // A trip of nothing but photos at home has nothing to draw.
+        var onlyHome = Self.world
+        let home = MapFixture.members(MapFixture.burst("garden", count: 6, at: World.home, day: "2025-05-10", jitterMeters: 10, country: "DE",
+                                                       town: "Regensburg", atHome: true), of: SortlyID("garden"))
+        onlyHome.facts += home
+        onlyHome.trips.append(MapFixture.trip(SortlyID("garden"), home))
+        #expect(MapSummary.build(onlyHome.input()).trip(SortlyID("garden")) == nil)
+    }
+
+    /// Every year on the map is the Gregorian year of a local day: a Japanese, Buddhist or Islamic
+    /// calendar on the iPhone changes nothing (review finding 8).
+    @Test func theDevicesCalendarChangesNoYear() throws {
+        for identifier in [Calendar.Identifier.japanese, .buddhist, .islamicUmmAlQura, .hebrew] {
+            var calendar = Calendar(identifier: identifier)
+            calendar.timeZone = MapFixture.calendar.timeZone
+            var input = Self.world.input(titles: [World.iceland: "Island, Ringstraße"])
+            input.calendar = calendar
+            #expect(MapSummary.build(input) == Self.summary, "\(identifier)")
+        }
+        #expect(Self.summary.years.map(\.year) == Array(2023...2025))
+        #expect(Self.summary.numbers.year == 2025 && Self.summary.numbers.firstTripYear == 2023)
+        #expect(Self.summary.countries.map(\.firstVisitYear).allSatisfy { (2022...2025).contains($0) })
+    }
+
+    /// A country lists only the trips the map shows: the photos of a trip that is not stored still
+    /// count for the country, but neither "Neues Land" nor the country's pin leads to that trip
+    /// (review finding 11).
+    @Test func countriesLeadOnlyToTripsOnTheMap() throws {
+        var ghost = Self.world
+        ghost.facts += MapFixture.members(MapFixture.burst("paris", count: 4, at: MapFixture.at(48.8566, 2.3522), day: "2025-05-01", country: "FR",
+                                                           town: "Paris"), of: SortlyID("ghost"))
+        let summary = MapSummary.build(ghost.input())
+        let france = try #require(summary.countries.first { $0.code == "FR" })
+        #expect(france.tripIDs.isEmpty)
+        #expect(summary.countries.allSatisfy { $0.tripIDs.allSatisfy { summary.trip($0) != nil } })
+        let event = try #require(MapYears.newCountries(since: [], countries: summary.countries).first { $0.code == "FR" })
+        #expect(event.tripID == nil)
+        #expect(!summary.pins.contains { $0.id == "country:FR" })
+    }
+
     @Test func storedSummaryAndDiagnosticsGiveNoHomeAway() throws {
         let data = try JSONEncoder().encode(Self.summary)
         let json = try #require(String(data: data, encoding: .utf8))
@@ -307,17 +402,18 @@ struct MapSummaryTests {
         #expect(passport.stamps.map(\.countryCode).sorted() == ["DE", "IS", "PT"])
         let year = try #require(MapShare.year(2024, of: summary))
         let postcards = summary.trips.compactMap { MapShare.postcard(for: $0.id, in: summary) }
-        #expect(postcards.count == 4)
+        // Every trip but Straubing, under 50 km from home: its postcard would name a place near
+        // home, and none of its photos may be shown.
+        #expect(postcards.count == summary.trips.count - 1)
+        #expect(MapShare.postcard(for: World.straubingTrip, in: summary) == nil)
 
         var points = world.arcs.flatMap { [$0.from, $0.to] } + world.destinations
         points += postcards.flatMap(\.route)
         for point in points { #expect(GeoMath.distance(point, World.home) >= MapShare.nearHomeMeters, "\(point)") }
+        #expect(!points.isEmpty)
         let nearHome = Set(Self.world.facts.filter { $0.tripID == World.straubingTrip || $0.atHome }.map(\.id))
         let photos = year.photos + postcards.flatMap(\.photos)
         #expect(photos.allSatisfy { !nearHome.contains($0.asset) })
-        // Straubing is under 50 km from home: its postcard has no route and no photo.
-        let straubing = try #require(MapShare.postcard(for: World.straubingTrip, in: summary))
-        #expect(straubing.route.isEmpty && straubing.photos.isEmpty)
         // Nothing in the share data spells the rounded home either.
         let home = try #require(summary.home).coordinate
         let encoder = JSONEncoder()

@@ -20,7 +20,7 @@ struct MapPinsBuilderTests {
         ]
         let croatia = MapHandmade.trip("croatia", "2022-08-01", places)
         let countries = [MapHandmade.country("HR", "2022-08-01", trips: ["croatia"], region: .southernEurope)]
-        let pins = MapPins.build(trips: [croatia], countries: countries, calendar: calendar)
+        let pins = MapPins.build(trips: [croatia], countries: countries)
         #expect(pins.count == 1 + 1 + 1 + 4)
         let real = Set(places.map(\.coordinate))
         #expect(pins.allSatisfy { real.contains($0.coordinate) })
@@ -41,7 +41,7 @@ struct MapPinsBuilderTests {
             MapHandmade.country("DE", "2009-01-01", trips: [], region: .westernEurope, photos: 20_000),
             MapHandmade.country("AT", "2023-02-10", trips: ["tirol"], region: .westernEurope),
         ]
-        let pins = MapPins.build(trips: [tirol], countries: countries, calendar: calendar)
+        let pins = MapPins.build(trips: [tirol], countries: countries)
         #expect(!pins.contains { $0.id == "country:DE" })
         #expect(pins.contains { $0.id == "country:AT" && $0.coordinate == Place.innsbruck && $0.count == 1 })
         let region = try #require(pins.first { $0.id == "region:westernEurope" })
@@ -49,12 +49,12 @@ struct MapPinsBuilderTests {
         #expect(region.coordinate == Place.innsbruck)
         #expect(region.level == .worldRegion && region.region == .westernEurope && region.title == nil && region.countryKey == nil)
         // Without any trip abroad there is no pin at all: no country pin, so no region pin either.
-        #expect(MapPins.build(trips: [], countries: [countries[0]], calendar: calendar).isEmpty)
+        #expect(MapPins.build(trips: [], countries: [countries[0]]).isEmpty)
         // What decides is the trip's photos per country (as `MapCountry.tripIDs` counts them), not
         // a place's key alone.
         let noPhotosThere = MapHandmade.trip("tirol", "2023-02-10", [MapHandmade.place(Place.innsbruck, "Innsbruck", "AT", photos: 45)],
                                              countryPhotos: ["DE": 45])
-        #expect(!MapPins.build(trips: [noPhotosThere], countries: countries, calendar: calendar).contains { $0.level == .country })
+        #expect(!MapPins.build(trips: [noPhotosThere], countries: countries).contains { $0.level == .country })
     }
 
     @Test func aTripThroughTwoCountriesGivesEachItsPinAtItsOwnPlace() {
@@ -69,7 +69,7 @@ struct MapPinsBuilderTests {
             MapHandmade.country("IS", "2023-06-14", trips: ["north"], region: .northernEurope),
             MapHandmade.country("GL", "2023-06-16", trips: ["north"], region: .northernAmerica, isState: false),
         ]
-        let pins = MapPins.build(trips: [north], countries: countries, calendar: calendar)
+        let pins = MapPins.build(trips: [north], countries: countries)
         #expect(pins.first { $0.id == "country:IS" }?.coordinate == MapFixture.Places.reykjavik)
         #expect(pins.first { $0.id == "country:GL" }?.coordinate == Place.ilulissat)
         #expect(pins.first { $0.id == "region:northernEurope" }?.coordinate == MapFixture.Places.reykjavik)
@@ -84,17 +84,17 @@ struct MapPinsBuilderTests {
         let rome = MapHandmade.trip("rome", "2019-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 80),
                                                            MapHandmade.place(Place.ciampino, nil, "IT", photos: 20)])
         let italy = MapHandmade.country("IT", "2019-05-02", trips: ["rome"], region: .southernEurope)
-        let pins = MapPins.build(trips: [rome], countries: [italy], calendar: calendar)
+        let pins = MapPins.build(trips: [rome], countries: [italy])
         #expect(pins.map(\.id) == ["region:southernEurope", "country:IT", "trip:rome", "place:rome:0", "place:rome:1"])
         // An unrelated trip adds its own pins and changes none of these.
         let tokyo = MapHandmade.trip("tokyo", "2023-03-02", [MapHandmade.place(MapFixture.Places.tokyo, "Tokio", "JP", photos: 500)])
         let japan = MapHandmade.country("JP", "2023-03-02", trips: ["tokyo"], region: .easternAsia)
-        let more = MapPins.build(trips: [tokyo, rome], countries: [japan, italy], calendar: calendar)
+        let more = MapPins.build(trips: [tokyo, rome], countries: [japan, italy])
         #expect(more.count == pins.count + 4)
         for pin in pins {
             #expect(more.first { $0.id == pin.id } == pin)
         }
-        #expect(MapPins.build(trips: [rome], countries: [italy], calendar: calendar) == pins)
+        #expect(MapPins.build(trips: [rome], countries: [italy]) == pins)
     }
 
     @Test func pinsAreOrderedByLevelThenCountThenID() {
@@ -104,7 +104,7 @@ struct MapPinsBuilderTests {
                                                                MapHandmade.place(MapFixture.Places.porto, "Porto", "PT", photos: 30)])
         let countries = [MapHandmade.country("PT", "2022-10-02", trips: ["lisbon"], region: .southernEurope),
                          MapHandmade.country("IT", "2019-05-02", trips: ["rome"], region: .southernEurope)]
-        let pins = MapPins.build(trips: [lisbon, rome], countries: countries, calendar: calendar)
+        let pins = MapPins.build(trips: [lisbon, rome], countries: countries)
         #expect(pins.map(\.id) == [
             "region:southernEurope",
             "country:IT", "country:PT",
@@ -118,7 +118,7 @@ struct MapPinsBuilderTests {
         let kashmir = MapHandmade.trip("kashmir", "2012-07-01", [MapHandmade.place(MapFixture.at(34.0837, 74.7973), "Srinagar", "disputed-kashmir", photos: 40)])
         // Even if a disputed key came in as a country, it makes no country pin and no region badge.
         let countries = [MapHandmade.country("disputed-kashmir", "2012-07-01", trips: ["kashmir"], region: .southernAsia)]
-        let pins = MapPins.build(trips: [kashmir], countries: countries, calendar: calendar)
+        let pins = MapPins.build(trips: [kashmir], countries: countries)
         #expect(!pins.contains { $0.level == .country || $0.level == .worldRegion })
         // The trip and its place keep the key: the app says "nicht sicher" there.
         #expect(pins.map(\.id) == ["trip:kashmir", "place:kashmir:0"])
@@ -139,7 +139,7 @@ struct MapPinsBuilderTests {
         let countries = [MapHandmade.country("IT", "2019-05-02", trips: ["rome"], region: .southernEurope),
                          MapHandmade.country("PT", "2022-10-02", trips: ["portugal"], region: .southernEurope),
                          MapHandmade.country("JP", "2023-01-02", trips: ["bare"], region: .easternAsia)]
-        let pins = MapPins.build(trips: [rome, portugal, bare], countries: countries, calendar: calendar)
+        let pins = MapPins.build(trips: [rome, portugal, bare], countries: countries)
         func cover(_ id: String) -> AssetID? { pins.first { $0.id == id }?.cover }
         #expect(cover("trip:rome") == "rome-1")
         #expect(cover("place:rome:0") == "rome-1")
@@ -155,13 +155,13 @@ struct MapPinsBuilderTests {
     @Test func countsAndYearsComeFromTheTrips() throws {
         let rome = MapHandmade.trip("rome", "2019-04-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 80)])
         let florence = MapHandmade.trip("florence", "2019-09-12", [MapHandmade.place(MapFixture.Places.florence, "Florenz", "IT", photos: 50)])
-        // Started on New Year's Eve at 23:30 UTC: 2023 on a device in Germany.
-        let newYear = MapHandmade.trip("new-year", "2022-12-31 23:30", [MapHandmade.place(Place.ciampino, nil, "IT", photos: 30)])
+        // Started on New Year's Eve at 23:30 UTC at Ciampino: 00:30 on 1 January in Rome, so a
+        // trip of 2023 (its first local day), wherever the iPhone is.
+        let newYear = MapHandmade.trip("new-year", "2022-12-31 23:30", [MapHandmade.place(Place.ciampino, nil, "IT", photos: 30)],
+                                       timeZone: "Europe/Rome")
         let countries = [MapHandmade.country("IT", "2019-04-02", trips: ["rome", "florence", "new-year"], region: .southernEurope),
                          MapHandmade.country("PT", "2015-03-01", trips: [], region: .southernEurope)]
-        var berlin = Calendar(identifier: .gregorian)
-        berlin.timeZone = try #require(TimeZone(identifier: "Europe/Berlin"))
-        let pins = MapPins.build(trips: [newYear, florence, rome], countries: countries, calendar: berlin)
+        let pins = MapPins.build(trips: [newYear, florence, rome], countries: countries)
         let italy = try #require(pins.first { $0.id == "country:IT" })
         #expect(italy.count == 3)
         #expect(italy.years == [2019, 2023])
@@ -171,8 +171,9 @@ struct MapPinsBuilderTests {
         #expect(pins.first { $0.id == "trip:new-year" }?.years == [2023])
         #expect(pins.first { $0.id == "place:new-year:0" }?.years == [2023])
         #expect(pins.first { $0.id == "trip:rome" }?.years == [2019])
-        // In UTC the New Year's trip is still 2022.
-        let utc = MapPins.build(trips: [newYear, florence, rome], countries: countries, calendar: calendar)
+        // On a clock still in 2022 (its first local day on New Year's Eve) it is a trip of 2022.
+        let oldYear = MapHandmade.trip("new-year", "2022-12-31 23:30", [MapHandmade.place(Place.ciampino, nil, "IT", photos: 30)])
+        let utc = MapPins.build(trips: [oldYear, florence, rome], countries: countries)
         #expect(utc.first { $0.id == "country:IT" }?.years == [2019, 2022])
         // Trip and place pins carry what the app shows on them.
         let trip = try #require(pins.first { $0.id == "trip:rome" })
@@ -186,7 +187,7 @@ struct MapPinsBuilderTests {
         let earlier = MapHandmade.trip("earlier", "2019-05-02", [MapHandmade.place(Place.ciampino, nil, "IT", photos: 40),
                                                                  MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 40)])
         let italy = MapHandmade.country("IT", "2019-05-02", trips: ["earlier", "later"], region: .southernEurope)
-        let pins = MapPins.build(trips: [later, earlier], countries: [italy], calendar: calendar)
+        let pins = MapPins.build(trips: [later, earlier], countries: [italy])
         #expect(pins.first { $0.id == "country:IT" }?.coordinate == Place.ciampino)
         #expect(pins.first { $0.id == "region:southernEurope" }?.coordinate == Place.ciampino)
     }
@@ -197,7 +198,7 @@ struct MapPinsBuilderTests {
                                     otherPhotos: 4, countryPhotos: ["AT": 40, "LI": 4])
         let countries = [MapHandmade.country("AT", "2022-08-01", trips: ["alps"], region: .westernEurope),
                          MapHandmade.country("LI", "2022-08-01", trips: ["alps"], region: .westernEurope)]
-        let pins = MapPins.build(trips: [alps], countries: countries, calendar: calendar)
+        let pins = MapPins.build(trips: [alps], countries: countries)
         #expect(pins.contains { $0.id == "country:AT" })
         #expect(!pins.contains { $0.id == "country:LI" })
         #expect(pins.first { $0.id == "region:westernEurope" }?.count == 2)
@@ -217,36 +218,35 @@ struct MapPinsBuilderTests {
                          MapHandmade.country("GL", "2023-06-15", trips: ["north"], region: .northernAmerica, isState: false),
                          MapHandmade.country("PT", "2022-10-02", trips: ["lisbon"], region: .southernEurope),
                          MapHandmade.country("DE", "2009-01-01", trips: [], region: .westernEurope)]
-        let pins = MapPins.build(trips: trips, countries: countries, calendar: calendar)
+        let pins = MapPins.build(trips: trips, countries: countries)
         for seed in 1...5 as ClosedRange<UInt64> {
-            let again = MapPins.build(trips: MapHandmade.shuffled(trips, seed: seed), countries: MapHandmade.shuffled(countries, seed: seed + 10),
-                                      calendar: calendar)
+            let again = MapPins.build(trips: MapHandmade.shuffled(trips, seed: seed), countries: MapHandmade.shuffled(countries, seed: seed + 10))
             #expect(again == pins)
         }
         // A trip given twice is pinned once; a country given twice (the summary never has one)
         // counts as its copy with the earliest first visit, whichever comes first.
-        #expect(MapPins.build(trips: trips + trips, countries: countries, calendar: calendar) == pins)
+        #expect(MapPins.build(trips: trips + trips, countries: countries) == pins)
         let stale = MapHandmade.country("IS", "2024-01-01", trips: [], region: .northernEurope)
-        #expect(MapPins.build(trips: trips, countries: [stale] + countries, calendar: calendar) == pins)
-        #expect(MapPins.build(trips: trips, countries: countries + [stale], calendar: calendar) == pins)
+        #expect(MapPins.build(trips: trips, countries: [stale] + countries) == pins)
+        #expect(MapPins.build(trips: trips, countries: countries + [stale]) == pins)
     }
 
     @Test func aTripWithoutPlacesHasItsPinAtItsMedoidOnly() throws {
         // Two photos a day on a hike: no place, the destination is the medoid of its photos.
         let walk = MapHandmade.trip("walk", "2022-05-01", [], medoid: MapFixture.Places.porto, otherPhotos: 12, countryPhotos: ["PT": 12])
         let portugal = MapHandmade.country("PT", "2022-05-01", trips: ["walk"], region: .southernEurope)
-        let pins = MapPins.build(trips: [walk], countries: [portugal], calendar: calendar)
+        let pins = MapPins.build(trips: [walk], countries: [portugal])
         let pin = try #require(pins.first)
         #expect(pins.count == 1)
         #expect(pin.id == "trip:walk" && pin.coordinate == MapFixture.Places.porto && pin.placeIndex == nil && pin.count == 12 && pin.cover == nil)
-        #expect(MapPins.build(trips: [], countries: [], calendar: calendar).isEmpty)
+        #expect(MapPins.build(trips: [], countries: []).isEmpty)
     }
 
     @Test func thousandsOfDayTripsStayFast() {
         // 5,000 trips with 20,000 places: one pass over the places and one sort.
         let (trips, countries) = MapHandmade.dayTrips(5_000)
         var pins: [MapPin] = []
-        let took = ContinuousClock().measure { pins = MapPins.build(trips: trips, countries: countries, calendar: calendar) }
+        let took = ContinuousClock().measure { pins = MapPins.build(trips: trips, countries: countries) }
         #expect(pins.filter { $0.level == .trip }.count == 5_000)
         #expect(pins.filter { $0.level == .place }.count == 20_000)
         #expect(pins.filter { $0.level == .country }.count == 12)
@@ -258,10 +258,9 @@ struct MapPinsBuilderTests {
         var broken = MapHandmade.trip("broken", "2022-05-01", [MapHandmade.place(MapFixture.Places.lisbon, "Lissabon", "PT", photos: 30),
                                                                MapHandmade.place(MapFixture.Places.porto, "Porto", "PT", photos: 20)])
         broken.geometry.places[1].coordinate = GeoCoordinate(latitude: .nan, longitude: -8.6)
-        let pins = MapPins.build(trips: [broken], countries: [MapHandmade.country("PT", "2022-05-01", trips: ["broken"], region: .southernEurope)],
-                                 calendar: calendar)
+        let pins = MapPins.build(trips: [broken], countries: [MapHandmade.country("PT", "2022-05-01", trips: ["broken"], region: .southernEurope)])
         #expect(pins.map(\.id) == ["region:southernEurope", "country:PT", "trip:broken", "place:broken:0"])
         broken.geometry.destination = GeoCoordinate(latitude: 0, longitude: 0)
-        #expect(!MapPins.build(trips: [broken], countries: [], calendar: calendar).contains { $0.level == .trip })
+        #expect(!MapPins.build(trips: [broken], countries: []).contains { $0.level == .trip })
     }
 }

@@ -19,20 +19,32 @@ public enum MapCountries {
     ///   time travel and no ordinal for "Neues Land". (The atlas counts it, sorted last; PhotoKit
     ///   almost always dates a photo, so this is a damaged library, where showing less is safer
     ///   than showing a made-up year.)
-    /// - `firstVisitYear`: the year of `firstVisit` in `calendar` (the device's, as everywhere in
-    ///   the map and the travel atlas).
+    /// - `firstVisitYear`: the Gregorian year of `firstVisit` on the clock where that photo was
+    ///   taken (`AssetFacts.timeZone`, else `timeZone`, the device's), as the app's albums and
+    ///   every year of the map count it (`MapYears.compute`): a first visit on New Year's Eve in
+    ///   New York is one of the old year wherever the iPhone is.
     /// - `tripIDs`: the trips (`AssetFacts.tripID`) with at least one counted photo there, ordered
     ///   by their start in `tripStarts`, then id; a trip missing from `tripStarts` comes last.
     public static func compute(facts: [AssetFacts], airborne: Set<AssetID>, tripStarts: [SortlyID: Date],
-                               minimumPhotos: Int = MapSummary.minimumPhotosPerCountry, calendar: Calendar = .sortlyDefault) -> [MapCountry] {
+                               minimumPhotos: Int = MapSummary.minimumPhotosPerCountry, timeZone: TimeZone = .current) -> [MapCountry] {
         struct Tally {
             var photos = Set<AssetID>()
             var firstVisit: Date?
+            /// The clock of the first visit's photo; `nil`: `timeZone`.
+            var firstVisitZone: TimeZone?
             var trips = Set<SortlyID>()
 
             mutating func add(_ fact: AssetFacts) {
                 photos.insert(fact.id)
-                if let date = fact.asset.creationDate { firstVisit = min(firstVisit ?? date, date) }
+                if let date = fact.asset.creationDate {
+                    // The earlier photo, or of two at the same moment the one whose clock comes
+                    // first by name, so the order of the facts never changes the year.
+                    let zone = fact.timeZone?.identifier ?? ""
+                    if firstVisit.map({ (date, zone) < ($0, firstVisitZone?.identifier ?? "") }) ?? true {
+                        firstVisit = date
+                        firstVisitZone = fact.timeZone
+                    }
+                }
                 if let trip = fact.tripID { trips.insert(trip) }
             }
         }
@@ -46,7 +58,7 @@ public enum MapCountries {
             let trips = tally.trips.sorted { a, b in
                 (tripStarts[a] ?? .distantFuture, a.rawValue) < (tripStarts[b] ?? .distantFuture, b.rawValue)
             }
-            return MapCountry(code: code, firstVisit: firstVisit, firstVisitYear: calendar.component(.year, from: firstVisit),
+            return MapCountry(code: code, firstVisit: firstVisit, firstVisitYear: LocalDay(firstVisit, timeZone: tally.firstVisitZone ?? timeZone).year,
                               photoCount: tally.photos.count, tripIDs: trips,
                               isState: WorldStates.isState(code), continent: Continent.forCountryCode(code),
                               region: WorldRegion.of(countryCode: code))

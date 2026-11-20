@@ -24,7 +24,15 @@ extension MapPins {
         return .place
     }
 
-    /// The pins to draw in `viewport`, close ones grouped.
+    /// The pins the globe shows in `viewport`: those of the level its width calls for
+    /// (`level(forWidth:)`), close ones grouped (`visible`). `pins` are the summary's, all levels.
+    public static func onGlobe(_ pins: [MapPin], in viewport: MapViewport, limit: Int = MapSummary.maxVisiblePins) -> [MapPinGroup] {
+        let level = level(forWidth: viewport.widthMeters)
+        return visible(pins.filter { $0.level == level }, in: viewport, limit: limit)
+    }
+
+    /// `pins` drawn in `viewport`, close ones grouped. They are taken as given, whatever their
+    /// level: the globe passes the pins of one level (`onGlobe`), a trip's own map its places.
     ///
     /// The pins are placed on the screen with the azimuthal equidistant projection around the
     /// view's centre (`viewport.widthPoints / viewport.widthMeters` points per metre), which is

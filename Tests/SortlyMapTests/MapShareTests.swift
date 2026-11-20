@@ -51,19 +51,45 @@ struct MapShareTests {
         return MapHandmade.summary(trips: trips, countries: countries, numbers: numbers, years: years)
     }
 
-    @Test func worldTellsTheNumbersOfTheSummary() {
-        let world = MapShare.world(Self.library(), geometry: geometry)
+    @Test func worldTellsTheNumbersOfWhatItShows() {
+        let library = Self.library()
+        let world = MapShare.world(library, geometry: geometry)
         #expect(world.countries == ["DE", "IT", "IS", "JP"])
         #expect(world.states == 4)
         #expect(world.tripCount == 5)
         #expect(world.sinceYear == 2019)
-        #expect(world.kilometers == 88_800)
-        // Europe and Asia; Antarctica would never count.
+        // "unterwegs" only against the Earth, never in kilometres (concept §8: no distance from
+        // home on a share image).
+        let traveled = library.trips.map(\.stats.metersTraveled).reduce(0, +)
+        #expect(world.earth == EarthComparison(meters: traveled))
+        #expect(world.earth != .none)
+        // Europe and Asia; Antarctica would never count (it has no state).
         #expect(world.continents == 2)
-        var withAntarctica = Self.library()
-        withAntarctica.numbers.continents.append(ContinentTally(continent: .antarctica, visited: 1, total: 0))
+        var withAntarctica = library
+        withAntarctica.countries.append(MapHandmade.country("AQ", "2025-01-10", trips: [], region: nil, isState: false))
         #expect(MapShare.world(withAntarctica, geometry: geometry).continents == 2)
+        #expect(MapShare.world(withAntarctica, geometry: geometry).states == 4)
         #expect(world.worldShare == 4.0 / 195)
+    }
+
+    /// While the analysis runs the app holds its numbers ("bisher"), but a share image counts what
+    /// it shows: never "3 Länder" over two flags, or "6 Reisen" over five arcs (review finding 7).
+    @Test func heldNumbersNeverReachAShareImage() {
+        var library = Self.library()
+        library.numbers.countries = 9
+        library.numbers.states = 9
+        library.numbers.trips = 12
+        library.numbers.firstTripYear = 2001
+        library.numbers.firstCountryYear = 1999
+        library.numbers.metersTraveled = 400_000_000
+        library.numbers.isPreliminary = true
+        let world = MapShare.world(library, geometry: geometry)
+        #expect(world.countries.count == 4 && world.states == 4 && world.tripCount == 5 && world.sinceYear == 2019)
+        #expect(world.earth == EarthComparison(meters: library.trips.map(\.stats.metersTraveled).reduce(0, +)))
+        let passport = MapShare.passport(library)
+        #expect(passport.stamps.count == 4 && passport.tripCount == 5)
+        // "gesammelt seit" is the first stamp's year (Germany, 2009).
+        #expect(passport.sinceYear == 2009)
     }
 
     @Test func worldArcsStartInTheMiddleOfTheHomeCountryAndMergeLikeTheGlobe() throws {
@@ -149,7 +175,6 @@ struct MapShareTests {
         let year = try #require(MapShare.year(2024, of: Self.library()))
         #expect(year.year == 2024)
         #expect(year.newCountries == ["JP"])
-        #expect(year.kilometers == 21_000)
         #expect(year.earth == .half)
         #expect(year.tripCount == 2)
         #expect(year.daysAway == 4)

@@ -358,9 +358,9 @@ public struct MapCountry: Hashable, Sendable, Codable, Identifiable {
     public var code: String
     /// The first photo there.
     public var firstVisit: Date
-    /// The year of `firstVisit` in the calendar the summary was worked out with: the year the
-    /// time travel, the numbers and the passport stamp all give it, so they never disagree in the
-    /// hours around New Year.
+    /// The Gregorian year of `firstVisit` on the clock where that photo was taken
+    /// (`MapCountries.compute`): the year the time travel, the numbers and the passport stamp all
+    /// give it, so they never disagree in the hours around New Year.
     public var firstVisitYear: Int
     public var photoCount: Int
     /// Trips with photos there, oldest first.
@@ -509,7 +509,7 @@ public struct WorldNumbers: Hashable, Sendable, Codable {
     public var longestTripDays: Int?
     public var mostPhotosInADay: DayRecord?
     public var favoriteCountry: FavoriteCountry?
-    /// The calendar year of `MapSummary.computedAt` in the device's calendar.
+    /// The Gregorian year of `MapSummary.computedAt` in the device's time zone ("this year").
     public var year: Int
     /// Countries first visited in `year`, first visit order.
     public var newThisYear: [String]
@@ -548,7 +548,7 @@ public struct WorldNumbers: Hashable, Sendable, Codable {
 
 /// One year of the time travel and of the first look's waves ("2022 · 10 Länder · Neu: Portugal").
 public struct MapYear: Hashable, Sendable, Codable {
-    /// Calendar year of the trips' start, in the device's calendar.
+    /// The Gregorian year of the trips' first local day (`TripGeometry.firstDay`).
     public var year: Int
     /// Trips that started in the year, oldest first.
     public var tripIDs: [SortlyID]
@@ -819,23 +819,26 @@ public struct ShareWorld: Hashable, Sendable, Codable {
     public var states: Int
     public var tripCount: Int
     public var sinceYear: Int?
-    /// "unterwegs", whole kilometres rounded to 100.
-    public var kilometers: Int
+    /// "unterwegs" against the Earth ("2,2-mal um die Erde"), never in kilometres: the kilometres
+    /// of one trip are about twice its distance from home, which no share image tells (concept
+    /// §8). The comparison's steps are a quarter of the Earth and then 4,000 km, far coarser than
+    /// any home.
+    public var earth: EarthComparison
     public var continents: Int
     public var worldShare: Double
     /// None when the home country is unknown or smaller than
     /// `CountryGeometry.smallCountrySquareKilometers`.
     public var arcs: [ShareArc]
-    /// Trip destinations at least `MapShare.nearHomeMeters` from home.
+    /// Trip destinations at least `MapShare.nearHomeMeters` from every home the summary knows.
     public var destinations: [GeoCoordinate]
 
-    public init(countries: [String], states: Int, tripCount: Int, sinceYear: Int?, kilometers: Int, continents: Int, worldShare: Double,
+    public init(countries: [String], states: Int, tripCount: Int, sinceYear: Int?, earth: EarthComparison, continents: Int, worldShare: Double,
                 arcs: [ShareArc], destinations: [GeoCoordinate]) {
         self.countries = countries
         self.states = states
         self.tripCount = tripCount
         self.sinceYear = sinceYear
-        self.kilometers = kilometers
+        self.earth = earth
         self.continents = continents
         self.worldShare = worldShare
         self.arcs = arcs
@@ -874,8 +877,9 @@ public struct SharePassport: Hashable, Sendable, Codable {
 public struct ShareYear: Hashable, Sendable, Codable {
     public var year: Int
     public var newCountries: [String]
-    /// "unterwegs" in the year, whole kilometres rounded to 100.
-    public var kilometers: Int
+    /// "unterwegs" in the year against the Earth, the motif's sentence ("Halb um die Erde."):
+    /// never in kilometres, which for a year with one trip would tell its distance from home
+    /// (concept §8).
     public var earth: EarthComparison
     public var tripCount: Int
     public var daysAway: Int
@@ -883,11 +887,10 @@ public struct ShareYear: Hashable, Sendable, Codable {
     /// Best first; the app takes the first three it has sharp on the iPhone.
     public var photos: [SharePhoto]
 
-    public init(year: Int, newCountries: [String], kilometers: Int, earth: EarthComparison, tripCount: Int, daysAway: Int, photoCount: Int,
+    public init(year: Int, newCountries: [String], earth: EarthComparison, tripCount: Int, daysAway: Int, photoCount: Int,
                 photos: [SharePhoto]) {
         self.year = year
         self.newCountries = newCountries
-        self.kilometers = kilometers
         self.earth = earth
         self.tripCount = tripCount
         self.daysAway = daysAway

@@ -59,16 +59,25 @@ struct MapCountriesTests {
         #expect(MapCountries.cityCount(facts: facts, airborne: []) == atlas.cityCount)
     }
 
-    /// The year of the first visit is worked out once, in the device's calendar, and the numbers,
-    /// the time travel and the passport all take it from there.
-    @Test func theFirstVisitsYearIsTheDevicesCalendars() throws {
-        let facts = Self.facts("tokyo", 3, "2019-12-31 16:30", "JP", town: "Tokio")
-        var tokyo = Calendar(identifier: .gregorian)
-        tokyo.timeZone = try #require(TimeZone(identifier: "Asia/Tokyo"))
-        #expect(MapCountries.compute(facts: facts, airborne: [], tripStarts: [:], calendar: tokyo).first?.firstVisitYear == 2020)
-        #expect(MapCountries.compute(facts: facts, airborne: [], tripStarts: [:], calendar: MapFixture.calendar).first?.firstVisitYear == 2019)
-        let countries = MapCountries.compute(facts: facts, airborne: [], tripStarts: [:], calendar: tokyo)
-        let numbers = WorldNumbers.compute(trips: [], countries: countries, cities: 1, calendar: tokyo, now: MapFixture.date("2020-06-01"),
+    /// The year of the first visit is that of the clock where the photo was taken
+    /// (`AssetFacts.timeZone`, as the app's albums count it), worked out once; the numbers, the
+    /// time travel and the passport all take it from there. The device's zone counts only for a
+    /// photo whose clock is not known.
+    @Test func theFirstVisitsYearIsThatOfThePhotosClock() throws {
+        let tokyo = try #require(TimeZone(identifier: "Asia/Tokyo"))
+        let utc = MapFixture.utc
+        // 16:30 UTC on New Year's Eve: 01:30 on 1 January 2020 in Tokyo.
+        let unknownClock = Self.facts("tokyo", 3, "2019-12-31 16:30", "JP", town: "Tokio")
+        #expect(MapCountries.compute(facts: unknownClock, airborne: [], tripStarts: [:], timeZone: tokyo).first?.firstVisitYear == 2020)
+        #expect(MapCountries.compute(facts: unknownClock, airborne: [], tripStarts: [:], timeZone: utc).first?.firstVisitYear == 2019)
+        let tokyoClock = unknownClock.map { fact in
+            var fact = fact
+            fact.timeZone = tokyo
+            return fact
+        }
+        let countries = MapCountries.compute(facts: tokyoClock, airborne: [], tripStarts: [:], timeZone: utc)
+        #expect(countries.first?.firstVisitYear == 2020)
+        let numbers = WorldNumbers.compute(trips: [], countries: countries, cities: 1, timeZone: utc, now: MapFixture.date("2020-06-01"),
                                            analysisRunning: false)
         #expect(numbers.firstCountryYear == 2020)
         #expect(numbers.newThisYear == ["JP"])

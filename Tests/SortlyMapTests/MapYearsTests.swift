@@ -29,9 +29,8 @@ struct MapYearsTests {
          HandBuilt.country("JP", "2024-03-10", trips: ["tokyo"]), HandBuilt.country("GB", "2026-05-01")]
     }
 
-    static func years(_ trips: [MapTrip] = trips, _ countries: [MapCountry] = countries, calendar: Calendar = MapFixture.calendar,
-                      through year: Int = 2026) -> [MapYear] {
-        MapYears.compute(trips: trips, countries: countries, calendar: calendar, through: year)
+    static func years(_ trips: [MapTrip] = trips, _ countries: [MapCountry] = countries, through year: Int = 2026) -> [MapYear] {
+        MapYears.compute(trips: trips, countries: countries, through: year)
     }
 
     // MARK: Years
@@ -61,22 +60,27 @@ struct MapYearsTests {
         #expect(Self.years(through: 2019).map(\.year) == [2019])
     }
 
-    /// A trip belongs to the year of its start in the device's calendar: one starting on New
-    /// Year's Eve at 23:30 UTC is a trip of the new year in Germany, of the old one in New York
-    /// and in UTC, whatever the local day where it started.
-    @Test func theDevicesCalendarDecidesATripOnNewYearsEve() {
-        var silvester = Self.trip("silvester", "2022-12-31 23:30", "2023-01-03 10:00", photos: 50, traveled: 2_000_000)
-        silvester.geometry.timeZoneIdentifier = "Asia/Tokyo"
-        silvester.geometry.firstDay = LocalDay(year: 2023, month: 1, day: 1)
-        let countries = [HandBuilt.country("PT", "2022-12-31 23:30", trips: ["silvester"])]
-        let utc = Self.years([silvester], countries)
-        #expect(utc.first?.year == 2022 && utc.first?.tripIDs == [SortlyID("silvester")] && utc.first?.newCountries == ["PT"])
-        let newYork = Self.years([silvester], countries, calendar: HandBuilt.calendar("America/New_York"))
-        #expect(newYork.first?.year == 2022 && newYork.first?.tripIDs == [SortlyID("silvester")])
-        let berlinCalendar = HandBuilt.calendar("Europe/Berlin")
-        let berlin = Self.years([silvester], HandBuilt.seen(countries, in: berlinCalendar), calendar: berlinCalendar)
-        #expect(berlin.map(\.year) == Array(2023...2026))
-        #expect(berlin.first?.tripIDs == [SortlyID("silvester")] && berlin.first?.newCountries == ["PT"] && berlin.first?.countriesSoFar == 1)
+    /// A trip belongs to the year of its first local day, on the clock where it started, as the
+    /// app's albums count it: one starting on New Year's Eve at 23:30 UTC in Tokyo (already
+    /// 1 January there) is a trip of the new year, wherever the iPhone is; the same moment in
+    /// Lisbon is one of the old year. Its country's first visit follows the same clock.
+    @Test func theLocalDayDecidesATripOnNewYearsEve() {
+        var tokyo = Self.trip("silvester", "2022-12-31 23:30", "2023-01-03 10:00", photos: 50, traveled: 2_000_000)
+        tokyo.geometry.timeZoneIdentifier = "Asia/Tokyo"
+        tokyo.geometry.firstDay = LocalDay(year: 2023, month: 1, day: 1)
+        var japan = HandBuilt.country("JP", "2022-12-31 23:30", trips: ["silvester"])
+        japan.firstVisitYear = 2023
+        let new = Self.years([tokyo], [japan])
+        #expect(new.map(\.year) == Array(2023...2026))
+        #expect(new.first?.tripIDs == [SortlyID("silvester")] && new.first?.newCountries == ["JP"] && new.first?.countriesSoFar == 1)
+        var lisbon = tokyo
+        lisbon.geometry.timeZoneIdentifier = "Europe/Lisbon"
+        lisbon.geometry.firstDay = LocalDay(year: 2022, month: 12, day: 31)
+        var portugal = HandBuilt.country("PT", "2022-12-31 23:30", trips: ["silvester"])
+        portugal.firstVisitYear = 2022
+        let old = Self.years([lisbon], [portugal])
+        #expect(old.map(\.year) == Array(2022...2026))
+        #expect(old.first?.tripIDs == [SortlyID("silvester")] && old.first?.newCountries == ["PT"])
     }
 
     @Test func aTripOverNewYearCountsWhollyInItsStartYear() {

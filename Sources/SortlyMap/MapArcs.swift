@@ -13,9 +13,23 @@ public enum MapArcs {
     /// merge their arcs and points by the same distance (`MapShare.world`).
     public static let mergeMeters = 25_000.0
 
+    /// Whether the globe shows the arcs in a view this wide on the ground: they start at the
+    /// rounded home and vanish with the house below `MapHome.houseMinimumWidthMeters` (concept
+    /// §8: "verschwinden unter 300 km Bildbreite zusammen mit dem Häuschen. So zeigen sie nie
+    /// genauer auf den Wohnort als das Häuschen"); in the world view they stay. A width that is
+    /// no number shows none.
+    public static func areShown(atWidth meters: Double) -> Bool {
+        meters >= MapHome.houseMinimumWidthMeters
+    }
+
     /// The arcs of `trips`, at most `MapSummary.maxArcs` (concept §9): the strongest first, then
     /// the one with the most recent trip, then by id; that is also what is kept when there are
-    /// more. `calendar` is the device's: it gives the years, as for `MapYear`.
+    /// more. An arc's years are its trips' years as the time travel counts them (the year of
+    /// each trip's first local day, `MapYears.compute`).
+    ///
+    /// An arc's id is "arc:" and the id of the trip it ends at (the one leading its group): stable
+    /// while that trip leads it, and nothing in it tells where home is, not even hashed (a hash
+    /// of a rounded home can be undone by trying every cell of the grid).
     ///
     /// Trips are grouped greedily in `byLeadership` order (the most photos first): a trip joins
     /// the nearest arc from the same rounded home whose end lies within `mergeMeters` of its
@@ -23,7 +37,7 @@ public enum MapArcs {
     /// So an arc ends at the destination of its trip with the most photos, and every trip of it
     /// went to within `mergeMeters` of there: destinations a little apart never chain into one arc
     /// that ends far from some of its trips.
-    public static func build(trips: [MapTrip], calendar: Calendar) -> [MapArc] {
+    public static func build(trips: [MapTrip]) -> [MapArc] {
         var homes: [String: Int] = [:]
         var destinations = Clusters(radiusMeters: mergeMeters)
         // One per leader of `destinations`, at the same index.
@@ -39,10 +53,10 @@ public enum MapArcs {
                 space = homes.count
                 homes[key] = space
             }
-            let member = ArcGroup.Member(id: trip.id, start: trip.geometry.start)
+            let member = ArcGroup.Member(id: trip.id, start: trip.geometry.start, year: trip.geometry.firstDay.year)
             let assignment = destinations.assign(destination, space: space)
             if assignment.isNew {
-                groups.append(ArcGroup(id: "arc:\(key):\(trip.id.rawValue)", from: home.coordinate, to: destination, members: [member],
+                groups.append(ArcGroup(id: "arc:\(trip.id.rawValue)", from: home.coordinate, to: destination, members: [member],
                                        newest: member.start))
             } else {
                 groups[assignment.leader].members.append(member)
@@ -60,7 +74,7 @@ public enum MapArcs {
                 return a.id < b.id
             }
             .prefix(MapSummary.maxArcs)
-        return kept.map { groups[$0.index].arc(calendar: calendar) }
+        return kept.map { groups[$0.index].arc() }
     }
 
     /// `trips` in the order in which they lead groups (here and on the share images): the most
@@ -90,12 +104,11 @@ public enum MapArcs {
         return a.id.rawValue < b.id.rawValue
     }
 
-    /// A rounded home as it enters an arc's id: its coordinate to 0.001° (about 100 m, far finer
-    /// than the grid home is rounded to, so two homes never share a key), hashed, so that an id
-    /// in a log or report never shows where home is (concept §8).
+    /// A rounded home as a key for keeping the arcs of different homes apart while they are
+    /// grouped: its coordinate to 0.001° (about 100 m, far finer than the grid home is rounded
+    /// to, so two homes never share a key). It is never stored: no id, log or report holds it.
     static func homeKey(_ home: GeoCoordinate) -> String {
-        let milliDegrees = "\(Int((home.latitude * 1_000).rounded())),\(Int((home.longitude * 1_000).rounded()))"
-        return String(format: "%016llx", StableHash.fnv1a64(milliDegrees))
+        "\(Int((home.latitude * 1_000).rounded())),\(Int((home.longitude * 1_000).rounded()))"
     }
 }
 
@@ -104,10 +117,12 @@ private struct ArcGroup: Sendable {
     struct Member: Sendable {
         var id: SortlyID
         var start: Date
+        /// The trip's year (`TripGeometry.firstDay`).
+        var year: Int
     }
 
-    /// From the home and the trip that leads the group (the one with the most photos, where the
-    /// arc ends): stable while that trip leads it.
+    /// From the trip that leads the group (the one with the most photos, where the arc ends):
+    /// stable while that trip leads it. A trip has one home, so no two groups share it.
     var id: String
     var from: GeoCoordinate
     var to: GeoCoordinate
@@ -115,12 +130,12 @@ private struct ArcGroup: Sendable {
     /// The start of its most recent trip.
     var newest: Date
 
-    func arc(calendar: Calendar) -> MapArc {
+    func arc() -> MapArc {
         let members = members.sorted { ($0.start, $0.id.rawValue) < ($1.start, $1.id.rawValue) }
-        // Sorted before removing repeats: a year is not always rising with time (an era change
-        // in the Japanese calendar starts again at 1).
+        // Sorted before removing repeats: across the date line a later trip can begin on an
+        // earlier local day.
         var years: [Int] = []
-        for year in members.map({ calendar.component(.year, from: $0.start) }).sorted() where years.last != year {
+        for year in members.map(\.year).sorted() where years.last != year {
             years.append(year)
         }
         return MapArc(id: id, from: from, to: to, tripIDs: members.map(\.id), years: years)

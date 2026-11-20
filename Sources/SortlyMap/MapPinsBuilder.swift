@@ -20,12 +20,13 @@ extension MapPins {
     ///   all visited countries of the region, those without trips too ("region:<raw value>").
     ///
     /// Places tie by more photos, then the earlier trip, then the smaller trip id, then the lower
-    /// index. `years` are the start years of the pin's trips in `calendar` (the device's, as for
-    /// `MapYear`), oldest first, so the time travel shows a place in the year of its trip.
-    public static func build(trips: [MapTrip], countries: [MapCountry], calendar: Calendar) -> [MapPin] {
+    /// index. `years` are the years of the pin's trips as the time travel counts them (each
+    /// trip's first local day, `MapYears.compute`), oldest first, so the time travel shows a
+    /// place in the year of its trip.
+    public static func build(trips: [MapTrip], countries: [MapCountry]) -> [MapPin] {
         let trips = MapArcs.byLeadership(trips)
         var startYears: [String: Int] = [:]
-        for trip in trips { startYears[trip.id.rawValue] = calendar.component(.year, from: trip.geometry.start) }
+        for trip in trips { startYears[trip.id.rawValue] = trip.geometry.firstDay.year }
 
         var pins: [MapPin] = []
         for trip in trips {

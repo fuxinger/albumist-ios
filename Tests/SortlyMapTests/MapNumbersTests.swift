@@ -94,7 +94,7 @@ enum HandBuilt {
 
     static func numbers(_ trips: [MapTrip], _ countries: [MapCountry] = [], cities: Int = 0, calendar: Calendar = MapFixture.calendar,
                         now: Date = now, running: Bool = false) -> WorldNumbers {
-        WorldNumbers.compute(trips: trips, countries: countries, cities: cities, calendar: calendar, now: now, analysisRunning: running)
+        WorldNumbers.compute(trips: trips, countries: countries, cities: cities, timeZone: calendar.timeZone, now: now, analysisRunning: running)
     }
 
     /// `items` in an order given by `seed` (Fisher-Yates).
@@ -233,7 +233,8 @@ struct MapNumbersTests {
         let utc = HandBuilt.numbers([], countries)
         #expect(utc.year == 2026)
         #expect(utc.newThisYear == ["IS", "GB", "NO"])
-        // On New Year's Eve 23:30 UTC it is already 2026 in Germany: the device's calendar decides.
+        // A first visit on New Year's Eve 23:30 UTC, photographed in Germany, is one of 2026 on
+        // the photo's clock (`MapCountry.firstVisitYear`), and "this year" is 2026 there too.
         let berlinCalendar = HandBuilt.calendar("Europe/Berlin")
         let berlin = HandBuilt.numbers([], HandBuilt.seen(countries, in: berlinCalendar), calendar: berlinCalendar)
         #expect(berlin.newThisYear == ["FR", "IS", "GB", "NO"])
@@ -387,10 +388,10 @@ struct MapNumbersTests {
         var stats: [TripStats] = []
         let elapsed = clock.measure {
             stats = trips.map { TripStats.compute($0.geometry, home: $0.home) }
-            numbers = WorldNumbers.compute(trips: trips, countries: countries, cities: 500, calendar: MapFixture.calendar, now: HandBuilt.now,
+            numbers = WorldNumbers.compute(trips: trips, countries: countries, cities: 500, timeZone: MapFixture.calendar.timeZone, now: HandBuilt.now,
                                            analysisRunning: true)
             numbers = numbers.holdingHighs(over: numbers)
-            years = MapYears.compute(trips: trips, countries: countries, calendar: MapFixture.calendar, through: 2026)
+            years = MapYears.compute(trips: trips, countries: countries, through: 2026)
         }
         let ms = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1e15
         print(String(format: "MAP_NUMBERS_PERF trips 2000 places 40000: %.1f ms", ms))

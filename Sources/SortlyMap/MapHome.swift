@@ -14,6 +14,10 @@ import SortlyCore
 public enum MapHome {
     /// Home is kept and shown only as the centre of a cell this wide (concept §8: about 10 km).
     public static let gridMeters = 10_000.0
+    /// The farthest `rounded(_:)` moves a point (half a cell's diagonal, see there). Whatever must
+    /// keep a distance from the real home keeps this much more from the rounded one
+    /// (`MapShare.nearHomeMeters`).
+    public static let maximumRoundingMeters = 7_250.0
     /// How far before a trip (or after it) the photos at home tell where home was: the trip
     /// detection's window for the home of a time (`TripDetector.Configuration.homeWindowDays`),
     /// so the map's home of a trip is the one the detection judged the trip by.
@@ -22,6 +26,21 @@ public enum MapHome {
     /// Photos at home within this distance of a home tell its country: the trip detection's home
     /// radius, inside which photos count as at home (`TripDetector.Configuration.homeRadiusMeters`).
     static let countryRadiusMeters = TripDetector.Configuration().homeRadiusMeters
+
+    // MARK: Where the house shows
+
+    /// The house shows only in the middle zoom (concept §8: "wenn der Ausschnitt 300 bis 3.000 km
+    /// breit ist"): from this view width on ...
+    public static let houseMinimumWidthMeters = 300_000.0
+    /// ... up to this one. In the world view there is no house; closer than 300 km it is gone, so
+    /// it never points to home more closely than its 10 km rounding at a glance.
+    public static let houseMaximumWidthMeters = 3_000_000.0
+
+    /// Whether the globe or map shows the house in a view this wide on the ground. A width that is
+    /// no number (a broken camera state) shows none: privacy wins.
+    public static func showsHouse(atWidth meters: Double) -> Bool {
+        meters >= houseMinimumWidthMeters && meters <= houseMaximumWidthMeters
+    }
 
     // MARK: Rounding
 

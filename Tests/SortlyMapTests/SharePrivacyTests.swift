@@ -107,27 +107,26 @@ struct SharePrivacyTests {
         let coordinates = Self.coordinates(in: Self.shareValues(of: summary))
         #expect(coordinates.count > 10)
         for coordinate in coordinates {
-            #expect(GeoMath.distance(coordinate, home) >= MapShare.nearHomeMeters, "\(coordinate) is near home")
+            // 50 km from the real home, wherever in its 10 km cell it lies.
+            #expect(GeoMath.distance(coordinate, home) >= MapShare.nearHomeMeters + MapHome.maximumRoundingMeters, "\(coordinate) is near home")
         }
         // Every arc starts exactly in the middle of the home country.
         let world = MapShare.world(summary, geometry: geometry)
         let middle = try #require(geometry.centers["DE"])
         #expect(!world.arcs.isEmpty && world.arcs.allSatisfy { $0.from == middle })
-        // The weekend 37 and 44 km away gets no route and no photo; the road trip's route starts
-        // at Munich, without Abensberg at either end.
-        let weekend = try #require(MapShare.postcard(for: SortlyID("weekend"), in: summary))
-        #expect(weekend.route.isEmpty && weekend.photos.isEmpty)
+        // The weekend 37 and 44 km away gets no postcard: its name would name a place near home,
+        // and none of its photos may be shown. The road trip's route starts at Munich, without
+        // Abensberg at either end.
+        #expect(MapShare.postcard(for: SortlyID("weekend"), in: summary) == nil)
         let road = try #require(MapShare.postcard(for: SortlyID("road-trip"), in: summary))
         #expect(road.route == [MapFixture.Places.munich, Place.innsbruck, Place.verona])
         // The trip from the earlier home to where the user lives now shows nothing of it: neither
         // on its postcard nor as a destination or arc of the world map.
-        let fromHamburg = try #require(MapShare.postcard(for: SortlyID("from-hamburg"), in: summary))
-        #expect(fromHamburg.route.isEmpty && fromHamburg.photos.isEmpty)
+        #expect(MapShare.postcard(for: SortlyID("from-hamburg"), in: summary) == nil)
         #expect(!world.destinations.contains(Place.regensburgOldTown))
         // Away from the home of the trip's time too: the weekend in Lüneburg, 43 km from Hamburg
         // where the user lived then, is far from today's home and still not shown.
-        let lueneburg = try #require(MapShare.postcard(for: SortlyID("lueneburg"), in: summary))
-        #expect(lueneburg.route.isEmpty && lueneburg.photos.isEmpty)
+        #expect(MapShare.postcard(for: SortlyID("lueneburg"), in: summary) == nil)
         #expect(!world.destinations.contains(Place.lueneburg) && !world.arcs.contains { $0.to == Place.lueneburg })
         for trip in summary.trips {
             guard let home = trip.home, let card = MapShare.postcard(for: trip.id, in: summary) else { continue }
@@ -200,6 +199,44 @@ struct SharePrivacyTests {
         #expect(!Self.photos(in: more).contains { $0.asset == "garden-1" })
     }
 
+    /// Every home the summary knows keeps its distance on every image, from every trip (a trip
+    /// from Hamburg to near the earlier home in Munich), and the 50 km hold from the real home
+    /// wherever in its 10 km cell it lies (review finding 12).
+    @Test func everyHomeKeepsItsDistanceFromTheRealHome() throws {
+        let munichHome = RoundedHome(coordinate: MapHome.rounded(MapFixture.Places.munich), countryCode: "DE")
+        var rome = MapHandmade.trip("rome-2015", "2015-05-02", [MapHandmade.place(MapFixture.Places.rome, "Rom", "IT", photos: 40, covers: ["rome-1"])])
+        rome.home = munichHome
+        // Freising: 33 km from Munich, the home of 2015, far from Hamburg and from today's home.
+        let freisingPlace = MapFixture.at(48.4029, 11.7488)
+        var freising = MapHandmade.trip("freising-2018", "2018-07-01", [MapHandmade.place(freisingPlace, "Freising", "DE", photos: 30,
+                                                                                          covers: ["freising-1"])])
+        freising.home = MapHandmade.hamburgHome
+        // 53 km north of today's rounded home: maybe only 46 km from the real one. 70 km: far enough.
+        let today = MapHandmade.home.coordinate
+        let close = MapFixture.at(today.latitude + 53_000 / GeoMath.metersPerDegreeLatitude, today.longitude)
+        let farther = MapFixture.at(today.latitude + 70_000 / GeoMath.metersPerDegreeLatitude, today.longitude)
+        let near = MapHandmade.trip("north-53", "2020-03-01", [MapHandmade.place(close, "Nah", "DE", photos: 30, covers: ["near-1"])])
+        let far = MapHandmade.trip("north-70", "2020-04-01", [MapHandmade.place(farther, "Weiter", "DE", photos: 30, covers: ["far-1"])])
+        let summary = MapHandmade.summary(trips: [rome, freising, near, far],
+                                          countries: [MapHandmade.country("DE", "2015-01-01", trips: ["freising-2018", "north-53", "north-70"],
+                                                                          region: .westernEurope),
+                                                      MapHandmade.country("IT", "2015-05-02", trips: ["rome-2015"], region: .southernEurope)])
+        #expect(MapShare.postcard(for: SortlyID("freising-2018"), in: summary) == nil)
+        #expect(MapShare.postcard(for: SortlyID("north-53"), in: summary) == nil)
+        #expect(MapShare.postcard(for: SortlyID("north-70"), in: summary)?.photos.map(\.asset) == ["far-1"])
+        #expect(MapShare.postcard(for: SortlyID("rome-2015"), in: summary)?.photos.map(\.asset) == ["rome-1"])
+        let world = MapShare.world(summary, geometry: geometry)
+        #expect(!world.destinations.contains(freisingPlace) && !world.destinations.contains(close))
+        #expect(world.destinations.contains(farther) && world.destinations.contains(MapFixture.Places.rome))
+        let values = Self.shareValues(of: summary)
+        #expect(!Self.photos(in: values).contains { $0.asset == "freising-1" || $0.asset == "near-1" })
+        for coordinate in Self.coordinates(in: values) {
+            for home in [today, munichHome.coordinate, MapHandmade.hamburgHome.coordinate] {
+                #expect(GeoMath.distance(coordinate, home) >= MapShare.nearHomeMeters + MapHome.maximumRoundingMeters)
+            }
+        }
+    }
+
     @Test func aHomeThatIsNoNumberKeepsEverythingOff() throws {
         // The summary never has one, but nothing can be measured as far enough from it: without
         // data, privacy wins.
@@ -210,15 +247,14 @@ struct SharePrivacyTests {
         let values = Self.shareValues(of: today)
         #expect(Self.coordinates(in: values).isEmpty)
         #expect(Self.photos(in: values).isEmpty)
-        // As the home of one trip's time: nothing of that trip, the others as before.
+        // As the home of one trip's time: every home counts for every trip, so nothing at all.
         var once = Self.library()
         let index = try #require(once.trips.firstIndex { $0.id == SortlyID("rome") })
         once.trips[index].home = broken
-        let rome = try #require(MapShare.postcard(for: SortlyID("rome"), in: once))
-        #expect(rome.route.isEmpty && rome.photos.isEmpty)
-        let world = MapShare.world(once, geometry: geometry)
-        #expect(!world.destinations.contains(MapFixture.Places.rome) && !world.arcs.contains { $0.to == MapFixture.Places.rome })
-        #expect(world.destinations.contains(MapFixture.Places.reykjavik))
+        #expect(MapShare.postcard(for: SortlyID("rome"), in: once) == nil)
+        let onceValues = Self.shareValues(of: once)
+        #expect(Self.coordinates(in: onceValues).isEmpty)
+        #expect(Self.photos(in: onceValues).isEmpty)
     }
 
     // MARK: - Reflection

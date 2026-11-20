@@ -7,12 +7,14 @@ public enum MapYears {
     /// Every year from the first trip's to `year` (the year of `MapSummary.computedAt`), years
     /// without a trip included, oldest first; no trips: none.
     ///
-    /// A trip belongs to the year of its start in `calendar`, the device's calendar (as
-    /// `MapYear.year` says), not to the local day where it started: so the time travel, the
-    /// numbers' "seit 2011" and the arcs' years all count it in the same year. A trip starting on
-    /// 31 December at 23:30 in Lisbon (UTC) is a trip of the new year for a device in Germany and of
-    /// the old one in New York. It counts in that year with all its days, photos and kilometres,
-    /// even when it lasts into January.
+    /// A trip belongs to the year of its first local day (`TripGeometry.firstDay`, on the clock
+    /// where its first photo was taken, as the app's albums count days), a country to the year
+    /// of its first visit (`MapCountry.firstVisitYear`, the same clock). So the time travel, the
+    /// numbers' "seit 2011", the arcs' and pins' years, the stamps and the postcard all count a
+    /// trip in the same year, and it is the year the user remembers: a trip that starts on New
+    /// Year's Eve in New York is one of the old year, wherever the iPhone is now. It counts in
+    /// that year with all its days, photos and kilometres, even when it lasts into January.
+    /// These are Gregorian years whatever calendar the device uses (`LocalDay`).
     ///
     /// - `newCountries`: first visited in the year (`MapCountry.firstVisitYear`), first
     ///   visit order.
@@ -23,9 +25,9 @@ public enum MapYears {
     ///   `TripGeometry.photoCount`, `TripStats.metersTraveled`).
     /// Trips and countries dated after `year` (a camera clock set wrong) are in no year; when even
     /// the first trip is, there are no years.
-    public static func compute(trips: [MapTrip], countries: [MapCountry], calendar: Calendar, through year: Int) -> [MapYear] {
+    public static func compute(trips: [MapTrip], countries: [MapCountry], through year: Int) -> [MapYear] {
         let trips = chronological(trips)
-        let tripYears = trips.map { calendar.component(.year, from: $0.geometry.start) }
+        let tripYears = trips.map(\.geometry.firstDay.year)
         guard let first = tripYears.min(), first <= year else { return [] }
         // Indices into `trips` per year, oldest first.
         var tripsOfYear: [Int: [Int]] = [:]

@@ -19,7 +19,7 @@ cause is fixed and the limit is tight again.
       have no change to check and say so.
 
 What a time limit is (a number of seconds or minutes the code waits for or measures against):
-  - Swift tests (App/SortlyUITests, App/SortlyTests, Tests): `timeout: 20` (waitForExistence,
+  - Swift tests (App/AlbumistUITests, App/AlbumistTests, Tests): `timeout: 20` (waitForExistence,
     UITestWait, XCTWaiter; also a default `timeout: TimeInterval = 15`), `limit: 15` of the
     timed(...) steps, an upper bound `< .seconds(3)` / `<= .milliseconds(500)` / `< .minutes(2)`,
     and `.timeLimit(.minutes(5))`;
@@ -50,7 +50,7 @@ SWIFT_LIMITS = (
     (re.compile(r"\.timeLimit\(\s*\.minutes\(\s*" + NUMBER + r"\s*\)\s*\)"), lambda m: 60.0),
 )
 WORKFLOW_LIMITS = ((re.compile(r"^\s*timeout-minutes\s*:\s*" + NUMBER + r"\s*(?:#.*)?$"), lambda m: 60.0),)
-SWIFT_DIRS = ("App/SortlyUITests/", "App/SortlyTests/", "Tests/")
+SWIFT_DIRS = ("App/AlbumistUITests/", "App/AlbumistTests/", "Tests/")
 WORKFLOW_DIR = ".github/workflows/"
 # A file whose limits the rule reads, as an entry names it.
 LIMIT_FILE = re.compile(r"\b[\w.+-]+\.(?:swift|ya?ml)\b")

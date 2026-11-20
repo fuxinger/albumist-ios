@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 import secondary_text_rule  # noqa: E402
 
 REPO = pathlib.Path(HERE).parents[2]
-THEME = REPO / "App" / "Sortly" / "DesignSystem" / "Theme.swift"
+THEME = REPO / "App" / "Albumist" / "DesignSystem" / "Theme.swift"
 
 
 class SecondaryTextRuleTests(unittest.TestCase):

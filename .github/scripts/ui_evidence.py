@@ -27,7 +27,7 @@ test code (the owner's rule of 17.11.).
       the branch left it, or the merge has conflicts) it names what differs: merge main into
       the branch and run the full pass again (the groups whose keys did not change are reused).
 
-Quick mode (--quick; pull requests): the tests get SORTLY_UI_QUICK=1, and
+Quick mode (--quick; pull requests): the tests get ALBUMIST_UI_QUICK=1, and
 DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips itself (XCTSkip). Every group
 has another test fingerprint in a quick run (ui_groups.py adds the mode for all, also where no
 file visibly reads the switch). A quick check may take a full green instead of a quick one; a
@@ -866,7 +866,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("plan")
     p.add_argument("--groups", default="auto")
-    p.add_argument("--quick", action="store_true", help="a quick run (SORTLY_UI_QUICK=1)")
+    p.add_argument("--quick", action="store_true", help="a quick run (ALBUMIST_UI_QUICK=1)")
     g = sub.add_parser("gate")
     g.add_argument("--quick", action="store_true", help="the verdict of a quick run; never for an upload")
     g.add_argument("--groups", default="", help="check only these groups (the small gate of the daily build)")

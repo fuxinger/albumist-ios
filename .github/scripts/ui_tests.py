@@ -13,7 +13,7 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
       so the boot can run in the background while the build products are downloaded.
   run   --udid U --name N (--xctestrun F | --project P --scheme S) [--only T]... [--skip T]...
         [--reduce-motion] [--increase-contrast] [--video F] [--out DIR] [--deadline EPOCH]
-      Runs the tests (T is "Class" or "Class/testMethod" of SortlyUITests), prints the
+      Runs the tests (T is "Class" or "Class/testMethod" of AlbumistUITests), prints the
       report lines for the log (steps, screenshots, accessibility findings, restart context,
       crash reports, SwiftUI runtime warnings), a last line "UI_RESULT NAME pass|fail|infra"
       (ui_evidence.py reads it) and exits with the result: 0, 1, or 75 when every pass failed
@@ -21,7 +21,7 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
       ui.yml fails the job in "No test result (simulator or XCTest failed in every pass)",
       which ui_evidence.py counts as no result rather than red). While a pass runs, the Mac
       answers the tests' request lines in the log (class HostGrants; xcodebuild gets
-      TEST_RUNNER_SORTLY_HOST_HELPER=1, so the tests know someone answers): a test that reset
+      TEST_RUNNER_ALBUMIST_HOST_HELPER=1, so the tests know someone answers): a test that reset
       the photo access (the CI simulator then answers "denied" without asking) prints
       UI_HOST_GRANT_PHOTOS [<answer file>], and the access is given back (`simctl privacy grant`;
       then "granted" or "failed" is written to the test's answer file, `write_host_answer`); a device
@@ -57,7 +57,7 @@ new one, and only for the tests that did not pass (-only-testing as before, plus
     "Test Case ... failed" or a crash other than SIGTERM counts even when it quotes one), no
     recorded issue, no A11Y_FAIL, no "Fatal error", "Crash:", "crashed", "Test crashed with signal ..." (other than the SIGTERM
     above) or "execution time allowance";
-  - no crash report of the app or the test runner (~/Library/Logs/DiagnosticReports/Sortly*)
+  - no crash report of the app or the test runner (~/Library/Logs/DiagnosticReports/Albumist*)
     was written during the pass;
   - the result bundle agrees: no test case failed with a message other than the
     infrastructure ones above, no issue outside a test, and it can be read at all (a JSON
@@ -114,7 +114,7 @@ import tempfile
 import threading
 import time
 
-TARGET = "SortlyUITests"
+TARGET = "AlbumistUITests"
 BUNDLE_ID = "app.albumist.ios"
 
 # Lines of the xcodebuild log that go into the job log. PREVIEW_JPEG lines carry the
@@ -371,7 +371,7 @@ def decide(status: int, log: str, crash_reports: list[str] | None = None, probe:
            bundle: list[str] | None = None, earlier: str = "") -> tuple[str, list[str]]:
     """("pass" | "retry" | "fail", reasons) for one finished pass.
 
-    status: exit code of xcodebuild; log: its whole output; crash_reports: paths of Sortly*
+    status: exit code of xcodebuild; log: its whole output; crash_reports: paths of Albumist*
     reports written during the pass; probe: output of a simctl call made right after the pass
     (says whether the simulator is still there); bundle: `bundle_findings` of the pass's
     result bundle (or the reason it could not be read); earlier: the log of the group's first
@@ -759,7 +759,7 @@ def crash_reports(since: float) -> list[str]:
     """Crash reports of the app or the test runner written since `since`."""
     folder = os.path.expanduser("~/Library/Logs/DiagnosticReports")
     found = []
-    for path in glob.glob(os.path.join(folder, "**", "Sortly*"), recursive=True):
+    for path in glob.glob(os.path.join(folder, "**", "Albumist*"), recursive=True):
         try:
             if os.path.getmtime(path) >= since - 5:
                 found.append(path)
@@ -777,7 +777,7 @@ def other_crash_reports(since: float) -> list[str]:
             recent = os.path.getmtime(path) >= since - 5
         except OSError:
             recent = False
-        if recent and not name.startswith("Sortly") and re.search(r"testmanagerd|XCTest|Runner|CoreSimulator|SpringBoard", name):
+        if recent and not name.startswith("Albumist") and re.search(r"testmanagerd|XCTest|Runner|CoreSimulator|SpringBoard", name):
             found.append(path)
     return sorted(found)[:10]
 
@@ -1001,7 +1001,7 @@ def terminate_app(udid: str, asked: float | None, run=sh, clock=time.time, tries
 # reused id never ends anything else.
 PID_TERM_WAIT = 10
 PID_KILL_WAIT = 5
-APP_PATH = "/Sortly.app/Sortly"
+APP_PATH = "/Albumist.app/Albumist"
 
 
 def app_process(udid: str, pid: int, run=sh) -> str:
@@ -1161,7 +1161,7 @@ class Watchdog(threading.Thread):
 
 # Handed to the tests (xcodebuild passes TEST_RUNNER_X on as X): the Mac answers UI_HOST_ lines
 # (HostGrants). Without it (a run in Xcode) the tests do not ask the Mac to end the app.
-HOST_HELPER = "TEST_RUNNER_SORTLY_HOST_HELPER"
+HOST_HELPER = "TEST_RUNNER_ALBUMIST_HOST_HELPER"
 
 
 def runner_env(base: dict | None = None) -> dict:
@@ -1192,7 +1192,7 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     with open(os.path.join(args.out, f"{args.name}-swiftui.txt"), "a") as swiftui:
         stream = subprocess.Popen(
             ["xcrun", "simctl", "spawn", args.udid, "log", "stream", "--style", "compact", "--level", "debug",
-             "--predicate", 'process == "Sortly" AND (subsystem == "com.apple.SwiftUI" OR messageType == fault '
+             "--predicate", 'process == "Albumist" AND (subsystem == "com.apple.SwiftUI" OR messageType == fault '
                             'OR eventMessage CONTAINS[c] "navigationDestination")'],
             stdout=swiftui, stderr=subprocess.STDOUT)
     recorder = None
@@ -1539,8 +1539,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--udid", required=True)
     r.add_argument("--name", required=True)
     r.add_argument("--xctestrun")
-    r.add_argument("--project", default="App/Sortly.xcodeproj")
-    r.add_argument("--scheme", default="SortlyUI")
+    r.add_argument("--project", default="App/Albumist.xcodeproj")
+    r.add_argument("--scheme", default="AlbumistUI")
     r.add_argument("--only", action="append", default=[])
     r.add_argument("--skip", action="append", default=[])
     r.add_argument("--reduce-motion", action="store_true")

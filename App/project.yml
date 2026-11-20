@@ -1,4 +1,4 @@
-name: Sortly
+name: Albumist
 options:
   bundleIdPrefix: app.albumist
   deploymentTarget:
@@ -7,7 +7,7 @@ options:
   createIntermediateGroups: true
   xcodeVersion: "26.0"
 packages:
-  SortlyKit:
+  AlbumistKit:
     path: ..
 settings:
   base:
@@ -18,25 +18,25 @@ settings:
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
     SWIFT_EMIT_LOC_STRINGS: YES
 targets:
-  Sortly:
+  Albumist:
     type: application
     platform: iOS
     sources:
-      - path: Sortly
+      - path: Albumist
     dependencies:
-      - package: SortlyKit
-        product: SortlyCore
-      - package: SortlyKit
-        product: SortlyStore
-      - package: SortlyKit
-        product: SortlyEngine
-      - package: SortlyKit
-        product: SortlyWorldMap
+      - package: AlbumistKit
+        product: AlbumistCore
+      - package: AlbumistKit
+        product: AlbumistStore
+      - package: AlbumistKit
+        product: AlbumistEngine
+      - package: AlbumistKit
+        product: AlbumistWorldMap
     info:
-      path: Sortly/Resources/Info.plist
+      path: Albumist/Resources/Info.plist
       properties:
         CFBundleDisplayName: Albumist
-        # Short name (the target is still called Sortly): Appetize and some system lists show it.
+        # Short name: Appetize and some system lists show it.
         CFBundleName: Albumist
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -71,23 +71,23 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
         ALBUMIST_COMMIT: local
-  SortlyTests:
+  AlbumistTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: SortlyTests
+      - path: AlbumistTests
       # The app's product for StoreKit testing (SKTestSession in PurchaseStoreKitTests).
       # Price and product id mirror App Store Connect; the app itself reads the price from StoreKit.
       - path: StoreKit/Albumist.storekit
         buildPhase: resources
     dependencies:
-      - target: Sortly
-      - package: SortlyKit
-        product: SortlyTestSupport
+      - target: Albumist
+      - package: AlbumistKit
+        product: AlbumistTestSupport
     postBuildScripts:
       # StoreKit testing (SKTestSession) recognizes the test host by its code signing
       # identifier. Built with CODE_SIGNING_ALLOWED=NO (CI), the app only carries the
-      # linker's signature with the identifier "Sortly", so StoreKit treats it as an
+      # linker's signature with the identifier "Albumist", so StoreKit treats it as an
       # unknown app and asks the real App Store: no product, no transactions. Signing the
       # simulator test host ad hoc gives it its bundle id. Never runs for devices or archives.
       - name: Sign test host for StoreKit testing
@@ -107,7 +107,7 @@ targets:
             if [ "$SIGNED" = "$ID" ]; then
               echo "note: test host signed ad hoc for StoreKit testing: Identifier=$SIGNED"
             else
-              echo "error: SortlyTests could not sign the test host for StoreKit testing: identifier '$SIGNED', expected '$ID'; $(tr '\n' ' ' < "$LOG")"
+              echo "error: AlbumistTests could not sign the test host for StoreKit testing: identifier '$SIGNED', expected '$ID'; $(tr '\n' ' ' < "$LOG")"
               exit 1
             fi
           fi
@@ -117,34 +117,34 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         # The script above writes into the test host's bundle.
         ENABLE_USER_SCRIPT_SANDBOXING: NO
-  SortlyUITests:
+  AlbumistUITests:
     type: bundle.ui-testing
     platform: iOS
     sources:
-      - path: SortlyUITests
+      - path: AlbumistUITests
     dependencies:
-      - target: Sortly
+      - target: Albumist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.albumist.ios.uitests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: Sortly
+        TEST_TARGET_NAME: Albumist
 schemes:
-  Sortly:
+  Albumist:
     build:
       targets:
-        Sortly: all
-        SortlyTests: [test]
+        Albumist: all
+        AlbumistTests: [test]
     test:
       targets:
-        - SortlyTests
+        - AlbumistTests
       gatherCoverageData: false
-  SortlyUI:
+  AlbumistUI:
     build:
       targets:
-        Sortly: all
-        SortlyUITests: [test]
+        Albumist: all
+        AlbumistUITests: [test]
     test:
       targets:
-        - SortlyUITests
+        - AlbumistUITests
       gatherCoverageData: false

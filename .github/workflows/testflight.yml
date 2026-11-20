@@ -262,7 +262,7 @@ jobs:
     # where UITestSupport.isRunning and the app's #if DEBUG code change what runs; the Release
     # build that is uploaded was never started before (only the archive below and ci.yml's
     # manual Appetize job build Release, and neither runs it). Here the UI test target is built
-    # with -configuration Release and one test (App/SortlyUITests/ReleaseSmokeUITests.swift)
+    # with -configuration Release and one test (App/AlbumistUITests/ReleaseSmokeUITests.swift)
     # does what a new user does: onboarding, demo library and analysis, a plan applied in
     # Photos. Both gates; the upload needs it green.
     # Beside the UI flow and the stress pass (it needs the tests only), so the upload waits no
@@ -312,8 +312,8 @@ jobs:
           set +e
           cd App && xcodegen generate
           xcodebuild build-for-testing \
-            -project Sortly.xcodeproj \
-            -scheme SortlyUI \
+            -project Albumist.xcodeproj \
+            -scheme AlbumistUI \
             -configuration Release \
             -destination "generic/platform=iOS Simulator" \
             -derivedDataPath ../build/dd \
@@ -325,7 +325,7 @@ jobs:
           # The app under test is the Release build and nothing else.
           products=../build/dd/Build/Products
           ls "$products"
-          [ -d "$products/Release-iphonesimulator/Sortly.app" ] || { echo "::error::no Release-iphonesimulator/Sortly.app in the build products"; exit 1; }
+          [ -d "$products/Release-iphonesimulator/Albumist.app" ] || { echo "::error::no Release-iphonesimulator/Albumist.app in the build products"; exit 1; }
           [ ! -d "$products/Debug-iphonesimulator" ] || { echo "::error::a Debug build in the products of the Release smoke test"; exit 1; }
       - name: Wait for the simulator
         run: |
@@ -344,7 +344,7 @@ jobs:
           XCTESTRUN: ${{ steps.built.outputs.xctestrun }}
           # xcodebuild hands TEST_RUNNER_* variables to the tests without the prefix; without it
           # the test skips itself (as in ui.yml).
-          TEST_RUNNER_SORTLY_RELEASE_SMOKE: '1'
+          TEST_RUNNER_ALBUMIST_RELEASE_SMOKE: '1'
         run: |
           set +e
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name release-smoke --xctestrun "$XCTESTRUN" \
@@ -355,11 +355,11 @@ jobs:
           [ "$status" = 0 ] || exit "$status"
           # ui_tests.py counts a skipped test as done; a pass needs the test to have passed (in
           # the first pass or in its repeat after a simulator failure).
-          PASSED="Test Case '-[SortlyUITests.ReleaseSmokeUITests test1_ReleaseBuildOnboardsAnalysesAndApplies]' passed"
+          PASSED="Test Case '-[AlbumistUITests.ReleaseSmokeUITests test1_ReleaseBuildOnboardsAnalysesAndApplies]' passed"
           for f in build/release-smoke-log.txt build/release-smoke-retry-log.txt; do
             if [ -f "$f" ] && grep -aqF "$PASSED" "$f"; then exit 0; fi
           done
-          echo "::error title=Release smoke test::the test did not pass (skipped: SORTLY_RELEASE_SMOKE did not reach it?)"
+          echo "::error title=Release smoke test::the test did not pass (skipped: ALBUMIST_RELEASE_SMOKE did not reach it?)"
           exit 1
       - name: No test result (simulator or XCTest failed in every pass)
         if: hashFiles('build/no-test-result') != ''
@@ -604,8 +604,8 @@ jobs:
           cd App
           set +e
           xcodebuild archive \
-            -project Sortly.xcodeproj \
-            -scheme Sortly \
+            -project Albumist.xcodeproj \
+            -scheme Albumist \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$ARCHIVE" \

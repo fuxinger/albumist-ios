@@ -21,7 +21,7 @@ class ArchiveCheckTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.archive = os.path.join(self.folder.name, "Albumist.xcarchive")
-        self.app = os.path.join(self.archive, "Products", "Applications", "Sortly.app")
+        self.app = os.path.join(self.archive, "Products", "Applications", "Albumist.app")
         os.makedirs(self.app)
         self.write_app(SHA, "77", b"binary-1")
 
@@ -30,11 +30,11 @@ class ArchiveCheckTests(unittest.TestCase):
 
     def write_app(self, sha, build, binary, xcode_build=PINNED_XCODE_BUILD):
         with open(os.path.join(self.app, "Info.plist"), "wb") as f:
-            plistlib.dump({"AlbumistCommit": sha, "CFBundleVersion": build, "CFBundleExecutable": "Sortly",
+            plistlib.dump({"AlbumistCommit": sha, "CFBundleVersion": build, "CFBundleExecutable": "Albumist",
                            "DTXcodeBuild": xcode_build}, f, fmt=plistlib.FMT_BINARY)
-        with open(os.path.join(self.app, "Sortly"), "wb") as f:
+        with open(os.path.join(self.app, "Albumist"), "wb") as f:
             f.write(binary)
-        os.chmod(os.path.join(self.app, "Sortly"), 0o755)
+        os.chmod(os.path.join(self.app, "Albumist"), 0o755)
 
     def run_check(self, *args):
         out = io.StringIO()

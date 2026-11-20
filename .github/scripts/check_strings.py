@@ -5,7 +5,7 @@ import json, os, re, sys, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import english_rule
 root = sys.argv[1]
-cat = json.load(open(f'{root}/App/Sortly/Resources/Localizable.xcstrings'))
+cat = json.load(open(f'{root}/App/Albumist/Resources/Localizable.xcstrings'))
 def norm(k):
     k = k.replace('%%', '%')
     k = re.sub(r'%(lld|ld|d|@|f|\.\d+f)', '#', k)
@@ -13,7 +13,7 @@ def norm(k):
 keys = {norm(k): k for k in cat['strings']}
 pat = re.compile(r'(?:(?:Text|Button|Label|Section|navigationTitle|Toggle|TextField|NavigationLink|ContentUnavailableView|Picker|confirmationDialog|LabeledContent|LocalizedStringKey|accessibilityLabel|Link|Tab|alert|IntentDescription)\(|String\(localized: |LocalizedStringResource = |TypeDisplayRepresentation \{ |dialog: |shortTitle: |@Parameter\(title: )\s*"((?:[^"\\]|\\.)*)"')
 missing = {}
-for f in glob.glob(f'{root}/App/Sortly/**/*.swift', recursive=True):
+for f in glob.glob(f'{root}/App/Albumist/**/*.swift', recursive=True):
     src = open(f).read()
     for m in pat.finditer(src):
         lit = m.group(1)

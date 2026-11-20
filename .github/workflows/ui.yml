@@ -44,7 +44,7 @@ run-name: >-
 #   this app and test code was red runs again when asked, but its green never counts (a red test
 #   is fixed, not re-run to green).
 #   Quick mode (pull requests, or "quick" by hand; never in a TestFlight run): the tests get
-#   SORTLY_UI_QUICK=1 and DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips
+#   ALBUMIST_UI_QUICK=1 and DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips
 #   itself. Every group has another test fingerprint then, so a quick green never stands for a
 #   full one; a red in either mode blocks both.
 #   The last job, "UI verdict (full|quick)", checks every group for this app and its test code
@@ -76,7 +76,7 @@ on:
         type: string
         default: auto
       quick:
-        description: Quick (SORTLY_UI_QUICK=1, device test11_LargeLibrary skips itself); a quick result never counts for an upload
+        description: Quick (ALBUMIST_UI_QUICK=1, device test11_LargeLibrary skips itself); a quick result never counts for an upload
         type: boolean
         default: false
   # testflight.yml runs the UI flow for the commit it uploads, in the same run (release: true).
@@ -276,8 +276,8 @@ jobs:
           set +e
           cd App && xcodegen generate
           xcodebuild build-for-testing \
-            -project Sortly.xcodeproj \
-            -scheme SortlyUI \
+            -project Albumist.xcodeproj \
+            -scheme AlbumistUI \
             -destination "generic/platform=iOS Simulator" \
             -derivedDataPath ../build/dd \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
@@ -339,9 +339,9 @@ jobs:
       VIDEO: ${{ matrix.video }}
       # Minutes; over it the group gets a warning, never red (ui_tests.py budget_check).
       BUDGET_MIN: ${{ matrix.budget_min }}
-      # Quick mode (SORTLY_UI_QUICK=1 in the tests; xcodebuild hands TEST_RUNNER_* variables to
+      # Quick mode (ALBUMIST_UI_QUICK=1 in the tests; xcodebuild hands TEST_RUNNER_* variables to
       # the test runner without the prefix): every group of a quick run (matrix.quick).
-      TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}
+      TEST_RUNNER_ALBUMIST_UI_QUICK: ${{ matrix.quick && '1' || '' }}
     steps:
       - name: Note when the job started
         # For the deadline of the test passes ("Run UI tests"): timeout-minutes above minus 12

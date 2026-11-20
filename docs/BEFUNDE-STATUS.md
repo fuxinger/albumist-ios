@@ -206,7 +206,7 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 |---|---|---|---|
 | Z1 | Derselbe Ort zweimal vorgeschlagen („Bayern“ und „Häufiger Ort in Zwiesel“) | ✅ | 4778b94, 8329de1, 617a156; `SamePlaceOnceTests` |
 | Z2 | Fester Ort heißt „Bayern“ statt nach der Stadt | ✅ | b8662c7; `RecurringPlaceNameTests` |
-| Z3 | Alter Zweig `claude/sortly-app` startete bei jedem Push einen Upload | ✅ | 20.11. mit deinem OK: gesichert (`sortly-app/backup/claude-sortly-app-2026-11-20.bundle`), PR #1 geschlossen, Zweig von dir gelöscht |
+| Z3 | Alter Zweig `claude/sortly-app` startete bei jedem Push einen Upload | ✅ | 20.11. mit deinem OK: gesichert (`albumist-app/backup/claude-albumist-app-2026-11-20.bundle`), PR #1 geschlossen, Zweig von dir gelöscht |
 
 ## Was braucht Fuchs (alle 👤 auf einen Blick)
 

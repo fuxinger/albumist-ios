@@ -5,7 +5,7 @@
 and again inside SwiftUI's navigation updates: the main thread stood up to 352 s while the
 preview or the atlas map was drawn thousands of times (UI runs 44055738268, 44066730498).
 A screen that opens another one in code pushes an `AppScreen` through the `Navigator`
-(App/Sortly/Views/Navigation.swift). Rules for every Swift file in App/Sortly, read without
+(App/Albumist/Views/Navigation.swift). Rules for every Swift file in App/Albumist, read without
 comments and string contents (a small lexer: `//` inside a string is no comment), over the
 whole file (a call split over lines counts too):
   1. no `navigationDestination(isPresented:` and no `navigationDestination(item:`;
@@ -112,7 +112,7 @@ def code_only(text: str) -> str:
 
 def offenders(root: pathlib.Path):
     found = []
-    for path in sorted((root / "App" / "Sortly").rglob("*.swift")):
+    for path in sorted((root / "App" / "Albumist").rglob("*.swift")):
         code = code_only(path.read_text(encoding="utf-8"))
         for number, (pattern, advice) in enumerate(RULES):
             if number == STACK_RULE and path.name in OWN_STACKS:

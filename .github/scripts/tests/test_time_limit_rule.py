@@ -19,10 +19,10 @@ import time_limit_rule as rule  # noqa: E402
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 
 # The change Build 36 was built from (4bb7fdd, review P5-13): only the wait for the note got longer.
-BUILD_36 = """diff --git a/App/SortlyUITests/SortlyFlowUITests.swift b/App/SortlyUITests/SortlyFlowUITests.swift
---- a/App/SortlyUITests/SortlyFlowUITests.swift
-+++ b/App/SortlyUITests/SortlyFlowUITests.swift
-@@ -828 +828,7 @@ final class SortlyFlowUITests: XCTestCase {
+BUILD_36 = """diff --git a/App/AlbumistUITests/AlbumistFlowUITests.swift b/App/AlbumistUITests/AlbumistFlowUITests.swift
+--- a/App/AlbumistUITests/AlbumistFlowUITests.swift
++++ b/App/AlbumistUITests/AlbumistFlowUITests.swift
+@@ -828 +828,7 @@ final class AlbumistFlowUITests: XCTestCase {
 -            let shown = note.waitForExistence(timeout: 5)
 +            // The note comes once the app has counted again.
 +            let asked = Date()
@@ -42,11 +42,11 @@ def found(text):
 
 class LoosenedTests(unittest.TestCase):
     def test_the_change_build_36_was_built_from_is_found(self):
-        self.assertEqual(found(BUILD_36), [("SortlyFlowUITests.swift", 5, 20)])
+        self.assertEqual(found(BUILD_36), [("AlbumistFlowUITests.swift", 5, 20)])
         self.assertEqual(rule.loosened(BUILD_36)[0]["line"], 830)
 
     def test_a_tighter_a_new_or_an_unchanged_limit_needs_nothing(self):
-        ui = "App/SortlyUITests/A.swift"
+        ui = "App/AlbumistUITests/A.swift"
         self.assertEqual(found(diff(ui, ["x.waitForExistence(timeout: 20)"], ["x.waitForExistence(timeout: 5)"])), [])
         self.assertEqual(found(diff(ui, [], ["y.waitForExistence(timeout: 60)"])), [])
         self.assertEqual(found(diff(ui, ["x.waitForExistence(timeout: 5) // old"], ["x.waitForExistence(timeout: 5) // new"])), [])
@@ -54,7 +54,7 @@ class LoosenedTests(unittest.TestCase):
         self.assertEqual(found(diff(ui, ["// waits 5 s"], ["// waits 20 s (timeout: 20)"])), [])
 
     def test_the_kinds_of_limits(self):
-        ui, unit, flow = "App/SortlyUITests/A.swift", "Tests/SortlyCoreTests/B.swift", ".github/workflows/ui.yml"
+        ui, unit, flow = "App/AlbumistUITests/A.swift", "Tests/AlbumistCoreTests/B.swift", ".github/workflows/ui.yml"
         self.assertEqual(found(diff(ui, ['UITestWait.appears(x, "plan", timeout: 10)'], ['UITestWait.appears(x, "plan", timeout: 30)'])),
                          [("A.swift", 10, 30)])
         self.assertEqual(found(diff(ui, ["static func until(_ what: String, timeout: TimeInterval = 15) {"],
@@ -76,13 +76,13 @@ class LoosenedTests(unittest.TestCase):
                          [("ui.yml", 3600, 5100)])
 
     def test_only_tests_and_workflows(self):
-        self.assertEqual(found(diff("Sources/SortlyCore/A.swift", ["wait(timeout: 5)"], ["wait(timeout: 50)"])), [])
-        self.assertEqual(found(diff("App/Sortly/A.swift", ["wait(timeout: 5)"], ["wait(timeout: 50)"])), [])
-        self.assertEqual(found(diff("App/SortlyTests/A.swift", ["wait(for: [e], timeout: 5)"], ["wait(for: [e], timeout: 50)"])),
+        self.assertEqual(found(diff("Sources/AlbumistCore/A.swift", ["wait(timeout: 5)"], ["wait(timeout: 50)"])), [])
+        self.assertEqual(found(diff("App/Albumist/A.swift", ["wait(timeout: 5)"], ["wait(timeout: 50)"])), [])
+        self.assertEqual(found(diff("App/AlbumistTests/A.swift", ["wait(for: [e], timeout: 5)"], ["wait(for: [e], timeout: 50)"])),
                          [("A.swift", 5, 50)])
 
     def test_a_reworded_line_with_a_longer_limit_is_found(self):
-        ui = "App/SortlyUITests/A.swift"
+        ui = "App/AlbumistUITests/A.swift"
         self.assertEqual(found(diff(ui, ['let shown = note.waitForExistence(timeout: 5)'],
                                     ['let shownNote = note.waitForExistence(timeout: 20)'])), [("A.swift", 5, 20)])
         # A new wait beside an unrelated changed line does not pair with it.
@@ -95,12 +95,12 @@ class EntryTests(unittest.TestCase):
     def test_an_entry_names_the_file(self):
         loose = rule.loosened(BUILD_36)
         self.assertEqual(rule.missing_entries(loose, []), loose)
-        added = rule.entries_added("+| 🔜 | Zeitgrenze gelockert: SortlyFlowUITests.swift test1b 5 -> 20 s | S | UI-Lauf 1 |\n")
+        added = rule.entries_added("+| 🔜 | Zeitgrenze gelockert: AlbumistFlowUITests.swift test1b 5 -> 20 s | S | UI-Lauf 1 |\n")
         self.assertEqual(rule.missing_entries(loose, added), [])
         other = rule.entries_added("+| 🔜 | Zeitgrenze gelockert: DeviceConditionUITests.swift | S | x |\n")
         self.assertEqual(rule.missing_entries(loose, other), loose)
         # The file named without the marker is no entry.
-        self.assertEqual(rule.entries_added("+| 🔜 | SortlyFlowUITests.swift wartet länger | S | x |\n"), [])
+        self.assertEqual(rule.entries_added("+| 🔜 | AlbumistFlowUITests.swift wartet länger | S | x |\n"), [])
 
     def test_entries_are_counted(self):
         text = ("| 🔜 | Zeitgrenze gelockert: A.swift | S | x |\n| ✅ | Zeitgrenze gelockert: B.swift, wieder 5 s | S | x |\n"
@@ -123,7 +123,7 @@ class CheckTests(unittest.TestCase):
         git(self.root, "init", "-q", "-b", "main")
         git(self.root, "config", "user.email", "t@example.com")
         git(self.root, "config", "user.name", "t")
-        self.write("App/SortlyUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 5))\n}\n")
+        self.write("App/AlbumistUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 5))\n}\n")
         self.write("docs/IMPROVEMENTS.md", "| Status | Punkt |\n|---|---|\n")
         self.base = self.commit()
 
@@ -144,15 +144,15 @@ class CheckTests(unittest.TestCase):
         return code, "\n".join(lines)
 
     def test_a_longer_wait_without_an_entry_is_red(self):
-        self.write("App/SortlyUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 20))\n}\n")
+        self.write("App/AlbumistUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 20))\n}\n")
         self.commit()
         code, out = self.check()
         self.assertEqual(code, 1)
-        self.assertIn("::error file=App/SortlyUITests/FlowUITests.swift,line=2,title=Time limit loosened without an entry::5 s -> 20 s", out)
+        self.assertIn("::error file=App/AlbumistUITests/FlowUITests.swift,line=2,title=Time limit loosened without an entry::5 s -> 20 s", out)
         self.assertIn("TIME_LIMIT_ENTRIES 0", out)
 
     def test_a_longer_wait_with_an_entry_is_green_and_counted(self):
-        self.write("App/SortlyUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 20))\n}\n")
+        self.write("App/AlbumistUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 20))\n}\n")
         self.commit()
         # The entry may come in a later commit of the same pull request or push.
         self.write("docs/IMPROVEMENTS.md", "| Status | Punkt |\n|---|---|\n"
@@ -160,18 +160,18 @@ class CheckTests(unittest.TestCase):
         self.commit()
         code, out = self.check()
         self.assertEqual(code, 0, out)
-        self.assertIn("TIME_LIMIT loosened App/SortlyUITests/FlowUITests.swift:2 5 s -> 20 s (entry in docs/IMPROVEMENTS.md)", out)
+        self.assertIn("TIME_LIMIT loosened App/AlbumistUITests/FlowUITests.swift:2 5 s -> 20 s (entry in docs/IMPROVEMENTS.md)", out)
         self.assertIn("TIME_LIMIT_ENTRIES 1 loosened limit(s) on record in docs/IMPROVEMENTS.md, 1 open", out)
 
     def test_an_entry_already_there_does_not_count_for_a_new_loosening(self):
         self.write("docs/IMPROVEMENTS.md", "| 🔜 | Zeitgrenze gelockert: FlowUITests.swift, früher |\n")
         base = self.commit()
-        self.write("App/SortlyUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 30))\n}\n")
+        self.write("App/AlbumistUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 30))\n}\n")
         self.commit()
         self.assertEqual(self.check(base)[0], 1)
 
     def test_a_tighter_wait_is_green(self):
-        self.write("App/SortlyUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 3))\n}\n")
+        self.write("App/AlbumistUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 3))\n}\n")
         self.commit()
         self.assertEqual(self.check(), (0, "TIME_LIMIT_ENTRIES 0 loosened limit(s) on record in docs/IMPROVEMENTS.md, 0 open"))
 
@@ -191,7 +191,7 @@ class CheckTests(unittest.TestCase):
             self.assertEqual(rule.auto_base(head, cwd=self.root), self.base)
         # A pull request: GitHub's merge commit against its first parent, the branch it goes into.
         git(self.root, "checkout", "-q", "-b", "topic")
-        self.write("App/SortlyUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 20))\n}\n")
+        self.write("App/AlbumistUITests/FlowUITests.swift", "func test1() {\n    XCTAssertTrue(note.waitForExistence(timeout: 20))\n}\n")
         self.commit()
         git(self.root, "checkout", "-q", "main")
         self.write("docs/other.md", "x\n")

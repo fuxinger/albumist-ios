@@ -17,7 +17,7 @@ OK = re.compile(r"\.accessibility(Label\(|Hidden\(true\))")
 
 def offenders(root: pathlib.Path):
     found = []
-    for path in sorted((root / "App" / "Sortly").rglob("*.swift")):
+    for path in sorted((root / "App" / "Albumist").rglob("*.swift")):
         lines = path.read_text(encoding="utf-8").splitlines()
         for i, line in enumerate(lines):
             if not BARE.search(line) or line.lstrip().startswith("//"):

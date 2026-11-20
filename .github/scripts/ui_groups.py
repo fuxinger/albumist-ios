@@ -12,23 +12,23 @@ identical app reruns only the groups it touches).
 
 The groups are defined in .github/ui-groups.json (only / skip as ui.yml hands them to
 xcodebuild). Nothing here lists test names: the tests, the classes and which file uses which
-are read from the Swift files of App/SortlyUITests at that commit, so a renamed, added or
+are read from the Swift files of App/AlbumistUITests at that commit, so a renamed, added or
 removed test is followed automatically.
 
 App fingerprint: sha256 over the path and git blob id of every tracked file that can go into
-the app or decide how it is built. That is every file EXCEPT the UI tests (App/SortlyUITests),
-the unit tests (App/SortlyTests, Tests), docs/, top-level *.md, .github/ (but .github/toolchain.json,
+the app or decide how it is built. That is every file EXCEPT the UI tests (App/AlbumistUITests),
+the unit tests (App/AlbumistTests, Tests), docs/, top-level *.md, .github/ (but .github/toolchain.json,
 the pinned Xcode and simulator runtime, counts), scripts/, tools/ and design/. It is made as an
 exclusion list on purpose: a new folder counts as app until someone says otherwise, so an
 unknown file can only cause a run too many, never a run too few. Same blobs means the same
-bytes, so equal fingerprints mean an identical app (Sortly/**, Sources/**, Package.swift and
+bytes, so equal fingerprints mean an identical app (Albumist/**, Sources/**, Package.swift and
 Package.resolved, project.yml with its build settings, resources, the StoreKit file, the
 toolchain).
 
 Test fingerprint of a group: sha256 over the group's own definition (fields of ui-groups.json
 without the "_" comments), the files that hold its tests, every file those use (transitively:
 a Swift file uses another when it names a type, function or extension member that file declares
-for the others; private declarations are not seen from outside), every file of App/SortlyUITests
+for the others; private declarations are not seen from outside), every file of App/AlbumistUITests
 that is not Swift (Info.plist and the like) or declares an XCTestObservation, every Swift file of
 the target that no group's tests reach (fails closed), and the harness: the UI workflows
 (ui.yml, ui-stress.yml) and every script and .github/ file they name or import, transitively
@@ -37,7 +37,7 @@ definition counts). A Swift file of the target goes in by
 its code (swift_code: comments left out, whitespace outside literals reduced to "line break or
 not", literals byte for byte), so editing a comment or the indentation of a test leaves its
 fingerprint, and a red result under it stays red (Prüfer B G5-04, 18.11.); a Swift file the reader
-cannot read for sure, and every other file, by its git blob id. In a quick run (SORTLY_UI_QUICK=1) a
+cannot read for sure, and every other file, by its git blob id. In a quick run (ALBUMIST_UI_QUICK=1) a
 line "mode quick" is added for every group. So a change to a shared helper
 (UITestOnboarding.swift) changes the fingerprint of every group whose tests use it, and only of
 those; a change to the harness changes every group's, a change to another workflow or script
@@ -57,7 +57,7 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 GROUPS_FILE = ".github/ui-groups.json"
-UI_DIR = "App/SortlyUITests/"
+UI_DIR = "App/AlbumistUITests/"
 # The harness: what builds, starts, names or judges the groups. It starts at the two workflows
 # that run UI tests (HARNESS_ROOTS) and takes every file under .github/ they name (scripts,
 # workflows, local actions, data), then every file those name or import in their code (not in a
@@ -423,16 +423,16 @@ def harness_files(tree) -> set[str]:
     return found
 
 
-NOT_APP_PREFIXES = ("App/SortlyUITests/", "App/SortlyTests/", "Tests/", "docs/", ".github/", "scripts/", "tools/",
+NOT_APP_PREFIXES = ("App/AlbumistUITests/", "App/AlbumistTests/", "Tests/", "docs/", ".github/", "scripts/", "tools/",
                     "design/")
 APP_EXCEPTIONS = (".github/toolchain.json",)
 SHORT = 12  # hex digits in job names (48 bits)
 GROUP_NAME = re.compile(r"[a-z0-9-]+")  # as ui_evidence.JOB_NAME reads it from a job name
-# Environment switch of the UI tests for a quick run per change (SORTLY_UI_QUICK=1, handed to the
-# tests as TEST_RUNNER_SORTLY_UI_QUICK; DeviceConditionUITests.test11_LargeLibrary skips itself):
+# Environment switch of the UI tests for a quick run per change (ALBUMIST_UI_QUICK=1, handed to the
+# tests as TEST_RUNNER_ALBUMIST_UI_QUICK; DeviceConditionUITests.test11_LargeLibrary skips itself):
 # every group has another test fingerprint in a quick run, so a quick result never stands in for
 # a full one (the upload needs full ones).
-QUICK_SWITCH = "SORTLY_UI_QUICK"
+QUICK_SWITCH = "ALBUMIST_UI_QUICK"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -995,7 +995,7 @@ class Groups:
         return sorted(closure(self.own_files(name), self.graph) | set(self.shared))
 
     def reads_quick(self, name: str) -> bool:
-        """Whether a file of the group reads the quick switch (SORTLY_UI_QUICK)."""
+        """Whether a file of the group reads the quick switch (ALBUMIST_UI_QUICK)."""
         return any(self.files[p].quick_switch for p in self.files_of(name) if p in self.files)
 
     def fingerprint(self, name: str, quick: bool = False) -> str:

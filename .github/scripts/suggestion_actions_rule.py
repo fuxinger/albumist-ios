@@ -8,7 +8,7 @@ ui-08c-trip-detail), and a user read six choices to create one album. Apple's wa
 and Files: one or two actions in view, the rest in a "…" menu in the toolbar (`Menu`). Decision 9
 of 18.11. (no basket, "Auswählen" as in Photos) leaves "Anlegen" and "Nicht jetzt" on a suggestion.
 
-Rules for `ProposalDetailView` in App/Sortly/Views/ProposalViews.swift (its extensions in the same
+Rules for `ProposalDetailView` in App/Albumist/Views/ProposalViews.swift (its extensions in the same
 file count for it), read without comments (navigation_rule.code_only; titles are read from the
 string literals the code has there):
   1. at most two large buttons (`PrimaryButtonStyle`, `SecondaryButtonStyle`, the system's
@@ -25,7 +25,7 @@ string literals the code has there):
      for an album Albumist leaves alone until the user picks it, the card said "Unter „Anpassen“
      kannst du stattdessen … ergänzen", and "Anpassen" is behind "…" since P3-06; the card offers
      "Stattdessen „…“ ergänzen …" itself (second review of P3-06).
-In every Swift file of the app (App/Sortly and Sources), read the same way:
+In every Swift file of the app (App/Albumist and Sources), read the same way:
   5. a text that names an action of the menu in German quotes („Anpassen“) says where it is, with
      „…“ as in „…“ › „Anpassen“ (second review of P3-06: the plan said "Ändere dazu den Vorschlag
      unter „Anpassen“." with no "Anpassen" to be seen).
@@ -51,7 +51,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from navigation_rule import code_only  # noqa: E402
 from selection_rule import DECLARATION  # noqa: E402
 
-FILE = "App/Sortly/Views/ProposalViews.swift"
+FILE = "App/Albumist/Views/ProposalViews.swift"
 VIEW = "ProposalDetailView"
 # The actions of a suggestion besides its two buttons, by their German titles.
 MENU_ACTIONS = (
@@ -65,7 +65,7 @@ MOST_LARGE_BUTTONS = 2
 ALBUM_CARD = "matchContent"
 OPENS_ADJUST = re.compile(r"\bshowAdjust\s*=\s*true\b")
 # Rule 5: where the app's texts are, and the menu's name in a text.
-TEXT_FOLDERS = ("App/Sortly", "Sources")
+TEXT_FOLDERS = ("App/Albumist", "Sources")
 MENU_NAME = "„…“"
 
 LARGE_BUTTON = re.compile(

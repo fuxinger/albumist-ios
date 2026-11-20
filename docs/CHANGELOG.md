@@ -50,16 +50,26 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Geändert
-- 20.11.: Große Mediatheken: Keine Rechnung über alle Fotos mehr auf dem Haupt-Strang, wenn ein Bildschirm sie braucht
-  (Fable P4-09). Der Atlas jedes Jahres, die Fotodaten nach Kennung (Foto-Ansicht, Treffer der Suche) und der Name
-  des erkannten Zuhauses entstehen beim Auffrischen der Übersicht abseits des Haupt-Strangs und kommen mit den
-  Fotodaten; „Seit wann wohnst du dort?“ rechnet seinen Vorschlag im Hintergrund (vorher bei 50.000 Fotos auf
-  Linux: Jahr im Atlas 75 ms, erstes Foto nach jeder Änderung 97 ms, je bei 100.000 Fotos das Doppelte). Die Orte
-  in „Dein Zuhause“ und der Status für die Suche liefen schon abseits. Die Fotodaten nach Kennung sind keine zweite
-  Kopie aller Fotodaten mehr, sondern ein Verweis je Foto, und bleiben bei einer Speicherwarnung.
+- 20.11.: Große Mediatheken: Weniger Rechnungen über alle Fotos auf dem Haupt-Strang, wenn ein Bildschirm sie
+  braucht (Fable P4-09). Die Fotodaten nach Kennung (Foto-Ansicht, Treffer der Suche) entstehen beim Auffrischen der
+  Übersicht abseits des Haupt-Strangs und kommen mit den Fotodaten; sie sind keine zweite Kopie aller Fotodaten
+  mehr, sondern ein Verweis je Foto, und bleiben bei einer Speicherwarnung. Der Atlas jedes Jahres und der Name des
+  erkannten Zuhauses entstehen abseits des Haupt-Strangs erst, wenn die Jahreswahl im Atlas oder „Dein Zuhause“
+  und die Einstellungen sie brauchen, einmal je Stand der Fotodaten, nie beim Auffrischen (zweite Prüfung: sonst
+  kosteten sie bei jedem Auffrischen Akku, bei 50.000 Fotos 240 und 299 ms); bis dahin zeigen Atlas und „Dein
+  Zuhause“ kurz, dass sie laden. „Seit wann wohnst du dort?“ rechnet seinen Vorschlag im Hintergrund, der gewählte
+  Ort zeigt solange einen Kreisel. Vorher bei 50.000 Fotos auf Linux auf dem Haupt-Strang: Jahr im Atlas 75 ms,
+  erstes Foto nach jeder Änderung 97 ms, je bei 100.000 Fotos das Doppelte. Die Orte in „Dein Zuhause“ und der
+  Status für die Suche liefen schon abseits. Noch auf dem Haupt-Strang (bekannt und hingenommen): die Fotos eines
+  Landes beim ersten Öffnen im Atlas (`CountryPhotos.collect`, danach gemerkt), die Aufnahmedaten nach einer
+  Speicherwarnung (beim nächsten Gebrauch neu), die Vorschau-Ränge als Rückfall, falls sie nicht mit den Fotodaten
+  kamen, und mit Apple Intelligence die Jahre der Foto-Geschichte bei jedem Zeichnen des Atlas
+  (`PhotoStory.availableYears`).
 - 20.11.: Auffrischen der Übersicht: Alles, was es zeigt, kommt in einem Paket aus der Analyse (`DerivedRefresh`)
-  und wird nur vom neuesten Aufruf zugewiesen; ein älterer Aufruf, der danach scheitert, zeigt keinen Fehler mehr
-  über dem neueren Stand (Fable P4-10 = G4-03, mit einem Test zweier überlappender Aufrufe).
+  und wird zusammen zugewiesen, nur wenn der Aufruf neuer ist als der gezeigte Stand: ein älterer Aufruf legt nie
+  seinen Stand über einen neueren, und scheitert der neuere, zeigt der ältere seinen (zweite Prüfung; vorher blieb
+  dann der alte Stand bis zum nächsten Auffrischen). Ein älterer Aufruf, der scheitert, zeigt keinen Fehler über dem
+  neueren Stand (Fable P4-10 = G4-03, mit Tests zweier überlappender Aufrufe).
 - 18.11. (Entscheidungen Fuchs 1 und 2, Fable P1-05/P1-06): Eine Bedeutung für „sortiert“.
   Ignorierte Fotos zählen im Ring nicht mehr mit (weder sortiert noch offen); der Ring erreicht
   100 %, sobald alles nicht Ignorierte sortiert ist, und „Ignorieren“ vergrößert nie die Zahl

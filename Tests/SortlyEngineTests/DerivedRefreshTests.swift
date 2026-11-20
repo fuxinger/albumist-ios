@@ -374,8 +374,14 @@ struct DerivedRefreshAppTests {
     /// The passes over all photos that ran on the main actor when a screen asked (review P4-09:
     /// the places of "Dein Zuhause", the facts by id at the first lookup, the atlas of a year,
     /// the statuses of a search, the start of a stay when a home is picked, the name of the
-    /// detected home): wherever the app or "Dein Zuhause" still makes one, it is inside a
+    /// detected home): wherever the app or "Dein Zuhause" still makes one of these, it is inside a
     /// `Task.detached` closure; the rest comes made with the facts (`DerivedLibrary`).
+    /// Only these passes, in these two files: not every pass over all photos is off the main
+    /// thread. Known and accepted (second review of P4-09, NIT-2), each made once and kept:
+    /// `CountryPhotos.collect` (`AppModel.countryPhotos`, a country opened in the atlas), the
+    /// capture dates made again after a memory warning (`AppModel.creationDates`), the preview
+    /// ranks when they did not come with the facts (`AppModel.previewRanks`, a fallback); and,
+    /// at each draw of the atlas with Apple Intelligence, `PhotoStory.availableYears` (`Atlas.swift`).
     static let passesOverAllPhotos = ["HomeCandidates.make(", "HomeCandidates.stayStart(", "HomeName.components(", "TravelAtlas.compute(",
                                       "TravelAtlas.years(", "DerivedLibrary.yearAtlases(", "DerivedLibrary.namedHome(", "LibraryStatus.searchStatuses(",
                                       "LibraryBuckets.make(", "FactsByID(", "Dictionary(", ".mapValues("]

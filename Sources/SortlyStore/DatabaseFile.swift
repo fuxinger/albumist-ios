@@ -53,8 +53,12 @@ public enum DatabaseFile {
     /// Moves an earlier database in `folder` to the current name when the plan says so and
     /// returns the file to open: the current name, or the earlier one when the move failed
     /// (never a new, empty database next to the user's data). Call before the database opens.
+    ///
+    /// `move` is the file move (tests hand in one that fails).
     public static func prepare(in folder: URL, legacy: String = legacyName, current: String = name,
-                               fileManager fm: FileManager = .default) -> (url: URL, outcome: Outcome) {
+                               move: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) })
+        -> (url: URL, outcome: Outcome) {
+        let fm = FileManager.default
         let currentURL = folder.appendingPathComponent(current)
         let candidates = suffixes.flatMap { [legacy + $0, current + $0] }
         let existing = Set(candidates.filter { fm.fileExists(atPath: folder.appendingPathComponent($0).path) })
@@ -62,15 +66,15 @@ public enum DatabaseFile {
         guard !moves.isEmpty else { return (currentURL, .unchanged) }
         var done: [Move] = []
         do {
-            for move in moves {
-                let from = folder.appendingPathComponent(move.from), to = folder.appendingPathComponent(move.to)
-                if move.replacing { try fm.removeItem(at: to) }
-                try fm.moveItem(at: from, to: to)
-                done.append(move)
+            for step in moves {
+                let from = folder.appendingPathComponent(step.from), to = folder.appendingPathComponent(step.to)
+                if step.replacing { try fm.removeItem(at: to) }
+                try move(from, to)
+                done.append(step)
             }
         } catch {
-            for move in done.reversed() {
-                try? fm.moveItem(at: folder.appendingPathComponent(move.to), to: folder.appendingPathComponent(move.from))
+            for step in done.reversed() {
+                try? move(folder.appendingPathComponent(step.to), folder.appendingPathComponent(step.from))
             }
             return (folder.appendingPathComponent(legacy), .keptEarlierName)
         }

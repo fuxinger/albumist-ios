@@ -91,8 +91,14 @@ struct DatabaseFileTests {
         try write("db", old, in: dir)
         try write("log", old + "-wal", in: dir)
         // The log moves, then the database file cannot (a full or locked folder).
-        let fm = FailingMove(failing: old)
-        let (url, outcome) = DatabaseFile.prepare(in: dir, legacy: old, current: new, fileManager: fm)
+        var tried: [String] = []
+        let (url, outcome) = DatabaseFile.prepare(in: dir, legacy: old, current: new) { from, to in
+            tried.append(from.lastPathComponent)
+            if from.lastPathComponent == old { throw CocoaError(.fileWriteNoPermission) }
+            try FileManager.default.moveItem(at: from, to: to)
+        }
+        // The log first, then the database file, then the log back.
+        #expect(tried == [old + "-wal", old, new + "-wal"])
         #expect(outcome == .keptEarlierName)
         #expect(url == dir.appendingPathComponent(old))
         #expect(read(old, in: dir) == "db" && read(old + "-wal", in: dir) == "log")
@@ -108,19 +114,5 @@ struct DatabaseFileTests {
         let (url, _) = DatabaseFile.prepare(in: dir)
         #expect(url.lastPathComponent == DatabaseFile.name)
         #expect(try Data(contentsOf: url) == Data("db".utf8))
-    }
-}
-
-/// A file manager whose move of one file name fails, as a full or locked folder would.
-private final class FailingMove: FileManager, @unchecked Sendable {
-    let failing: String
-    init(failing: String) {
-        self.failing = failing
-        super.init()
-    }
-
-    override func moveItem(at srcURL: URL, to dstURL: URL) throws {
-        if srcURL.lastPathComponent == failing { throw CocoaError(.fileWriteNoPermission) }
-        try super.moveItem(at: srcURL, to: dstURL)
     }
 }

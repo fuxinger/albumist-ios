@@ -648,6 +648,19 @@ class StressBeforeMergeTests(unittest.TestCase):
         self.assertIn("needs.release-smoke.result == 'success'", job_field(tf, "release", "if"))
 
 
+class EnvironmentRetryTests(unittest.TestCase):
+    """Rule 17.11.: an environment retry is counted and fixed at its cause, never hidden. The
+    retries that exist are narrow (exact signatures, ui_tests.py INFRA; a boot that did not come
+    up; an apt mirror) and each one shows in the check's annotations, not only in the log."""
+
+    def test_the_ci_boot_retry_is_an_annotation(self):
+        ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        step = ci.split("- name: Fresh simulator (erased and booted)\n", 1)[1].split("\n      - name: ", 1)[0]
+        self.assertIn("for attempt in 1 2 3; do", step)
+        self.assertIn("::warning title=Environment retry (simulator boot)::", step)
+        self.assertIn('[ "$attempt" = 3 ] && { echo "simulator did not boot (3 attempts)"; exit 1; }', step)
+
+
 class ReleaseSkipTests(unittest.TestCase):
     """In a TestFlight run (release) CI's Mac job leaves out a step only when ui.yml, called in
     the same run right after it, builds the same thing itself (coordinator's rule for C4: no

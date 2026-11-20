@@ -546,6 +546,21 @@ Noch nicht umgesetzt, Entscheidung nötig:
 5. **P5-05 Stufe 1** (eine vorbereitete Demo-Mediathek je Gruppe statt Onboarding in jedem Test):
    rund 4–5 Minuten je Gruppe; braucht Testcode-Änderungen.
 
+### Umgebungsfehler: was einmal automatisch wiederholt wird (Stand 20.11.)
+
+Regel: Wackelndes wird gezählt und an der Ursache behoben, nie still wiederholt. Wiederholt wird
+nur bei genau erkannten Umgebungsfehlern; im Zweifel ist es ein echter Fehler.
+
+| Fehler | Wiederholung | sichtbar | gezählt |
+|---|---|---|---|
+| Simulator startet nicht (UI-Gruppen, Härtetest) | bis 3 Boot-Versuche, `FLAKY_BOOT` | Zusammenfassung, Anmerkung | ja, `flaky_history.py` („Failed boot attempts“) |
+| Simulator/XCTest bricht in einem UI-Durchgang ab (genaue Muster `ui_tests.py INFRA`, `STRONG_REAL` geht vor) | einmal, nur die nicht bestandenen Tests, `FLAKY_RETRY` | Zusammenfassung, Anmerkung | ja („passed on repeat“) |
+| Simulator startet nicht (CI-Mac-Job) | bis 3 Boot-Versuche | seit 20.11. Anmerkung und Zusammenfassung | nein (nur im Log und in der Anmerkung) |
+| Ubuntu-Paketquelle (apt) | 2 Versuche, dann Azure-Kopie, 2 weitere, `CI_INFRA_RETRY` | seit 20.11. Anmerkung und Zusammenfassung | nein |
+| Artefakt-Upload ETIMEDOUT | nur der Retry-Record (`ui.yml`, `testflight.yml`): ein zweiter Versuch nach 60 s, `FLAKY_UPLOAD` | Log | nein; andere Uploads: „Re-run failed jobs“ als Technik, vom Upload-Job gelistet |
+| StoreKit „no product“ | keine | – | – (bleibt ein roter Testlauf, bis eine genaue Signatur vereinbart ist) |
+| Hängender Test (`swift_test_watch.py`, `UI_HANG`) | keine, immer rot | Anmerkung, Zusammenfassung | als Testfehler |
+
 ## Code-Scanning (CodeQL)
 
 - Python und Workflows: bei jedem Pull Request, auf Linux.

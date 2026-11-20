@@ -260,6 +260,8 @@ jobs:
             xcrun simctl bootstatus "$UDID" -b > /dev/null && break
             [ "$attempt" = 3 ] && { echo "simulator did not boot (3 attempts)"; exit 1; }
             echo "FLAKY_BOOT bootstatus failed (attempt $attempt of 3), retrying"
+            echo "::warning title=Environment retry (simulator boot)::bootstatus failed (attempt $attempt of 3), erased simulator booted again; counted, a finding to fix, not a test result"
+            echo "- Environment retry (simulator boot): attempt $attempt of 3 failed" >> "$GITHUB_STEP_SUMMARY"
             xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
             sleep 15
           done

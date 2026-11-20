@@ -314,43 +314,9 @@ struct ProposalDetailView: View {
                     }
                 }
 
+                // Two actions on the page; "Anpassen", "Auswählen und später anlegen", the trip
+                // workshop and "Keine Reise" are behind "…" at the top right (`moreActions`).
                 actions
-
-                // Reise-Werkstatt (I07): only before Albumist made the trip's album.
-                if model.canReshape(proposal) {
-                    Button { showWorkshop = true } label: {
-                        Label("Reise teilen oder zusammenlegen", systemImage: "scissors")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .disabled(preparing)
-                    .accessibilityIdentifier("proposal.reshapeTrip")
-                }
-
-                // The same answer without being asked: for a place visited too rarely for the
-                // question (a semester abroad, a new second home).
-                if model.recurringPlaceQuestion(for: proposal) == nil && model.canMarkRecurringPlace(proposal) {
-                    Button { confirmOftenHere = true } label: {
-                        Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .disabled(!model.canChangeHome || preparing)
-                    .accessibilityIdentifier("proposal.oftenHere")
-                    .confirmationDialog("Keine Reise?", isPresented: $confirmOftenHere, titleVisibility: .visible) {
-                        Button("Keine Reise, hier bin ich öfter") { answerOftenHere(true) }
-                    } message: {
-                        Text("Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Zurücknehmen kannst du das in den Einstellungen.")
-                    }
-                    // Why it waits, as on the question card.
-                    if let reason = oftenHereWaitReason(askedOnTheCard: false) {
-                        Text(reason)
-                            .font(.footnote).foregroundStyle(.noteText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
             }
             .padding(Theme.Spacing.l)
         }
@@ -360,6 +326,16 @@ struct ProposalDetailView: View {
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle("Vorschlag")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { moreActions }
+        }
+        // Asked for by "Keine Reise, hier bin ich öfter" in the menu; on the screen, because the
+        // menu is gone once its item is tapped.
+        .confirmationDialog("Keine Reise?", isPresented: $confirmOftenHere, titleVisibility: .visible) {
+            Button("Keine Reise, hier bin ich öfter") { answerOftenHere(true) }
+        } message: {
+            Text("Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Zurücknehmen kannst du das in den Einstellungen.")
+        }
         .onAppear {
             // A name given before is where the field starts. A name typed here stays while
             // another screen was on top (all photos, the preview): it was wiped on the way back.
@@ -530,6 +506,20 @@ struct ProposalDetailView: View {
                 ForEach(Array(shownReasons(match).enumerated()), id: \.offset) { _, reason in
                     Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(.noteText)
                 }
+                // The other way for an album Albumist leaves alone, right below the hint that
+                // says so. The hint sent the user to "Anpassen", which is behind "…" since P3-06
+                // (second review): the card offers it itself, as a small text button like
+                // "passt nicht" below. It opens "Anpassen", where the album is chosen.
+                if let album = albumLeftAlone(match) {
+                    Button { showAdjust = true } label: {
+                        Text("Stattdessen „\(album)“ ergänzen …")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .disabled(preparing)
+                    .accessibilityIdentifier("proposal.addInstead")
+                }
                 if let choice = chosenAlbumText {
                     Label(choice, systemImage: "hand.point.up.left")
                         .font(.subheadline.weight(.semibold))
@@ -557,7 +547,7 @@ struct ProposalDetailView: View {
                             }
                         } message: {
                             if onlyOffered {
-                                Text("Albumist legt ohnehin ein neues Album an und bietet dieses unter „Anpassen“ nicht mehr an. Am Album selbst ändert sich nichts.")
+                                Text("Albumist legt ohnehin ein neues Album an und bietet es für diesen Vorschlag nicht mehr an. Am Album selbst ändert sich nichts.")
                             } else {
                                 Text("Albumist merkt sich das und schlägt stattdessen ein neues oder ein anderes passendes Album vor. Am Album selbst ändert sich nichts.")
                             }
@@ -588,6 +578,15 @@ struct ProposalDetailView: View {
         return match.reasons.filter { if case .keptUnchangedUntilChosen = $0 { false } else { true } }
     }
 
+    /// The album a possible match leaves alone until the user picks it, while the card says so
+    /// ("Albumist legt ein neues Album an und ändert „X“ nicht"): "Stattdessen „X“ ergänzen …".
+    private func albumLeftAlone(_ match: MatchResult) -> String? {
+        shownReasons(match).lazy.compactMap { reason -> String? in
+            if case .keptUnchangedUntilChosen(let album) = reason { return album }
+            return nil
+        }.first
+    }
+
     /// The user's pick from "Anpassen", shown where Albumist could not decide alone (several
     /// albums, none clearly, or only a possible match).
     private var chosenAlbumText: String? {
@@ -603,6 +602,10 @@ struct ProposalDetailView: View {
         }
     }
 
+    /// The two actions in view: the primary one ("Album anlegen", or what the suggestion needs
+    /// first) and "Nicht jetzt". Six actions in a column made a user read them all to create one
+    /// album, and the last lay half behind the tab bar (review P3-06, ui-08c-trip-detail); the
+    /// others are in the "…" menu (`moreActions`), as in Apple's apps.
     private var actions: some View {
         VStack(spacing: Theme.Spacing.s) {
             Button {
@@ -626,25 +629,70 @@ struct ProposalDetailView: View {
             .buttonStyle(PrimaryButtonStyle())
             .disabled((!recommended.isAccepted && !needsChoice && !needsName) || preparing)
 
-            HStack(spacing: Theme.Spacing.s) {
-                Button("Anpassen") { showAdjust = true }.buttonStyle(SecondaryButtonStyle())
-                    .disabled(preparing)
-                Button("Nicht jetzt") {
-                    model.setDecision(.reject, for: proposal)
-                    dismiss()
-                }
-                .buttonStyle(SecondaryButtonStyle())
+            Button("Nicht jetzt") {
+                model.setDecision(.reject, for: proposal)
+                dismiss()
             }
-            if recommended.isAccepted && !recommended.isKeepExisting {
-                Button { accept(); dismiss() } label: {
-                    Text("Auswählen und später anlegen")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-            }
+            .buttonStyle(SecondaryButtonStyle())
         }
         .padding(.top, Theme.Spacing.s)
+    }
+
+    /// Everything a suggestion offers besides its two buttons, behind "…" at the top right like
+    /// "Album löschen" in Photos: first for the album ("Anpassen", "Auswählen und später
+    /// anlegen"), then for a trip (the workshop, "Keine Reise, hier bin ich öfter"). Each item
+    /// is there, waits and says why exactly as its button on the page did before. "Auswählen und
+    /// später anlegen" stays until the list selects as in Photos (decision 9 of 18.11.).
+    private var moreActions: some View {
+        Menu {
+            Section {
+                Button { showAdjust = true } label: {
+                    Label("Anpassen", systemImage: "slider.horizontal.3")
+                }
+                .disabled(preparing)
+                .accessibilityIdentifier("proposal.adjust")
+                if recommended.isAccepted && !recommended.isKeepExisting {
+                    Button { accept(); dismiss() } label: {
+                        Label("Auswählen und später anlegen", systemImage: "checkmark.circle")
+                    }
+                    .accessibilityIdentifier("proposal.selectLater")
+                }
+            }
+            if model.canReshape(proposal) || offersOftenHere {
+                Section {
+                    // Reise-Werkstatt (I07): only before Albumist made the trip's album.
+                    if model.canReshape(proposal) {
+                        Button { showWorkshop = true } label: {
+                            Label("Reise teilen oder zusammenlegen", systemImage: "scissors")
+                        }
+                        .disabled(preparing)
+                        .accessibilityIdentifier("proposal.reshapeTrip")
+                    }
+                    if offersOftenHere {
+                        Button { confirmOftenHere = true } label: {
+                            Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
+                            // Why it waits, as on the question card: a second Text in the label
+                            // is the menu item's second line (screenshot 63b-trip-menu-analysis).
+                            if let reason = oftenHereWaitReason(askedOnTheCard: false) {
+                                Text(reason)
+                            }
+                        }
+                        .disabled(!model.canChangeHome || preparing)
+                        .accessibilityIdentifier("proposal.oftenHere")
+                    }
+                }
+            }
+        } label: {
+            Label("Weitere Aktionen", systemImage: "ellipsis")
+        }
+        .accessibilityIdentifier("proposal.more")
+    }
+
+    /// "Keine Reise, hier bin ich öfter": the same answer without being asked, for a place
+    /// visited too rarely for the question (a semester abroad, a new second home). Not while
+    /// the question card asks it.
+    private var offersOftenHere: Bool {
+        model.recurringPlaceQuestion(for: proposal) == nil && model.canMarkRecurringPlace(proposal)
     }
 
     /// The preview of "Album anlegen" is on the stack.

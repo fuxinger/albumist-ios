@@ -67,6 +67,90 @@ final class SortlyFlowUITests: XCTestCase {
         return bar.exists && bar.isHittable
     }
 
+    /// The actions of a suggestion besides its two buttons ("Album anlegen", "Nicht jetzt"): in
+    /// the "…" menu at the top right since review P3-06.
+    private static let menuActions = ["Anpassen", "Auswählen und später anlegen", "Reise teilen oder zusammenlegen",
+                                      "Keine Reise, hier bin ich öfter"]
+
+    /// The "…" button at the top right of a suggestion, by its identifier or, where the toolbar
+    /// does not pass that on, by its name.
+    private func moreActionsButton() -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@", "proposal.more", "Weitere Aktionen")).firstMatch
+    }
+
+    /// An item of the open "…" menu, by its identifier or by the start of its name: an item with
+    /// a second line ("Keine Reise, hier bin ich öfter" and why it waits) may be named with both.
+    private func menuItem(_ identifier: String, _ title: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@", identifier, title)).firstMatch
+    }
+
+    /// Waits until `element` is there (and can be tapped, if `tappable`) and stays where it is from
+    /// one check to the next (half a second apart): an opening menu or dialog has come to rest
+    /// before its picture, without a fixed sleep.
+    @discardableResult
+    private func settled(_ element: XCUIElement, _ what: String, tappable: Bool = true, timeout: TimeInterval = 5) -> Bool {
+        var last: CGRect?
+        return UITestWait.until(what, timeout: timeout) {
+            guard element.exists, !tappable || element.isHittable else { last = nil; return false }
+            let frame = element.frame
+            defer { last = frame }
+            return frame == last
+        }
+    }
+
+    /// Closes the dialog that shows `title` without an answer: its "Abbrechen", or where iOS shows
+    /// none (a dialog as a popover), the region around the popover or a tap at the top of the
+    /// screen, which only closes it.
+    @discardableResult
+    private func closeDialog(_ title: XCUIElement, _ what: String) -> Bool {
+        let cancel = app.buttons["Abbrechen"]
+        let around = app.otherElements["PopoverDismissRegion"]
+        if cancel.exists && cancel.isHittable {
+            cancel.tap()
+        } else if around.exists {
+            around.tap()
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap()
+        }
+        return UITestWait.disappears(title, what, timeout: 5)
+    }
+
+    /// Taps an item of the open menu where it is: `tap(_:_:)` swipes to bring an element into
+    /// view, and a swipe would close the menu. A missing item closes the menu again.
+    @discardableResult
+    private func tapMenuItem(_ item: XCUIElement, _ step: String) -> Bool {
+        guard item.waitForExistence(timeout: 5) else {
+            print("UI_STEP_MISSING \(step)")
+            shot("x-missing-" + step.replacingOccurrences(of: " ", with: "-"))
+            XCTFail("Missing: \(step)")
+            // A tap at the left edge closes the menu; if it reached the page, it hits no button.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5)).tap()
+            return false
+        }
+        UITestOnboarding.clock("tap \(step)")
+        item.tap()
+        print("UI_STEP_OK \(step)")
+        return true
+    }
+
+    /// Review P3-06 (screenshot ui-08c-trip-detail): a suggestion showed up to six actions in a
+    /// column, the last half behind the tab bar. Its page now has "Nicht jetzt" beside the
+    /// primary button and none of the other actions, and the "…" menu at the top right is there
+    /// to tap.
+    private func checkTwoActionsAndMenu(_ what: String) {
+        let more = moreActionsButton()
+        // Hittable once the pushed page has come to rest, not in the first look after the push.
+        let menu = UITestWait.until("\(what) has the \"…\" menu to tap", timeout: 5) { more.exists && more.isHittable }
+        let onPage = Self.menuActions.filter { app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", $0)).firstMatch.exists }
+        let notNow = app.buttons.matching(NSPredicate(format: "label == %@", "Nicht jetzt")).firstMatch.exists
+        let shown = onPage.isEmpty && menu && notNow
+        print(shown ? "UI_STEP_OK \(what) shows two actions and the menu"
+                    : "UI_STEP_MISSING \(what) shows two actions and the menu (on the page \(onPage), menu \(menu), Nicht jetzt \(notNow))")
+        // A "…" not there in time has failed in the wait already.
+        XCTAssertTrue(onPage.isEmpty, "The \(what) shows \(onPage) on the page instead of in the \"…\" menu")
+        XCTAssertTrue(notNow, "The \(what) shows no \"Nicht jetzt\"")
+    }
+
     private func anything(_ text: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
@@ -671,6 +755,7 @@ final class SortlyFlowUITests: XCTestCase {
                 print(opened ? "UI_STEP_OK trip detail opened" : "UI_STEP_MISSING trip detail opened")
                 XCTAssertTrue(opened, "Tapping a trip suggestion did not open its detail")
                 shot("08c-trip-detail")
+                checkTwoActionsAndMenu("trip")
                 back()
                 // pacing: kept, the pop ends before the screenshot (the bar swaps when it starts)
                 sleep(1)
@@ -1110,6 +1195,9 @@ final class SortlyFlowUITests: XCTestCase {
             tap(button("Fertig"), "close settings after trip reset")
             _ = waitStable("analysis after trip reset", timeout: 180) { analysisIdle }
         }
+        // Second review of P3-06: "Keine Reise, hier bin ich öfter" from the "…" menu asks
+        // before it changes anything; asked with nothing running, closed without an answer.
+        noTripQuestion()
     }
 
     /// Design review D4 (15.11.): "Ignorieren" can be taken back, right after the action
@@ -1272,13 +1360,30 @@ final class SortlyFlowUITests: XCTestCase {
                 sleep(1)
             }
             guard tap(row, "open trip for " + step, timeout: 10) else { return false }
-            let reshape = app.buttons["proposal.reshapeTrip"]
-            if reshape.waitForExistence(timeout: 5) && !reshape.isHittable {
-                app.swipeUp()
-                // pacing: kept, the scroll comes to rest before the tap measures the element's place
+            // Review P3-06: the workshop is in the "…" menu at the top right of the trip.
+            guard tap(moreActionsButton(), "more actions of the trip for " + step, timeout: 5) else { return false }
+            let reshape = menuItem("proposal.reshapeTrip", "Reise teilen oder zusammenlegen")
+            if step == "split" {
+                // The open menu holds the trip's other actions too: "Anpassen" is in every
+                // suggestion's. Both can be tapped before the picture is taken.
+                UITestWait.until("trip menu lists its actions", timeout: 5) {
+                    reshape.exists && reshape.isHittable && menuItem("proposal.adjust", "Anpassen").isHittable
+                }
+                // pacing: the menu's opening animation, before the picture
                 sleep(1)
+                shot("59-trip-menu")
+            } else if settled(reshape, "trip menu during the analysis", timeout: 15) {
+                // Second review of P3-06: the same menu while the analysis the split started
+                // still runs. "Keine Reise, hier bin ich öfter" waits then and says why as its
+                // second line, which no picture showed before; what it showed is logged. Up to
+                // 15 s: queries can be slow while the analysis runs (see `analysisIdle`).
+                // One snapshot for all of it (each query is slow while the analysis runs).
+                let noTrip = try? menuItem("proposal.oftenHere", "Keine Reise, hier bin ich öfter").snapshot()
+                let state = noTrip.map { "\($0.isEnabled ? "can be tapped" : "waits"): \($0.label) | \($0.value as? String ?? "")" }
+                print("UI_FACT trip menu during the analysis: Keine Reise \(state ?? "not offered")")
+                shot("63b-trip-menu-analysis")
             }
-            return tap(reshape, "open trip workshop for " + step, timeout: 5)
+            return tapMenuItem(reshape, "open trip workshop for " + step)
         }
         func finish(_ step: String, shotName: String) {
             let done = app.buttons["workshop.done"]
@@ -1388,6 +1493,51 @@ final class SortlyFlowUITests: XCTestCase {
         let whole = waitStable("one trip in August 2023 again", timeout: 20, stableChecks: 1) { tripRows(iceland).count == 1 }
         print(whole ? "UI_STEP_OK trip whole again" : "UI_STEP_MISSING trip whole again")
         XCTAssertTrue(whole, "After the merge the trip is not one again")
+    }
+
+    /// "Keine Reise?" from the "…" menu of the Iceland trip, with nothing running (second review
+    /// of P3-06: no picture showed the question since the action moved behind "…"). It is closed
+    /// without an answer: "Keine Reise" would turn the stays there into an album of the place and
+    /// plan the trips anew.
+    private func noTripQuestion() {
+        let travel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Reisen")).firstMatch
+        guard tap(travel, "open travel area for Keine Reise", timeout: 10) else { return }
+        defer { back() }
+        guard UITestWait.appears(app.navigationBars["Reisen"], "trips for Keine Reise", timeout: 10) else { return }
+        // Rows of a List exist only once they are on screen: one swipe per look.
+        let row = app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", "August 2023")).element(boundBy: 0)
+        UITestWait.until("Iceland trip in the list for Keine Reise", timeout: 20) {
+            if row.exists && row.isHittable { return true }
+            app.swipeUp()
+            return false
+        }
+        guard tap(row, "open trip for Keine Reise", timeout: 5) else { return }
+        defer { back() }
+        guard tap(moreActionsButton(), "more actions of the trip for Keine Reise", timeout: 5) else { return }
+        let noTrip = menuItem("proposal.oftenHere", "Keine Reise, hier bin ich öfter")
+        let offered = settled(noTrip, "Keine Reise in the trip menu")
+        let enabled = offered && noTrip.isEnabled
+        if offered {
+            print(enabled ? "UI_STEP_OK Keine Reise can be tapped with nothing running"
+                          : "UI_STEP_MISSING Keine Reise can be tapped with nothing running (\(noTrip.label))")
+            XCTAssertTrue(enabled, "\"Keine Reise, hier bin ich öfter\" waits with nothing running: \(noTrip.label)")
+        }
+        guard enabled else {
+            // A tap at the left edge closes the menu; if it reached the page, it hits no button.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5)).tap()
+            return
+        }
+        guard tapMenuItem(noTrip, "ask Keine Reise") else { return }
+        let title = app.staticTexts["Keine Reise?"]
+        guard UITestWait.appears(title, "Keine Reise? asks", timeout: 5) else { return }
+        // Its answer "Keine Reise, hier bin ich öfter" is never tapped here.
+        settled(title, "Keine Reise? at rest", tappable: false)
+        shot("66b-no-trip-question")
+        if closeDialog(title, "Keine Reise? closed without an answer") {
+            let kept = app.navigationBars["Vorschlag"].exists
+            print(kept ? "UI_STEP_OK the trip stays after Keine Reise? was closed" : "UI_STEP_MISSING the trip stays after Keine Reise? was closed")
+            XCTAssertTrue(kept, "Closing \"Keine Reise?\" without an answer left the trip")
+        }
     }
 
     /// Test 1 did not reach its end (or did not run): the app may still be at its welcome
@@ -2085,9 +2235,11 @@ final class SortlyFlowUITests: XCTestCase {
 
         // "Anpassen" has the same name under "Titel", and a name changed there is in the field
         // afterwards, also when "Abbrechen" closes it (owner's device test 18.11.: "Dahoam"
-        // typed in the suggestion, "Titel" in "Anpassen" was empty).
+        // typed in the suggestion, "Titel" in "Anpassen" was empty). "Anpassen" is in the "…"
+        // menu at the top right (review P3-06).
         let typed = field.value as? String ?? ""
-        if tap(app.buttons["Anpassen"], "open Anpassen with the typed name", timeout: 5) {
+        if tap(moreActionsButton(), "more actions of the personal place", timeout: 5),
+           tapMenuItem(menuItem("proposal.adjust", "Anpassen"), "open Anpassen with the typed name") {
             let title = app.textFields["adjust.titleField"]
             let there = title.waitForExistence(timeout: 5) ? (title.value as? String ?? "") : "-"
             print("UI_FACT name in the suggestion '\(typed)', in Anpassen '\(there)'")

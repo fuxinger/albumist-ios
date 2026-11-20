@@ -349,7 +349,7 @@ struct PlanReviewView: View {
     private func applyNotes(_ facts: PlanReviewFacts) -> some View {
         let summary = facts.summary
         if facts.isBlocking {
-            Text("Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“.")
+            Text("Erst die markierten Punkte klären. Das geht im Vorschlag oben rechts unter „…“ › „Anpassen“.")
                 .font(.footnote).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
         }

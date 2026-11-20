@@ -29,8 +29,9 @@ In every Swift file of the app (App/Sortly and Sources), read the same way:
   5. a text that names an action of the menu in German quotes („Anpassen“) says where it is, with
      „…“ as in „…“ › „Anpassen“ (second review of P3-06: the plan said "Ändere dazu den Vorschlag
      unter „Anpassen“." with no "Anpassen" to be seen).
-An action that leaves the suggestion for good leaves `MENU_ACTIONS` with it (decision 9:
-"Auswählen und später anlegen" goes once the list of suggestions selects as in Photos).
+An action that leaves the suggestion for good leaves `MENU_ACTIONS` with it: "Auswählen und später
+anlegen" went with the basket once the list of suggestions selected as in Photos (decision 9 of
+18.11., design wave 1).
 
 Not seen (known gaps): a button style set once on a container of several buttons (counts once);
 large buttons of a helper view in another type; a large `.bordered` button (`.controlSize(.large)`)
@@ -56,7 +57,6 @@ VIEW = "ProposalDetailView"
 # The actions of a suggestion besides its two buttons, by their German titles.
 MENU_ACTIONS = (
     "Anpassen",
-    "Auswählen und später anlegen",
     "Reise teilen oder zusammenlegen",
     "Keine Reise, hier bin ich öfter",
 )

@@ -123,22 +123,18 @@ struct CoverPhoto: View {
 
 /// The image filling `size`, cropped around `focus` (a share of the image) as far as the
 /// image reaches: the focus sits in the middle of the cover unless that would leave an edge
-/// of the cover empty.
+/// of the cover empty (`CoverLoader.placement`).
 private struct CroppedCover: View {
     let image: UIImage
     let focus: UnitPoint
     let size: CGSize
 
     var body: some View {
-        let imageWidth = max(image.size.width, 1), imageHeight = max(image.size.height, 1)
-        let scale = max(size.width / imageWidth, size.height / imageHeight)
-        let drawn = CGSize(width: imageWidth * scale, height: imageHeight * scale)
-        let x = min(0, max(size.width - drawn.width, size.width / 2 - focus.x * drawn.width))
-        let y = min(0, max(size.height - drawn.height, size.height / 2 - focus.y * drawn.height))
+        let drawn = CoverLoader.placement(imageSize: image.size, focus: focus, filling: size)
         Image(uiImage: image)
             .resizable()
             .frame(width: drawn.width, height: drawn.height)
-            .offset(x: x, y: y)
+            .offset(x: drawn.minX, y: drawn.minY)
     }
 }
 
@@ -286,6 +282,18 @@ enum CoverLoader {
         return UnitPoint(x: 0.5, y: imageSize.height > imageSize.width ? 1.0 / 3.0 : 0.4)
     }
 
+    /// Where an image of `imageSize` is drawn so it fills `size` (aspect fill) with `focus` (a
+    /// share of the image) as near the middle as the image reaches: never an empty edge. The
+    /// origin is relative to the cover's top left corner, so it is zero or negative.
+    nonisolated static func placement(imageSize: CGSize, focus: UnitPoint, filling size: CGSize) -> CGRect {
+        let imageWidth = max(imageSize.width, 1), imageHeight = max(imageSize.height, 1)
+        let scale = max(size.width / imageWidth, size.height / imageHeight)
+        let drawn = CGSize(width: imageWidth * scale, height: imageHeight * scale)
+        let x = min(0, max(size.width - drawn.width, size.width / 2 - focus.x * drawn.width))
+        let y = min(0, max(size.height - drawn.height, size.height / 2 - focus.y * drawn.height))
+        return CGRect(origin: CGPoint(x: x, y: y), size: drawn)
+    }
+
     /// Four calm colours of a preview, worked out off the main thread (`PhotoPalette.sample`).
     private static func palette(of image: UIImage) async -> [Color] {
         let preview = Preview(image: image)
@@ -317,32 +325,44 @@ enum CoverStats {
         case nothing
     }
 
-    private struct Counts: Sendable {
-        var outcomes: [Outcome: Int] = [:]
-        var seen: Set<String> = []
-    }
+    /// The counts: each cover once per size it is drawn at.
+    struct Tally: Sendable {
+        private var outcomes: [Outcome: Int] = [:]
+        private var seen: Set<String> = []
+        /// Covers remembered so they count once; beyond this many each new one still counts.
+        static let seenLimit = 5000
 
-    private static let counts = LockedBox(Counts())
-    /// Covers remembered so they count once; beyond this many each new one still counts.
-    private static let seenLimit = 5000
+        /// Counts `outcome` unless the cover `key` (`CoverStats.key`) was counted before.
+        mutating func note(_ outcome: Outcome, key: String) {
+            if seen.contains(key) { return }
+            if seen.count < Self.seenLimit { seen.insert(key) }
+            outcomes[outcome, default: 0] += 1
+        }
 
-    static func note(_ outcome: Outcome, for request: CoverLoader.Request) {
-        let key = "\(request.ids.first?.rawValue ?? "")#\(Int(request.pixels.width))"
-        counts.update { counts in
-            if counts.seen.contains(key) { return }
-            if counts.seen.count < seenLimit { counts.seen.insert(key) }
-            counts.outcomes[outcome, default: 0] += 1
+        /// One line, counts only (no photo ids).
+        var lines: [String] {
+            let sharp = outcomes[.sharp] ?? 0, later = outcomes[.sharpLater] ?? 0
+            let blurry = outcomes[.onlyBlurry] ?? 0, nothing = outcomes[.nothing] ?? 0
+            let total = sharp + later + blurry + nothing
+            guard total > 0 else { return ["covers none shown yet"] }
+            return ["covers \(total): sharp \(sharp), sharp after another \(later), no sharp photo on the device \(blurry + nothing) (only a blurry preview \(blurry), nothing \(nothing))"]
         }
     }
 
+    private static let tally = LockedBox(Tally())
+
+    /// A cover as it is counted: its first id at its width in pixels.
+    static func key(for request: CoverLoader.Request) -> String {
+        "\(request.ids.first?.rawValue ?? "")#\(Int(request.pixels.width))"
+    }
+
+    static func note(_ outcome: Outcome, for request: CoverLoader.Request) {
+        let cover = Self.key(for: request)
+        tally.update { $0.note(outcome, key: cover) }
+    }
+
     /// The lines for the diagnostic report (`AppModel.diagnosticReport`: `lines += CoverStats.reportLines()`).
-    /// Counts only, no photo ids.
     static func reportLines() -> [String] {
-        let outcomes = counts.value.outcomes
-        let sharp = outcomes[.sharp] ?? 0, later = outcomes[.sharpLater] ?? 0
-        let blurry = outcomes[.onlyBlurry] ?? 0, nothing = outcomes[.nothing] ?? 0
-        let total = sharp + later + blurry + nothing
-        guard total > 0 else { return ["covers none shown yet"] }
-        return ["covers \(total): sharp \(sharp), sharp after another \(later), no sharp photo on the device \(blurry + nothing) (only a blurry preview \(blurry), nothing \(nothing))"]
+        tally.value.lines
     }
 }

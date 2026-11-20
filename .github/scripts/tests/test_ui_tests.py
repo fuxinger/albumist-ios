@@ -1547,7 +1547,7 @@ class SleepRuleTests(unittest.TestCase):
         "SortlyFlowUITests.swift": 123,
         "SortlyLockedUITests.swift": 1,
         "UITestOnboarding.swift": 1,
-        # The poll interval of the condition waits (holds, which until, settled and never use),
+        # The poll interval of the condition waits (holds, which until, screenAtRest and never use),
         # toBackground's own poll, the minimum time in the background, and atLeast: the rest of
         # an old fixed time after the state was reached (second review of C2). Its callers are
         # counted in AT_LEAST.

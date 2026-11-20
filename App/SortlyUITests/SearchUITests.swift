@@ -193,7 +193,7 @@ final class SortlySearchUITests: XCTestCase {
         }
         // Chips, count and results come in one update (SearchView); the picture once the
         // results have stopped moving under the chips.
-        UITestWait.screenSettled(app, "search '\(query)' results at rest")
+        UITestWait.screenAtRest(app, "search '\(query)' results at rest")
         let count = search("search.count")
         print("UI_FACT search '\(query)' chips \(chips()) | \(count.exists ? count.label : "no count")")
         shot(shotName)

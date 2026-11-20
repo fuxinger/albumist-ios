@@ -107,6 +107,8 @@ final class AccessibilityUITests: XCTestCase {
         var photoLoading: String
         /// The sorting show's one VoiceOver element (SortingShow).
         var sortingShow: String
+        /// The receipt's share button, there once the receipt is loaded (PlanReceiptView).
+        var shareReceipt: String
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: ".*[0-9.]+ Vorschl(ag|äge) prüfen.*",
@@ -116,7 +118,8 @@ final class AccessibilityUITests: XCTestCase {
                                   shareAtlas: "Reise-Atlas teilen", sharePreview: "Vorschau des Teilen-Bilds", searchQuery: "Rom", country: "Italien",
                                   receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig",
                                   folderLabel: "Ordner für neue Alben", planLoading: "Plan wird erstellt",
-                                  photoLoading: "Foto wird geladen", sortingShow: "Fotos werden einsortiert")
+                                  photoLoading: "Foto wird geladen", sortingShow: "Fotos werden einsortiert",
+                                  shareReceipt: "Liste teilen")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ [Ss]uggestions?.*",
                                    suggestionTitle: "Suggestion", suggestionsTitle: "Suggestions", rowMarker: "photo",
@@ -125,7 +128,8 @@ final class AccessibilityUITests: XCTestCase {
                                    shareAtlas: "Share Travel Atlas", sharePreview: "Preview of the share image", searchQuery: "Rome", country: "Italy",
                                    receiptTitle: "Changes", historyTitle: "History and Undo",
                                    folderLabel: "Folder for New Albums", planLoading: "Creating plan",
-                                   photoLoading: "Loading photo", sortingShow: "Sorting photos")
+                                   photoLoading: "Loading photo", sortingShow: "Sorting photos",
+                                   shareReceipt: "Share List")
     }
 
     // MARK: Tests
@@ -274,18 +278,22 @@ final class AccessibilityUITests: XCTestCase {
         let overview = tabButton(w.overviewTab)
         if overview.waitForExistence(timeout: 20) { overview.tap() }
         UITestWait.appears(app.navigationBars[w.overviewTab], "\(tag) overview shown", timeout: 20)
+        let reviewSuggestions = app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.reviewSuggestions)).firstMatch
+        // Its content, not only its bar: the suggestions button the walk taps next. Not asserted
+        // here, the tap below says when it is missing.
+        _ = reviewSuggestions.waitForExistence(timeout: 20)
         // check() waits for the screen to come to rest after every swipe before it.
         check("\(tag) overview", english: english)
         if !short {
             app.swipeUp(); app.swipeUp()
             check("\(tag) overview lower", english: english)
             app.swipeDown(); app.swipeDown(); app.swipeDown(); app.swipeDown()
-            UITestWait.screenSettled(app, "\(tag) overview back at the top")
+            UITestWait.screenAtRest(app, "\(tag) overview back at the top")
         }
 
         // Suggestions and one suggestion
         // A tap that landed elsewhere (on a bar) fails here by its name, not steps later.
-        if tap(app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.reviewSuggestions)).firstMatch, "\(tag) open suggestions", timeout: 20),
+        if tap(reviewSuggestions, "\(tag) open suggestions", timeout: 20),
            opened(app.navigationBars[w.suggestionsTitle], "\(tag) suggestions") {
             check("\(tag) suggestions", english: english)
             // A List only creates the rows on screen; at the largest text size the first row
@@ -339,10 +347,17 @@ final class AccessibilityUITests: XCTestCase {
                     // between them is the point (another album on screen), there is no state.
                     usleep(1_500_000); shot("a11y-\(slug(tag))-sorting-show-2")
                     if button(w.undo).waitForExistence(timeout: 600) {
+                        // The result replaces the show, which fades out over it first.
+                        UITestWait.disappears(anything(exactly: w.sortingShow), "\(tag) sorting show ended", timeout: 10)
                         check("\(tag) result", english: english)
                         let receipt = app.buttons["result.receipt"]
                         if tap(receipt, "\(tag) open receipt", timeout: 10),
                            opened(app.navigationBars[w.receiptTitle], "\(tag) receipt") {
+                            // The receipt loads after the screen opens (an empty list until then):
+                            // its rows, or the share button that comes with the loaded receipt.
+                            UITestWait.until("\(tag) receipt loaded", timeout: 20) {
+                                app.collectionViews.cells.firstMatch.exists || app.buttons[w.shareReceipt].exists
+                            }
                             check("\(tag) receipt", english: english)
                             back("\(tag) receipt", confirmed: true)
                             UITestWait.disappears(app.navigationBars[w.receiptTitle], "\(tag) receipt closed", timeout: 10)
@@ -379,7 +394,7 @@ final class AccessibilityUITests: XCTestCase {
                     UITestWait.disappears(app.navigationBars[w.country], "\(tag) country closed", timeout: 10)
                 }
                 app.swipeDown(); app.swipeDown(); app.swipeDown()
-                UITestWait.screenSettled(app, "\(tag) atlas back at the top")
+                UITestWait.screenAtRest(app, "\(tag) atlas back at the top")
                 if tap(app.buttons[w.shareAtlas], "\(tag) share atlas", timeout: 5) {
                     let shownAt = Date()
                     // The card itself before the audit (its preview), and at least the old 3 s:
@@ -409,7 +424,18 @@ final class AccessibilityUITests: XCTestCase {
             if !short, photo.waitForExistence(timeout: 5), tap(photo, "\(tag) open photo", timeout: 5) {
                 UITestWait.appears(app.buttons["viewer.close"], "\(tag) photo viewer shown", timeout: 10)
                 // The photo itself, not its spinner ("Foto wird geladen" until Photos delivers it).
-                UITestWait.disappears(anything(exactly: w.photoLoading), "\(tag) photo loaded", timeout: 20)
+                // Only a spinner on screen counts: the pages beside it load their own.
+                let spinners = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", w.photoLoading))
+                UITestWait.until("\(tag) photo loaded", timeout: 20) {
+                    let screen = app.frame
+                    for spinner in spinners.allElementsBoundByIndex {
+                        // A snapshot, not `frame`: a spinner that went away meanwhile is no failure.
+                        if let seen = try? spinner.snapshot(), screen.contains(CGPoint(x: seen.frame.midX, y: seen.frame.midY)) {
+                            return false
+                        }
+                    }
+                    return true
+                }
                 check("\(tag) photo viewer", english: english)
                 if tap(app.buttons["viewer.info"], "\(tag) photo info", timeout: 5) {
                     UITestWait.appears(app.buttons["detail.close"], "\(tag) photo info shown", timeout: 10)
@@ -482,12 +508,20 @@ final class AccessibilityUITests: XCTestCase {
 
     /// Screenshot, audit and tree checks for what is on screen now.
     private func check(_ screen: String, english: Bool = false) {
-        // Let a scroll come to rest, so screenshot, tree and audit see the same positions.
-        UITestWait.screenSettled(app, "\(screen) at rest")
+        // Let a scroll come to rest, so screenshot, tree and audit see the same positions. Push,
+        // sheet and fade transitions move no frame and are not seen here: the callers wait for
+        // the screen's own elements, and `confirmContrast` measures a contrast failure again.
+        // The snapshot that showed the screen still is the one the tree checks read.
+        var still: (any XCUIElementSnapshot)?
+        switch UITestWait.screenAtRest(app, "\(screen) at rest") {
+        case .still(let root): still = root
+        case .moving: break // failed in the wait
+        case .unread: print("A11Y_WARN \(screen) | not checked at rest: no snapshot")
+        }
         shot("a11y-" + slug(screen))
         let chrome = chromeFrames()
         UITestOnboarding.clock("check start \(screen)")
-        inspectTree(screen, chrome: chrome, english: english)
+        inspectTree(screen, root: still, chrome: chrome, english: english)
         audit(screen, chrome: chrome)
         UITestOnboarding.clock("check end \(screen)")
         let failures = auditFailures + screenFailures
@@ -697,14 +731,19 @@ final class AccessibilityUITests: XCTestCase {
     ]
 
     /// One snapshot of the accessibility tree: labels, placeholders, untranslated words, text
-    /// running off the side, and (reported only) small targets and overlapping text.
-    private func inspectTree(_ screen: String, chrome: [CGRect], english: Bool) {
+    /// running off the side, and (reported only) small targets and overlapping text. `given`:
+    /// the snapshot `check` already took once the screen was still; else a new one.
+    private func inspectTree(_ screen: String, root given: (any XCUIElementSnapshot)?, chrome: [CGRect], english: Bool) {
         let root: any XCUIElementSnapshot
-        do {
-            root = try app.snapshot()
-        } catch {
-            print("A11Y_WARN \(screen) | tree | no snapshot: \(error.localizedDescription)")
-            return
+        if let given {
+            root = given
+        } else {
+            do {
+                root = try app.snapshot()
+            } catch {
+                print("A11Y_WARN \(screen) | tree | no snapshot: \(error.localizedDescription)")
+                return
+            }
         }
         let bounds = root.frame
         var texts: [(label: String, frame: CGRect)] = []
@@ -1007,8 +1046,16 @@ final class AccessibilityUITests: XCTestCase {
             origin.withOffset(CGVector(dx: window.midX, dy: from))
                 .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.midX, dy: down ? from + 220 : from - 220)))
             drags += 1
-            // The drag may fling the list on: measured once the element stops moving.
-            UITestWait.settled("\(step): element at rest after drag \(drags)", timeout: 5) { () -> CGRect? in element.exists ? element.frame : nil }
+            // The drag may fling the list on: measured once the element stops moving (the same
+            // frame twice in a row). Not asserted: an element a lazy list dropped for a moment
+            // is measured again by the loop, as after the old second.
+            var lastFrame: CGRect?
+            _ = UITestWait.holds(timeout: 5) {
+                let now: CGRect? = element.exists ? element.frame : nil
+                let same = now != nil && now == lastFrame
+                lastFrame = now
+                return same
+            }
         }
         let clear = band()
         print("UI_FACT tap \(step): element \(element.frame), clear band \(Int(clear.top))-\(Int(clear.bottom)), \(drags) drags")

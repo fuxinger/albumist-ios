@@ -150,12 +150,14 @@ enum UITestOnboarding {
         guard partial.waitForExistence(timeout: wait) else { return nil }
         var taken: (any XCUIElementSnapshot)?
         var gone = false
-        // Three tries, half a second apart (at 0, 0.5 and 1 s).
-        _ = UITestWait.holds(timeout: 1) {
+        var tries = 0
+        // Three tries, half a second apart; the limit only bounds three slow snapshots.
+        _ = UITestWait.holds(timeout: 60) {
+            tries += 1
             if let snapshot = try? partial.snapshot() { taken = snapshot; return true }
             // The count went away between the tries: the analysis has finished.
             gone = !partial.exists
-            return gone
+            return gone || tries >= 3
         }
         if gone { return nil }
         guard let shot = taken else {

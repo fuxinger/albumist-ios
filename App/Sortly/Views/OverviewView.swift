@@ -67,7 +67,8 @@ struct OverviewView: View {
                 .padding(.horizontal, Theme.Spacing.l)
                 // The cards read plain values from here: the analysis' many changes redraw the
                 // ring card, not every suggestion.
-                StartSections(libraryHint: empty != nil, analysedOnce: model.analysedOnce, showsMosaic: model.showsScanShow)
+                StartSections(libraryHint: empty != nil, analysedOnce: model.analysedOnce, showsMosaic: model.showsScanShow,
+                              rebuilding: model.suggestionsRebuilding, analysing: model.analysisMayBringSuggestions)
                 #if targetEnvironment(simulator)
                 if !DemoLibrary.shared.isDone {
                     DemoLibraryCard()
@@ -319,10 +320,17 @@ struct OverviewView: View {
     @ViewBuilder
     private var analysisRows: some View {
         analysisCard
-        if let notice = finishNotice {
-            RingCardSeparator()
-            FinishNotificationRow(notice: notice)
+        // Known only once iOS answered (`FinishNotificationAsk.refresh`), a moment after the
+        // page appears: the row fades in and the card grows smoothly, not with a jump.
+        VStack(spacing: 0) {
+            if let notice = finishNotice {
+                RingCardSeparator()
+                FinishNotificationRow(notice: notice)
+                    .transition(.opacity)
+            }
         }
+        .clipped()
+        .animation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35), value: finishNotice)
         if case .year(let year) = model.analysisScope {
             RingCardSeparator()
             trialNote(year)
@@ -381,7 +389,7 @@ struct OverviewView: View {
                     .foregroundStyle(Theme.accent)
                     .accessibilityHidden(true)
             } detail: {
-                if line == .restLater {
+                if line.restFollows {
                     Text("Den Rest holt Albumist später nach")
                 } else if let date = model.analysis.lastRun {
                     LastCheckLine(date: date)
@@ -400,6 +408,8 @@ struct OverviewView: View {
         switch line {
         case .upToDate: Text("Analyse aktuell")
         case .all(let photos): Text("Alle \(photos.formatted()) Fotos analysiert")
+        // Cut off part way: how far it got, never "Analyse fertig" (second review).
+        case .partly(let analyzed, let photos): Text("\(analyzed.formatted()) von \(photos.formatted()) Fotos analysiert")
         case .restLater: Text("Analyse fertig")
         }
     }
@@ -829,14 +839,14 @@ private struct SortedSheet: View {
                         if let interrupted = model.interruptedPlan {
                             // The unfinished run counts only once the user has decided on the
                             // page (unknown is not done), so "0 sortiert" next to "39 of 61 steps"
-                            // is explained. Named with the card's own word ("Anlegen wurde
-                            // unterbrochen", P3-09).
+                            // is explained. Named with the card's own words ("Anlegen wurde
+                            // unterbrochen", P3-09): in a sheet nothing is "oben" (second review).
                             if interrupted.reverts != nil {
-                                Text("Das unterbrochene Rückgängigmachen zählt, sobald du oben entschieden hast.")
+                                Text("Das unterbrochene Rückgängigmachen zählt, sobald du auf der Karte „Rückgängig wurde unterbrochen“ entschieden hast.")
                             } else if !interrupted.removalSources.isEmpty {
-                                Text("Das unterbrochene Entfernen zählt, sobald du oben entschieden hast.")
+                                Text("Das unterbrochene Entfernen zählt, sobald du auf der Karte „Entfernen wurde unterbrochen“ entschieden hast.")
                             } else {
-                                Text("Das unterbrochene Anlegen zählt, sobald du oben entschieden hast.")
+                                Text("Das unterbrochene Anlegen zählt, sobald du auf der Karte „Anlegen wurde unterbrochen“ entschieden hast.")
                             }
                         }
                     }

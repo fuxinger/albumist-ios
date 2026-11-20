@@ -20,6 +20,45 @@ struct MapModelTests {
         #expect(LocalDay(year: 2024, month: 2, day: 9).description == "2024-02-09")
     }
 
+    /// The day arithmetic gives what the Gregorian calendar gives: in zones with half and
+    /// quarter hours, across the date line, through summer time changes, and the day Samoa
+    /// skipped (30 December 2011).
+    @Test func localDayIsTheGregorianCalendarsDay() throws {
+        let zones = ["UTC", "Europe/Berlin", "Atlantic/Reykjavik", "America/St_Johns", "America/Los_Angeles", "Asia/Kathmandu",
+                     "Australia/Lord_Howe", "Pacific/Apia", "Pacific/Kiritimati", "Pacific/Pago_Pago", "Asia/Tokyo"]
+        var random = MapRandom(seed: 11)
+        let from = MapFixture.date("1901-01-01").timeIntervalSince1970, to = MapFixture.date("2099-12-31").timeIntervalSince1970
+        var dates = (0..<400).map { _ in Date(timeIntervalSince1970: from + random.unit() * (to - from)) }
+        dates += ["2011-12-29 09:59", "2011-12-29 10:00", "2011-12-30 12:00", "2024-02-29 12:00", "2000-02-29 23:59",
+                  "1970-01-01 00:00", "1969-12-31 23:59", "2026-03-29 00:59", "2026-03-29 01:00", "2026-10-25 01:00"].map(MapFixture.date)
+        for identifier in zones {
+            let zone = try #require(TimeZone(identifier: identifier))
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = zone
+            for date in dates {
+                let parts = calendar.dateComponents([.year, .month, .day], from: date)
+                #expect(LocalDay(date, timeZone: zone) == LocalDay(year: parts.year!, month: parts.month!, day: parts.day!), "\(identifier) \(date)")
+            }
+        }
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = MapFixture.utc
+        for _ in 0..<300 {
+            let a = Date(timeIntervalSince1970: from + random.unit() * (to - from)), b = Date(timeIntervalSince1970: from + random.unit() * (to - from))
+            let expected = utc.dateComponents([.day], from: utc.startOfDay(for: a), to: utc.startOfDay(for: b)).day!
+            #expect(LocalDay(a, timeZone: MapFixture.utc).days(to: LocalDay(b, timeZone: MapFixture.utc)) == expected)
+        }
+        // A month or day out of range carries over as the calendar does.
+        #expect(LocalDay(year: 2023, month: 12, day: 31).days(to: LocalDay(year: 2023, month: 13, day: 1)) == 1)
+        #expect(LocalDay(year: 2023, month: 3, day: 0).days(to: LocalDay(year: 2023, month: 2, day: 28)) == 0)
+        #expect(LocalDay(year: 2024, month: 0, day: 31).days(to: LocalDay(year: 2023, month: 12, day: 31)) == 0)
+        // Samoa went from 29 to 31 December 2011.
+        let apia = try #require(TimeZone(identifier: "Pacific/Apia"))
+        #expect(LocalDay(MapFixture.date("2011-12-30 10:00"), timeZone: apia) == LocalDay(year: 2011, month: 12, day: 31))
+        // No date a calendar could show.
+        #expect(LocalDay(Date(timeIntervalSince1970: .nan), timeZone: apia) == LocalDay(year: 1970, month: 1, day: 1))
+        #expect(LocalDay(Date(timeIntervalSince1970: 1e300), timeZone: apia) == LocalDay(year: 1970, month: 1, day: 1))
+    }
+
     @Test func tripGeometryDerivesDaysOnSiteAndRoute() throws {
         let places = [
             TripPlace(coordinate: MapFixture.Places.reykjavik, name: "Reykjavík", countryKey: "IS", photoCount: 40,

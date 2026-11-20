@@ -34,11 +34,19 @@ public struct LocalDay: Hashable, Comparable, Sendable, Codable, CustomStringCon
     }
 
     /// The day of `date` in `timeZone`.
+    ///
+    /// Plain day arithmetic on the zone's offset at that moment, no `Calendar`: the map works out
+    /// the day of every photo, and making a calendar for each costs more than all the rest of a
+    /// photo's work (`MapSummaryLoadTests`). Gives the Gregorian calendar's day
+    /// (`localDayIsTheGregorianCalendarsDay` compares the two).
     public init(_ date: Date, timeZone: TimeZone) {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        let parts = calendar.dateComponents([.year, .month, .day], from: date)
-        self.init(year: parts.year ?? 1970, month: parts.month ?? 1, day: parts.day ?? 1)
+        let seconds = date.timeIntervalSince1970 + Double(timeZone.secondsFromGMT(for: date))
+        // A date no calendar can show (not a number, or millions of years away) is 1 January 1970.
+        guard seconds.isFinite, abs(seconds) < 1e15 else {
+            self.init(year: 1970, month: 1, day: 1)
+            return
+        }
+        self.init(dayNumber: Int((seconds / 86_400).rounded(.down)))
     }
 
     /// The day of `date` where `place` is, or in `fallback` when the place has no known time zone.
@@ -50,12 +58,33 @@ public struct LocalDay: Hashable, Comparable, Sendable, Codable, CustomStringCon
     public static func < (a: LocalDay, b: LocalDay) -> Bool { (a.year, a.month, a.day) < (b.year, b.month, b.day) }
 
     /// Days from `self` to `other` (`other` later: positive), counted as whole calendar days.
-    public func days(to other: LocalDay) -> Int {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        guard let a = calendar.date(from: DateComponents(year: year, month: month, day: day)),
-              let b = calendar.date(from: DateComponents(year: other.year, month: other.month, day: other.day)) else { return 0 }
-        return calendar.dateComponents([.day], from: a, to: b).day ?? 0
+    public func days(to other: LocalDay) -> Int { other.dayNumber - dayNumber }
+
+    /// Days since 1 January 1970 in the (proleptic) Gregorian calendar. A month or day out of
+    /// range carries over as a calendar would: month 13 is January of the next year, day 0 the
+    /// last day of the month before. After H. Hinnant's `days_from_civil`.
+    var dayNumber: Int {
+        let months = month - 1
+        let carry = months >= 0 ? months / 12 : (months - 11) / 12
+        let m = months - carry * 12 + 1
+        let y = year + carry - (m <= 2 ? 1 : 0)
+        let era = (y >= 0 ? y : y - 399) / 400
+        let yearOfEra = y - era * 400
+        let dayOfYear = (153 * ((m + 9) % 12) + 2) / 5 + day - 1
+        let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+        return era * 146_097 + dayOfEra - 719_468
+    }
+
+    /// The day `dayNumber` days after 1 January 1970 (H. Hinnant's `civil_from_days`).
+    init(dayNumber: Int) {
+        let z = dayNumber + 719_468
+        let era = (z >= 0 ? z : z - 146_096) / 146_097
+        let dayOfEra = z - era * 146_097
+        let yearOfEra = (dayOfEra - dayOfEra / 1_460 + dayOfEra / 36_524 - dayOfEra / 146_096) / 365
+        let dayOfYear = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
+        let mp = (5 * dayOfYear + 2) / 153
+        let month = mp < 10 ? mp + 3 : mp - 9
+        self.init(year: yearOfEra + era * 400 + (month <= 2 ? 1 : 0), month: month, day: dayOfYear - (153 * mp + 2) / 5 + 1)
     }
 
     public var description: String { String(format: "%04d-%02d-%02d", year, month, day) }

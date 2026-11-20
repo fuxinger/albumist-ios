@@ -76,3 +76,21 @@ Team-Schlüssel `GitHub Feedback` mit Zugriff **Developer** (nicht Admin) anlege
 https://github.com/fuxinger/sortly-ios/settings/secrets/actions als **Repository secrets**
 `ASC_FEEDBACK_KEY_ID`, `ASC_FEEDBACK_ISSUER_ID` und `ASC_FEEDBACK_KEY_P8` eintragen. Hier nie den
 Admin-Schlüssel eintragen.
+
+**Verschlüsselt (täglich, seit 20.11.2026):** Der Lauf holt Kommentare, Screenshots und
+Absturzprotokolle der letzten 14 Tage und verschlüsselt sie, bevor etwas hochgeladen wird. Auf
+GitHub liegt nur die verschlüsselte Datei (Artefakt `testflight-feedback-encrypted`, 14 Tage); die
+Zusammenfassung zeigt weiter nur Anzahlen. Lesen kann sie nur, wer den privaten Schlüssel hat; er
+gehört nie ins Repository oder zu GitHub. Das Zertifikat `.github/feedback-recipient.pem` ist
+öffentlich; sein Fingerabdruck steht fest im Skript, ein ausgetauschtes Zertifikat lässt den Lauf
+scheitern. Zum Lesen das Artefakt des Laufs (zip) herunterladen; der Zielordner muss außerhalb
+des Repositorys liegen:
+
+    python3 -I tools/feedback_inbox.py --key <privater Schlüssel> --out ~/albumist-feedback \
+        testflight-feedback-encrypted.zip
+
+Auf dem Mac braucht es OpenSSL 3 (`brew install openssl@3`, dann zusätzlich
+`--openssl "$(brew --prefix openssl@3)/bin/openssl"`). `~/albumist-feedback/INBOX.md` listet jede Einsendung einmal; NEU heißt: noch nicht gesehen. Mit
+`--mark-seen` gelten sie danach als gesehen. Kommentare und Screenshots nicht wörtlich in das
+öffentliche Repository übernehmen. „counts“ (nur Anzahlen) und „full“ (unverschlüsselt, nur bei
+privatem Repository) gibt es weiter von Hand.

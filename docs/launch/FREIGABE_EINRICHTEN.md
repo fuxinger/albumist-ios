@@ -72,9 +72,10 @@ wieder an.
 Die tägliche Abfrage von Feedback und Abstürzen (Workflow „TestFlight feedback“) bekommt den
 Upload-Schlüssel nicht, sondern einen eigenen. Er liegt in einer eigenen Umgebung
 `asc-feedback`, die nur `main` benutzen darf; so kann ein geänderter Workflow auf einem anderen
-Zweig ihn nicht lesen. **Bis die Umgebung eingerichtet ist, holt der Lauf nichts ab** und bleibt
-grün („Skipped: the environment asc-feedback does not exist yet“); Feedback siehst du weiter in
-App Store Connect > Albumist > TestFlight.
+Zweig ihn nicht lesen. **Bis die Umgebung eingerichtet ist** (geplant nach Build 40), holt der
+Lauf weiter mit den Repository-Secrets ab, mit der Warnung „not yet fenced to main“: die drei
+Secrets kann bis dahin jeder Workflow auf jedem Zweig lesen. Sobald die Umgebung mit der Regel
+`main` besteht, holt nur noch der Job in der Umgebung ab. Abgeholt wird nur auf `main`.
 
 1. In App Store Connect einen Team-Schlüssel `GitHub Feedback` mit Zugriff **Developer** (nicht
    Admin) anlegen, falls es ihn noch nicht gibt. Hier nie den Admin-Schlüssel nehmen.
@@ -92,7 +93,9 @@ App Store Connect > Albumist > TestFlight.
    Zweig lesen; der Lauf warnt dann („still a repository secret“).
 6. Prüfen: **Actions** > **TestFlight feedback** > **Run workflow**, Zweig `main`. Der Job
    „Feedback environment checked“ wird grün, danach holt „Fetch TestFlight feedback and crashes“
-   ab. Wird der erste Job rot, ist die Zweig-Regel nicht genau `main`.
+   ab (nicht mehr „… (repository secrets)“). Wird der erste Job rot, ist die Zweig-Regel nicht
+   genau `main`. Warnt er „main ist nicht geschützt“, verlangt nichts einen Pull Request für
+   `main`: wer auf `main` pushen kann, kann dann auch den Feedback-Schlüssel lesen.
 
 **Verschlüsselt (täglich, seit 20.11.2026):** Der Lauf holt Kommentare, Screenshots und
 Absturzprotokolle der letzten 14 Tage und verschlüsselt sie, bevor etwas hochgeladen wird. Auf

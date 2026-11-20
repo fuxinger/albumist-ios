@@ -5,15 +5,19 @@
       [--recipient .github/feedback-recipient.pem] [--days 14]
 
   python3 asc_feedback.py --check-environment
-      The workflow's job "setup": ready=true to $GITHUB_OUTPUT only when the environment
-      asc-feedback (ENVIRONMENT) exists and only the branch main may use it (one custom branch
-      rule, exactly main; upload_approval.main_only). The fetch job names that environment, and
-      GitHub creates a named environment that does not exist without any rule, so the fetch job
-      only starts after this. Not there yet, or a private repository without a paid plan
-      (UPLOAD_PRIVATE_PLAN_OK): a notice, ready=false, exit 0, so the daily run skips green.
-      Other rules, or the GitHub API does not answer: an error, exit 1. A repository secret
-      ASC_FEEDBACK_KEY_ID left behind (REPOSITORY_SECRET_LEFT=true) is a warning. The GitHub API
-      calls never follow redirects either.
+      The workflow's job "setup": writes target=env|repo|none to $GITHUB_OUTPUT. env: the
+      environment asc-feedback (ENVIRONMENT) exists and only the branch main may use it (one
+      custom branch rule, exactly main; upload_approval.main_only); then only the job fetch-env,
+      which names it, runs. repo: it does not exist yet (or the repository is private without a
+      paid plan, UPLOAD_PRIVATE_PLAN_OK): a warning that the ASC_FEEDBACK_* secrets are not yet
+      fenced to main, and the job fetch-repo fetches with the repository secrets as before; it
+      never names the environment, because GitHub creates a named environment that does not
+      exist without any rule. none, exit 1: the environment has any other rule, or the GitHub
+      API does not answer (an error; nothing is fetched). Warnings beside a ready environment: one
+      of the three ASC_FEEDBACK_* is still a repository secret (REPOSITORY_SECRET_LEFT=true), or
+      nothing requires a pull request for main (upload_approval.main_protection: whoever can push
+      to main can read the key). Both fetch jobs also need the branch main (a notice here when
+      the run is on another branch). The GitHub API calls never follow redirects either.
 
 Mode counts (default): only the number of feedback and crash submissions per build. Only the
 build and date of each submission are requested; no comment, device data, screenshot or crash
@@ -87,7 +91,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from testflight_notes import b64, der_to_raw  # noqa: E402  (same JWT signing as the upload)
-from upload_approval import PLAN_VARIABLE, main_only, private_plan_ok  # noqa: E402  (same branch rule)
+from upload_approval import (PLAN_VARIABLE, UNPROTECTED, ApiError, main_only, main_protection,  # noqa: E402
+                             private_plan_ok)  # (the upload's branch rule and its check of main)
 
 API = "https://api.appstoreconnect.apple.com"
 ROLES = "Admin, App Manager or Developer"
@@ -750,13 +755,12 @@ def environment_state(repo, token, plan_ok=False, transport=None, sleep=time.sle
     if not (repository.get("private") is False and repository.get("visibility", "public") == "public") \
             and not plan_ok:
         return "private", (f"the repository is private: on GitHub Free, environments and their branch rules exist "
-                           f"only in public repositories; feedback paused until the repository is public again or "
-                           f"the repository variable {PLAN_VARIABLE} is true (paid plan), as in {SETUP}")
+                           f"only in public repositories (a paid plan: set the repository variable {PLAN_VARIABLE} "
+                           f"to true)")
     name = urllib.parse.quote(ENVIRONMENT, safe="")
     status, environment = github_get(f"{repo}/environments/{name}", token, transport, sleep)
     if status == 404:
-        return "missing", (f"the environment {ENVIRONMENT} does not exist yet: feedback paused until it is set up "
-                           f"(only the branch main, the three ASC_FEEDBACK_* secrets moved into it; {SETUP})")
+        return "missing", f"the environment {ENVIRONMENT} does not exist yet"
     if status != 200:
         raise RuntimeError(f"GitHub API: the environment {ENVIRONMENT} could not be read (HTTP {status})")
     branches = None
@@ -771,10 +775,28 @@ def environment_state(repo, token, plan_ok=False, transport=None, sleep=time.sle
     return "ready", f"only the branch main may use the environment {ENVIRONMENT}"
 
 
+TARGETS = {"ready": "env", "missing": "repo", "private": "repo"}   # anything else: none (red)
+
+
+def protection_get(repo, token, transport=None, sleep=time.sleep):
+    """A get(path, final) for upload_approval.main_protection over github_get (no redirects):
+    JSON, None for 404, ApiError for a status in final or no answer."""
+    def get(path, final=()):
+        try:
+            status, answer = github_get(f"{repo}/{path}" if path else repo, token, transport, sleep)
+        except RuntimeError as error:
+            raise ApiError(one_line(error, 200)) from None
+        if status == 200:
+            return answer
+        if status == 404:
+            return None
+        raise ApiError(f"GitHub API: {path}: HTTP {status}")
+    return get
+
+
 def check_environment(environ=None, transport=None, sleep=time.sleep):
-    """The setup job: ready=true to $GITHUB_OUTPUT only when the environment is fenced to main.
-    Not set up yet (missing, or private without a paid plan): a notice and exit 0, so the daily
-    run skips without failing. Set up wrongly, or the API does not answer: an error, exit 1."""
+    """The setup job: target=env|repo|none to $GITHUB_OUTPUT (see the module docstring).
+    Exit 0 for env and repo, 1 for none."""
     environ = os.environ if environ is None else environ
     try:
         state, text = environment_state(environ.get("GITHUB_REPOSITORY", ""),
@@ -782,26 +804,52 @@ def check_environment(environ=None, transport=None, sleep=time.sleep):
                                         private_plan_ok(environ), transport, sleep)
     except RuntimeError as error:
         state, text = "error", f"{one_line(error, 300)}; re-run when the API answers"
-    lines = []
-    if state == "ready" and environ.get("REPOSITORY_SECRET_LEFT") == "true":
-        lines.append(f"::warning title=Feedback setup::ASC_FEEDBACK_KEY_ID is still a repository secret, which "
-                     f"workflows on every branch can read: move the three ASC_FEEDBACK_* secrets into the "
-                     f"environment {ENVIRONMENT} and delete them under Repository secrets ({SETUP}).")
-    if state in ("missing", "private"):
-        lines.append(f"::notice title=Feedback setup::Skipped: {text}.")
-    elif state in ("wrong", "error"):
-        lines.append(f"::error title=Feedback setup::{text}. Nothing was fetched.")
-    for line in lines:
-        print(line)
-    if state == "ready":
-        print(f"ASC_FEEDBACK_SETUP {ENVIRONMENT}: main only")
+    target = TARGETS.get(state, "none")
+    warnings = []
+    if target == "repo":
+        warnings.append(f"{text}. Fetched with the repository secrets ASC_FEEDBACK_*, which workflows on every "
+                        f"branch can read: not yet fenced to main (set up the environment {ENVIRONMENT} as in "
+                        f"{SETUP})")
+    elif target == "env":
+        if environ.get("REPOSITORY_SECRET_LEFT") == "true":
+            warnings.append(f"an ASC_FEEDBACK_* secret is still a repository secret, which workflows on every branch "
+                            f"can read: delete all three under Repository secrets ({SETUP})")
+        # Only a warning, as in upload_approval.check: the environment admits main alone, and
+        # whoever can push to main can read the key.
+        try:
+            protected, how = main_protection(protection_get(environ.get("GITHUB_REPOSITORY", ""),
+                                                            environ.get("GH_TOKEN") or environ.get("GITHUB_TOKEN"),
+                                                            transport, sleep))
+        except ApiError as error:
+            protected, how = None, f"the rules of main could not be read ({error})"
+        if protected is False:
+            warnings.append(f"{UNPROTECTED.replace('hochladen', 'den Feedback-Schlüssel lesen')} ({how})")
+        elif protected is None:
+            warnings.append(f"whether main requires a pull request could not be checked: {how}")
+    ref = environ.get("GITHUB_REF", "")
+    if target != "none" and ref and ref != "refs/heads/main":
+        print(f"::notice title=Feedback setup::Not the branch main ({one_line(ref, 100)}): nothing is fetched.")
+    for warning in warnings:
+        print(f"::warning title=Feedback setup::{warning}")
+    if target == "none":
+        print(f"::error title=Feedback setup::{text}. Nothing was fetched.")
+    else:
+        print(f"ASC_FEEDBACK_SETUP target={target}")
     with open(environ.get("GITHUB_OUTPUT") or os.devnull, "a", encoding="utf-8") as handle:
-        handle.write(f"ready={'true' if state == 'ready' else 'false'}\n")
+        handle.write(f"target={target}\n")
     with open(environ.get("GITHUB_STEP_SUMMARY") or os.devnull, "a", encoding="utf-8") as handle:
-        handle.write(f"### TestFlight-Feedback: Umgebung `{ENVIRONMENT}`\n\n"
-                     + ("Bereit: nur `main` darf sie benutzen.\n" if state == "ready" else
-                        f"Nicht abgeholt: {md_inline(text, 600)}.\n"))
-    return 1 if state in ("wrong", "error") else 0
+        heading = f"### TestFlight-Feedback: Umgebung `{ENVIRONMENT}`\n\n"
+        if target == "env":
+            body = "Abruf in der Umgebung; nur `main` darf sie benutzen.\n"
+        elif target == "repo":
+            body = ("**Warnung:** Die Umgebung ist noch nicht eingerichtet. Abruf mit den Repository-Secrets, "
+                    "die noch nicht auf `main` beschränkt sind (" + md_inline(SETUP, 100) + ").\n")
+        else:
+            body = f"Nicht abgeholt: {md_inline(text, 600)}.\n"
+        if target == "env" and warnings:
+            body += "".join(f"\n- Warnung: {md_inline(w, 600)}\n" for w in warnings)
+        handle.write(heading + body)
+    return 1 if target == "none" else 0
 
 
 def repo_is_private(repo, token, transport=None):
@@ -918,8 +966,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--bundle-id", default="app.albumist.ios")
     parser.add_argument("--check-environment", action="store_true",
-                        help=f"only check that the environment {ENVIRONMENT} exists and admits the branch main "
-                             "alone (the setup job); writes ready=true|false to $GITHUB_OUTPUT")
+                        help=f"only check the environment {ENVIRONMENT} (the setup job); writes "
+                             "target=env|repo|none to $GITHUB_OUTPUT")
     parser.add_argument("--out", default="feedback", help="folder for report.md, screenshots and crash logs (full)")
     parser.add_argument("--encrypted-out", default="feedback-encrypted",
                         help="folder for the one encrypted file (encrypted); nothing else is written there")

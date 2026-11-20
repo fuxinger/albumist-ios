@@ -9,8 +9,11 @@ name: TestFlight feedback
 # kept as three secrets ASC_FEEDBACK_KEY_ID, ASC_FEEDBACK_ISSUER_ID and ASC_FEEDBACK_KEY_P8 of the
 # environment asc-feedback, which only the branch main may use (docs/launch/FREIGABE_EINRICHTEN.md,
 # optional step): a changed workflow or script on another branch cannot read them. The job
-# "setup" checks that rule first; until the environment exists the run fetches nothing and stays
-# green, as it does without the secrets.
+# "setup" checks that rule first; both fetch jobs run only from main (another branch: skipped). Until the owner has created the environment (after Build 40),
+# the feedback still flows: the job fetch-repo fetches with the same three names as repository
+# secrets, with a warning that they are not yet fenced to main. Once the environment exists with
+# the rule main only, only fetch-env runs, in the environment. Any other rule: red, no fetch.
+# Without the secrets the run stops after one quick check.
 #
 # Three modes. "encrypted" is the schedule and the default: comments, device data, screenshots and
 # crash logs of the last 14 days are packed into one tar under $RUNNER_TEMP and encrypted with
@@ -58,12 +61,13 @@ concurrency:
 
 jobs:
   setup:
-    # The fetch job runs in the environment asc-feedback, which holds the three ASC_FEEDBACK_*
-    # secrets and which only the branch main may use. GitHub creates an environment that a job
-    # names but that does not exist, without any rule; so the fetch job only starts once this
-    # job has read the environment and its one branch rule main (asc_feedback.py
-    # --check-environment, the rule of upload_approval.py). Not set up yet: a notice, the run
-    # stays green and fetches nothing. Set up wrongly: red.
+    # Decides where the fetch runs (asc_feedback.py --check-environment, the branch rule of
+    # upload_approval.py): target=env when the environment asc-feedback exists and only main may
+    # use it; target=repo while it does not exist yet (warning: the repository secrets are not
+    # fenced to main); red with any other rule. GitHub creates an environment that a job names
+    # but that does not exist, without any rule: so only fetch-env names it, and only fetch-env
+    # runs when it exists. fetch-env and fetch-repo have the same steps
+    # (test_asc_feedback_encrypted.py checks that they are identical).
     name: Feedback environment checked
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -71,7 +75,7 @@ jobs:
       contents: read
       actions: read
     outputs:
-      ready: ${{ steps.check.outputs.ready }}
+      target: ${{ steps.check.outputs.target }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -82,15 +86,91 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           UPLOAD_PRIVATE_PLAN_OK: ${{ vars.UPLOAD_PRIVATE_PLAN_OK }}
-          # Only whether a repository secret of that name is left ("true"/"false"), never its value.
-          REPOSITORY_SECRET_LEFT: ${{ secrets.ASC_FEEDBACK_KEY_ID != '' }}
+          # Only whether one of the three is left as a repository secret ("true"/"false"), never a value.
+          REPOSITORY_SECRET_LEFT: ${{ secrets.ASC_FEEDBACK_KEY_ID != '' || secrets.ASC_FEEDBACK_ISSUER_ID != '' || secrets.ASC_FEEDBACK_KEY_P8 != '' }}
         run: python3 .github/scripts/asc_feedback.py --check-environment
 
-  fetch:
+  fetch-env:
     name: Fetch TestFlight feedback and crashes
     needs: setup
-    if: needs.setup.outputs.ready == 'true'
+    # Only from main: the environment admits main alone, so another branch skips instead of failing.
+    if: needs.setup.outputs.target == 'env' && github.ref == 'refs/heads/main'
     environment: asc-feedback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: App Store Connect secrets present
+        id: secrets
+        env:
+          KEY_ID: ${{ secrets.ASC_FEEDBACK_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_FEEDBACK_ISSUER_ID }}
+          KEY_P8: ${{ secrets.ASC_FEEDBACK_KEY_P8 }}
+        run: |
+          if [ -n "$KEY_ID" ] && [ -n "$ISSUER_ID" ] && [ -n "$KEY_P8" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped: the feedback key is not set (ASC_FEEDBACK_KEY_ID, ASC_FEEDBACK_ISSUER_ID, ASC_FEEDBACK_KEY_P8; docs/launch/FREIGABE_EINRICHTEN.md)."
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          # Cone mode: also the files right in .github/, among them feedback-recipient.pem.
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: App Store Connect key
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          KEY_P8: ${{ secrets.ASC_FEEDBACK_KEY_P8 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$KEY_P8" > "$RUNNER_TEMP/asc/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey.p8"
+      - name: Fetch feedback and crash logs
+        id: fetch
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          KEY_ID: ${{ secrets.ASC_FEEDBACK_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_FEEDBACK_ISSUER_ID }}
+          KEY_PATH: ${{ runner.temp }}/asc/AuthKey.p8
+          # Read by the script to ask GitHub whether the repository is private (mode full only).
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.report || 'encrypted' }}
+        run: |
+          python3 .github/scripts/asc_feedback.py --bundle-id app.albumist.ios \
+            --out "$RUNNER_TEMP/feedback" --encrypted-out "$RUNNER_TEMP/feedback-encrypted" \
+            --recipient .github/feedback-recipient.pem --days 14 \
+            --summary "$GITHUB_STEP_SUMMARY" --mode "$MODE"
+      - name: Remove key and plaintext
+        if: always()
+        # The script wipes its plaintext folder itself; this only catches a killed step.
+        run: rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP"/feedback-plain-*
+      - name: Keep the encrypted report
+        if: always() && steps.fetch.outputs.mode == 'encrypted'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: testflight-feedback-encrypted
+          path: ${{ runner.temp }}/feedback-encrypted/*.cms
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
+      - name: Keep report, screenshots and crash logs
+        if: always() && steps.fetch.outputs.mode == 'full'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: testflight-feedback
+          path: ${{ runner.temp }}/feedback
+          retention-days: 7
+          if-no-files-found: ignore
+          overwrite: true
+
+  fetch-repo:
+    # Only while the environment asc-feedback does not exist yet: the repository secrets of the
+    # same names. Never names the environment. Same steps as fetch-env.
+    name: Fetch TestFlight feedback and crashes (repository secrets)
+    needs: setup
+    if: needs.setup.outputs.target == 'repo' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

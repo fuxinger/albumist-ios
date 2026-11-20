@@ -99,8 +99,10 @@ Actions > **TestFlight feedback** > Run workflow.
   der Upload-Job. Der Feedback-Schlüssel hat die Rolle **Developer** und
   liegt als Secrets `ASC_FEEDBACK_KEY_ID`, `ASC_FEEDBACK_ISSUER_ID` und `ASC_FEEDBACK_KEY_P8` in
   der Umgebung `asc-feedback`, die nur `main` benutzen darf; der erste Job prüft das
-  (`docs/launch/FREIGABE_EINRICHTEN.md`, „Freiwillig“). Ohne die
-  Umgebung oder ohne die Secrets meldet der Lauf nur „Skipped“ und bleibt grün. Mit einer Rolle ohne Lesezugriff meldet er „HTTP 403“ und nennt
+  (`docs/launch/FREIGABE_EINRICHTEN.md`, „Freiwillig“). Bis es die Umgebung gibt, holt ein
+  zweiter Job mit den gleichnamigen Repository-Secrets ab und warnt, dass sie noch nicht auf
+  `main` beschränkt sind; eine Umgebung mit anderer Regel macht den Lauf rot. Abgeholt wird nur
+  auf `main`. Ohne die Secrets meldet der Lauf nur „Skipped“. Mit einer Rolle ohne Lesezugriff meldet er „HTTP 403“ und nennt
   die fehlende Rolle (Admin, App Manager oder Developer geht). Die Rolle eines Schlüssels lässt
   sich nicht ändern: neuen Schlüssel mit passender Rolle erzeugen, alten widerrufen, die drei
   Secrets ersetzen. Geprüft 16.11. (damals noch mit dem Upload-Schlüssel): Feedback und Abstürze

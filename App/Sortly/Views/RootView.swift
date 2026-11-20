@@ -83,18 +83,23 @@ struct MainTabs: View {
 
     var body: some View {
         TabView(selection: $tab) {
+            // Every tab shows the banner after "Anlegen" above the tab bar (decision 7B).
             Tab("Übersicht", systemImage: "square.grid.2x2", value: MainTab.overview) {
                 NavigationRoot(overviewNavigator) { OverviewView() }
+                    .showsQuickCreateBanner()
             }
             Tab("Mediathek", systemImage: "photo.on.rectangle", value: MainTab.library) {
                 NavigationRoot { LibraryView() }
+                    .showsQuickCreateBanner()
             }
             // The symbol Photos uses for albums (design review N1).
             Tab("Alben", systemImage: "rectangle.stack", value: MainTab.albums) {
                 NavigationRoot { AlbumsView() }
+                    .showsQuickCreateBanner()
             }
             Tab(value: MainTab.search, role: .search) {
                 NavigationRoot { SearchView() }
+                    .showsQuickCreateBanner()
             }
         }
         // iPad: tabs become a sidebar; iPhone: the Liquid Glass tab bar shrinks while scrolling.
@@ -122,6 +127,19 @@ struct MainTabs: View {
             Button("OK", role: .cancel) {}
         } message: { message in
             Text(message.text)
+        }
+        // "Anlegen" on a card made an album: one success tap as its banner comes, as after the
+        // preview's run (`ExecutionHaptics`).
+        .sensoryFeedback(.success, trigger: model.quickCreateBanner?.id) { (old: SortlyID?, new: SortlyID?) in
+            new != nil && new != old
+        }
+        // "Anlegen" found the free albums used up: the purchase sheet instead of the album. Once
+        // Albumist is unlocked, the album is made as tapped; closed without buying, the
+        // suggestion stays open.
+        .sheet(item: Binding(get: { model.quickCreatePurchase }, set: { model.quickCreatePurchase = $0 })) { request in
+            UnlockSheet(reason: .quickCreate) {
+                Task { await model.continueQuickCreate(after: request) }
+            }
         }
         // The App Store rating question: a moment after the user left the result of a plan that
         // made new albums, never at a start (`ReviewPrompt`, `ReviewPromptPolicy`).

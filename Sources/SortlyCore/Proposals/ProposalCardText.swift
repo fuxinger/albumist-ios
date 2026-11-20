@@ -7,7 +7,8 @@ import Foundation
 ///   (`ProposalOutcome`); a suggestion for the user's own album keeps its own title, and the
 ///   status names the album.
 /// - "16 Fotos · Neues Album"; "Kommt in dein Album „Toskana“ · +12 Fotos"; "Schon in deinem
-///   Album „Island“"; "Name fehlt · 38 Fotos"; "9 Fotos · Persönlicher Inhalt".
+///   Album „Island“"; "Name fehlt · 38 Fotos"; "9 Fotos · Persönlicher Inhalt"; "Benennt dein
+///   Album „Sommer“ um"; "Verschiebt dein Album „Garten“".
 /// - "Sicher", "Wahrscheinlich", "Möglich" are said only when the user should look before
 ///   anything is created: "16 Fotos · Möglich · Bitte kurz ansehen" (`needsLook`). A choice the
 ///   user made in the suggestion ("Anpassen") needs no second look.
@@ -25,6 +26,10 @@ public struct ProposalCardText: Equatable, Sendable {
         /// Albumist is unsure: the confidence when that is the reason, nil when an album of the
         /// user only possibly fits or several fit.
         case pleaseLook(Reliability?)
+        /// The user's album `album` gets a new name (the card's title); nothing is added to it.
+        case renames(album: String)
+        /// The user's album `album` moves into another folder; nothing is added to it.
+        case moves(album: String)
     }
 
     public let title: String
@@ -77,6 +82,10 @@ public struct ProposalCardText: Equatable, Sendable {
             (status, action) = (.addsTo(album: album, newPhotos: newPhotos), .add(albumName: album, newPhotos: newPhotos))
         case .alreadyIn(_, let album):
             (status, action) = (.alreadyIn(album: album), .look)
+        case .renames(_, let album, _):
+            (status, action) = (.renames(album: album), .look)
+        case .moves(_, let album, _):
+            (status, action) = (.moves(album: album), .look)
         case .chooseAlbum:
             (status, action) = (.pleaseLook(nil), .look)
         case .newAlbum:
@@ -100,12 +109,16 @@ public struct ProposalCardText: Equatable, Sendable {
         case .alreadyIn(let album): parts = [words.alreadyIn(album: album)]
         case .nameMissing: parts = [words.nameMissing, words.photos(count)]
         case .personal: parts = [words.photos(count), words.personal]
+        case .renames(let album): parts = [words.renames(album: album)]
+        case .moves(let album): parts = [words.moves(album: album)]
         case .pleaseLook(let reliability):
             parts = [words.photos(count)] + (reliability.map { [words.reliability($0)] } ?? []) + [words.pleaseLook]
         }
 
         switch outcome {
         case .newAlbum(let title, _): self.title = title
+        // The name the plan gives the user's album; the status names it as it is called now.
+        case .renames(_, _, let title): self.title = title
         // The place's own title ("Häufiger Ort in Lindau") until it has a name.
         case .needsName: self.title = proposal.title
         default: self.title = userTitle.flatMap(UserTitle.stored) ?? proposal.title
@@ -132,7 +145,8 @@ public enum ProposalCardAction: Equatable, Sendable {
     case add(albumName: String, newPhotos: Int)
     /// "Benennen …": a place or group only the user can name.
     case name
-    /// "Ansehen …": personal content, an album that is complete, or Albumist is unsure.
+    /// "Ansehen …": personal content, an album that is complete or that the suggestion renames or
+    /// moves, or Albumist is unsure.
     case look
 }
 
@@ -151,6 +165,12 @@ public enum ProposalOutcome: Equatable, Sendable {
     case addsTo(album: CollectionID, title: String, newPhotos: Int)
     /// The user's album already holds every photo: nothing changes.
     case alreadyIn(album: CollectionID, title: String)
+    /// The user's album, called `from` in Photos, gets the name `to`; no photos are added (it
+    /// holds every one, or the decision adds none).
+    case renames(album: CollectionID, from: String, to: String)
+    /// The user's album `title` moves into the folder `folderPath` (below the root folder, which
+    /// is part of it when it is set); no photos are added.
+    case moves(album: CollectionID, title: String, folderPath: [String])
     /// Several albums fit (or none clearly): the user chooses, Albumist does not guess.
     case chooseAlbum
 
@@ -182,6 +202,18 @@ public enum ProposalOutcome: Equatable, Sendable {
             let count = adds ? missing(in: id) : 0
             return count > 0 ? .addsTo(album: id, title: shown, newPhotos: count) : .alreadyIn(album: id, title: shown)
         }
+        /// Whether the plan moves album `id` into `path` (the root folder first): the folder the
+        /// planner finds for it, existing folders by their title from the top, is not the album's
+        /// own, or is not there yet and is made. An album out of reach moves as the decision says.
+        func isMoved(_ id: CollectionID, into path: [String]) -> Bool {
+            guard let album = inventory[id] else { return true }
+            var parent: CollectionID?
+            for title in path {
+                guard let found = inventory.folders.first(where: { $0.title == title && $0.parentID == parent }) else { return true }
+                parent = found.id
+            }
+            return parent != album.parentID
+        }
 
         switch decision {
         case .undecided, .reject:
@@ -193,9 +225,26 @@ public enum ProposalOutcome: Equatable, Sendable {
         case .extendExisting(let id):
             self = existing(id, adds: true)
         case .renameExisting(let id, let newTitle, let extend):
-            self = existing(id, title: AlbumTitle.sanitize(newTitle), adds: extend)
-        case .moveExisting(let id, _, let extend):
-            self = existing(id, adds: extend)
+            // Renamed only when the name differs (`OrganizationPlanner`): its own name again is
+            // no change.
+            let clean = AlbumTitle.sanitize(newTitle), current = albumTitle(id)
+            let added = extend ? missing(in: id) : 0
+            if added > 0 {
+                self = .addsTo(album: id, title: clean, newPhotos: added)
+            } else if clean != current {
+                self = .renames(album: id, from: current, to: clean)
+            } else {
+                self = .alreadyIn(album: id, title: current)
+            }
+        case .moveExisting(let id, let path, let extend):
+            let target = folder(path), added = extend ? missing(in: id) : 0
+            if added > 0 {
+                self = .addsTo(album: id, title: albumTitle(id), newPhotos: added)
+            } else if isMoved(id, into: target) {
+                self = .moves(album: id, title: albumTitle(id), folderPath: target)
+            } else {
+                self = .alreadyIn(album: id, title: albumTitle(id))
+            }
         case .merge(let target, _, let title, let path):
             if let target {
                 self = existing(target, title: title.map(AlbumTitle.sanitize), adds: true)

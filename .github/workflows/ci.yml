@@ -98,7 +98,12 @@ jobs:
     name: Core tests (Linux)
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
-    timeout-minutes: 30
+    # Hang limits (20.11.2026: the core tests hung 30 min, until this job's old limit of 30): about
+    # twice the 95th percentile of 158 green jobs since 16.11. (job 9.0 min, "Build and test" 4.7,
+    # load test 3.2). swift_test_watch.py stops a step's tests before its timeout-minutes and
+    # names the tests still running (TEST_HANG), so the log says which test hung; a hang is red
+    # like any failing test, never re-run.
+    timeout-minutes: 25
     defaults:
       run:
         shell: bash
@@ -107,13 +112,14 @@ jobs:
       - name: Install SQLite headers
         run: bash .github/scripts/apt_install.sh libsqlite3-dev python3
       - name: Build and test
-        run: |
-          set -o pipefail
-          swift test --parallel 2>&1 | tee core-linux.log
+        timeout-minutes: 12
+        run: python3 .github/scripts/swift_test_watch.py --minutes 10 --log core-linux.log -- swift test --parallel
       - name: Load test (20,000 and 100,000 photos, time and memory limits)
+        timeout-minutes: 9
         run: |
           set +e
-          SORTLY_LOAD_TEST=1 swift test --skip-build --filter LoadTests > load.log 2>&1
+          SORTLY_LOAD_TEST=1 python3 .github/scripts/swift_test_watch.py --minutes 7 --quiet --log load.log -- \
+            swift test --skip-build --filter LoadTests
           status=$?
           grep -E "LOAD_|passed|failed|error" load.log
           exit $status
@@ -207,12 +213,14 @@ jobs:
       - name: Core tests (macOS)
         # Also after a failed "Build UI tests" (its error is in the log above; the app's own
         # tests still say what they find). Not after a failed app build or an earlier step.
+        # Hang limit: about twice the 95th percentile of 64 green jobs (6.3 min); the watchdog
+        # names the tests still running (swift_test_watch.py, as in the Linux job).
         id: core
         if: ${{ !cancelled() && (steps.appbuild.outcome == 'success' || (success() && steps.sim.outputs.udid == '')) }}
+        timeout-minutes: 15
         run: |
-          set -o pipefail
           mkdir -p build
-          swift test --parallel 2>&1 | tee build/core-macos.log
+          python3 .github/scripts/swift_test_watch.py --minutes 13 --log build/core-macos.log -- swift test --parallel
       - name: Fresh simulator (erased and booted)
         # 18.11.: StoreKit listed no product for 300 s in four runs from ~16:00 UTC on, with no
         # error, also on claude/next at 3dfda45 (CI 44369338871), whose code was green in every

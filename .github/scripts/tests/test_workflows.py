@@ -581,6 +581,33 @@ class FullPassBeforeMergeTests(unittest.TestCase):
         self.assertIn("release-smoke", jobs)
 
 
+class HangLimitTests(unittest.TestCase):
+    """20.11.2026: the core tests hung 30 min until the job's limit; every swift test step now runs
+    under swift_test_watch.py, which names the tests still running before the step's limit."""
+
+    def test_every_core_test_step_is_watched(self):
+        ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        watched = 0
+        for text, job in ((ci, "core-linux"), (ci, "ios"), (ui, "core-linux")):
+            for name, _, run in job_steps(text, job):
+                if "swift test" not in run:
+                    continue
+                with self.subTest(job=job, step=name):
+                    self.assertIn("python3 .github/scripts/swift_test_watch.py --minutes", run)
+                    minutes = float(re.search(r"--minutes (\d+(?:\.\d+)?)", run).group(1))
+                    block = "\n" + text.split(f"- name: {name}\n", 1)[1].split("\n      - ", 1)[0]
+                    limit = re.search(r"\n        timeout-minutes: (\d+)", block)
+                    self.assertIsNotNone(limit, "the step has its own timeout-minutes")
+                    # The watchdog reports (and gives the backtrace a minute) before GitHub kills.
+                    self.assertLessEqual(minutes + 2, int(limit.group(1)))
+                    watched += 1
+        self.assertEqual(watched, 4)
+        # The Linux container installs python3 for it.
+        for text in (ci, ui):
+            self.assertIn("apt_install.sh libsqlite3-dev python3", text)
+
+
 class ReleaseSkipTests(unittest.TestCase):
     """In a TestFlight run (release) CI's Mac job leaves out a step only when ui.yml, called in
     the same run right after it, builds the same thing itself (coordinator's rule for C4: no

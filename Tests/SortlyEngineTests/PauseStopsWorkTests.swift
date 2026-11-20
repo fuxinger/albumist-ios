@@ -12,22 +12,42 @@ import SortlyTestSupport
 /// steps: the photos in work were finished first (an iCloud original up to 180 s), and the
 /// trips step and the suggestions (3.5 to 7.8 s over 50,000 to 100,000 photos) were never
 /// interrupted. Counted here is the work done after the Pause, not the time it takes.
-@Suite("Pause stops the work, not only the card")
+///
+/// Each test case is held to 10 minutes: a test that waits for ever fails here instead of
+/// holding the whole job until its 30-minute timeout. The slowest, `pauseRacingTheEndOfThePhotos`,
+/// took 81 s for its twelve cases in CI and 202 s inside a full `swift test --parallel` on a
+/// 4-core machine with a load of 20 (20.11.); its cases run side by side, each about as long.
+@Suite("Pause stops the work, not only the card", .timeLimit(.minutes(10)))
 struct PauseStopsWorkTests {
     static let map: OfflineWorldMap = try! WorldMapResource.load()
+    /// The pipeline's "now". Not the wall clock: the image step ends a batch early once a second
+    /// of `now` has passed (saved and shown at least once a second), and on a busy machine a
+    /// second of wall clock passed before the second photo was handed out. Only one photo was
+    /// then in work, and `pauseRacingTheEndOfThePhotos`, which waits for two, waited for ever
+    /// (both Linux core jobs of b38dfdc on 20.11. ran into their 30-minute timeout).
+    static let today = Fixture.date("2026-07-01 08:00")
 
     /// Analyses that wait at a gate until the test opens it (or until they are cancelled, like
     /// the app's image requests). Every analysis that ends normally is counted.
     final class GatedAnalyzer: ContentAnalyzing, @unchecked Sendable {
         let gateContent: Bool
         let gateText: Bool
+        /// Wall-clock time each `willAnalyze` takes while the gate is shut: a machine so busy
+        /// that a second passes between two photos handed out.
+        let slowMachine: Duration
         let open = Mutex(false)
         /// Analyses begun and analyses that ran to their end.
         let counts = Mutex<(started: Int, finished: Int)>((0, 0))
 
-        init(gateContent: Bool = false, gateText: Bool = false) {
+        init(gateContent: Bool = false, gateText: Bool = false, slowMachine: Duration = .zero) {
             self.gateContent = gateContent
             self.gateText = gateText
+            self.slowMachine = slowMachine
+        }
+
+        func willAnalyze(_ upcoming: [AssetSnapshot]) async {
+            guard slowMachine > .zero, !open.withLock({ $0 }) else { return }
+            try? await Task.sleep(for: slowMachine)
         }
 
         private func pass(_ gated: Bool) async throws {
@@ -58,7 +78,8 @@ struct PauseStopsWorkTests {
         let pipeline = AnalysisPipeline(
             store: store, reader: InMemoryLibraryReader(assets: lib.assets), analyzer: analyzer,
             geocoder: FakeGeocoder(), map: Self.map, conditions: FakeConditions(), settings: OrganizationSettings(),
-            calendar: Fixture.calendar, time: ManualTime().source, batchSize: 10, earlyGraceOnStop: .seconds(60)
+            calendar: Fixture.calendar, time: ManualTime().source, batchSize: 10, now: { Self.today },
+            earlyGraceOnStop: .seconds(60)
         )
         return (store, pipeline)
     }
@@ -187,7 +208,21 @@ struct PauseStopsWorkTests {
     /// Pause and the photos in work ending at the same moment, in both orders: every photo is
     /// done with a result or still to do, never done without one; "Fortsetzen" does the rest.
     @Test(arguments: 0..<12) func pauseRacingTheEndOfThePhotos(_ seed: Int) async throws {
-        let analyzer = GatedAnalyzer(gateContent: true)
+        try await race(seed, GatedAnalyzer(gateContent: true))
+    }
+
+    /// The same race on a machine so busy that a second of wall clock passes between two
+    /// photos handed out (both Linux core jobs of b38dfdc): two photos are in work all the same,
+    /// and the race ends. Before, the pipeline of these tests read the wall clock, ended the
+    /// batch after its first photo, and the race waited for a second photo for ever (with a
+    /// limit of one minute both cases failed with "Time limit was exceeded"; alone they take
+    /// about 17 s).
+    @Test(arguments: [0, 1])
+    func pauseRacingTheEndOfThePhotosOnABusyMachine(_ seed: Int) async throws {
+        try await race(seed, GatedAnalyzer(gateContent: true, slowMachine: .milliseconds(1100)))
+    }
+
+    func race(_ seed: Int, _ analyzer: GatedAnalyzer) async throws {
         let (store, pipeline) = try pipeline(analyzer: analyzer)
         let control = AnalysisRunControl()
         let run = Task { try await pipeline.run(control: control) }

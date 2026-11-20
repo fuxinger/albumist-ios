@@ -159,11 +159,12 @@ extension PhotoCard where Actions == EmptyView {
 }
 
 extension CardBadge {
-    /// What VoiceOver says for the badge (the card's value): "+12" is "+12 Fotos".
+    /// What VoiceOver says for the badge (the card's value): "+12" is "+12 Fotos" (the
+    /// integer picks the plural form, the grouped number is shown: "+1.234 Fotos").
     var spoken: Text {
         switch self {
         case .new: Text("Neu")
-        case .added(let count): Text("+\(count) Fotos")
+        case .added(let count): Text("+\(count) \(count.formatted()) Fotos")
         case .created: Text("Angelegt")
         }
     }
@@ -192,7 +193,8 @@ struct CardBadgeLabel: View {
         case .new:
             Text("Neu")
         case .added(let count):
-            Text("+\(count)")
+            // Grouped like every large count ("+1.234"); a number needs no translation.
+            Text(verbatim: "+" + count.formatted())
         case .created:
             Label("Angelegt", systemImage: "checkmark")
                 .labelStyle(.titleAndIcon)

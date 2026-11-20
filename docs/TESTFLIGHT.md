@@ -440,6 +440,52 @@ Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-
    iOS-Job (rund 16 Minuten früher). Kostet Mac-Minuten, wenn der iOS-Job dann rot wird, und
    weicht von „erst schnell, dann teuer“ ab.
 
+## Tempo-Plan (Analyse 20.11.2026, Zweig `ci/tempo`)
+
+Gemessen an den Pull-Request-Läufen seit 18.11. 17:00 UTC (die heutige Strecke): Push bis
+UI-Urteil im Median 73, höchstens 131 Minuten; Push bis CI-Urteil 32 (höchstens 48). Davon
+Mac-Warteschlange im Median 0,4, aber bis 63 Minuten; die längste UI-Gruppe (übrige Abläufe)
+56 Minuten im Median, davon 2–4 Minuten „Wait for the simulator“ und 4–5 Minuten erstes
+Onboarding. Rot seit 16.11.: 87 Läufe, davon 25 App-Fehler, 22 Testfehler, 24 Umgebung, 2
+Bau-Strecke, 14 veraltet; seit der heutigen Strecke 25 (4 App, 6 Test, 14 Umgebung, 1 Strecke).
+
+Auf dem Zweig umgesetzt (kein Schritt fällt weg, kein Tor wird weicher, kein Test wird
+übersprungen oder wiederholt):
+
+| Stufe | vorher (Median / schlechtester) | nachher (erwartet) |
+|---|---|---|
+| Übersetzungsfehler nur auf dem Mac bis rot | 27 Minuten (61e9b8c) | rund 12 Minuten |
+| CI-Urteil je Push | 32 / 48 | gleich (rund 31) |
+| UI-Gruppen, längste Gruppe | 56 / 65 | rund 43 / 50 |
+| Push bis UI-Urteil | 73 / 131 | rund 60 / 105 |
+| Rot, das für diese App und diesen Testcode schon feststand | 69 Minuten (8b71209) | rund 1 Minute (Job „UI known red“) |
+| TestFlight, großes Tor | 129 (ohne Konkurrenz) / 156 | gleich (Gruppenphase rund 70 wie bisher) |
+| TestFlight, kleines Tor | 89 | gleich |
+
+Geänderte Regeln: „höchstens fünf Macs je Push“ (16.11.) wird „fünf laufen, die sechste wartet
+in GitHubs Schlange“ (UI-Gruppen außerhalb von TestFlight fünf zugleich). Alle anderen bleiben:
+kein Cache, Rot bleibt rot, „Re-run failed jobs“ nur für die Technik, Merge nur grün ohne
+Wiederholung, voller UI-Lauf und Härtetest vor jedem Upload, Freigabe vor dem Hochladen.
+
+Noch nicht umgesetzt, Entscheidung nötig:
+
+1. **Voller Lauf einmal vor dem Merge, TestFlight übernimmt ihn**: den letzten Stand eines Pull
+   Requests von Hand voll testen (Actions > UI flow > Run workflow auf dem Zweig, „quick“ aus).
+   Die Fingerabdrücke hängen am Inhalt, nicht am Commit: ist der Merge-Commit inhaltlich gleich
+   (Zweig vor dem Merge auf dem Stand von `main`), findet das UI-Tor von TestFlight die grünen
+   vollen Ergebnisse und lässt nur Härtetest und Release-Kurztest laufen. Großes Tor dann rund
+   85–90 statt 129–156 Minuten; letzter Push bis Upload rund 2,5 statt 3,5–4 Stunden.
+   Regeländerung: ein voller UI-Lauf vor dem Merge statt im TestFlight-Lauf (der volle Lauf vor
+   dem Upload bleibt Pflicht, das Tor prüft ihn für genau diesen Inhalt).
+2. **TestFlight vor Pull Requests**: UI-Läufe von Pull Requests warten, solange ein
+   TestFlight-Lauf seine Gruppen braucht (Lauf 44629523806: Gruppen warteten 17–82 Minuten).
+3. **Bekannt rote Gruppen nicht mehr laufen lassen**: ihr Grün zählt nicht; spart je Fall
+   20–55 Mac-Minuten, zeigt aber nicht mehr, ob das Rot wiederkommt.
+4. **Pushes bündeln** (Agenten-Regel): 30 von 42 Pushes kamen weniger als 70 Minuten nach dem
+   vorigen; 12 % der Mac-Minuten gingen an abgebrochene UI-Läufe.
+5. **P5-05 Stufe 1** (eine vorbereitete Demo-Mediathek je Gruppe statt Onboarding in jedem Test):
+   rund 4–5 Minuten je Gruppe; braucht Testcode-Änderungen.
+
 ## Code-Scanning (CodeQL)
 
 - Python und Workflows: bei jedem Pull Request, auf Linux.

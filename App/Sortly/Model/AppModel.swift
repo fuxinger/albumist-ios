@@ -952,9 +952,10 @@ final class AppModel {
         values.isExcludedFromBackup = true
         try? folder.setResourceValues(values)
         // Before anything opens it: a database an older build wrote under an earlier file name
-        // moves to the current name once (the rename to Albumist); if that move fails, the
-        // earlier file opens as it is, never a new empty database next to it.
-        let url = DatabaseFile.prepare(in: base).url
+        // moves to the current name once (the rename to Albumist); if that move fails, everything
+        // goes back and the earlier file opens with its log, never a new empty database next to
+        // it. If even the way back fails, the start fails (start error screen), nothing is deleted.
+        let url = try DatabaseFile.prepare(in: base).url
         for suffix in ["", "-wal", "-shm"] {
             let path = url.path + suffix
             if FileManager.default.fileExists(atPath: path) {
@@ -3255,6 +3256,19 @@ final class AppModel {
         }
         if let failure = execution.failure { lines.append("last execution failure: \(PlanDiagnostics.reasonCode(failure))") }
         if let deletion = DeletionLog.last { lines.append("last deletion \(deletion)") }
+        // Database files of the other name that stay (never deleted silently): e.g. an older
+        // build ran again after the rename and wrote its own database, which keeps its data.
+        if let folder = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+            .appendingPathComponent(AppInfo.supportFolderName, isDirectory: true) {
+            let beside = DatabaseFile.filesLeftBeside(existing: DatabaseFile.existing(in: folder))
+            if !beside.isEmpty {
+                let sizes = beside.map { file in
+                    let bytes = (try? FileManager.default.attributesOfItem(atPath: folder.appendingPathComponent(file).path)[.size] as? Int) ?? 0
+                    return "\(file) \(bytes / 1_000) kB"
+                }
+                lines.append("database files kept beside \(DatabaseFile.name): " + sizes.joined(separator: ", "))
+            }
+        }
         lines += BackgroundRunLog.summary
         lines += BatteryLog.summary + EnergyMetricsSubscriber.summary
         return lines.joined(separator: "\n")

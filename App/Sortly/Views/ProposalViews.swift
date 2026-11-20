@@ -9,7 +9,8 @@ import SortlyEngine
 /// "Auswählen" works as in Photos (decision 9 of 18.11.2026, in place of a basket): tick the
 /// cards, then "N Alben anlegen" opens the preview of those suggestions; "Fertig" or leaving the
 /// list drops the ticks. Only what a card could make itself can be ticked ("Anlegen",
-/// "Ergänzen …"): a name, a look or a choice needs the suggestion's own page first.
+/// "Ergänzen …"): a name, a look or a choice needs the suggestion's own page first. "Alle
+/// auswählen" leaves out what "Nicht jetzt" set aside: those are ticked one by one.
 struct ProposalListView: View {
     @Environment(AppModel.self) private var model
     @Environment(Navigator.self) private var navigator: Navigator?
@@ -43,8 +44,7 @@ struct ProposalListView: View {
         let items: [AlbumProposal]
     }
 
-    private var sections: [CardSection] {
-        let all = proposals
+    private func sections(of all: [AlbumProposal]) -> [CardSection] {
         let open = all.filter { model.decisions[$0.id] != .reject }
         let notNow = all.filter { model.decisions[$0.id] == .reject }
         var result: [CardSection] = []
@@ -65,29 +65,28 @@ struct ProposalListView: View {
     }
 
     /// The suggestions a tick can take: what their card would make itself.
-    private func isSelectable(_ proposal: AlbumProposal) -> Bool {
-        guard made[proposal.id] == nil else { return false }
-        switch model.proposalCard(for: proposal).action {
+    private func isSelectable(_ proposal: AlbumProposal, _ card: ProposalCardText?) -> Bool {
+        guard made[proposal.id] == nil, let card else { return false }
+        switch card.action {
         case .create, .add: return true
         case .name, .look: return false
         }
     }
 
-    /// The ticked suggestions that are still there, in the list's order.
-    private var ticked: [AlbumProposal] {
-        proposals.filter { selected.contains($0.id) }
-    }
-
     var body: some View {
-        let sections = self.sections
+        // Once per drawing: the suggestions and each one's card, which the toolbar, the ticks and
+        // the cards read (they were made up to three times over; second review of design wave 1).
+        let shown = proposals
+        let cards = Dictionary(shown.map { ($0.id, model.proposalCard(for: $0)) }, uniquingKeysWith: { first, _ in first })
+        let groups = sections(of: shown)
         ScrollView {
-            if sections.isEmpty {
+            if groups.isEmpty {
                 ContentUnavailableView("Keine Vorschläge", systemImage: "checkmark.circle",
                                        description: Text("Für diesen Bereich gibt es gerade nichts zu tun."))
                     .padding(.top, 60)
             } else {
                 LazyVStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-                    ForEach(sections) { section in
+                    ForEach(groups) { section in
                         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                             // The list's own title names a single area: no header repeating it.
                             if area == nil || section.id == "notNow" {
@@ -95,7 +94,7 @@ struct ProposalListView: View {
                                     .font(.title2.weight(.bold))
                                     .accessibilityAddTraits(.isHeader)
                             }
-                            grid(section.items)
+                            grid(section.items, cards: cards)
                         }
                     }
                 }
@@ -116,21 +115,25 @@ struct ProposalListView: View {
                         selected = []
                     }
                 }
-                .disabled(!selecting && !proposals.contains { isSelectable($0) })
+                .disabled(!selecting && !shown.contains { isSelectable($0, cards[$0.id]) })
                 .accessibilityIdentifier(selecting ? "suggestions.selectDone" : "suggestions.select")
             }
             if selecting {
                 ToolbarItem(placement: .topBarLeading) {
-                    let all = proposals.filter { isSelectable($0) }.map(\.id)
-                    Button(!all.isEmpty && Set(all).isSubset(of: selected) ? "Auswahl aufheben" : "Alle auswählen") {
-                        if !all.isEmpty && Set(all).isSubset(of: selected) { selected = [] } else { selected = Set(all) }
+                    // Not what "Nicht jetzt" set aside: the user ticks those one by one.
+                    let all = shown.filter { model.decisions[$0.id] != .reject && isSelectable($0, cards[$0.id]) }.map(\.id)
+                    let allTicked = !all.isEmpty && Set(all).isSubset(of: selected)
+                    Button(allTicked ? "Auswahl aufheben" : "Alle auswählen") {
+                        selected = allTicked ? [] : selected.union(all)
                     }
+                    .disabled(all.isEmpty)
                     .accessibilityIdentifier("suggestions.selectAll")
                 }
                 ToolbarItem(placement: .bottomBar) {
-                    let count = ticked.count
+                    // The ticked suggestions that are still there.
+                    let count = shown.filter { selected.contains($0.id) }.count
                     Button {
-                        createTicked()
+                        createTicked(from: shown)
                     } label: {
                         Text("\(count) \(count.formatted()) Alben anlegen")
                     }
@@ -160,11 +163,13 @@ struct ProposalListView: View {
             : [GridItem(.adaptive(minimum: 160), spacing: Theme.Spacing.m, alignment: .top)]
     }
 
-    private func grid(_ items: [AlbumProposal]) -> some View {
+    private func grid(_ items: [AlbumProposal], cards: [SortlyID: ProposalCardText]) -> some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: Theme.Spacing.m) {
             ForEach(items) { proposal in
-                ProposalListCard(proposal: proposal, made: made[proposal.id] != nil && model.quickCreateBanner?.proposalID == proposal.id,
-                                 selecting: selecting, selectable: selecting && isSelectable(proposal),
+                let card = cards[proposal.id] ?? model.proposalCard(for: proposal)
+                ProposalListCard(proposal: proposal, card: card,
+                                 made: made[proposal.id] != nil && model.quickCreateBanner?.proposalID == proposal.id,
+                                 selecting: selecting, selectable: selecting && isSelectable(proposal, card),
                                  isSelected: selected.contains(proposal.id)) {
                     open(proposal)
                 } toggle: {
@@ -177,9 +182,10 @@ struct ProposalListView: View {
         }
     }
 
-    /// The suggestion's page, pushed by value (`AppScreen`): it may push its own preview.
+    /// The suggestion's page, pushed by value (`AppScreen`): it may push its own preview. It zooms
+    /// out of its card and back into it (`ProposalDetailView.zoom`).
     private func open(_ proposal: AlbumProposal) {
-        Navigator.push(.proposal(ProposalRef(proposal)), on: navigator)
+        Navigator.push(.proposal(ProposalRef(proposal, zoom: zoom)), on: navigator)
     }
 
     /// The card's one action: "Anlegen" makes the album at once with its banner (decision 7B),
@@ -200,9 +206,10 @@ struct ProposalListView: View {
         }
     }
 
-    /// "N Alben anlegen": the preview of the ticked suggestions; the ticks go with the list.
-    private func createTicked() {
-        let items = ticked
+    /// "N Alben anlegen": the preview of the ticked suggestions that are still there, in the
+    /// list's order; the ticks go with the list.
+    private func createTicked(from shown: [AlbumProposal]) {
+        let items = shown.filter { selected.contains($0.id) }
         withAnimation(.snappy) {
             selecting = false
             selected = []
@@ -232,8 +239,10 @@ struct ProposalListView: View {
 private struct ProposalListCard: View {
     @Environment(AppModel.self) private var model
     var proposal: AlbumProposal
+    /// Its words (`AppModel.proposalCard`), made once for the whole list.
+    var card: ProposalCardText
     /// Made from this card a moment ago: "✓ Angelegt" in place of its action while its banner
-    /// shows (draft E6 b; no badge on the photo besides).
+    /// shows (draft E6 b; no badge on the photo besides). It opens nothing: its suggestion is gone.
     var made: Bool
     var selecting: Bool
     var selectable: Bool
@@ -243,13 +252,14 @@ private struct ProposalListCard: View {
     var act: (ProposalCardAction) -> Void
 
     var body: some View {
-        let card = model.proposalCard(for: proposal)
         // The card's body opens the suggestion, or ticks it while the list selects (`onOpen`:
-        // its own button behind cover and texts); its one action stays a real button.
+        // its own button behind cover and texts); its one action stays a real button. A card
+        // just made opens nothing.
+        let opens: (@MainActor () -> Void)? = made ? nil : { tap() }
         PhotoCard(coverIDs: model.proposalCoverIDs(for: proposal), title: Text(verbatim: card.title),
                   subtitle: card.styledSubtitle, hidesPreview: card.hidesPreview,
-                  placeholderSymbol: proposal.placeholderSymbol, onOpen: { tap() }) {
-            actionButton(card)
+                  placeholderSymbol: proposal.placeholderSymbol, onOpen: opens) {
+            actionButton
                 // While the list selects, a tap ticks the card: the button keeps its place, so
                 // nothing moves, but cannot be seen or tapped.
                 .opacity(selecting ? 0 : 1)
@@ -263,13 +273,14 @@ private struct ProposalListCard: View {
                 tick
             }
         }
-        // What cannot be ticked steps back while the list selects.
+        // What cannot be ticked steps back while the list selects, and cannot be tapped.
         .opacity(selecting && !selectable ? 0.45 : 1)
+        .disabled(selecting && !selectable)
     }
 
     /// The tick of a card the list can select, as in Photos. A touch goes through to the card's
-    /// body, which ticks; for VoiceOver it is a button of its own that says whether the card is
-    /// ticked (the body only says what the card is).
+    /// body, which ticks; for VoiceOver it is a button of its own, named with the album, that
+    /// says whether the card is ticked (the body only says what the card is).
     private var tick: some View {
         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
             .font(.title2)
@@ -277,7 +288,7 @@ private struct ProposalListCard: View {
             .foregroundStyle(.white, isSelected ? Theme.accent : Color.black.opacity(0.3))
             .padding(Theme.Spacing.s)
             .allowsHitTesting(false)
-            .accessibilityLabel(Text("Auswählen"))
+            .accessibilityLabel(card.spokenTick)
             .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { toggle() }
             .accessibilityIdentifier("suggestion.tick")
@@ -291,20 +302,24 @@ private struct ProposalListCard: View {
         }
     }
 
-    /// One button: what the card does, a wait while its album is made, "Angelegt" after it.
+    /// One button: what the card does, a wait while its album is made, "Angelegt" after it. Its
+    /// name for VoiceOver and Voice Control holds the album's ("„Kyoto, Oktober 2024“ anlegen"),
+    /// as on the start page.
     @ViewBuilder
-    private func actionButton(_ card: ProposalCardText) -> some View {
+    private var actionButton: some View {
         if made {
             Button {} label: {
                 Label("Angelegt", systemImage: "checkmark")
             }
             .buttonStyle(CardActionButtonStyle())
             .disabled(true)
+            .accessibilityLabel(card.spokenMade)
         } else {
+            let creating = model.quickCreating == proposal.id
             Button {
                 act(card.action)
             } label: {
-                if model.quickCreating == proposal.id {
+                if creating {
                     ProgressView()
                         .accessibilityLabel(Text("Album wird angelegt"))
                 } else {
@@ -314,6 +329,8 @@ private struct ProposalListCard: View {
             .buttonStyle(CardActionButtonStyle())
             // One album at a time: a second tap meanwhile is no second album.
             .disabled(model.quickCreating != nil)
+            .accessibilityLabel(creating ? Text("Album wird angelegt") : card.spokenAction)
+            .accessibilityInputLabels(card.actionInputLabels)
         }
     }
 }
@@ -404,14 +421,19 @@ struct ProposalDetailView: View {
     @State private var pastCover = false
     /// The page's title has gone under the bar: the bar shows the name, as Photos does in an album.
     @State private var pastTitle = false
+    /// Where the bar ends at the top of the page, in the scroll view's space: the status bar and
+    /// the navigation bar as the page measures them (about 103 pt on an iPhone held upright,
+    /// less across it or on an iPad), with a little room.
+    @State private var barBottom: CGFloat = 110
+    /// The page went back once: a second way out (the banner of its album, its button) does not
+    /// take a second screen with it.
+    @State private var left = false
+    /// Its photos by day and its cover's candidates, kept while they stay the same.
+    @State private var cache = ProposalPageCache()
     /// The keyboard is in the name field; "Namen eingeben" puts it there.
     @FocusState private var nameFocused: Bool
     /// VoiceOver goes along to the name field.
     @AccessibilityFocusState private var nameFieldVoiceOverFocus: Bool
-
-    /// Where the bar ends at the top of the page, in the scroll view's space: status bar and
-    /// navigation bar of an iPhone (about 103 pt), with a little room.
-    private static let barBottom: CGFloat = 110
 
     /// Only trips get a creative name; places and dates keep their exact titles.
     private var canSuggestTitle: Bool {
@@ -445,17 +467,58 @@ struct ProposalDetailView: View {
     /// Something for this suggestion is being made: its buttons wait.
     private var busy: Bool { preparing || creating || model.quickCreating == proposal.id }
 
+    /// The suggestion as the analysis has it now, with the same photos. One that went meanwhile
+    /// (made from its card or after the purchase sheet, split, merged, made anew) shows as it was
+    /// opened (`ProposalScreen`), and nothing is made from it any more.
+    private var isCurrent: Bool {
+        model.proposals.contains { $0.id == proposal.id && $0.assetIDs == proposal.assetIDs }
+    }
+
+    /// Photos lets an app make albums only when all photos are shared: the page says so where
+    /// the album would be made, as the preview does, instead of an alert after the tap.
+    private var needsFullAccess: Bool { model.access == .limited && !UITestSupport.isRunning }
+
+    /// Its photos by day and its cover's candidates, made again only when what they are made of
+    /// changes (`ProposalPageCache`), not at every letter of a name or tick of a photo.
+    private func pagePhotos() -> (days: [PhotoDay], coverIDs: [AssetID]) {
+        let key = ProposalPageCache.Key(id: proposal.id, photos: proposal.assetIDs,
+                                        removed: model.removedFromProposals[proposal.id] ?? [],
+                                        cover: proposal.coverAssetID, words: model.proposalWords,
+                                        analysis: model.snapshot?.generatedAt, facts: model.facts.count)
+        cache.update(for: key) {
+            model.proposalPhotoDays(for: proposal)
+        } coverIDs: {
+            model.proposalCoverIDs(for: proposal, favorites: model.proposalFavorites(for: proposal))
+        }
+        return (cache.days, cache.coverIDs)
+    }
+
+    /// Back to where the page was opened from, once.
+    private func leave() {
+        guard !left else { return }
+        left = true
+        dismiss()
+    }
+
     var body: some View {
         // The card's words: the album's name and folder exactly as the plan will make them.
         let card = model.proposalCard(for: proposal, typedTitle: typedName)
-        let days = model.proposalPhotoDays(for: proposal)
+        let photos = pagePhotos()
+        let days = photos.days
         let text = ProposalDetailText(card: card, days: days, words: model.proposalWords)
         let photosHidden = card.hidesPreview && !revealed
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                cover(card)
+                cover(card, ids: photos.coverIDs)
                 VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                     header(card, text)
+                        // VoiceOver reads the header, then the two buttons at the bottom, then
+                        // the rest: the buttons came after every photo (second review).
+                        .accessibilityElement(children: .contain)
+                        .accessibilitySortPriority(2)
+                    if needsFullAccess {
+                        FullAccessCard()
+                    }
                     if proposal.requiresUserName {
                         nameSection
                     }
@@ -480,6 +543,13 @@ struct ProposalDetailView: View {
         }
         // The cover reaches up under the status bar and the bar's glass buttons (draft E2).
         .ignoresSafeArea(edges: .top)
+        // Where the bar ends: measured, as status bar and navigation bar differ upright, across
+        // and on an iPad.
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.safeAreaInsets.top
+        } action: { top in
+            if top > 0 { barBottom = top + 7 }
+        }
         // Dragging the page down puts the name field's keyboard away, as in Apple's apps.
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background.ignoresSafeArea())
@@ -490,6 +560,8 @@ struct ProposalDetailView: View {
                 actionBar(card)
             }
         }
+        // One container for VoiceOver, so the header and the bar can go first.
+        .accessibilityElement(children: .contain)
         // The bar's title: kept for the stack and VoiceOver's screen name, shown as the album's
         // name only once the page's own title went under the bar (no text on the photo).
         .navigationTitle("Vorschlag")
@@ -581,7 +653,12 @@ struct ProposalDetailView: View {
             previewSelection = nil
             directPlan = nil
             // Back from the finished preview: the suggestion is done, return to the list.
-            if applied { dismiss() }
+            if applied { leave() }
+        }
+        // Its album was made meanwhile (after the purchase sheet, or from its card): nothing is
+        // left to do here.
+        .onChange(of: model.quickCreateBanner?.id) {
+            if model.quickCreateBanner?.proposalID == proposal.id { leave() }
         }
         .modifier(ZoomedFromCard(source: proposal.id, namespace: zoom))
     }
@@ -591,10 +668,10 @@ struct ProposalDetailView: View {
     /// The cover across the page with no text on it: sharp from the device, or a calm
     /// placeholder; "Vorschau ausgeblendet" for sensitive documents (`CoverPhoto`). Never a
     /// screenshot, a document or a sensitive photo (`AppModel.proposalCoverIDs`).
-    private func cover(_ card: ProposalCardText) -> some View {
+    private func cover(_ card: ProposalCardText, ids: [AssetID]) -> some View {
         // A plain number for the geometry closure, which runs off the main actor.
-        let barBottom = Self.barBottom
-        return CoverPhoto(ids: model.proposalCoverIDs(for: proposal, favorites: model.proposalFavorites(for: proposal)),
+        let barBottom = self.barBottom
+        return CoverPhoto(ids: ids,
                           aspectRatio: typeSize.isAccessibilitySize ? 2 : 1.25, cornerRadius: 0, hidesPreview: card.hidesPreview,
                           placeholderSymbol: proposal.placeholderSymbol) { outcome in
             coverIsPhoto = outcome == .sharp
@@ -618,7 +695,7 @@ struct ProposalDetailView: View {
     /// The sign, the name, the count with the days and where the album goes (draft E2), then
     /// what the user should know before it is made.
     private func header(_ card: ProposalCardText, _ text: ProposalDetailText) -> some View {
-        let barBottom = Self.barBottom
+        let barBottom = self.barBottom
         return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             pill(card, text)
             Text(verbatim: card.title)
@@ -638,6 +715,13 @@ struct ProposalDetailView: View {
             .font(.subheadline)
             .foregroundStyle(.noteText)
             .fixedSize(horizontal: false, vertical: true)
+            // Why its buttons wait: nothing is made from a suggestion that went meanwhile.
+            if !isCurrent && !left {
+                Label("Dieser Vorschlag ist schon erledigt oder nicht mehr aktuell.", systemImage: "info.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.noteText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             // "Möglich" and the like only where the user should look (Punkt 3).
             if case .pleaseLook(let reliability?) = card.status {
                 reliabilityNote(reliability)
@@ -846,7 +930,7 @@ struct ProposalDetailView: View {
     /// change in "Dein Zuhause"): back to the list.
     private func answerOftenHere(_ oftenHere: Bool) {
         Task {
-            if await model.answerRecurringPlace(oftenHere, for: proposal), oftenHere { dismiss() }
+            if await model.answerRecurringPlace(oftenHere, for: proposal), oftenHere { leave() }
         }
     }
 
@@ -976,7 +1060,11 @@ struct ProposalDetailView: View {
     /// accessibility text sizes.
     private func actionBar(_ card: ProposalCardText) -> some View {
         Group {
-            if typeSize.isAccessibilitySize {
+            if needsFullAccess {
+                // Nothing can be made before full access: the page's one filled button is
+                // "Einstellungen öffnen" (`FullAccessCard`).
+                notNowButton
+            } else if typeSize.isAccessibilitySize {
                 VStack(spacing: Theme.Spacing.s) {
                     primaryButton(card)
                     notNowButton
@@ -1002,8 +1090,10 @@ struct ProposalDetailView: View {
                 .accessibilityHidden(true)
         }
         // A container of its own: an identifier on a plain container is handed down to every
-        // element inside (`EmptyLibraryCard`), and the buttons keep theirs.
+        // element inside (`EmptyLibraryCard`), and the buttons keep theirs. Read right after
+        // the header, before the photos (the header goes first).
         .accessibilityElement(children: .contain)
+        .accessibilitySortPriority(1)
         .accessibilityIdentifier("proposal.bar")
     }
 
@@ -1011,10 +1101,10 @@ struct ProposalDetailView: View {
     private var notNowButton: some View {
         Button("Nicht jetzt") {
             model.setDecision(.reject, for: proposal)
-            dismiss()
+            leave()
         }
         .buttonStyle(SecondaryButtonStyle())
-        .disabled(busy)
+        .disabled(busy || !isCurrent)
         .accessibilityIdentifier("proposal.notNow")
     }
 
@@ -1033,7 +1123,7 @@ struct ProposalDetailView: View {
         }
         .buttonStyle(PrimaryButtonStyle())
         // One album at a time, also one made from a card meanwhile (`AppModel.createNow`).
-        .disabled(busy || model.quickCreating != nil || !canAct(card))
+        .disabled(busy || model.quickCreating != nil || !canAct(card) || !isCurrent)
         .accessibilityIdentifier("proposal.create")
     }
 
@@ -1044,6 +1134,8 @@ struct ProposalDetailView: View {
         case .newAlbum: "Album anlegen"
         case .addsTo(_, _, let missing): "\(missing) \(missing.formatted()) Fotos ergänzen"
         case .alreadyIn: "Album so lassen"
+        case .renames: "Album umbenennen"
+        case .moves: "Album verschieben"
         }
     }
 
@@ -1063,19 +1155,22 @@ struct ProposalDetailView: View {
             // Several albums fit (or none clearly): the user picks one, Albumist does not guess.
             showAdjust = true
         case .newAlbum:
-            Task { await create() }
-        case .addsTo, .alreadyIn:
+            Task { await create(card) }
+        case .addsTo, .alreadyIn, .renames, .moves:
+            // An album of the user's changes only through the preview (Punkt 5).
             Task { await applyNow() }
         }
     }
 
     /// "Album anlegen" for a new album: made at once, with the banner to take it back (decision
     /// 7B), through the preview's own plan and run (`AppModel.createNow`). What may not skip the
-    /// preview (personal content; a plan with something to point out, such as an album of the
-    /// same name in the folder) goes through the preview from here.
-    private func create() async {
-        if proposal.requiresUserName { model.setUserTitle(name, for: proposal) }
-        guard QuickCreate.mayCreateAtOnce(proposal, decision: recommended) else {
+    /// preview (personal content, whose photos the user may not have seen; a plan with something
+    /// to point out, such as an album of the same name in the folder) goes through the preview
+    /// from here. A suggestion that went meanwhile is not made again.
+    private func create(_ card: ProposalCardText) async {
+        guard isCurrent else { return }
+        storeTypedName()
+        guard !card.isPersonal, QuickCreate.mayCreateAtOnce(proposal, decision: recommended, hidesPreview: card.hidesPreview) else {
             await applyNow()
             return
         }
@@ -1088,13 +1183,25 @@ struct ProposalDetailView: View {
         switch outcome {
         case .created:
             // Done: the banner "„Name“ angelegt · Widerrufen" shows where the user goes back to.
-            dismiss()
+            leave()
         case .needsLook:
             // Its plan has something to point out: the preview says it.
             await applyNow()
         case .needsPurchase, .notNow, .failed:
             // The purchase sheet or a message says what happened; the suggestion stays open.
             break
+        }
+    }
+
+    /// The name in the field of a place or group only the user can name is its name: stored, and
+    /// in a new album chosen before under "Anpassen" too, whose stored name would win over the
+    /// field ("Oma" chosen there, "Opa" typed here afterwards).
+    private func storeTypedName() {
+        guard proposal.requiresUserName else { return }
+        let typed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        model.setUserTitle(typed, for: proposal)
+        if !typed.isEmpty, case .createNew(let title, let folderPath) = model.decision(for: proposal), title != typed {
+            model.setDecision(.createNew(title: typed, folderPath: folderPath), for: proposal)
         }
     }
 
@@ -1162,7 +1269,7 @@ struct ProposalDetailView: View {
     /// not skip the preview.
     private func applyNow(attempt: Int = 1) async {
         waiting = nil
-        if proposal.requiresUserName { model.setUserTitle(name, for: proposal) }
+        storeTypedName()
         let chosen = recommended
         let previous = model.decisions[proposal.id]
         previewSelection = model.selectForPreview([(proposal, chosen)])
@@ -1175,7 +1282,7 @@ struct ProposalDetailView: View {
             // Nothing to change (album already complete or kept as it is): the pick goes back,
             // and the suggestion closes if it still shows.
             endSelection()
-            if navigator?.isShowing(request.mark) == true { dismiss() }
+            if navigator?.isShowing(request.mark) == true { leave() }
             return
         }
         offer(WaitingPlan(token: PlanToken(plan), request: request, chosen: chosen, previous: previous, basis: basis), attempt: attempt)

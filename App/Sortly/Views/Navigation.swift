@@ -106,8 +106,10 @@ struct PlanToken: Hashable {
 /// A suggestion on a path, compared by its id.
 struct ProposalRef: Hashable {
     let proposal: AlbumProposal
+    /// The card the page zooms out of and back into; not part of which screen it is. // Design W1 H4
+    let zoom: Namespace.ID? // Design W1 H4
 
-    init(_ proposal: AlbumProposal) { self.proposal = proposal }
+    init(_ proposal: AlbumProposal, zoom: Namespace.ID? = nil) { self.proposal = proposal; self.zoom = zoom } // Design W1 H4
 
     static func == (a: ProposalRef, b: ProposalRef) -> Bool { a.proposal.id == b.proposal.id }
     func hash(into hasher: inout Hasher) { hasher.combine(proposal.id) }
@@ -121,7 +123,7 @@ struct ProposalScreen: View {
     var ref: ProposalRef
 
     var body: some View {
-        ProposalDetailView(proposal: model.proposals.first(where: { $0.id == ref.proposal.id }) ?? ref.proposal)
+        ProposalDetailView(proposal: model.proposals.first(where: { $0.id == ref.proposal.id }) ?? ref.proposal, zoom: ref.zoom) // Design W1 H4
     }
 }
 

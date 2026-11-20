@@ -177,7 +177,7 @@ class HTTPTests(unittest.TestCase):
         fake = FakeAPI([(API, [(401, {"errors": [{"code": "NOT_AUTHORIZED"}]})])])
         with self.assertRaises(asc_feedback.AccessError) as caught:
             client(fake).get("/v1/apps")
-        self.assertIn("ASC_KEY_ID", str(caught.exception))
+        self.assertIn("ASC_FEEDBACK_KEY_ID", str(caught.exception))
         self.assertNotIn("TOKEN", str(caught.exception))
 
     def test_rate_limit_waits_for_retry_after_then_succeeds(self):
@@ -593,13 +593,16 @@ class PrivacyGateTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_schedule_and_default_are_counts_and_the_artifact_follows_the_script(self):
+    def test_schedule_and_default_are_encrypted_and_the_artifact_follows_the_script(self):
+        # Since 20.11.2026 the schedule runs mode encrypted (test_asc_feedback_encrypted.py);
+        # counts and full stay as they were.
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "workflows", "asc-feedback.yml")
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
-        self.assertIn("default: counts", text)
-        self.assertIn("MODE: ${{ inputs.report || 'counts' }}", text)
+        self.assertIn("default: encrypted", text)
+        self.assertIn("MODE: ${{ inputs.report || 'encrypted' }}", text)
         self.assertIn("if: always() && steps.fetch.outputs.mode == 'full'", text)
+        self.assertIn("if: always() && steps.fetch.outputs.mode == 'encrypted'", text)
         self.assertIn("retention-days: 7", text)
         self.assertNotRegex(text, r"(?m)^  push:")
         self.assertNotRegex(text, r"(?m)^  pull_request")

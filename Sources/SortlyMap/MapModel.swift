@@ -63,6 +63,21 @@ public struct LocalDay: Hashable, Comparable, Sendable, Codable, CustomStringCon
 
 // MARK: - Trip geometry (where the photos of one trip were, day by day)
 
+/// How many photos of a trip were taken on one local day ("Meiste Fotos an einem Tag").
+public struct TripDay: Hashable, Sendable, Codable {
+    public var day: LocalDay
+    /// All the trip's photos of that day, with and without a location.
+    public var photoCount: Int
+    /// The place of most of that day's photos, if one has `TripGeometry.minimumPhotosPerPlace`.
+    public var placeIndex: Int?
+
+    public init(day: LocalDay, photoCount: Int, placeIndex: Int?) {
+        self.day = day
+        self.photoCount = photoCount
+        self.placeIndex = placeIndex
+    }
+}
+
 /// Where photos of one local day of a trip were taken: at least `TripGeometry.minimumPhotosPerPlace`
 /// photos of that day within `TripGeometry.placeRadiusMeters`.
 public struct DayPlace: Hashable, Sendable, Codable {
@@ -105,14 +120,20 @@ public struct TripPlace: Hashable, Sendable, Codable {
     /// `TripGeometry.coverCandidateLimit`. The app shows only those it has sharp on the iPhone
     /// and never loads one from iCloud.
     public var coverCandidates: [AssetID]
+    /// Metres above sea level, when at least `TripGeometry.minimumPhotosPerPlace` of its photos
+    /// carry an altitude, all below `AirborneFilter.maximumAltitude` and agreeing within
+    /// `TripGeometry.altitudeSpreadMeters`: their mean. `nil` otherwise (no "Höchstes Foto" from it).
+    public var altitude: Double?
 
-    public init(coordinate: GeoCoordinate, name: String?, countryKey: String?, photoCount: Int, days: [LocalDay], coverCandidates: [AssetID]) {
+    public init(coordinate: GeoCoordinate, name: String?, countryKey: String?, photoCount: Int, days: [LocalDay], coverCandidates: [AssetID],
+                altitude: Double? = nil) {
         self.coordinate = coordinate
         self.name = name
         self.countryKey = countryKey
         self.photoCount = photoCount
         self.days = days
         self.coverCandidates = coverCandidates
+        self.altitude = altitude
     }
 }
 
@@ -166,6 +187,8 @@ public struct TripGeometry: Hashable, Sendable, Codable, Identifiable {
     public static let maxRoutePoints = 200
     /// At most this many photos per place for its pin and stack.
     public static let coverCandidateLimit = 6
+    /// A place's photos must agree on their altitude within this to give it one (`TripPlace.altitude`).
+    public static let altitudeSpreadMeters = 150.0
 
     public var id: SortlyID
     /// First and last photo of the trip.
@@ -178,6 +201,9 @@ public struct TripGeometry: Hashable, Sendable, Codable, Identifiable {
     public var lastDay: LocalDay
     /// All photos of the trip (with and without location), as its album shows them.
     public var photoCount: Int
+    /// Every local day with photos, oldest first. A photo without a place counts in the time zone
+    /// of the trip (`timeZoneIdentifier`).
+    public var dayCounts: [TripDay]
     /// Oldest first.
     public var dayPlaces: [DayPlace]
     public var places: [TripPlace]
@@ -198,7 +224,7 @@ public struct TripGeometry: Hashable, Sendable, Codable, Identifiable {
     public var airborneCount: Int
 
     public init(id: SortlyID, start: Date, end: Date, timeZoneIdentifier: String?, firstDay: LocalDay, lastDay: LocalDay, photoCount: Int,
-                dayPlaces: [DayPlace], places: [TripPlace], route: [RoutePoint], legs: [RouteLeg], destinationIndex: Int?,
+                dayCounts: [TripDay] = [], dayPlaces: [DayPlace], places: [TripPlace], route: [RoutePoint], legs: [RouteLeg], destinationIndex: Int?,
                 destination: GeoCoordinate, countryPhotos: [String: Int], mainCountryKey: String?, airborneCount: Int) {
         self.id = id
         self.start = start
@@ -207,6 +233,7 @@ public struct TripGeometry: Hashable, Sendable, Codable, Identifiable {
         self.firstDay = firstDay
         self.lastDay = lastDay
         self.photoCount = photoCount
+        self.dayCounts = dayCounts
         self.dayPlaces = dayPlaces
         self.places = places
         self.route = route
@@ -663,14 +690,16 @@ public struct MapTrip: Hashable, Sendable, Codable, Identifiable {
     /// country's code.
     public var title: String
     public var stats: TripStats
-    /// The country of the home of the trip's time ("abroad" for the favourite country), if known.
-    public var homeCountryCode: String?
+    /// The home of the trip's time, rounded (`MapHome.homes`): where its arc starts; its country
+    /// tells "abroad" for the favourite country. `nil` when none is known or "Kein Zuhause".
+    /// Never goes into share data.
+    public var home: RoundedHome?
 
-    public init(geometry: TripGeometry, title: String, stats: TripStats, homeCountryCode: String?) {
+    public init(geometry: TripGeometry, title: String, stats: TripStats, home: RoundedHome?) {
         self.geometry = geometry
         self.title = title
         self.stats = stats
-        self.homeCountryCode = homeCountryCode
+        self.home = home
     }
 
     public var id: SortlyID { geometry.id }

@@ -29,10 +29,14 @@ public enum DatabaseFile {
         case openCurrent
         /// These moves, then the current name opens.
         case move([Move])
-        /// A write-ahead log under both names: which one holds committed rows is not known.
-        /// Nothing moves and nothing is deleted; the earlier database opens with its own log,
-        /// and the diagnostic report lists the other one (`filesLeftBeside`).
-        case keepEarlier
+        /// A write-ahead log under both names: the earlier database's own log is the one next to
+        /// it; the one under the current name is stale. It must not stay there: once the earlier
+        /// database closes cleanly (its log checkpointed and deleted), the next move would put the
+        /// database next to the stale log and SQLite would replay it over newer rows (second
+        /// review of prep/rename, 250 updates and an insert lost). So the stale log and shared
+        /// memory of the current name go into `Quarantine/<time>-stray/` (never deleted), then the
+        /// earlier database moves as usual.
+        case setAsideStrayLog
     }
 
     /// What the start does with the folder's files. Pure, so the rules are tested without files.
@@ -44,7 +48,7 @@ public enum DatabaseFile {
     /// - Neither exists: a new database starts under the current name.
     public static func plan(existing: Set<String>, legacy: String = legacyName, current: String = name) -> Plan {
         guard legacy != current, !existing.contains(current), existing.contains(legacy) else { return .openCurrent }
-        if existing.contains(legacy + "-wal"), existing.contains(current + "-wal") { return .keepEarlier }
+        if existing.contains(legacy + "-wal"), existing.contains(current + "-wal") { return .setAsideStrayLog }
         return .move(suffixes.compactMap { suffix in
             let from = legacy + suffix, to = current + suffix
             guard existing.contains(from) else { return nil }
@@ -68,7 +72,7 @@ public enum DatabaseFile {
     /// Files of the other name that stay where they are and are never deleted silently: earlier
     /// files next to the current database (an older build ran again after the move and wrote a
     /// new one; they still hold the user's data, recognized text included), or a log under the
-    /// current name while the earlier database opens (`Plan.keepEarlier`). The diagnostic report
+    /// current name while the earlier database opens (a stray log that could not be set aside). The diagnostic report
     /// lists them.
     public static func filesLeftBeside(existing: Set<String>, legacy: String = legacyName, current: String = name) -> [String] {
         guard legacy != current else { return [] }
@@ -85,12 +89,14 @@ public enum DatabaseFile {
         /// A move failed; everything went back, so the database opens under its earlier name
         /// this time and the next start tries again.
         case keptEarlierName
-        /// A log under both names (`Plan.keepEarlier`): the earlier database opens as it is.
-        case logUnderBothNames
+        /// A stale log under the current name went into the quarantine folder
+        /// (`Plan.setAsideStrayLog`), then the earlier files moved.
+        case straySetAsideThenMoved(count: Int)
     }
 
-    /// A failed move whose way back failed too: the start fails (the start error screen), so no
-    /// database opens without its log. Nothing is deleted.
+    /// A failed move whose way back failed too, or a stray log that could not be set aside: the
+    /// start fails (the start error screen), so no database opens without its log or next to a
+    /// stale one. Nothing is deleted.
     public struct RollbackFailed: Error, CustomStringConvertible {
         public let files: [String]
         public var description: String { "database files could not be moved back: \(files.joined(separator: ", "))" }
@@ -109,15 +115,26 @@ public enum DatabaseFile {
     ///
     /// `move` is the file move (tests hand in one that fails).
     /// - Throws: `RollbackFailed` when a failed move cannot be undone completely.
-    public static func prepare(in folder: URL, legacy: String = legacyName, current: String = name,
+    public static func prepare(in folder: URL, legacy: String = legacyName, current: String = name, now: Date = Date(),
                                move: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) })
         throws -> (url: URL, outcome: Outcome) {
         let url = { (file: String) in folder.appendingPathComponent(file) }
         switch plan(existing: existing(in: folder, legacy: legacy, current: current), legacy: legacy, current: current) {
         case .openCurrent:
             return (url(current), .unchanged)
-        case .keepEarlier:
-            return (url(legacy), .logUnderBothNames)
+        case .setAsideStrayLog:
+            // Moved, never deleted; if that fails the start fails (nothing opens next to it).
+            let stray = [current + "-wal", current + "-shm"].filter { FileManager.default.fileExists(atPath: url($0).path) }
+            do {
+                let aside = strayFolder(in: folder, now: now)
+                try FileManager.default.createDirectory(at: aside, withIntermediateDirectories: true)
+                for file in stray { try move(url(file), aside.appendingPathComponent(file)) }
+            } catch {
+                throw RollbackFailed(files: stray.filter { FileManager.default.fileExists(atPath: url($0).path) })
+            }
+            let (opened, outcome) = try prepare(in: folder, legacy: legacy, current: current, now: now, move: move)
+            if case .moved(let count) = outcome { return (opened, .straySetAsideThenMoved(count: count)) }
+            return (opened, outcome)
         case .move(let moves):
             do {
                 for step in moves {
@@ -136,5 +153,28 @@ public enum DatabaseFile {
                 return (url(legacy), .keptEarlierName)
             }
         }
+    }
+
+    /// A new folder `Quarantine/<time>-stray` next to the database (the folder "Neu aufbauen"
+    /// uses; a running number when one of that time exists).
+    static func strayFolder(in folder: URL, now: Date) -> URL {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stamp = formatter.string(from: now).replacingOccurrences(of: ":", with: "-")
+        let base = folder.appendingPathComponent("Quarantine", isDirectory: true)
+        var target = base.appendingPathComponent("\(stamp)-stray", isDirectory: true)
+        var attempt = 1
+        while FileManager.default.fileExists(atPath: target.path) {
+            attempt += 1
+            target = base.appendingPathComponent("\(stamp)-stray-\(attempt)", isDirectory: true)
+        }
+        return target
+    }
+
+    /// The other of the two names (`name`, `legacyName`) for a database file name, or nil when
+    /// both are the same or the name is neither (a test's own file).
+    public static func otherName(for file: String) -> String? {
+        guard name != legacyName else { return nil }
+        return file == name ? legacyName : file == legacyName ? name : nil
     }
 }

@@ -408,6 +408,26 @@ struct DataSafetyTests {
         #expect(try Data(contentsOf: folders[2].appendingPathComponent("sortly.sqlite")) == Data("db 2".utf8))
     }
 
+    /// "Neu aufbauen" takes stray logs of the other name too (no database of that name): a
+    /// stale log must not be replayed into the database built next (second review of prep/rename).
+    @Test func theQuarantineTakesAStrayLogOfTheOtherNameButNotItsDatabase() throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("old.sqlite")
+        for name in ["old.sqlite", "old.sqlite-wal", "new.sqlite-wal", "new.sqlite-shm"] {
+            try Data(name.utf8).write(to: dir.appendingPathComponent(name))
+        }
+        let aside = try #require(SortlyStore.quarantineDatabase(at: url, otherName: "new.sqlite"))
+        let moved = try FileManager.default.contentsOfDirectory(atPath: aside.path).sorted()
+        #expect(moved == ["new.sqlite-shm", "new.sqlite-wal", "old.sqlite", "old.sqlite-wal"])
+        // A database file of the other name is the user's data: it stays, with its log.
+        for name in ["new.sqlite", "new.sqlite-wal"] { try Data(name.utf8).write(to: dir.appendingPathComponent(name)) }
+        try Data("db".utf8).write(to: url)
+        let second = try #require(SortlyStore.quarantineDatabase(at: url, otherName: "new.sqlite"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: second.path) == ["old.sqlite"])
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("new.sqlite-wal").path))
+    }
+
     /// "Neu aufbauen" after a start that failed with the store already open (AppModel.load):
     /// the old connection is still open while its files go to the quarantine and a new database
     /// starts under the same name. When the old connection closes, it must not touch the new

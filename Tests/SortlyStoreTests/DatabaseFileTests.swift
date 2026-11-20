@@ -63,9 +63,10 @@ struct DatabaseFileTests {
                                                              DatabaseFile.Move(from: old, to: new, replacing: false)])
     }
 
-    @Test func aLogUnderBothNamesMovesNothing() {
-        // Either log may hold committed rows: none is replaced (second review of prep/rename).
-        #expect(DatabaseFile.plan(existing: [old, old + "-wal", new + "-wal"], legacy: old, current: new) == .keepEarlier)
+    @Test func aLogUnderBothNamesSetsTheStrayOneAside() {
+        // The earlier database's own log is next to it; the other one is stale and must never
+        // be replaced silently nor stay (second review of prep/rename).
+        #expect(DatabaseFile.plan(existing: [old, old + "-wal", new + "-wal"], legacy: old, current: new) == .setAsideStrayLog)
     }
 
     @Test func theWayBackTakesEveryFileOfTheCurrentNameWithoutItsEarlierCounterpartDatabaseFirst() {
@@ -148,19 +149,61 @@ struct DatabaseFileTests {
         #expect(read(new + "-wal", in: dir) == nil)
     }
 
-    @Test func aLogOnBothSidesIsNeverDeleted() throws {
+    @Test func aStrayLogGoesIntoTheQuarantineNeverDeletedThenTheEarlierDatabaseMoves() throws {
         let dir = try folder()
         defer { try? FileManager.default.removeItem(at: dir) }
         try write("db", old, in: dir)
         try write("earlier log", old + "-wal", in: dir)
         try write("stray log", new + "-wal", in: dir)
-        let (url, outcome) = try DatabaseFile.prepare(in: dir, legacy: old, current: new)
-        #expect(outcome == .logUnderBothNames)
-        // Which log holds committed rows is not known: nothing moves, nothing is deleted, the
-        // earlier database opens with its own log.
-        #expect(url == dir.appendingPathComponent(old))
-        #expect(read(old, in: dir) == "db" && read(old + "-wal", in: dir) == "earlier log")
-        #expect(read(new + "-wal", in: dir) == "stray log")
+        try write("stray shm", new + "-shm", in: dir)
+        let (url, outcome) = try DatabaseFile.prepare(in: dir, legacy: old, current: new, now: Date(timeIntervalSince1970: 1_700_000_000))
+        #expect(outcome == .straySetAsideThenMoved(count: 2))
+        #expect(url == dir.appendingPathComponent(new))
+        #expect(read(new, in: dir) == "db" && read(new + "-wal", in: dir) == "earlier log" && read(new + "-shm", in: dir) == nil)
+        let aside = try FileManager.default.contentsOfDirectory(atPath: dir.appendingPathComponent("Quarantine").path)
+        #expect(aside.count == 1 && aside[0].hasSuffix("-stray"))
+        let strayFolder = "Quarantine/" + aside[0] + "/"
+        #expect(read(strayFolder + new + "-wal", in: dir) == "stray log" && read(strayFolder + new + "-shm", in: dir) == "stray shm")
+    }
+
+    @Test func aStrayLogThatCannotBeSetAsideFailsTheStart() throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try write("db", old, in: dir)
+        try write("earlier log", old + "-wal", in: dir)
+        try write("stray log", new + "-wal", in: dir)
+        #expect(throws: DatabaseFile.RollbackFailed.self) {
+            _ = try DatabaseFile.prepare(in: dir, legacy: old, current: new) { _, _ in throw CocoaError(.fileWriteOutOfSpace) }
+        }
+        #expect(read(old, in: dir) == "db" && read(old + "-wal", in: dir) == "earlier log" && read(new + "-wal", in: dir) == "stray log")
+    }
+
+    @Test func aStaleLogUnderTheCurrentNameNeverReplaysOverTheEarlierDatabase() async throws {
+        // Second review of prep/rename, with real SQLite: the earlier database with its log (an
+        // app that ended without closing it) and a stale log of the same database under the
+        // current name. The database goes on working, closes cleanly (its log checkpointed and
+        // deleted), and the next start runs again: no row may be lost to the stale log.
+        let source = try folder(), dir = try folder()
+        defer { for d in [source, dir] { try? FileManager.default.removeItem(at: d) } }
+        let earlier = try SortlyStore(url: source.appendingPathComponent(old))
+        try await earlier.setValue(0, forKey: "user.count")
+        // Copied while it is open: the files as an app that was ended leaves them.
+        for file in [old, old + "-wal"] {
+            try FileManager.default.copyItem(at: source.appendingPathComponent(file), to: dir.appendingPathComponent(file))
+        }
+        try FileManager.default.copyItem(at: source.appendingPathComponent(old + "-wal"), to: dir.appendingPathComponent(new + "-wal"))
+        _ = earlier
+
+        let (url, _) = try DatabaseFile.prepare(in: dir, legacy: old, current: new)
+        do {
+            let store = try SortlyStore(url: url)
+            for count in 1...250 { try await store.setValue(count, forKey: "user.count") }
+            try await store.setValue("inserted", forKey: "user.inserted")
+        }
+        let (next, _) = try DatabaseFile.prepare(in: dir, legacy: old, current: new)
+        let reopened = try SortlyStore(url: next)
+        #expect(try await reopened.value(Int.self, forKey: "user.count") == 250)
+        #expect(try await reopened.value(String.self, forKey: "user.inserted") == "inserted")
     }
 
     @Test func aWayBackThatFailsTooFailsTheStartAndDeletesNothing() throws {

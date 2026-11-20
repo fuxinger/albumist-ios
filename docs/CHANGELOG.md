@@ -54,7 +54,8 @@
   „Rückgängig machen“ für alles, was Albumist angelegt hat („Alles rückgängig machen“, „Rest
   rückgängig machen“, in der Reise-Werkstatt statt „Aufheben“), „Widerrufen“ nur im kurzen
   Hinweis direkt danach; Belege sagen „Vollständig angelegt“, „Angelegt am“ (beim Entfernen
-  „entfernt“) statt „umgesetzt“; „Unsortiert“ statt „Nicht sortiert“ (Liste, Foto-Info, Suche);
+  „entfernt“, beim Rückgängigmachen „Vollständig rückgängig gemacht“, „Teilweise rückgängig
+  gemacht“, auch in Albumzeilen und im geteilten Text) statt „umgesetzt“; „Unsortiert“ statt „Nicht sortiert“ (Liste, Foto-Info, Suche);
   die Einstellung heißt nur noch „Zählt als sortiert“, die Übersicht nennt die Bereiche selbst
   („Gezählt werden nur Fotos, die zu „Länder und Orte“ und „Reisen“ passen.“); die Wahl des Jahres
   heißt in Einführung und Einstellungen „Albumist arbeitet mit“. Die Einführung sagt richtig,

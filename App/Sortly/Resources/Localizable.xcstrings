@@ -3761,6 +3761,16 @@
         }
       }
     },
+    "Nicht vollständig rückgängig gemacht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not fully undone"
+          }
+        }
+      }
+    },
     "Nichts mehr zu tun" : {
       "localizations" : {
         "en" : {
@@ -4607,6 +4617,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fully Removed"
+          }
+        }
+      }
+    },
+    "Vollständig rückgängig gemacht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fully Undone"
           }
         }
       }

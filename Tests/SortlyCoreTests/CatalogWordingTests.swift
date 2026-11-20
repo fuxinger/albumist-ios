@@ -167,9 +167,28 @@ struct CatalogWordingTests {
         // The receipt.
         ("Vollständig angelegt", "Fully Created"),
         ("Angelegt am %@", "Created on %@"),
+        ("Nicht vollständig angelegt", "Not fully created"),
+        // The receipt of an undo (second review of P3-09: it said „Vollständig angelegt“).
+        ("Vollständig rückgängig gemacht", "Fully Undone"),
+        ("Teilweise rückgängig gemacht", "Partly Undone"),
+        ("Nicht vollständig rückgängig gemacht", "Not fully undone"),
     ])
     func oneWordInBothLanguages(_ pair: (german: String, english: String)) throws {
         #expect(try Self.value(pair.german, "en") == pair.english)
+    }
+
+    /// The receipt, its album rows and its shared text name the kind of work
+    /// (`PlanReceipt.Kind`): an undo says „rückgängig gemacht“ (second review of P3-09: the
+    /// receipt of an undo said „Vollständig angelegt“, its rows „Nicht vollständig angelegt“).
+    @Test func theReceiptOfAnUndoSaysUndone() throws {
+        let source = AppSource.code(try AppSource.read("App/Sortly/Views/PlanReceiptView.swift"), keepStrings: true)
+        let literals = Set(Self.literals(source))
+        let missing = ["Vollständig rückgängig gemacht", "Teilweise rückgängig gemacht", "Nicht vollständig rückgängig gemacht"]
+            .filter { !literals.contains($0) }
+        #expect(missing.isEmpty, "PlanReceiptView.swift does not say \(missing)")
+        // The kind decides the word, not a flag that only knows removals.
+        let byFlag = source.contains("isRemoval"), byKind = source.contains("PlanReceipt.Kind")
+        #expect(!byFlag && byKind, "PlanReceiptView.swift picks its words by isRemoval, not by PlanReceipt.Kind")
     }
 
     // MARK: - Thousands separators

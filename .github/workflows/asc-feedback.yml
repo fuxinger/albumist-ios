@@ -6,9 +6,11 @@ name: TestFlight feedback
 # upload's: the upload key (Admin) is an environment secret of testflight-upload that only the
 # upload job of testflight.yml gets (test_workflows.py checks that no other job names it). This key needs the role
 # Developer (Admin or App Manager would work too, but can do more than reading feedback) and is
-# kept as three repository secrets ASC_FEEDBACK_KEY_ID, ASC_FEEDBACK_ISSUER_ID and
-# ASC_FEEDBACK_KEY_P8 (docs/launch/FREIGABE_EINRICHTEN.md, optional step). Without them the run
-# stops after one quick check.
+# kept as three secrets ASC_FEEDBACK_KEY_ID, ASC_FEEDBACK_ISSUER_ID and ASC_FEEDBACK_KEY_P8 of the
+# environment asc-feedback, which only the branch main may use (docs/launch/FREIGABE_EINRICHTEN.md,
+# optional step): a changed workflow or script on another branch cannot read them. The job
+# "setup" checks that rule first; until the environment exists the run fetches nothing and stays
+# green, as it does without the secrets.
 #
 # Three modes. "encrypted" is the schedule and the default: comments, device data, screenshots and
 # crash logs of the last 14 days are packed into one tar under $RUNNER_TEMP and encrypted with
@@ -55,8 +57,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  setup:
+    # The fetch job runs in the environment asc-feedback, which holds the three ASC_FEEDBACK_*
+    # secrets and which only the branch main may use. GitHub creates an environment that a job
+    # names but that does not exist, without any rule; so the fetch job only starts once this
+    # job has read the environment and its one branch rule main (asc_feedback.py
+    # --check-environment, the rule of upload_approval.py). Not set up yet: a notice, the run
+    # stays green and fetches nothing. Set up wrongly: red.
+    name: Feedback environment checked
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Environment asc-feedback admits main only
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPLOAD_PRIVATE_PLAN_OK: ${{ vars.UPLOAD_PRIVATE_PLAN_OK }}
+          # Only whether a repository secret of that name is left ("true"/"false"), never its value.
+          REPOSITORY_SECRET_LEFT: ${{ secrets.ASC_FEEDBACK_KEY_ID != '' }}
+        run: python3 .github/scripts/asc_feedback.py --check-environment
+
   fetch:
     name: Fetch TestFlight feedback and crashes
+    needs: setup
+    if: needs.setup.outputs.ready == 'true'
+    environment: asc-feedback
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

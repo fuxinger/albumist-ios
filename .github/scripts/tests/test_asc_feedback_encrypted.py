@@ -478,8 +478,136 @@ class WorkflowEncryptedTests(unittest.TestCase):
         self.assertEqual(expressions, {
             "${{ secrets.ASC_FEEDBACK_KEY_ID }}", "${{ secrets.ASC_FEEDBACK_ISSUER_ID }}",
             "${{ secrets.ASC_FEEDBACK_KEY_P8 }}", "${{ runner.temp }}", "${{ github.token }}",
-            "${{ inputs.report || 'encrypted' }}"})
+            "${{ inputs.report || 'encrypted' }}", "${{ steps.check.outputs.ready }}",
+            "${{ vars.UPLOAD_PRIVATE_PLAN_OK }}", "${{ secrets.ASC_FEEDBACK_KEY_ID != '' }}"})
         self.assertNotRegex(self.text, r"secrets\.ASC_(?:KEY_ID|ISSUER_ID|KEY_P8)\b")   # never the upload key
+
+
+class EnvironmentTests(unittest.TestCase):
+    """Review S1: the fetch job runs in the environment asc-feedback, fenced to main."""
+
+    REPO = "fuxinger/sortly-ios"
+
+    def github(self, repository=None, environment=None, branches=None, fail=None):
+        calls = []
+
+        def transport(method, url, headers):
+            calls.append((url, headers.get("Authorization")))
+            path = url[len(asc_feedback.GITHUB_API) + len("/repos/"):]
+            if fail and fail in path:
+                return 503, {}, b""
+            if path == self.REPO:
+                answer = repository if repository is not None else {"private": False, "visibility": "public"}
+            elif path.endswith("/environments/asc-feedback"):
+                answer = environment
+            elif path.endswith("/deployment-branch-policies"):
+                answer = {"branch_policies": branches or []}
+            else:
+                raise AssertionError(url)
+            return (404, {}, b"{}") if answer is None else (200, {}, json.dumps(answer).encode())
+        return transport, calls
+
+    def check(self, *args, environ=None, **kwargs):
+        transport, calls = self.github(*args, **kwargs)
+        folder = tempfile.mkdtemp()
+        try:
+            env = {"GITHUB_REPOSITORY": self.REPO, "GH_TOKEN": "gh", "GITHUB_OUTPUT": os.path.join(folder, "o"),
+                   "GITHUB_STEP_SUMMARY": os.path.join(folder, "s")}
+            env.update(environ or {})
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                code = asc_feedback.check_environment(env, transport, sleep=lambda s: None)
+            with open(env["GITHUB_OUTPUT"], encoding="utf-8") as handle:
+                output = handle.read()
+        finally:
+            shutil.rmtree(folder)
+        return code, output, log.getvalue(), calls
+
+    MAIN = {"deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}
+
+    def test_ready_only_with_the_one_rule_main(self):
+        code, output, log, calls = self.check(environment=self.MAIN, branches=[{"name": "main", "type": "branch"}])
+        self.assertEqual((code, output), (0, "ready=true\n"))
+        self.assertIn("main only", log)
+        self.assertTrue(all(token == "Bearer gh" for _, token in calls))
+        self.assertTrue(all(url.startswith("https://api.github.com/repos/") for url, _ in calls))
+
+    def test_a_missing_environment_skips_green(self):
+        code, output, log, _ = self.check(environment=None)
+        self.assertEqual((code, output), (0, "ready=false\n"))
+        self.assertIn("::notice title=Feedback setup::Skipped: the environment asc-feedback does not exist", log)
+        self.assertNotIn("::error", log)
+
+    def test_a_wrong_rule_fails_red(self):
+        for environment, branches in (
+                ({"deployment_branch_policy": None}, None),                                       # any branch
+                ({"deployment_branch_policy": {"protected_branches": True, "custom_branch_policies": False}}, None),
+                (self.MAIN, [{"name": "main"}, {"name": "dev"}]),
+                (self.MAIN, [{"name": "*"}]),
+                (self.MAIN, [{"name": "main", "type": "tag"}]),
+                (self.MAIN, [])):
+            with self.subTest(environment=environment, branches=branches):
+                code, output, log, _ = self.check(environment=environment, branches=branches)
+                self.assertEqual((code, output), (1, "ready=false\n"))
+                self.assertIn("::error title=Feedback setup::the environment asc-feedback may be used from other", log)
+
+    def test_a_private_repository_skips_unless_the_plan_allows_environments(self):
+        private = {"private": True, "visibility": "private"}
+        code, output, log, calls = self.check(repository=private, environment=self.MAIN)
+        self.assertEqual((code, output), (0, "ready=false\n"))
+        self.assertIn("private", log)
+        self.assertEqual(len(calls), 1)
+        code, output, _, _ = self.check(repository=private, environment=self.MAIN, branches=[{"name": "main"}],
+                                        environ={"UPLOAD_PRIVATE_PLAN_OK": "true"})
+        self.assertEqual((code, output), (0, "ready=true\n"))
+
+    def test_no_answer_fails_red_and_a_redirect_is_not_followed(self):
+        code, output, log, calls = self.check(environment=self.MAIN, fail="environments")
+        self.assertEqual((code, output), (1, "ready=false\n"))
+        self.assertIn("::error title=Feedback setup::GitHub API", log)
+        self.assertEqual(len([u for u, _ in calls if "environments" in u]), 3)        # tried three times
+
+        def redirect(method, url, headers):
+            return 301, {"Location": "https://evil.example/"}, b""
+        with self.assertRaises(RuntimeError):
+            asc_feedback.environment_state(self.REPO, "gh", transport=redirect, sleep=lambda s: None)
+
+    def test_a_repository_secret_left_behind_is_a_warning(self):
+        code, output, log, _ = self.check(environment=self.MAIN, branches=[{"name": "main"}],
+                                          environ={"REPOSITORY_SECRET_LEFT": "true"})
+        self.assertEqual((code, output), (0, "ready=true\n"))
+        self.assertIn("::warning title=Feedback setup::ASC_FEEDBACK_KEY_ID is still a repository secret", log)
+
+    def test_the_command_line_only_checks(self):
+        with mock.patch.object(asc_feedback, "check_environment", return_value=0) as check, \
+                mock.patch.object(asc_feedback, "fetch", side_effect=AssertionError("fetched")):
+            self.assertEqual(asc_feedback.main(["--check-environment"]), 0)
+        check.assert_called_once_with()
+
+
+class WorkflowEnvironmentTests(unittest.TestCase):
+    def test_only_the_fetch_job_names_the_environment_and_only_after_the_check(self):
+        with open(WORKFLOW, encoding="utf-8") as handle:
+            text = handle.read()
+        try:
+            import yaml
+        except ImportError:
+            yaml = None
+        setup = text.split("\n  setup:\n", 1)[1].split("\n  fetch:\n", 1)[0]
+        fetch = text.split("\n  fetch:\n", 1)[1]
+        self.assertIn("    needs: setup\n    if: needs.setup.outputs.ready == 'true'\n    environment: asc-feedback\n",
+                      fetch)
+        self.assertNotIn("environment:", setup)
+        self.assertIn("run: python3 .github/scripts/asc_feedback.py --check-environment", setup)
+        self.assertIn("actions: read", setup)
+        self.assertEqual(text.count("environment: "), 1)
+        self.assertEqual(asc_feedback.ENVIRONMENT, "asc-feedback")
+        # The setup job learns only whether a repository secret is left, never a value.
+        self.assertEqual(re.findall(r"secrets\.[A-Z_]+[^}]*", setup), ["secrets.ASC_FEEDBACK_KEY_ID != '' "])
+        if yaml is not None:
+            jobs = yaml.safe_load(text)["jobs"]
+            self.assertEqual(jobs["fetch"]["environment"], "asc-feedback")
+            self.assertEqual(jobs["fetch"]["needs"], "setup")
+            self.assertNotIn("environment", jobs["setup"])
 
 
 if __name__ == "__main__":

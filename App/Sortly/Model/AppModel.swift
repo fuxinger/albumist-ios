@@ -332,6 +332,15 @@ final class AppModel {
         return nil
     }
 
+    /// A screen asked for something made only on demand from the facts (the places of "Dein
+    /// Zuhause", the atlas of each year, the name of the detected home), and it is made or being
+    /// made: a refresh whose facts are unchanged keeps it, with no spinner and no lost VoiceOver
+    /// focus (delta review, N2, `refreshDerived`).
+    private var keepsOnDemand: Bool {
+        homeCandidatesCache != nil || homeCandidatesTask != nil || yearAtlasesCache != nil || yearAtlasesTask != nil
+            || detectedHomePlaceCache != nil || detectedHomeNameTask != nil
+    }
+
     /// Starts making the atlas of each year for the facts as they are, unless that is under way
     /// (`makeHomeCandidates`): observed `yearAtlasesCache` draws the atlas again when they are
     /// there; facts that change meanwhile drop the result (`factsVersion`).
@@ -1975,11 +1984,15 @@ final class AppModel {
             // that fails there does not skip it.
             let settings = settings
             let managed = managedAlbums, scope = analysisScope
+            // The facts on screen, when a screen has something made only on demand from them:
+            // when the new ones equal them, the engine hands them back (comparing them costs
+            // 150 ms at 50,000 photos off the main thread, so only then).
+            let shownFacts = keepsOnDemand ? facts : []
             let once = DerivedRefresh.Once(
                 reopened: { [weak self] reopened in await self?.reopenAfterRecheck(reopened) },
                 undone: { undone in await Purchases.shared.settleUndone(undone) })
             let refreshed = try await pipeline.derivedRefresh(settings: settings, managed: managed, scope: scope,
-                                                              historyLimit: historyLimit, once: once)
+                                                              historyLimit: historyLimit, once: once, shown: shownFacts)
             // A newer call showed its result meanwhile, or the part of the library changed: this
             // result is older than what is shown (review of 9f0bc40). Noted at once, so an older
             // call that ends later sees it.
@@ -1994,6 +2007,15 @@ final class AppModel {
             detectedHome = refreshed.detectedHome
             homeChangeNotice = refreshed.homeNotice
             MainThreadWatch.shared.section("refresh: facts") {
+                // The facts on screen themselves (`DerivedLibrary.sameFacts`, one look): nothing
+                // made from them is emptied or made again, not the atlas of a year nor the name
+                // of the home a screen shows (delta review, N2: a spinner and VoiceOver's focus
+                // lost at every refresh).
+                if DerivedLibrary.sameFacts(derived.facts, facts) {
+                    // Capture dates a memory warning emptied come back made off the main thread.
+                    if datesCache == nil { datesCache = derived.creationDates }
+                    return
+                }
                 facts = derived.facts
                 // Made with the facts off the main thread (a new value of the facts empties
                 // them): the first draw of the overview, the atlas, the photo view and the search

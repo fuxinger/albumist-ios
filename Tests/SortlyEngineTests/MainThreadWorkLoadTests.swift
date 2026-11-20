@@ -150,6 +150,13 @@ extension LoadTests {
         #expect(atlases[year] == oneYear)
         #expect(atlases.count >= 10)
         note("DerivedLibrary.yearAtlases (\(atlases.count) years)", yearsTook, before: oneYearTook)
+        // The facts read compared with those on screen, at every refresh with as many photos
+        // (`derivedLibrary(shown:)`, off the main thread; delta review, N2). Another copy: two
+        // arrays of the same storage are equal at once.
+        let other = MainThreadWork.facts(photos)
+        let (compareTook, equal) = MainThreadWork.fastest { facts == other }
+        #expect(equal)
+        note("[AssetFacts] == (unchanged facts)", compareTook)
         // The statuses of a search like "nicht sortiert" (`AppModel.plainSearch`).
         let (statusesTook, statuses) = MainThreadWork.fastest {
             LibraryStatus.searchStatuses(facts: facts, states: states, resolver: resolver, scope: .all)
@@ -184,6 +191,7 @@ extension LoadTests {
         #expect(byIDTook < .milliseconds(200) * scale, "FactsByID took \(byIDTook)") // measured 40-54 / 89-96 ms
         #expect(lookupTook < .milliseconds(5), "1,000 lookups took \(lookupTook)") // measured 0.5-0.8 ms
         #expect(yearsTook < .milliseconds(1_000) * scale, "DerivedLibrary.yearAtlases took \(yearsTook)") // measured 277-349 / 482-716 ms
+        #expect(compareTook < .milliseconds(500) * scale, "comparing the facts took \(compareTook)") // measured 149 / 226 ms
         #expect(statusesTook < .milliseconds(1_200) * scale, "LibraryStatus.searchStatuses took \(statusesTook)") // measured 320-377 / 722-1,011 ms
         // The main actor: never held for anything near a pass (Apple counts a hang from 250 ms;
         // under 100 ms one seldom notices). Measured 1.4 to 12 ms, the ticker's own rhythm.

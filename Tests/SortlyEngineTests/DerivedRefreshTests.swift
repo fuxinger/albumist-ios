@@ -258,6 +258,34 @@ struct DerivedRefreshTests {
         #expect(made.isEmpty, "a refresh makes \(made.sorted())")
     }
 
+    /// Delta review, N2: a refresh whose facts equal those on screen hands back those very facts
+    /// (the same storage), and everything made from them is made from them, so the app keeps
+    /// the facts and all it made from them (the atlas of a year, the name of the home: no
+    /// spinner, no lost VoiceOver focus at every early look). Facts that changed come anew.
+    @Test func aRefreshWithUnchangedFactsHandsBackTheFactsOnScreen() async throws {
+        let library = try await analysed()
+        let pipeline = library.launch()
+        let settings = library.settings
+        let first = try await pipeline.derivedRefresh(settings: settings, managed: [], scope: .all, historyLimit: 50, once: .nothing)
+        let shown = first.library.facts
+        let compared = Mutex(false)
+        let probe: DerivedLibrary.Probe = { piece, _ in if piece == .sameFacts { compared.withLock { $0 = true } } }
+        let again = try await pipeline.derivedRefresh(settings: settings, managed: [], scope: .all, historyLimit: 50, once: .nothing,
+                                                      shown: shown, probe: probe)
+        #expect(compared.withLock { $0 }, "the facts were not compared off the main thread")
+        #expect(DerivedLibrary.sameFacts(again.library.facts, shown), "unchanged facts come as a new copy")
+        #expect(DerivedLibrary.sameFacts(again.library.factsByID.facts, shown), "the facts by id are made from other facts")
+        // Without the facts on screen (the first refresh), or with others: new ones.
+        let fresh = try await pipeline.derivedRefresh(settings: settings, managed: [], scope: .all, historyLimit: 50, once: .nothing)
+        #expect(fresh.library.facts == shown && !DerivedLibrary.sameFacts(fresh.library.facts, shown))
+        _ = try await library.store.upsertAssets([OverlappingRefreshTests.late])
+        let changed = try await pipeline.derivedRefresh(settings: settings, managed: [], scope: .all, historyLimit: 50, once: .nothing,
+                                                        shown: shown)
+        #expect(!DerivedLibrary.sameFacts(changed.library.facts, shown))
+        #expect(changed.library.facts.contains { $0.id == OverlappingRefreshTests.late.id })
+        #expect(DerivedLibrary.sameFacts(changed.library.factsByID.facts, changed.library.facts))
+    }
+
     /// ...and what the screens get when they ask (`AppModel.travelAtlas(year:)` and
     /// `AppModel.detectedHomePlace`), made from what the refresh handed over (its facts, its atlas
     /// of all years, its detected home): each year's atlas as `TravelAtlas.compute(facts:year:)`
@@ -321,7 +349,7 @@ struct DerivedRefreshAppTests {
         let body = try Self.refreshBody()
         let facts = try #require(body.range(of: "(?<![A-Za-z0-9_.])facts = ", options: .regularExpression), "refreshDerived assigns no facts")
         for cache in ["previewRanksCache = ", "datesCache = ", "atlasCache = ", "atlasYearsCache = ", "factsIndex = "] {
-            let handed = body.range(of: cache).map { $0.lowerBound > facts.lowerBound } ?? false
+            let handed = body.range(of: cache, options: .backwards).map { $0.lowerBound > facts.lowerBound } ?? false
             #expect(handed, "refreshDerived does not hand over \(cache)…: the first draw makes it on the main thread")
         }
     }
@@ -444,6 +472,28 @@ struct DerivedRefreshAppTests {
         let getter = AppSource.code(AppSource.body(of: "var factsByID: FactsByID", in: model) ?? "")
         let checks = AppSource.calls(of: "assert(", in: getter).contains { $0.contains("factsIndex") && $0.contains("facts.count == facts.count") }
         #expect(checks, "factsByID does not check that factsIndex goes with the facts")
+    }
+
+    /// Delta review, N2: the refresh hands the engine the facts on screen and, when it gets them
+    /// back (`DerivedLibrary.sameFacts`), assigns neither the facts nor anything made from them
+    /// (the behaviour: `DerivedRefreshTests.aRefreshWithUnchangedFactsHandsBackTheFactsOnScreen`).
+    @Test func unchangedFactsAreNotAssignedAgain() throws {
+        let body = try Self.refreshBody()
+        #expect(body.contains("let shownFacts = keepsOnDemand ? facts : []"), "refreshDerived does not take the facts on screen")
+        // Only while something made on demand is there to keep (the comparison costs battery).
+        let model = AppSource.code(try AppSource.read("App/Sortly/Model/AppModel.swift"))
+        let keeps = AppSource.code(AppSource.body(of: "private var keepsOnDemand: Bool", in: model) ?? "")
+        for item in Self.onDemand {
+            #expect(keeps.contains("\(item.cache) != nil") && keeps.contains("\(item.task) != nil"), "keepsOnDemand leaves out \(item.cache)")
+        }
+        let passes = AppSource.calls(of: "pipeline.derivedRefresh(", in: body).contains { $0.hasSuffix("shown: shownFacts") }
+        #expect(passes, "refreshDerived does not hand the engine the facts on screen")
+        let skip = try #require(body.range(of: "if DerivedLibrary.sameFacts(derived.facts, facts) {"), "refreshDerived assigns unchanged facts")
+        let assign = try #require(body.range(of: "(?<![A-Za-z0-9_.])facts = derived.facts", options: .regularExpression))
+        #expect(skip.lowerBound < assign.lowerBound, "the facts are assigned before it is asked whether they changed")
+        let branch = String(body[skip.upperBound..<assign.lowerBound])
+        #expect(branch.contains("return") && !branch.contains("factsIndex") && !branch.contains("atlasCache") && !branch.contains("previewRanksCache"),
+                "unchanged facts still empty or replace what is made from them: \(branch)")
     }
 
     /// Second review of P4-09, NIT-3: while "Seit wann wohnst du dort?" is proposed off the main

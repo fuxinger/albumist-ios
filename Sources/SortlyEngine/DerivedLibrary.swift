@@ -88,6 +88,15 @@ public struct DerivedLibrary: Sendable {
         HomePlace(center: center, components: HomeName.components(near: center, facts: facts))
     }
 
+    /// The same facts, not only equal ones: the same storage (one O(1) look, cheap enough for the
+    /// main thread). A refresh whose facts equal the ones on screen hands those back
+    /// (`derivedLibrary(shown:)`), so the app sees at once that nothing made from them changed.
+    public static func sameFacts(_ a: [AssetFacts], _ b: [AssetFacts]) -> Bool {
+        guard a.count == b.count else { return false }
+        if a.isEmpty { return true }
+        return a.withUnsafeBufferPointer { pa in b.withUnsafeBufferPointer { pb in pa.baseAddress == pb.baseAddress } }
+    }
+
     /// The photos the user took out of each suggestion, from the overrides.
     public static func removedFromProposals(_ overrides: [UserOverride]) -> [SortlyID: Set<AssetID>] {
         var removed: [SortlyID: Set<AssetID>] = [:]
@@ -98,7 +107,7 @@ public struct DerivedLibrary: Sendable {
     }
 
     /// A pass over the whole library, for tests (`probe`: called as each starts and ends).
-    enum Piece: String, Sendable { case previewRanks, merges, status, firstDraw, factsByID }
+    enum Piece: String, Sendable { case previewRanks, merges, status, firstDraw, factsByID, sameFacts }
     typealias Probe = @Sendable (Piece, _ ended: Bool) async -> Void
 }
 
@@ -112,14 +121,26 @@ extension AnalysisPipeline {
         try await derivedLibrary(snapshot: snapshot, settings: settings, managed: managed, scope: scope, ownAlbums: ownAlbums, probe: nil)
     }
 
+    /// `shown`: the facts on screen. When the facts read equal them (compared off the main
+    /// thread), they are handed back themselves, and everything is made from them
+    /// (`DerivedLibrary.sameFacts`): the app then keeps the facts and all it made from them
+    /// (delta review of the second review, N2: every refresh assigned the facts anew, so the
+    /// atlas of a year and "Dein Zuhause" were made again, with a spinner and VoiceOver's
+    /// focus lost, at every early look of an analysis).
     nonisolated func derivedLibrary(snapshot: ProposalSnapshot?, settings: OrganizationSettings, managed: [ManagedAlbumState],
-                                    scope: OrganizationScope, ownAlbums: Set<CollectionID>,
+                                    scope: OrganizationScope, ownAlbums: Set<CollectionID>, shown: [AssetFacts] = [],
                                     probe: DerivedLibrary.Probe?) async throws -> DerivedLibrary {
         let store = self.store
         // Each input once (`factsForOverview`), and everything read before any pass starts: once
         // they run, nothing throws, so no pass is left running when a read fails.
         let read = try await factsForOverview()
-        let inventory = read.inventory, facts = read.facts, contents = read.contents
+        let inventory = read.inventory, contents = read.contents
+        var chosen = read.facts
+        if !shown.isEmpty, shown.count == chosen.count, !DerivedLibrary.sameFacts(shown, chosen) {
+            let readFacts = read.facts
+            if await Self.pass(.sameFacts, .userInitiated, probe, { shown == readFacts }).value { chosen = shown }
+        }
+        let facts = chosen
         let stored = try await store.overrides()
         let overrides = OverrideSet(stored)
         // The analysed photos still without their image labels ("Themen" or "Dokumente" turned
@@ -217,12 +238,13 @@ extension AnalysisPipeline {
     /// `managed`: Albumist's own albums as the app knows them (after its album check); their ids
     /// are left out of the albums that overlap (a country holds its trips on purpose).
     public nonisolated func derivedRefresh(settings: OrganizationSettings, managed: [ManagedAlbumState], scope: OrganizationScope,
-                                           historyLimit: Int, once: DerivedRefresh.Once) async throws -> DerivedRefresh {
-        try await derivedRefresh(settings: settings, managed: managed, scope: scope, historyLimit: historyLimit, once: once, probe: nil)
+                                           historyLimit: Int, once: DerivedRefresh.Once, shown: [AssetFacts] = []) async throws -> DerivedRefresh {
+        try await derivedRefresh(settings: settings, managed: managed, scope: scope, historyLimit: historyLimit, once: once, shown: shown, probe: nil)
     }
 
+    /// `shown`: the facts on screen (`derivedLibrary(shown:)`).
     nonisolated func derivedRefresh(settings: OrganizationSettings, managed: [ManagedAlbumState], scope: OrganizationScope,
-                                    historyLimit: Int, once: DerivedRefresh.Once,
+                                    historyLimit: Int, once: DerivedRefresh.Once, shown: [AssetFacts] = [],
                                     probe: DerivedLibrary.Probe?) async throws -> DerivedRefresh {
         let store = self.store
         var result = DerivedRefresh()
@@ -239,7 +261,7 @@ extension AnalysisPipeline {
         result.undone = try await store.undoneTargets()
         await once.undone(result.undone)
         result.library = try await derivedLibrary(snapshot: refresh.snapshot, settings: settings, managed: managed, scope: scope,
-                                                  ownAlbums: Set(managed.map(\.albumID)), probe: probe)
+                                                  ownAlbums: Set(managed.map(\.albumID)), shown: shown, probe: probe)
         return result
     }
 }

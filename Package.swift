@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "SortlyStore", targets: ["SortlyStore"]),
         .library(name: "SortlyWorldMap", targets: ["SortlyWorldMap"]),
         .library(name: "SortlyEngine", targets: ["SortlyEngine"]),
+        .library(name: "SortlyMap", targets: ["SortlyMap"]),
         .library(name: "SortlyTestSupport", targets: ["SortlyTestSupport"]),
     ],
     targets: [
@@ -48,6 +49,13 @@ let package = Package(
             dependencies: ["SortlyCore", "SortlyStore"],
             swiftSettings: strictSettings
         ),
+        // "Deine Welt" (map concept 2.0, approved 20.11.2026): the map summary, its numbers and
+        // the data of the share images. Its own module, so the map builds and tests on its own.
+        .target(
+            name: "SortlyMap",
+            dependencies: ["SortlyCore"],
+            swiftSettings: strictSettings
+        ),
         .target(
             name: "SortlyTestSupport",
             dependencies: ["SortlyCore"],
@@ -69,6 +77,11 @@ let package = Package(
         .testTarget(
             name: "SortlyCoreTests",
             dependencies: ["SortlyCore", "SortlyWorldMap", "SortlyTestSupport"],
+            swiftSettings: strictSettings
+        ),
+        .testTarget(
+            name: "SortlyMapTests",
+            dependencies: ["SortlyMap", "SortlyCore", "SortlyWorldMap", "SortlyTestSupport"],
             swiftSettings: strictSettings
         ),
         .testTarget(

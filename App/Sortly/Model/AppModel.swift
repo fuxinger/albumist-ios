@@ -2655,6 +2655,20 @@ final class AppModel {
         await run(plan)
     }
 
+    /// Undo, "Rest rückgängig machen" and finishing or taking back an interrupted plan change
+    /// Photos without a review, so they ask here for what the review asks with `FullAccessCard`
+    /// (second review of P1-07, S2): with "Ausgewählte Fotos" the album list shows only the
+    /// shared photos of each album, and an album the user also filled with photos that are not
+    /// shared would look like Albumist's alone and be deleted. Asked of Photos now, not from
+    /// `access` as last seen. UI tests keep their way, as in the review.
+    private func changesHaveFullAccess() async -> Bool {
+        let now = await library.access()
+        access = now
+        guard now == .limited, !UITestSupport.isRunning else { return true }
+        message = .failure(String(localized: "Dafür braucht Albumist Zugriff auf alle Fotos. Gerade sind nur ausgewählte Fotos freigegeben, und Albumist sieht nicht, was sonst in deinen Alben liegt. Ändern kannst du das unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff."))
+        return false
+    }
+
     private func claimExecution() -> Bool {
         // Not while a change in "Dein Zuhause" makes the suggestions again: a plan must not see
         // its suggestions change under it. Said, not silently ignored (apply, undo, resume).
@@ -3008,6 +3022,7 @@ final class AppModel {
     /// request never got to Photos); the user's own albums get nothing without a preview
     /// (`ChangeExecutor`, docs/DECISIONS.md).
     func resumeInterruptedPlan() async {
+        guard await changesHaveFullAccess() else { return }
         guard let store, let interrupted = interruptedPlan, claimExecution() else { return }
         defer { releaseExecution() }
         guard await reconcileManagedAlbums() != nil else { return }
@@ -3057,6 +3072,7 @@ final class AppModel {
     /// Before, it was cancelled first and its albums stayed in Photos without a trace. The
     /// order, and what each ending leaves, is `InterruptedPlanUndo.carryOut`.
     func undoInterruptedPlan() async {
+        guard await changesHaveFullAccess() else { return }
         // An interrupted undo cannot itself be taken back: Photos cannot bring deleted albums
         // back, and undo plans put no photos back. What it already did is kept and recorded
         // instead (as with "So lassen"), so the receipt offers "Rest rückgängig machen".
@@ -3234,6 +3250,7 @@ final class AppModel {
     }
 
     func undo(_ executed: ChangePlan) async {
+        guard await changesHaveFullAccess() else { return }
         // Asked to take it back: never an App Store rating question for this plan (`ReviewPrompt`).
         ReviewPrompt.shared.undoStarted(executed.id)
         // Taking back the same plan twice would find nothing to do (or remove what the user

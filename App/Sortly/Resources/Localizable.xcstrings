@@ -631,6 +631,16 @@
         }
       }
     },
+    "Dafür braucht Albumist Zugriff auf alle Fotos. Gerade sind nur ausgewählte Fotos freigegeben, und Albumist sieht nicht, was sonst in deinen Alben liegt. Ändern kannst du das unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist needs access to all photos for this. Only selected photos are shared right now, so Albumist can't see what else is in your albums. You can change this in Settings › Apps › Albumist › Photos › Full Access."
+          }
+        }
+      }
+    },
     "Umstrittenes Gebiet: Zu welchem Land es gehört, ist nicht sicher. Albumist ordnet „%@“ darum keinem Land zu." : {
       "localizations" : {
         "en" : {

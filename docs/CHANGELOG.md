@@ -92,6 +92,9 @@
 - 20.11.: Auswählen wie in Fotos: Solange Fotos ausgewählt werden, ist die Tab-Leiste ausgeblendet. „N aus Vorschlag
   entfernen“ lag hinter der Tab-Leiste und lässt sich jetzt antippen; in der Mediathek stehen „Zu Album hinzufügen“,
   die Zahl der ausgewählten Fotos und „Ignorieren“ in der Leiste unten statt in einer eigenen Leiste über den Tabs (P3-01 = G3-04).
+- 20.11.: Rückgängig machen und das Fertigstellen oder Zurücknehmen eines unterbrochenen Vorgangs brauchen jetzt
+  Zugriff auf alle Fotos. Bei „Ausgewählte Fotos“ sah ein Album, in das du selbst nicht freigegebene Fotos gelegt
+  hattest, aus wie eines von Albumist und konnte beim Rückgängigmachen gelöscht werden (zweite Prüfung von P1-07).
 - 20.11.: „Ausgewählte Fotos“ und zurück auf „Alle Fotos“: Albumist analysiert nicht mehr alles von vorn (P1-07).
   Fotos außerhalb der Auswahl werden beiseitegelegt statt gelöscht und zählen, suchen und planen nicht mit;
   zurück kommen sie mit Analyse, Ort und Text. Endgültig gelöscht wird ein Foto erst, wenn es bei vollem Zugriff fehlt

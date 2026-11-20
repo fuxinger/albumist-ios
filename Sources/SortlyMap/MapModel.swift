@@ -358,6 +358,10 @@ public struct MapCountry: Hashable, Sendable, Codable, Identifiable {
     public var code: String
     /// The first photo there.
     public var firstVisit: Date
+    /// The year of `firstVisit` in the calendar the summary was worked out with: the year the
+    /// time travel, the numbers and the passport stamp all give it, so they never disagree in the
+    /// hours around New Year.
+    public var firstVisitYear: Int
     public var photoCount: Int
     /// Trips with photos there, oldest first.
     public var tripIDs: [SortlyID]
@@ -370,9 +374,12 @@ public struct MapCountry: Hashable, Sendable, Codable, Identifiable {
 
     public var id: String { code }
 
-    public init(code: String, firstVisit: Date, photoCount: Int, tripIDs: [SortlyID], isState: Bool, continent: Continent?, region: WorldRegion?) {
+    /// `firstVisitYear` nil: the year of `firstVisit` in UTC.
+    public init(code: String, firstVisit: Date, firstVisitYear: Int? = nil, photoCount: Int, tripIDs: [SortlyID], isState: Bool,
+                continent: Continent?, region: WorldRegion?) {
         self.code = code
         self.firstVisit = firstVisit
+        self.firstVisitYear = firstVisitYear ?? LocalDay(firstVisit, timeZone: TimeZone(identifier: "UTC")!).year
         self.photoCount = photoCount
         self.tripIDs = tripIDs
         self.isState = isState

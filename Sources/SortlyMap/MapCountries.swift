@@ -19,10 +19,12 @@ public enum MapCountries {
     ///   time travel and no ordinal for "Neues Land". (The atlas counts it, sorted last; PhotoKit
     ///   almost always dates a photo, so this is a damaged library, where showing less is safer
     ///   than showing a made-up year.)
+    /// - `firstVisitYear`: the year of `firstVisit` in `calendar` (the device's, as everywhere in
+    ///   the map and the travel atlas).
     /// - `tripIDs`: the trips (`AssetFacts.tripID`) with at least one counted photo there, ordered
     ///   by their start in `tripStarts`, then id; a trip missing from `tripStarts` comes last.
     public static func compute(facts: [AssetFacts], airborne: Set<AssetID>, tripStarts: [SortlyID: Date],
-                               minimumPhotos: Int = MapSummary.minimumPhotosPerCountry) -> [MapCountry] {
+                               minimumPhotos: Int = MapSummary.minimumPhotosPerCountry, calendar: Calendar = .sortlyDefault) -> [MapCountry] {
         struct Tally {
             var photos = Set<AssetID>()
             var firstVisit: Date?
@@ -44,7 +46,8 @@ public enum MapCountries {
             let trips = tally.trips.sorted { a, b in
                 (tripStarts[a] ?? .distantFuture, a.rawValue) < (tripStarts[b] ?? .distantFuture, b.rawValue)
             }
-            return MapCountry(code: code, firstVisit: firstVisit, photoCount: tally.photos.count, tripIDs: trips,
+            return MapCountry(code: code, firstVisit: firstVisit, firstVisitYear: calendar.component(.year, from: firstVisit),
+                              photoCount: tally.photos.count, tripIDs: trips,
                               isState: WorldStates.isState(code), continent: Continent.forCountryCode(code),
                               region: WorldRegion.of(countryCode: code))
         }

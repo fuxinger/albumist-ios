@@ -74,6 +74,16 @@ enum HandBuilt {
                    isState: WorldStates.isState(code), continent: Continent.forCountryCode(code), region: WorldRegion.of(countryCode: code))
     }
 
+    /// `countries` as `MapCountries.compute` gives them on a device with `calendar`: the year of
+    /// each first visit in that calendar.
+    static func seen(_ countries: [MapCountry], in calendar: Calendar) -> [MapCountry] {
+        countries.map { country in
+            var country = country
+            country.firstVisitYear = calendar.component(.year, from: country.firstVisit)
+            return country
+        }
+    }
+
     static func calendar(_ zone: String) -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: zone)!
@@ -224,7 +234,8 @@ struct MapNumbersTests {
         #expect(utc.year == 2026)
         #expect(utc.newThisYear == ["IS", "GB", "NO"])
         // On New Year's Eve 23:30 UTC it is already 2026 in Germany: the device's calendar decides.
-        let berlin = HandBuilt.numbers([], countries, calendar: HandBuilt.calendar("Europe/Berlin"))
+        let berlinCalendar = HandBuilt.calendar("Europe/Berlin")
+        let berlin = HandBuilt.numbers([], HandBuilt.seen(countries, in: berlinCalendar), calendar: berlinCalendar)
         #expect(berlin.newThisYear == ["FR", "IS", "GB", "NO"])
         #expect(HandBuilt.numbers([], countries, now: MapFixture.date("2025-12-31 12:00")).newThisYear == ["FR"])
     }

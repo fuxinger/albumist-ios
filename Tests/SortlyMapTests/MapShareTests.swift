@@ -130,13 +130,16 @@ struct MapShareTests {
         #expect(MapShare.passport(Self.library()).stamps.allSatisfy { !$0.isNew })
     }
 
-    @Test func passportYearIsTheYearWhereThePhotoWasTaken() {
-        // Landed in Tokyo on New Year's morning 2020, still 2019 in UTC; Germany was first seen at
-        // home, not on a trip, on New Year's Eve 2008 at 23:30 UTC.
+    /// The stamp's year is the one the time travel and the numbers give the country, worked
+    /// out once in the device's calendar (`MapCountry.firstVisitYear`), not again here.
+    @Test func passportYearIsTheYearOfTheTimeTravel() {
+        // Landed in Tokyo on New Year's morning 2020 (still 2019 in UTC), on a device in Tokyo;
+        // Germany first seen at home on New Year's Eve 2008 at 23:30 UTC, on a device in UTC.
         let japan = MapHandmade.trip("japan", "2019-12-31 22:00", [MapHandmade.place(MapFixture.Places.tokyo, "Tokio", "JP", photos: 40)],
                                      timeZone: "Asia/Tokyo")
-        let countries = [MapHandmade.country("JP", "2019-12-31 23:30", trips: ["japan"], region: .easternAsia),
+        var countries = [MapHandmade.country("JP", "2019-12-31 23:30", trips: ["japan"], region: .easternAsia),
                          MapHandmade.country("DE", "2008-12-31 23:30", trips: [], region: .westernEurope)]
+        countries[0].firstVisitYear = 2020
         let passport = MapShare.passport(MapHandmade.summary(trips: [japan], countries: countries))
         #expect(passport.stamps.map(\.countryCode) == ["DE", "JP"])
         #expect(passport.stamps.map(\.year) == [2008, 2020])

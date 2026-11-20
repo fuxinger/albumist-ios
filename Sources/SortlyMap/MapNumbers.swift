@@ -64,7 +64,7 @@ extension WorldNumbers {
         numbers.cities = cities
         numbers.trips = trips.count
         numbers.firstTripYear = trips.first.map { calendar.component(.year, from: $0.geometry.start) }
-        numbers.firstCountryYear = countries.first.map { calendar.component(.year, from: $0.firstVisit) }
+        numbers.firstCountryYear = countries.min { ($0.firstVisit, $0.code) < ($1.firstVisit, $1.code) }?.firstVisitYear
         numbers.metersTraveled = trips.reduce(0) { $0 + TripStats.finiteMeters($1.stats.metersTraveled) }
         numbers.metersOnSite = trips.reduce(0) { $0 + TripStats.finiteMeters($1.stats.metersOnSite) }
         numbers.earth = EarthComparison(meters: numbers.metersTraveled)
@@ -77,7 +77,7 @@ extension WorldNumbers {
         numbers.favoriteCountry = favoriteCountry(of: trips)
         let year = calendar.component(.year, from: now)
         numbers.year = year
-        numbers.newThisYear = countries.filter { calendar.component(.year, from: $0.firstVisit) == year }.map(\.code)
+        numbers.newThisYear = countries.filter { $0.firstVisitYear == year }.map(\.code)
         numbers.isPreliminary = analysisRunning
         return numbers
     }

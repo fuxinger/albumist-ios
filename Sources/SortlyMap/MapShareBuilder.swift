@@ -66,15 +66,13 @@ extension MapShare {
     }
 
     /// Motif B, "Reisepass": a stamp per country in first visit order, with the year of the first
-    /// visit as the photo's place saw it (decision 19.11.2026, as Apple Photos): in the time zone
-    /// of the trip it was on, Gregorian; a first visit outside a trip (everyday photos in the home
-    /// country) in UTC, which differs only in the hours around New Year. `newCountries` (ISO
-    /// codes) are drawn as the newest stamps (moment "Neues Land").
+    /// visit as the time travel and the numbers give it (`MapCountry.firstVisitYear`, in the
+    /// device's calendar like the travel atlas). `newCountries` (ISO codes) are drawn as the
+    /// newest stamps (moment "Neues Land").
     public static func passport(_ summary: MapSummary, newCountries: Set<String> = []) -> SharePassport {
-        let trips = ShareBuilding.tripsByID(summary.trips)
         let fresh = Set(newCountries.map { $0.uppercased() })
         let stamps = ShareBuilding.byFirstVisit(summary.countries).map { country in
-            SharePassport.Stamp(countryCode: country.code, year: ShareBuilding.firstVisitYear(country, trips: trips),
+            SharePassport.Stamp(countryCode: country.code, year: country.firstVisitYear,
                                 isNew: fresh.contains(country.code.uppercased()))
         }
         return SharePassport(stamps: stamps, sinceYear: summary.numbers.firstCountryYear, tripCount: summary.numbers.trips)
@@ -162,14 +160,6 @@ private enum ShareBuilding {
             byID[trip.id.rawValue] = trip
         }
         return byID
-    }
-
-    /// The year of a country's first visit in the time zone of the trip it was on, else in UTC.
-    static func firstVisitYear(_ country: MapCountry, trips: [String: MapTrip]) -> Int {
-        let visit = country.firstVisit
-        let trip = country.tripIDs.lazy.compactMap { trips[$0.rawValue] }.first { $0.geometry.start <= visit && visit <= $0.geometry.end }
-        let zone = trip?.geometry.timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? TimeZone(identifier: "UTC")!
-        return LocalDay(visit, timeZone: zone).year
     }
 
     /// The photos of `trips` for a share image, best first: each trip's best photo, the trips with

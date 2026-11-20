@@ -73,7 +73,8 @@ struct MapYearsTests {
         #expect(utc.first?.year == 2022 && utc.first?.tripIDs == [SortlyID("silvester")] && utc.first?.newCountries == ["PT"])
         let newYork = Self.years([silvester], countries, calendar: HandBuilt.calendar("America/New_York"))
         #expect(newYork.first?.year == 2022 && newYork.first?.tripIDs == [SortlyID("silvester")])
-        let berlin = Self.years([silvester], countries, calendar: HandBuilt.calendar("Europe/Berlin"))
+        let berlinCalendar = HandBuilt.calendar("Europe/Berlin")
+        let berlin = Self.years([silvester], HandBuilt.seen(countries, in: berlinCalendar), calendar: berlinCalendar)
         #expect(berlin.map(\.year) == Array(2023...2026))
         #expect(berlin.first?.tripIDs == [SortlyID("silvester")] && berlin.first?.newCountries == ["PT"] && berlin.first?.countriesSoFar == 1)
     }

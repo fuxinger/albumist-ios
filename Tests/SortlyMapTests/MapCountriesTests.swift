@@ -59,6 +59,21 @@ struct MapCountriesTests {
         #expect(MapCountries.cityCount(facts: facts, airborne: []) == atlas.cityCount)
     }
 
+    /// The year of the first visit is worked out once, in the device's calendar, and the numbers,
+    /// the time travel and the passport all take it from there.
+    @Test func theFirstVisitsYearIsTheDevicesCalendars() throws {
+        let facts = Self.facts("tokyo", 3, "2019-12-31 16:30", "JP", town: "Tokio")
+        var tokyo = Calendar(identifier: .gregorian)
+        tokyo.timeZone = try #require(TimeZone(identifier: "Asia/Tokyo"))
+        #expect(MapCountries.compute(facts: facts, airborne: [], tripStarts: [:], calendar: tokyo).first?.firstVisitYear == 2020)
+        #expect(MapCountries.compute(facts: facts, airborne: [], tripStarts: [:], calendar: MapFixture.calendar).first?.firstVisitYear == 2019)
+        let countries = MapCountries.compute(facts: facts, airborne: [], tripStarts: [:], calendar: tokyo)
+        let numbers = WorldNumbers.compute(trips: [], countries: countries, cities: 1, calendar: tokyo, now: MapFixture.date("2020-06-01"),
+                                           analysisRunning: false)
+        #expect(numbers.firstCountryYear == 2020)
+        #expect(numbers.newThisYear == ["JP"])
+    }
+
     @Test func onlyPlacesFromGPSCount() {
         let facts = Self.facts("guess", 5, "2023-05-01 10:00", "FR", town: "Paris", source: .contentInferred)
             + Self.facts("unresolved", 5, "2023-05-01 10:00", "BE", town: "Brügge", source: .gpsUnresolved)

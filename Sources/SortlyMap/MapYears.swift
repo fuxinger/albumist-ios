@@ -14,7 +14,7 @@ public enum MapYears {
     /// the old one in New York. It counts in that year with all its days, photos and kilometres,
     /// even when it lasts into January.
     ///
-    /// - `newCountries`: first visited in the year (`MapCountry.firstVisit` in `calendar`), first
+    /// - `newCountries`: first visited in the year (`MapCountry.firstVisitYear`), first
     ///   visit order.
     /// - `countriesSoFar`: first visited up to the end of the year, including countries visited
     ///   before the first trip (the home country from everyday photos).
@@ -33,7 +33,7 @@ public enum MapYears {
         var newOfYear: [Int: [String]] = [:]
         var countriesSoFar = 0
         for country in MapCountries.inFirstVisitOrder(countries) {
-            let visitYear = calendar.component(.year, from: country.firstVisit)
+            let visitYear = country.firstVisitYear
             if visitYear < first { countriesSoFar += 1 } else { newOfYear[visitYear, default: []].append(country.code) }
         }
         var years: [MapYear] = []

@@ -321,8 +321,9 @@ struct HomePlacePicker: View {
     /// picked (it goes over every photo), not on every redraw, and off the main thread
     /// (`AppModel.homeStayStart`, review P4-09).
     @State private var askingSince: SinceQuestion?
-    /// The place whose "Seit wann" is being worked out (a fraction of a second): a second tap
-    /// meanwhile does not ask twice.
+    /// The place whose "Seit wann" is being worked out (a fraction of a second): its row shows a
+    /// spinner, and the other choices are dimmed and take no tap meanwhile, so nothing is asked
+    /// twice (second review of P4-09, NIT-3).
     @State private var proposing: String?
 
     struct SinceQuestion: Identifiable {
@@ -378,14 +379,21 @@ struct HomePlacePicker: View {
                             dismiss()
                         }
                     } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(HomeText.short(candidate.components)).foregroundStyle(.primary)
-                            Text(detail(candidate)).font(.subheadline).foregroundStyle(.noteText)
+                        HStack(spacing: Theme.Spacing.m) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(HomeText.short(candidate.components)).foregroundStyle(.primary)
+                                Text(detail(candidate)).font(.subheadline).foregroundStyle(.noteText)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            if proposing == candidate.id {
+                                ProgressView()
+                                    .accessibilityLabel(Text("Datum wird vorgeschlagen"))
+                            }
                         }
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                     }
-                    .disabled(busy)
+                    .disabled(busy || (proposing != nil && proposing != candidate.id))
                     .accessibilityIdentifier("home.candidate")
                 }
             } header: {
@@ -431,7 +439,7 @@ struct HomePlacePicker: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .disabled(busy)
+        .disabled(busy || proposing != nil)
     }
 
     /// "Bayern, Deutschland · 120 Tage".

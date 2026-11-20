@@ -417,6 +417,21 @@ struct DerivedRefreshAppTests {
         #expect(checks, "factsByID does not check that factsIndex goes with the facts")
     }
 
+    /// Second review of P4-09, NIT-3: while "Seit wann wohnst du dort?" is proposed off the main
+    /// thread (`AppModel.homeStayStart`), the place tapped shows a spinner and the other choices
+    /// are dimmed and take no tap, as in Apple's own lists; before, the screen showed nothing
+    /// and other taps were dropped without a sign.
+    @Test func thePlacePickedShowsItsSpinnerWhileItsDateIsProposed() throws {
+        let view = try AppSource.read("App/Sortly/Views/HomeSettingsView.swift")
+        let picker = AppSource.code(try #require(AppSource.body(of: "struct HomePlacePicker", in: view)))
+        let spinner = picker.range(of: "if proposing == candidate.id \\{\\s*ProgressView\\(\\)", options: .regularExpression) != nil
+        #expect(spinner, "the place picked shows no spinner while its date is proposed")
+        #expect(picker.contains(".disabled(busy || (proposing != nil && proposing != candidate.id))"), "the other places take taps meanwhile")
+        #expect(picker.contains(".disabled(busy || proposing != nil)"), "the other choices take taps meanwhile")
+        let ask = AppSource.code(AppSource.body(of: "private func askSince(", in: view) ?? "")
+        #expect(ask.contains("guard proposing == nil else { return }"), "a second tap asks twice")
+    }
+
     /// The line of `source` at a position in Unicode scalars, trimmed.
     static func line(at offset: Int, in source: String) -> String {
         let scalars = Array(source.unicodeScalars)

@@ -60,10 +60,11 @@ private final class ContinuedTaskBox: @unchecked Sendable {
 
 @MainActor
 enum ContinuedAnalysis {
-    /// Whether iOS lets the analysis go on in the background, for the card's chip (S8):
-    /// "Läuft auch im Hintergrund" only while the task really runs (a successful `submit` is
-    /// not enough: with `strategy = .fail` iOS can still refuse it), "Läuft, solange Albumist
-    /// offen ist" after iOS refused.
+    /// Whether iOS lets the analysis go on in the background, for the analysis card (S8, P3-08):
+    /// its Details say "Läuft im Hintergrund weiter, dort aber langsamer" only while the task
+    /// really runs (a successful `submit` is not enough: with `strategy = .fail` iOS can still
+    /// refuse it). After iOS refused, the card itself says "Läuft, solange Albumist offen ist"
+    /// in place of the finish time.
     enum Status: Equatable { case idle, running, refused }
 
     /// Mirrored into `AppModel.analysisBackground` by the card's tick (this is not observable).
@@ -126,7 +127,7 @@ enum ContinuedAnalysis {
         guard !isActive, UIApplication.shared.applicationState == .active else { return }
         if let lastRequest, Date().timeIntervalSince(lastRequest) < 60 { return }
         lastRequest = Date()
-        // A new request: what iOS said to an earlier one no longer holds for the chip.
+        // A new request: what iOS said to an earlier one no longer holds for the card.
         if status == .refused { status = .idle }
         let identifier = makeIdentifier()
         BackgroundRunLog.update { $0.requested += 1 }
@@ -138,7 +139,9 @@ enum ContinuedAnalysis {
         let request = BGContinuedProcessingTaskRequest(
             identifier: identifier,
             title: title,
-            subtitle: String(localized: "Läuft weiter, auch wenn du die App verlässt")
+            // The card's words (its Details): iOS gives work in the background less computing
+            // power, and the text says so (P4-13, `ContinuedAnalysisTextTests`).
+            subtitle: String(localized: "Läuft im Hintergrund weiter, dort aber langsamer")
         )
         request.strategy = .fail
         do {

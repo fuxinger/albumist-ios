@@ -212,7 +212,8 @@ final class AppModel {
     var analysisStartedAt: Date?
     /// "Gerade angesehen": the last photos of the image step, at most one change a second.
     var analysisRecent: [AssetID] = []
-    /// The Lock Screen task really runs (chip "Läuft auch im Hintergrund"), or iOS refused it.
+    /// The Lock Screen task really runs (the card's Details: "Läuft im Hintergrund weiter, dort
+    /// aber langsamer"), or iOS refused it (the card: "Läuft, solange Albumist offen ist").
     var analysisBackground: ContinuedAnalysis.Status = .idle
     /// Albumist is on screen (scene active): no gliding, no thumbnails, no announcements otherwise.
     var isOnScreen = true

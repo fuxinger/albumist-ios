@@ -68,8 +68,8 @@ Vorschaufotos eine DKB-Karte mit lesbarer Nummer). Was die Analyse nicht erkenne
 Bild ausgeblendet. Das gilt für die Vorschaufotos und den Farbschein eines Vorschlags, die
 Titelbilder in den Listen (Vorschläge, Startpaket, Alben, „Schon gefunden“, Tage der
 Reise-Werkstatt), die Vorschau und den Beleg eines Plans, die Sortier-Show, das Mosaik der
-ersten Analyse, „Gerade angesehen“ auf der Analyse-Karte, den Farbschein eines Atlas-Lands und
-das Foto im teilbaren Reise-Atlas-Bild.
+ersten Analyse, „Gerade angesehen“ in den Details der Analyse-Karte, den Farbschein eines
+Atlas-Lands und das Foto im teilbaren Reise-Atlas-Bild.
 - **Sensibel** ist ein Foto, dessen Dokument-Einordnung finanziell, Ausweis oder medizinisch
   sagt; in dessen gespeichertem Text eine Kartennummer oder IBAN maskiert wurde oder ein Wort
   einer Bankkarte oder eines Kontoauszugs steht („Visa Debit“, „girocard“, „Kontostand“); und

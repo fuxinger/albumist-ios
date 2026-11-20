@@ -192,7 +192,7 @@ struct OtherDocumentStatusTests {
     }
 }
 
-/// "Gerade angesehen" on the analysis card shows the last pictures looked at: never a
+/// "Gerade angesehen" in the analysis card's Details shows the last pictures looked at: never a
 /// document, receipt or card (second review of the build 36 fix).
 @Suite("Analysis card thumbnails")
 struct AnalysisRecentThumbnailTests {

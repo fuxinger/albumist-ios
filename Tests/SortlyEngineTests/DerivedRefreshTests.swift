@@ -345,6 +345,29 @@ struct DerivedRefreshAppTests {
                  cache: "detectedHomePlaceCache", task: "detectedHomeNameTask"),
     ]
 
+    /// The engine's side in its code (delta review, N1): neither the refresh nor the library it
+    /// reads calls any of these passes, in any of their overloads (the behaviour:
+    /// `DerivedRefreshTests.aRefreshMakesNeitherTheAtlasOfEachYearNorTheHomeName`).
+    @Test func theRefreshCodeCallsNoneOfWhatOnlyOneScreenNeeds() throws {
+        let engine = try AppSource.read("Sources/SortlyEngine/DerivedLibrary.swift")
+        let code = Array(AppSource.code(engine).unicodeScalars)
+        let passes = ["HomeCandidates.make(", "HomeName.components(", "namedHome(", "yearAtlases("]
+        for function in ["func derivedLibrary(", "func derivedRefresh("] {
+            var bodies: [String] = []
+            var from = 0
+            while let range = AppSource.bodyRange(of: function, in: engine, within: from..<code.count) {
+                bodies.append(String(String.UnicodeScalarView(code[range])))
+                from = range.upperBound
+            }
+            #expect(bodies.count == 2, "\(function)…): \(bodies.count) bodies, expected the public one and the one with the probe")
+            for body in bodies {
+                for pass in passes {
+                    #expect(AppSource.calls(of: pass, in: body).isEmpty, "\(function)…) calls \(pass)…)")
+                }
+            }
+        }
+    }
+
     /// Each is made only when its screen asks, off the main thread, once for each value of the
     /// facts, and never at a refresh (battery): the getter starts it and makes nothing itself,
     /// the work runs in `Task.detached`, a result for facts that changed meanwhile is dropped

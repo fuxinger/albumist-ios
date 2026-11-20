@@ -13,10 +13,12 @@ enum CardBadge: Equatable, Sendable {
 /// How a `PhotoCard` sits on the page.
 enum PhotoCardStyle: Sendable {
     /// Side by side (a shelf, two in a row; drafts E1, E6): a white card, the title in the
-    /// headline style, its actions full width below the text.
+    /// headline style, its actions full width below the text. Every compact card keeps the
+    /// height of three text lines, so cards side by side are equally high whatever their texts.
     case compact
     /// Across the page ("Schon gefunden", "Neue Reisen"; drafts E6): a larger title, the action
-    /// next to the text, below it at the accessibility text sizes.
+    /// next to the text while the text keeps room for a long word, below it otherwise and at the
+    /// accessibility text sizes.
     case large
     /// An album in a row or a grid (draft E4): the photo with round corners on the page, name
     /// and count below it, no card around them.
@@ -24,8 +26,8 @@ enum PhotoCardStyle: Sendable {
 }
 
 /// Photo on top, text below (title up to 2 lines, the subtitle in what is left of 3), optional badge on a
-/// solid light ground, actions below the text; stacks at accessibility sizes; one VoiceOver element
-/// (caller adds actions).
+/// solid light ground, actions below the text; stacks at accessibility sizes. For assistive technologies the
+/// card is a container: its body (cover, title, subtitle, badge) is one element, its actions are real buttons.
 ///
 /// - No text on the photo: name and count sit below it; the badge has its own white ground.
 /// - The cover is a `CoverPhoto`: sharp from the device or a calm placeholder, "Vorschau
@@ -36,10 +38,13 @@ enum PhotoCardStyle: Sendable {
 /// - Accessibility text sizes: everything below each other and nothing cut off (no line limits),
 ///   the photo a wide strip so name and button stay in view (draft E7), the badge moves from the
 ///   photo into the text so it never covers the photo, buttons span the card.
-/// - VoiceOver: one element, "title, subtitle", the badge as its value ("Neu", "+12 Fotos",
-///   "Angelegt"). The buttons in `actions` are for touch; the caller gives the card the same
-///   actions with `.accessibilityAction(named:)` (and `.accessibilityAddTraits(.isButton)` with a
-///   default action if tapping the card opens something).
+/// - VoiceOver, Switch Control, Voice Control, Full Keyboard Access: the card is a container
+///   (`.contain`; an `.accessibilityIdentifier` on the card names it). Its body is one element,
+///   first: "title, subtitle", the badge as its value ("Neu", "+12 Fotos", "Angelegt"), the title
+///   as its Voice Control name; with `onOpen` it is a button that opens the card. The views in
+///   `actions` stay buttons of their own ("Anlegen tippen"), so nothing needs to be repeated as
+///   an accessibility action, and nothing is nested: `onOpen` is the body's own button, behind
+///   the cover and the texts (they let touches through to it), never a button around the card.
 /// - Dark mode: the card colour of the system; Increase Contrast: the card gets an edge (as
 ///   `Card`); the actions' own contrast: `CardActionButtonStyle`.
 struct PhotoCard<Actions: View>: View {
@@ -52,14 +57,20 @@ struct PhotoCard<Actions: View>: View {
     private let style: PhotoCardStyle
     private let placeholderSymbol: String?
     private let onCoverOutcome: (@MainActor (CoverOutcome) -> Void)?
+    private let onOpen: (@MainActor () -> Void)?
     private let actions: Actions
 
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorSchemeContrast) private var contrast
+    /// The texts of a large card keep this much width beside the action (`ActionBesideText`).
+    @ScaledMetric(relativeTo: .title3) private var minimumTextWidth: CGFloat = CardTextMetrics.minimumTextBesideAction
+    /// The body's button is held: cover and texts dim, as a plain button's label does.
+    @State private var pressed = false
 
     init(coverIDs: [AssetID], title: Text, subtitle: Text?, badge: CardBadge? = nil, hidesPreview: Bool = false,
          aspectRatio: CGFloat = 4.0 / 3.0, style: PhotoCardStyle = .compact, placeholderSymbol: String? = nil,
-         onCoverOutcome: (@MainActor (CoverOutcome) -> Void)? = nil, @ViewBuilder actions: () -> Actions) {
+         onCoverOutcome: (@MainActor (CoverOutcome) -> Void)? = nil, onOpen: (@MainActor () -> Void)? = nil,
+         @ViewBuilder actions: () -> Actions) {
         self.coverIDs = coverIDs
         self.title = title
         self.subtitle = subtitle
@@ -69,20 +80,16 @@ struct PhotoCard<Actions: View>: View {
         self.style = style
         self.placeholderSymbol = placeholderSymbol
         self.onCoverOutcome = onCoverOutcome
+        self.onOpen = onOpen
         self.actions = actions()
     }
 
     var body: some View {
-        Group {
-            if style == .tile {
-                tile
-            } else {
-                card
-            }
+        if style == .tile {
+            tile
+        } else {
+            card
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenTitle)
-        .accessibilityValue(badge?.spoken ?? Text(verbatim: ""))
     }
 
     private var hasActions: Bool { Actions.self != EmptyView.self }
@@ -114,32 +121,69 @@ struct PhotoCard<Actions: View>: View {
         let shape = RoundedRectangle(cornerRadius: style == .large ? Theme.Radius.largeCard : Theme.Radius.compactCard,
                                      style: .continuous)
         return VStack(alignment: .leading, spacing: 0) {
-            cover
+            face(cover)
             details
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background { cardBody }
         .background(Theme.card, in: shape)
         .clipShape(shape)
         // White on light grey is only 1.1:1; with Increase Contrast the card gets an edge (as `Card`).
         .overlay {
             if contrast == .increased {
                 shape.strokeBorder(Color(uiColor: .separator), lineWidth: 1)
+                    .allowsHitTesting(false)
             }
         }
-        .contentShape(shape)
+        .accessibilityElement(children: .contain)
     }
 
     private var tile: some View {
         VStack(alignment: .leading, spacing: 7) {
-            cover
-            texts
+            face(cover)
+            face(texts)
             if hasActions {
-                actions
-                    .environment(\.cardActionFillsWidth, true)
+                actionsView(fillsWidth: true, inset: CardTextMetrics.compactActionInset)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .background { cardBody }
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Cover and texts: drawn in front, but touches go through to the card's body behind them,
+    /// and assistive technologies read them as that body (`cardBody`).
+    private func face(_ content: some View) -> some View {
+        content
+            .opacity(pressed ? 0.7 : 1)
+            .animation(.easeOut(duration: 0.12), value: pressed)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    /// The card's body as one element, behind the whole card: a button that opens the card when
+    /// there is `onOpen`, otherwise only what it says. First in the card for VoiceOver; its
+    /// Voice Control name is the title ("Kyoto, Oktober 2024 tippen").
+    @ViewBuilder private var cardBody: some View {
+        if let onOpen {
+            describedAsBody(
+                Button(action: onOpen) {
+                    Color.clear.contentShape(Rectangle())
+                }
+                .buttonStyle(PressReportingButtonStyle(pressed: $pressed))
+            )
+        } else {
+            describedAsBody(Color.clear.accessibilityElement())
+        }
+    }
+
+    private func describedAsBody(_ element: some View) -> some View {
+        element
+            .accessibilityLabel(spokenTitle)
+            .accessibilityValue(badge?.spoken ?? Text(verbatim: ""))
+            .accessibilityInputLabels([title])
+            .accessibilitySortPriority(1)
+            .accessibilityIdentifier("photoCard.body")
     }
 
     /// The drafts: 20 pt bold across the page, 17 pt semibold in a card side by side, 15 pt
@@ -159,46 +203,63 @@ struct PhotoCard<Actions: View>: View {
             if let badge, typeSize.isAccessibilitySize {
                 CardBadgeLabel(badge: badge)
             }
-            CardTextLayout(lines: typeSize.isAccessibilitySize ? nil : 3, spacing: 2) {
+            CardTextLayout(limitsLines: !typeSize.isAccessibilitySize,
+                           reservesLines: style == .compact && !typeSize.isAccessibilitySize, spacing: 2) {
                 title
                     .font(titleFont)
                     .foregroundStyle(.primary)
                     .compactLineLimit(2)
+                // One and two lines in each font: the heights `CardTextLayout` counts with.
+                probe("A", font: titleFont)
+                probe("A\nA", font: titleFont)
+                probe("A", font: subtitleFont)
+                probe("A\nA", font: subtitleFont)
                 if let subtitle {
                     subtitle
                         .font(subtitleFont)
                         .foregroundStyle(.noteText)
                         .compactLineLimit(2)
-                    // One line in the subtitle's font: its line height (`CardTextLayout`).
-                    Text(verbatim: "A")
-                        .font(subtitleFont)
-                        .hidden()
-                        .accessibilityHidden(true)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func probe(_ lines: String, font: Font) -> some View {
+        Text(verbatim: lines)
+            .font(font)
+            .hidden()
+            .accessibilityHidden(true)
+    }
+
+    /// The actions in one view (a layout would take several apart), told how wide to be and how
+    /// much room the word gets inside its capsule (`CardActionButtonStyle`).
+    private func actionsView(fillsWidth: Bool, inset: CGFloat) -> some View {
+        HStack(spacing: Theme.Spacing.s) {
+            actions
+        }
+        .environment(\.cardActionFillsWidth, fillsWidth)
+        .environment(\.cardActionInset, inset)
+    }
+
     @ViewBuilder private var details: some View {
         switch style {
         case .compact, .tile:
             VStack(alignment: .leading, spacing: 10) {
-                texts
+                face(texts)
                 if hasActions {
-                    actions
-                        .environment(\.cardActionFillsWidth, true)
+                    actionsView(fillsWidth: true, inset: CardTextMetrics.compactActionInset)
                 }
             }
             .padding(.top, 10)
-            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.horizontal, CardTextMetrics.compactInset)
             .padding(.bottom, Theme.Spacing.m)
         case .large:
-            AdaptiveStack(verticalAlignment: .center, spacing: Theme.Spacing.m) {
-                texts
+            ActionBesideText(spacing: Theme.Spacing.m, minimumTextWidth: minimumTextWidth,
+                             stacks: typeSize.isAccessibilitySize) {
+                face(texts)
                 if hasActions {
-                    actions
-                        .environment(\.cardActionFillsWidth, typeSize.isAccessibilitySize)
+                    actionsView(fillsWidth: true, inset: 18)
                 }
             }
             .padding(.top, 10)
@@ -213,65 +274,190 @@ extension PhotoCard where Actions == EmptyView {
     /// A card without buttons (an album, a cover to look at).
     init(coverIDs: [AssetID], title: Text, subtitle: Text?, badge: CardBadge? = nil, hidesPreview: Bool = false,
          aspectRatio: CGFloat = 4.0 / 3.0, style: PhotoCardStyle = .compact, placeholderSymbol: String? = nil,
-         onCoverOutcome: (@MainActor (CoverOutcome) -> Void)? = nil) {
+         onCoverOutcome: (@MainActor (CoverOutcome) -> Void)? = nil, onOpen: (@MainActor () -> Void)? = nil) {
         self.init(coverIDs: coverIDs, title: title, subtitle: subtitle, badge: badge, hidesPreview: hidesPreview,
                   aspectRatio: aspectRatio, style: style, placeholderSymbol: placeholderSymbol,
-                  onCoverOutcome: onCoverOutcome) { EmptyView() }
+                  onCoverOutcome: onCoverOutcome, onOpen: onOpen) { EmptyView() }
+    }
+}
+
+/// A plain button that says when it is held, so the card can dim its cover and texts, which lie
+/// in front of the button.
+private struct PressReportingButtonStyle: ButtonStyle {
+    @Binding var pressed: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, isPressed in pressed = isPressed }
+    }
+}
+
+/// The rules of a card's texts, apart from the views so the tests can check them.
+enum CardTextMetrics {
+    /// The heights of one and two lines of the title and of the subtitle, as measured in their
+    /// fonts (`CardTextLayout`'s hidden probes).
+    struct Lines: Equatable {
+        var titleOne: CGFloat
+        var titleTwo: CGFloat
+        var subtitleOne: CGFloat
+        var subtitleTwo: CGFloat
+    }
+
+    /// A compact card's inner margin, left and right: 10 pt (the drafts' 12 less 2 on each side,
+    /// so a long German word fits on one line of a card of 163 pt, the small iPhone's).
+    static let compactInset: CGFloat = 10
+    /// The room beside the word inside a compact card's capsule (`CardActionButtonStyle`): 10 pt
+    /// (the drafts' 18 where the capsule is only as wide as its word), "Benennen …" fits at
+    /// every text size a card side by side is shown at.
+    static let compactActionInset: CGFloat = 10
+    /// The width the texts of a large card keep beside its action at the standard text size
+    /// (grows with the text): a 15-letter word in the bold title ("Weihnachtsmarkt") stays on
+    /// one line. Narrower, the action goes below the texts.
+    static let minimumTextBesideAction: CGFloat = 176
+
+    /// Whether a title of `height` takes two lines.
+    static func titleTakesTwoLines(_ height: CGFloat, _ lines: Lines) -> Bool {
+        height > (lines.titleOne + lines.titleTwo) / 2
+    }
+
+    /// The height the subtitle may take within three lines: under a two-line title one line
+    /// (offered half a line more, which a text never fills, so it ends in "…" after one); nil
+    /// under a one-line title, where it keeps its own limit of two.
+    static func subtitleRoom(titleHeight: CGFloat, lines: Lines) -> CGFloat? {
+        guard titleTakesTwoLines(titleHeight, lines) else { return nil }
+        return (lines.subtitleOne + lines.subtitleTwo) / 2
+    }
+
+    /// The height a compact card keeps for its texts: the taller of a two-line title over a
+    /// one-line subtitle and a one-line title over a two-line subtitle, so every card side by
+    /// side is as high, whatever its texts, and a shelf neither stands ragged nor jumps when a
+    /// taller card scrolls in.
+    static func reservedHeight(lines: Lines, spacing: CGFloat) -> CGFloat {
+        max(lines.titleTwo + spacing + lines.subtitleOne, lines.titleOne + spacing + lines.subtitleTwo)
+    }
+
+    /// Whether a large card's action fits beside its texts in `width`: the texts keep
+    /// `minimumTextWidth` next to the action's own width.
+    static func actionBesideText(width: CGFloat, actionWidth: CGFloat, spacing: CGFloat, minimumTextWidth: CGFloat) -> Bool {
+        width - actionWidth - spacing >= minimumTextWidth
     }
 }
 
 /// A card's title and subtitle within three lines at the standard text sizes (design rule 4):
 /// the title as it is (its own limit of two lines), the subtitle in the lines the title left,
-/// at least one. `lines` nil (the accessibility sizes): both as long as they are. Subviews: the
-/// title, then the subtitle and a hidden line in its font that gives its line height (a
-/// subtitle may break a line of its own, so its own one-line height says nothing). A text
-/// offered less height than it needs ends its last line in "…".
+/// at least one. `limitsLines` false (the accessibility sizes): both as long as they are.
+/// `reservesLines`: the height of three lines whatever the texts (`CardTextMetrics.reservedHeight`),
+/// the texts at the top. Subviews: the title, four hidden probes (one and two lines of the
+/// title's font, then of the subtitle's), then the subtitle if there is one. A text offered less
+/// height than it needs ends its last line in "…".
 private struct CardTextLayout: Layout {
-    var lines: Int?
+    var limitsLines: Bool
+    var reservesLines: Bool
     var spacing: CGFloat
 
+    private static let subtitleIndex = 5
+
+    private struct Measured {
+        var title: CGSize
+        var subtitle: CGSize?
+        var height: CGFloat
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let sizes = measure(width: proposal.width, subviews: subviews)
-        let height = sizes.title.height + (sizes.subtitle.map { spacing + $0.height } ?? 0)
+        let measured = measure(width: proposal.width, subviews: subviews)
         // The width offered, or the texts' own width when none or no limit is offered.
-        let own = max(sizes.title.width, sizes.subtitle?.width ?? 0)
+        let own = max(measured.title.width, measured.subtitle?.width ?? 0)
         let width = proposal.width.map { $0.isFinite ? $0 : own } ?? own
-        return CGSize(width: width, height: height)
+        return CGSize(width: width, height: measured.height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let sizes = measure(width: bounds.width, subviews: subviews)
+        let measured = measure(width: bounds.width, subviews: subviews)
         for (index, subview) in subviews.enumerated() {
             switch index {
             case 0:
                 subview.place(at: bounds.origin, anchor: .topLeading,
-                              proposal: ProposedViewSize(width: bounds.width, height: sizes.title.height))
-            case 1:
-                subview.place(at: CGPoint(x: bounds.minX, y: bounds.minY + sizes.title.height + spacing), anchor: .topLeading,
-                              proposal: ProposedViewSize(width: bounds.width, height: sizes.subtitle?.height ?? 0))
+                              proposal: ProposedViewSize(width: bounds.width, height: measured.title.height))
+            case Self.subtitleIndex:
+                subview.place(at: CGPoint(x: bounds.minX, y: bounds.minY + measured.title.height + spacing), anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: measured.subtitle?.height ?? 0))
             default:
-                // The hidden line that measures the subtitle's line height.
+                // The hidden probes.
                 subview.place(at: bounds.origin, anchor: .topLeading, proposal: .zero)
             }
         }
     }
 
-    private func measure(width: CGFloat?, subviews: Subviews) -> (title: CGSize, subtitle: CGSize?) {
-        guard let title = subviews.first else { return (.zero, nil) }
+    private func measure(width: CGFloat?, subviews: Subviews) -> Measured {
+        guard let title = subviews.first else { return Measured(title: .zero, subtitle: nil, height: 0) }
         let titleSize = title.sizeThatFits(ProposedViewSize(width: width, height: nil))
-        guard subviews.count > 1 else { return (titleSize, nil) }
-        let subtitle = subviews[1]
-        let full = subtitle.sizeThatFits(ProposedViewSize(width: width, height: nil))
-        guard let lines, subviews.count > 2 else { return (titleSize, full) }
-        let titleLine = title.sizeThatFits(.unspecified).height
-        let subtitleLine = subviews[2].sizeThatFits(.unspecified).height
-        guard titleLine > 0, subtitleLine > 0 else { return (titleSize, full) }
-        let titleLines = max(1, Int((titleSize.height / titleLine).rounded()))
-        // Room for the lines left and half a line more: a text never fits half a line, so it
-        // shows exactly the lines left.
-        let room = CGFloat(max(1, lines - titleLines)) * subtitleLine + subtitleLine / 2
-        guard full.height > room else { return (titleSize, full) }
-        return (titleSize, subtitle.sizeThatFits(ProposedViewSize(width: width, height: room)))
+        guard subviews.count >= Self.subtitleIndex else { return Measured(title: titleSize, subtitle: nil, height: titleSize.height) }
+        let lines = CardTextMetrics.Lines(titleOne: subviews[1].sizeThatFits(.unspecified).height,
+                                          titleTwo: subviews[2].sizeThatFits(.unspecified).height,
+                                          subtitleOne: subviews[3].sizeThatFits(.unspecified).height,
+                                          subtitleTwo: subviews[4].sizeThatFits(.unspecified).height)
+        var subtitleSize: CGSize?
+        if subviews.count > Self.subtitleIndex {
+            let subtitle = subviews[Self.subtitleIndex]
+            var size = subtitle.sizeThatFits(ProposedViewSize(width: width, height: nil))
+            if limitsLines, let room = CardTextMetrics.subtitleRoom(titleHeight: titleSize.height, lines: lines), size.height > room {
+                size = subtitle.sizeThatFits(ProposedViewSize(width: width, height: room))
+            }
+            subtitleSize = size
+        }
+        var height = titleSize.height + (subtitleSize.map { spacing + $0.height } ?? 0)
+        if reservesLines { height = max(height, CardTextMetrics.reservedHeight(lines: lines, spacing: spacing)) }
+        return Measured(title: titleSize, subtitle: subtitleSize, height: height)
+    }
+}
+
+/// A large card's texts and its action: side by side while the texts keep `minimumTextWidth`
+/// next to the action (`CardTextMetrics.actionBesideText`), both centred on each other as in the
+/// drafts; otherwise, and always with `stacks` (the accessibility sizes), the action below the
+/// texts and as wide as they are. Subviews: the texts, then the actions (one view).
+private struct ActionBesideText: Layout {
+    var spacing: CGFloat
+    var minimumTextWidth: CGFloat
+    var stacks: Bool
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(width: proposal.width, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let frames = arrange(width: bounds.width, subviews: subviews).frames
+        for (index, subview) in subviews.enumerated() {
+            let frame = index < frames.count ? frames[index] : .zero
+            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: frame.width, height: frame.height))
+        }
+    }
+
+    private func arrange(width: CGFloat?, subviews: Subviews) -> (frames: [CGRect], size: CGSize) {
+        guard let texts = subviews.first else { return ([], .zero) }
+        let offered = width.flatMap { $0.isFinite ? $0 : nil }
+        guard subviews.count > 1 else {
+            let size = texts.sizeThatFits(ProposedViewSize(width: offered, height: nil))
+            let shownWidth = offered ?? size.width
+            return ([CGRect(x: 0, y: 0, width: shownWidth, height: size.height)], CGSize(width: shownWidth, height: size.height))
+        }
+        let action = subviews[1]
+        let natural = action.sizeThatFits(.unspecified)
+        if !stacks, CardTextMetrics.actionBesideText(width: offered ?? .infinity, actionWidth: natural.width, spacing: spacing,
+                                                        minimumTextWidth: minimumTextWidth) {
+            let textSize = texts.sizeThatFits(ProposedViewSize(width: offered.map { $0 - natural.width - spacing }, height: nil))
+            let textWidth = offered.map { $0 - natural.width - spacing } ?? textSize.width
+            let height = max(textSize.height, natural.height)
+            let textFrame = CGRect(x: 0, y: (height - textSize.height) / 2, width: textWidth, height: textSize.height)
+            let actionFrame = CGRect(x: textWidth + spacing, y: (height - natural.height) / 2, width: natural.width, height: natural.height)
+            return ([textFrame, actionFrame], CGSize(width: actionFrame.maxX, height: height))
+        }
+        let textSize = texts.sizeThatFits(ProposedViewSize(width: offered, height: nil))
+        let shownWidth = offered ?? max(textSize.width, natural.width)
+        let actionSize = action.sizeThatFits(ProposedViewSize(width: shownWidth, height: nil))
+        let textFrame = CGRect(x: 0, y: 0, width: shownWidth, height: textSize.height)
+        let actionFrame = CGRect(x: 0, y: textSize.height + spacing, width: shownWidth, height: actionSize.height)
+        return ([textFrame, actionFrame], CGSize(width: shownWidth, height: actionFrame.maxY))
     }
 }
 
@@ -289,11 +475,13 @@ extension CardBadge {
 
 /// A `CardBadge` on its solid light ground: the accent on white, in dark mode too, so it reads
 /// the same on any photo (5.97:1; Increase Contrast 8.27:1 with the deeper teal), with a hairline
-/// edge that keeps its shape on a white sky. Like the mosaic's "+N" it stops growing at the first
-/// accessibility size and keeps to one line (on the photo it is never cut; `PhotoCard` moves it
-/// below the photo at the accessibility sizes).
+/// edge that keeps its shape on a white sky; with Increase Contrast the edge is the deeper teal
+/// itself, 1 pt (8.27:1 against the white badge and a white sky alike). Like the mosaic's
+/// "+N" it stops growing at the first accessibility size and keeps to one line (on the photo it is
+/// never cut; `PhotoCard` moves it below the photo at the accessibility sizes).
 struct CardBadgeLabel: View {
     var badge: CardBadge
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         label
@@ -304,7 +492,10 @@ struct CardBadgeLabel: View {
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
             .background(Color.white, in: Capsule())
-            .overlay { Capsule().strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5) }
+            .overlay {
+                Capsule().strokeBorder(contrast == .increased ? Theme.accent : Color.black.opacity(0.08),
+                                       lineWidth: contrast == .increased ? 1 : 0.5)
+            }
             .environment(\.colorScheme, .light)
             .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             .accessibilityHidden(true)

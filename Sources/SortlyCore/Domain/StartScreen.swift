@@ -8,6 +8,7 @@ import Foundation
 /// without the user asking for it. Now a screen of its own says that access is missing and
 /// leads to Settings (or to the system question when iOS forgot the answer); once access is
 /// back, Albumist goes on where it was, with the part of the library chosen before.
+/// What the main screen's first tab "Vorschläge" shows is decided in `StartPage`.
 public enum StartScreen: Hashable, Sendable {
     /// First start: promise, areas, photo access, the part of the library to start with.
     case introduction

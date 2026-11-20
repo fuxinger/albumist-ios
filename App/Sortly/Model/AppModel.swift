@@ -990,7 +990,8 @@ final class AppModel {
         onboardingDone = true
         phase = .ready
         if access.canRead { LibraryChangeWatcher.shared.start() }
-        ContinuedAnalysis.requestNotificationPermission()
+        // Design W1 H5 (decision 3B): no notification question at the start; the analysis card
+        // asks with "Bescheid sagen, wenn fertig" once the analysis takes a while.
         startAnalysis(scope: scope, cause: .tap)
     }
 
@@ -1135,7 +1136,8 @@ final class AppModel {
             // it put "Albumist analysiert deine Fotos · Schritt 1 von 7" on the Lock Screen for
             // a few seconds after every check (device test 15.11. 23:16).
             if analysis.kind != .check {
-                ContinuedAnalysis.requestNotificationPermission()
+                // Design W1 H5 (decision 3B): iOS asks about notifications only from the
+                // analysis card ("Bescheid sagen, wenn fertig"), not at every start.
                 ContinuedAnalysis.begin()
             }
             retry.reset()
@@ -3044,7 +3046,7 @@ final class AppModel {
             // put it into `message`), as the undo of an interrupted plan does (second review of
             // resume-fill, D2).
             let reasons = [execution.failure, message?.text].compactMap { $0 }
-            message = .failure(([String(localized: "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Einstellungen › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen.")]
+            message = .failure(([String(localized: "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Alben › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen.")]
                                 + reasons.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }).joined(separator: "\n\n"))
         }
         // Read again, not cleared: a plan that stopped once more stays offered, and so does
@@ -3127,14 +3129,14 @@ final class AppModel {
                 persistDecisions()
             case .partlyUndone:
                 // The receipt offers "Rest rückgängig machen".
-                message = .failure([String(localized: "Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen."),
+                message = .failure([String(localized: "Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen."),
                                     execution.failure].compactMap { $0 }.joined(separator: "\n\n"))
             case .notStarted:
                 // Nothing was taken back: the receipt offers "Rückgängig machen" (review of 6c6ef79).
                 // Keeps the reason storing earlier results failed (e.g. a full disk), which
                 // finalize put into `message` (review of 6b34b20).
                 let reasons = [execution.failure, message?.text].compactMap { $0 }
-                message = .failure(([String(localized: "Albumist konnte den unterbrochenen Vorgang gerade nicht rückgängig machen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn rückgängig machen.")]
+                message = .failure(([String(localized: "Albumist konnte den unterbrochenen Vorgang gerade nicht rückgängig machen. Er steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du ihn rückgängig machen.")]
                                     + reasons.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }).joined(separator: "\n\n"))
             case .undoInterrupted, .resultsNotStored:
                 // Offered on the overview again: the undo that was cut off, or the one that
@@ -3347,7 +3349,7 @@ final class AppModel {
             lines.append(String(localized: "\(p.assets.count) Fotos bleiben im Album „\(name(p.folderPath, p.title))“."))
         }
         lines.append(String(localized: "Albumist kann nicht sicher sagen, ob das von Albumist ist oder von dir, und lässt es deshalb, wie es ist. Sieh in Fotos nach, ob du es behalten möchtest."))
-        if inHistory { lines.append(String(localized: "Der Vorgang bleibt unter Einstellungen › Verlauf und Rückgängig.")) }
+        if inHistory { lines.append(String(localized: "Der Vorgang bleibt unter Alben › Verlauf und Rückgängig.")) }
         return AppMessage(title: String(localized: "Etwas bleibt in Fotos"), text: lines.joined(separator: "\n"))
     }
 

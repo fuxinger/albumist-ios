@@ -67,6 +67,25 @@ class SelectionRuleTests(unittest.TestCase):
                "}\n")
         self.assertEqual(self.found(src), [("Photos", selection_rule.HIDE_TAB_BAR)])
 
+    def test_a_view_that_hides_the_tab_bar_for_good_by_design_may_select(self):
+        # The open suggestion: its two buttons stand where the tab bar was (design E2).
+        self.assertIn("ProposalDetailView", selection_rule.HIDDEN_FOR_GOOD)
+        src = ("struct ProposalDetailView: View {\n"
+               "    @State private var selecting = false\n"
+               "    var body: some View {\n"
+               "        Grid()\n"
+               "            .toolbar { if selecting { ToolbarItem(placement: .bottomBar) { Y() } } }\n"
+               "            .toolbarVisibility(.hidden, for: .tabBar)\n"
+               "    }\n"
+               "}\n")
+        self.assertEqual(self.found(src), [])
+        # It still hides the tab bar: without it, its bottom bar lies behind the tab bar.
+        shown = src.replace("            .toolbarVisibility(.hidden, for: .tabBar)\n", "")
+        self.assertEqual(self.found(shown), [("ProposalDetailView", selection_rule.HIDE_TAB_BAR)])
+        # Its selection still shows its actions in the system bottom bar.
+        own_bar = src.replace("if selecting { ToolbarItem(placement: .bottomBar) { Y() } }", "EmptyView()")
+        self.assertEqual(self.found(own_bar), [("ProposalDetailView", selection_rule.ACTIONS_IN_BOTTOM_BAR)])
+
     def test_a_bottom_bar_without_selection_needs_the_tab_bar_hidden(self):
         src = ("struct Detail: View {\n"
                "    var body: some View {\n"

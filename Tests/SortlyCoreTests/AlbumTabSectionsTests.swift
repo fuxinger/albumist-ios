@@ -15,9 +15,13 @@ struct AlbumTabSectionsTests {
 
     static let photos: Set<AssetID> = [AssetID("p1"), AssetID("p2")]
 
-    /// Every album and folder at most once over both lists.
+    /// Every album and folder at most once over both lists and the folder rows between them
+    /// (design 5C).
     static func listedOnce(_ sections: AlbumTabSections) -> Bool {
-        let ids = (sections.fromAlbumist + sections.yours).map(\.id)
+        let folders = sections.rows.compactMap { row -> CollectionID? in
+            if case .folder(let folder, _) = row { folder.id } else { nil }
+        }
+        let ids = (sections.fromAlbumist + sections.yours).map(\.id) + folders
         return Set(ids).count == ids.count
     }
 
@@ -57,7 +61,10 @@ struct AlbumTabSectionsTests {
         #expect(Self.listedOnce(sections))
     }
 
-    @Test func albumsInAlbumistsFolderKeepTheFolderUnderYourAlbums() {
+    /// Design 5C: the folder Albumist's new albums lie in is a row of its own („Ordner
+    /// „Albumist““) between the shelf and "Deine Alben", so it is not listed under "Deine Alben"
+    /// again (before, the folder stood there).
+    @Test func albumsInAlbumistsFolderGiveTheFolderItsOwnRow() {
         let folder = CollectionSnapshot(id: "f", title: "Albumist", kind: .folder, childIDs: ["a1"])
         let album = CollectionSnapshot(id: "a1", title: "Rom", parentID: "f", assetIDs: Self.photos)
         let mine = CollectionSnapshot(id: "u1", title: "Garten", assetIDs: [AssetID("p3")])
@@ -65,7 +72,8 @@ struct AlbumTabSectionsTests {
         let sections = AlbumTabSections(inventory: CollectionInventory([folder, album, mine, smart]),
                                         managed: [Self.state(album)])
         #expect(sections.fromAlbumist.map(\.id) == ["a1"])
-        #expect(sections.yours.map(\.id) == ["f", "u1"])
+        #expect(sections.rows.first == .folder(folder, albums: 1))
+        #expect(sections.yours.map(\.id) == ["u1"])
         #expect(Self.listedOnce(sections))
     }
 

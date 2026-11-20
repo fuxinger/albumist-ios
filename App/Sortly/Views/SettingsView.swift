@@ -2,7 +2,8 @@ import SwiftUI
 import SortlyCore
 import SortlyEngine
 
-/// Settings (prompt §17): areas, naming, privacy, history and undo, about.
+/// Settings (prompt §17): the library, areas, naming, privacy, about. "Verlauf und Rückgängig"
+/// and Albumist's albums are in the tab "Alben" (design 5C).
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
@@ -17,23 +18,6 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var model = model
         Form {
-            // Undo first and on its own screen (design review W16: the history sat between
-            // privacy and the purchase, the seventh of twelve sections).
-            Section {
-                // Pushed by value (`AppScreen`), like the screens behind it: a receipt pushes
-                // "Fehlendes erneut versuchen".
-                PushLink(.history) {
-                    LabeledContent {
-                        if model.interruptedPlan != nil { Text("Unterbrochen") }
-                    } label: {
-                        Label("Verlauf und Rückgängig", systemImage: "clock.arrow.circlepath")
-                    }
-                }
-                .accessibilityIdentifier("settings.history")
-            } footer: {
-                Text("Alles, was Albumist in Fotos geändert hat, und der Weg zurück.")
-            }
-
             Section {
                 Picker("Albumist arbeitet mit", selection: scopeYear) {
                     Text("Ganze Mediathek").tag(Int?.none)
@@ -106,10 +90,6 @@ struct SettingsView: View {
                     }
                 }
                 Toggle("Foto in mehreren Alben erlauben", isOn: $model.settings.allowMultipleAssignments)
-                // Pushed by value: it pushes the preview of a removal (`AppScreen`).
-                PushLink(.managedAlbums) {
-                    LabeledContent("Alben von Albumist", value: model.managedAlbums.count.formatted())
-                }
             }
 
             Section {
@@ -297,7 +277,8 @@ private struct FieldRowStyle: LabeledContentStyle {
     }
 }
 
-/// Every change Albumist made, newest first, each with its way back (design review W16).
+/// Every change Albumist made, newest first, each with its way back (design review W16). Opened
+/// from the row "Verlauf und Rückgängig" in the tab "Alben" (design 5C).
 struct HistoryView: View {
     @Environment(AppModel.self) private var model
 

@@ -2831,6 +2831,156 @@
         }
       }
     },
+    "Ergänzen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add…"
+          }
+        }
+      }
+    },
+    "Benennen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Name…"
+          }
+        }
+      }
+    },
+    "Ansehen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View…"
+          }
+        }
+      }
+    },
+    "Bitte kurz ansehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Please take a look"
+          }
+        }
+      }
+    },
+    "Album wird angelegt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating album"
+          }
+        }
+      }
+    },
+    "Fotos anzeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Photos"
+          }
+        }
+      }
+    },
+    "Alle auswählen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select All"
+          }
+        }
+      }
+    },
+    "%lld %@ Alben anlegen" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@albums@"
+          },
+          "substitutions" : {
+            "albums" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Album anlegen"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Alben anlegen"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@albums@"
+          },
+          "substitutions" : {
+            "albums" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "Create %2$@ Album"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "Create %2$@ Albums"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Angelegt wird erst mit „Album anlegen“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing is created until you tap “Create Album”."
+          }
+        }
+      }
+    },
+    "Ergänzt wird erst, wenn du in der Vorschau bestätigst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing is added until you confirm in the preview."
+          }
+        }
+      }
+    },
     "Anpassen" : {
       "localizations" : {
         "en" : {
@@ -4671,6 +4821,26 @@
         }
       }
     },
+    "Ordner „%@“" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Folder “%@”"
+          }
+        }
+      }
+    },
+    "Den Ordner „%@“ gibt es nicht mehr." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The folder “%@” no longer exists."
+          }
+        }
+      }
+    },
     "Originale bearbeitet" : {
       "localizations" : {
         "en" : {
@@ -4927,6 +5097,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Undo"
+          }
+        }
+      }
+    },
+    "Fotos ansehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View Photos"
+          }
+        }
+      }
+    },
+    "Entfernt nur dieses Album. Deine Fotos bleiben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removes only this album. Your photos stay."
+          }
+        }
+      }
+    },
+    "Nimmt nur Albumists Fotos heraus. Das Album bleibt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removes only Albumist’s photos. The album stays."
           }
         }
       }
@@ -5766,7 +5966,17 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Similar albums"
+            "value" : "Similar Albums"
+          }
+        }
+      }
+    },
+    "Keine ähnlichen Alben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Similar Albums"
           }
         }
       }
@@ -6251,6 +6461,126 @@
         }
       }
     },
+    "%lld %@ Fotos · angelegt von Albumist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Foto · angelegt von Albumist"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Fotos · angelegt von Albumist"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ photo · created by Albumist"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ photos · created by Albumist"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld %@ Fotos · ergänzt von Albumist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Foto · ergänzt von Albumist"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Fotos · ergänzt von Albumist"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ photo · extended by Albumist"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ photos · extended by Albumist"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Albumists Fotos herausnehmen" : {
       "localizations" : {
         "en" : {
@@ -6267,6 +6597,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tap an album to undo Albumist's changes to it. Photos you added yourself stay in it. Your originals always stay in your library."
+          }
+        }
+      }
+    },
+    "Halte ein Album gedrückt oder tippe im Album auf „…“, um Albumists Änderungen daran rückgängig zu machen. Fotos, die du selbst hinzugefügt hast, bleiben drin." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Touch and hold an album, or tap “…” in the album, to undo Albumist’s changes to it. Photos you added yourself stay in it."
           }
         }
       }
@@ -6367,6 +6707,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Created or Extended by Albumist"
+          }
+        }
+      }
+    },
+    "Von Albumist" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "From Albumist"
+          }
+        }
+      }
+    },
+    "angelegt oder ergänzt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "created or extended"
+          }
+        }
+      }
+    },
+    "Alle %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "See All %lld"
           }
         }
       }
@@ -11871,6 +12241,86 @@
         }
       }
     },
+    "%lld Änderungen" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Änderung"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Änderungen"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld change"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld changes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Mehr als %lld Änderungen" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Mehr als %lld Änderung"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Mehr als %lld Änderungen"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "More than %lld change"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "More than %lld changes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Alles, was Albumist in Fotos geändert hat, und der Weg zurück." : {
       "localizations" : {
         "en" : {
@@ -11921,12 +12371,12 @@
         }
       }
     },
-    "Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen." : {
+    "Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Not everything could be undone. The interrupted run is now in Settings › History and Undo, where you can undo the rest."
+            "value" : "Not everything could be undone. The interrupted run is now in Albums › History and Undo, where you can undo the rest."
           }
         }
       }
@@ -12031,12 +12481,12 @@
         }
       }
     },
-    "Albumist konnte den unterbrochenen Vorgang gerade nicht rückgängig machen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn rückgängig machen." : {
+    "Albumist konnte den unterbrochenen Vorgang gerade nicht rückgängig machen. Er steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du ihn rückgängig machen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist couldn’t undo the interrupted changes just now. They are now under Settings › History and Undo, where you can undo them."
+            "value" : "Albumist couldn’t undo the interrupted changes just now. They are now under Albums › History and Undo, where you can undo them."
           }
         }
       }
@@ -14281,12 +14731,12 @@
         }
       }
     },
-    "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Einstellungen › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen." : {
+    "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Alben › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The rest is done, but not everything worked. The change is listed under Settings › History and Undo. There you can see what is missing and add it with “Try Missing Steps Again”."
+            "value" : "The rest is done, but not everything worked. The change is listed under Albums › History and Undo. There you can see what is missing and add it with “Try Missing Steps Again”."
           }
         }
       }
@@ -14561,12 +15011,12 @@
         }
       }
     },
-    "Der Vorgang bleibt unter Einstellungen › Verlauf und Rückgängig." : {
+    "Der Vorgang bleibt unter Alben › Verlauf und Rückgängig." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The run stays in Settings › History and Undo."
+            "value" : "The run stays in Albums › History and Undo."
           }
         }
       }
@@ -14797,6 +15247,216 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Finish Removing"
+          }
+        }
+      }
+    },
+    "Noch nichts sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing sorted yet"
+          }
+        }
+      }
+    },
+    "Albumist sieht sich deine Fotos an" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is looking at your photos"
+          }
+        }
+      }
+    },
+    "Reisefotos sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "travel photos sorted"
+          }
+        }
+      }
+    },
+    "Reisefotos aus %@ sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "travel photos from %@ sorted"
+          }
+        }
+      }
+    },
+    "Fotos aus %@ sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "photos from %@ sorted"
+          }
+        }
+      }
+    },
+    "Sortiert heißt: in einem Album für Reise oder Land." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sorted means: in an album for its trip or country."
+          }
+        }
+      }
+    },
+    "Sortiert heißt: in einem passenden Album für jeden Bereich, der zählt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sorted means: in a matching album for each area that counts."
+          }
+        }
+      }
+    },
+    "Ein Foto gilt als sortiert, wenn es in einem passenden Album liegt, zum Beispiel ein Reisefoto im Album seiner Reise oder ein Foto aus Italien im Album „Italien“. Welche Bereiche zählen, wählst du in den Einstellungen unter „Zählt als sortiert“. Fotos, die zu keinem dieser Bereiche passen, zählen nicht mit." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A photo counts as sorted when it is in a matching album, for example a travel photo in the album of its trip or a photo from Italy in the album “Italy”. Choose which areas count under “Counts as Sorted” in Settings. Photos that fit none of these areas are not counted."
+          }
+        }
+      }
+    },
+    "Den Rest holt Albumist später nach" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist will finish the rest later"
+          }
+        }
+      }
+    },
+    "Was heißt sortiert?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What Does Sorted Mean?"
+          }
+        }
+      }
+    },
+    "Neu gezählt · Mehr dazu" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recounted · Learn more"
+          }
+        }
+      }
+    },
+    "Was zählt, ändern" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change What Counts"
+          }
+        }
+      }
+    },
+    "Analyse" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis"
+          }
+        }
+      }
+    },
+    "Bescheid sagen, wenn fertig" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Let Me Know When It’s Done"
+          }
+        }
+      }
+    },
+    "Albumist sagt Bescheid, wenn die Analyse fertig ist." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist will let you know when the analysis is done."
+          }
+        }
+      }
+    },
+    "Neue Reisen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New Trips"
+          }
+        }
+      }
+    },
+    "Alle %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All %@"
+          }
+        }
+      }
+    },
+    "Die %lld besten Alben aus deiner Mediathek. Du siehst vorher genau, was passiert." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The %lld best albums from your library. You see exactly what happens first."
+          }
+        }
+      }
+    },
+    "Alles erledigt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All Caught Up"
+          }
+        }
+      }
+    },
+    "Neue Vorschläge kommen von selbst, sobald du neue Fotos machst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New suggestions come on their own when you take new photos."
+          }
+        }
+      }
+    },
+    "Alle Vorschläge" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All Suggestions"
           }
         }
       }

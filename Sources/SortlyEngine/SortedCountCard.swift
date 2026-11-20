@@ -255,3 +255,27 @@ extension SortedCountCard {
             && !OrganizationStatusResolver.isExcluded(state)
     }
 }
+
+// MARK: The ring's second line (overview draft B, start page "Vorschläge")
+
+extension SortedCountCard {
+    /// What the ring counts, said under "495 von 3.114" (overview draft B, 19.11.): "Reisefotos
+    /// sortiert" while only "Reisen" and "Länder und Orte" count (the standard), "Fotos sortiert"
+    /// as soon as another area counts too; with "Nur 2026" "Reisefotos aus 2026 sortiert". The
+    /// word "Hauptbereiche" leaves the start page.
+    public enum Subject: Equatable, Sendable {
+        case travelPhotos(year: Int?)
+        case photos(year: Int?)
+
+        /// The small "i" at the ring says what "sortiert" means for travel photos: "Sortiert
+        /// heißt: in einem Album für Reise oder Land." (decision 8A).
+        public var isTravel: Bool {
+            if case .travelPhotos = self { true } else { false }
+        }
+    }
+
+    public static func subject(settings: OrganizationSettings, scope: OrganizationScope) -> Subject {
+        let year: Int? = if case .year(let year) = scope { year } else { nil }
+        return countedAreas(settings).isSubset(of: [.trips, .places]) ? .travelPhotos(year: year) : .photos(year: year)
+    }
+}

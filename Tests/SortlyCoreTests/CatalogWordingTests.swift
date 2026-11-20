@@ -152,9 +152,10 @@ struct CatalogWordingTests {
         // The undo of an interrupted plan.
         ("Alles rückgängig machen", "Undo Everything"),
         ("Rest rückgängig machen", "Undo the Rest"),
-        // The message that points to it.
-        ("Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen.",
-         "Not everything could be undone. The interrupted run is now in Settings › History and Undo, where you can undo the rest."),
+        // The message that points to it ("Verlauf und Rückgängig" moved from the settings to
+        // the tab "Alben", design 5C).
+        ("Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen.",
+         "Not everything could be undone. The interrupted run is now in Albums › History and Undo, where you can undo the rest."),
         // Right after „Ignorieren“, as in iOS.
         ("Widerrufen", "Undo"),
         // The receipt.

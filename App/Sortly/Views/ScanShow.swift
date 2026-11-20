@@ -2,20 +2,20 @@ import SwiftUI
 import SortlyCore
 
 /// "Erster Scan als Show": during the first analysis the user's own photos form a mosaic
-/// that a soft light sweeps across, and every trip Albumist finds pops up as a card.
-/// Only during the first analysis (Fuchs 16.11.; `ScanShowRule`, one switch): later analyses
-/// show only the calm progress card.
+/// that a soft light sweeps across (draft E6 "Analyse läuft": two rows of six under the ring
+/// card, the last three paler, as if still being looked at). The trips Albumist finds meanwhile
+/// are cards right under it ("Schon gefunden", `StartPage`). Only during the first analysis
+/// (Fuchs 16.11.; `ScanShowRule`, one switch): later analyses show only the calm ring card.
 struct ScanShow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let columns = 6
-    private let rows = 3
+    private let rows = 2
+    /// The last tiles are paler (draft E6).
+    private let paler = 3
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            mosaic
-            found
-        }
+        mosaic
     }
 
     /// Photos spread over the whole library, so the mosaic shows years, not one afternoon.
@@ -31,15 +31,16 @@ struct ScanShow: View {
 
     private var mosaic: some View {
         let photos = mosaicPhotos
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
         return Group {
             if photos.count >= columns {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columns), spacing: 4) {
-                    ForEach(photos, id: \.self) { id in
+                    ForEach(Array(photos.enumerated()), id: \.element) { index, id in
                         AssetThumbnail(id: id, side: 64)
                             .aspectRatio(1, contentMode: .fill)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .clipShape(shape)
                             .compositingGroup() // fade photo and its placeholder as one
-                            .opacity(0.6)
+                            .opacity(index < photos.count - paler ? 1 : 0.55)
                     }
                 }
                 .overlay {
@@ -50,51 +51,13 @@ struct ScanShow: View {
                         MosaicSweep()
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(shape)
                 .transition(.opacity)
             }
         }
         .animation(.smooth(duration: 0.6), value: photos.count)
-        // The photos are decoration; the progress card says what happens.
+        // The photos are decoration; the ring card says what happens.
         .accessibilityHidden(true)
-    }
-
-    /// Trips found so far, newest first; each appears with a small spring.
-    private var found: some View {
-        let trips = model.proposals
-            .filter { $0.kind == .trip }
-            .sorted { ($0.dateRange?.start ?? .distantPast) > ($1.dateRange?.start ?? .distantPast) }
-            .prefix(3)
-        return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            if !trips.isEmpty {
-                Text("Schon gefunden")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.noteText)
-                    .textCase(.uppercase)
-            }
-            ForEach(Array(trips)) { trip in
-                HStack(spacing: Theme.Spacing.m) {
-                    CoverThumbnail(id: model.coverID(for: trip), side: 44)
-                        .frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.userTitles[trip.id] ?? trip.title)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                        Text("\(trip.assetIDs.count) \(trip.assetIDs.count.formatted()) Aufnahmen")
-                            .font(.caption).foregroundStyle(.noteText)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "airplane")
-                        .foregroundStyle(Theme.accent)
-                        .accessibilityHidden(true)
-                }
-                .accessibilityElement(children: .combine)
-                .transition(reduceMotion ? AnyTransition.opacity
-                            : AnyTransition.scale(scale: 0.85, anchor: .top).combined(with: .opacity))
-            }
-        }
-        .animation(reduceMotion ? .easeInOut(duration: 0.3) : .spring(response: 0.45, dampingFraction: 0.7), value: trips.map(\.id))
     }
 }
 

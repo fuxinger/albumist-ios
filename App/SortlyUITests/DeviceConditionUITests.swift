@@ -28,6 +28,7 @@ final class DeviceConditionUITests: XCTestCase {
         let stalls = UITestStalls.arguments(besides: extra)
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra
         launchExtra = extra
+        idleCounts = nil
         UITestAppEnd.launch(app, justBefore: { UITestOnboarding.clock("launch") })
     }
 
@@ -156,13 +157,32 @@ final class DeviceConditionUITests: XCTestCase {
         return false
     }
 
-    /// The overview says the analysis is done and nothing runs (no "Pause"): "Alle 246 Fotos
-    /// analysiert", "Analyse aktuell", or the card's "Analyse fertig" right after a long run.
+    /// The start page says the analysis is done and nothing runs (no "Pause"): its line "Alle 246
+    /// Fotos analysiert", "Analyse aktuell", "239 von 246 Fotos analysiert" or "Analyse fertig"
+    /// (`UITestScreens.Analysis.isIdle`; design wave 1 moved the notes into the sheet
+    /// "Analyse"). Whenever it is not idle, the counts read from the sheet are dropped
+    /// (`idleCounts`).
     /// (No query over every element: one timed out while the app was busy.)
     private var analysisIdle: Bool {
-        guard !app.buttons["Pause"].exists else { return false }
-        let headline = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ OR label == %@", "Fotos analysiert", "Analyse aktuell")).firstMatch
-        return headline.exists || (progressText()?.hasPrefix("Analyse fertig") ?? false)
+        let idle = UITestScreens.Analysis.isIdle(app)
+        if !idle { idleCounts = nil }
+        return idle
+    }
+
+    /// What the start page's line or the sheet "Analyse" said since the page last went idle:
+    /// a poll reads the sheet once per idle stretch, not every few seconds (it is opened and
+    /// closed for "Analyse fertig"). Dropped at each launch, while something runs, and before a
+    /// check the test starts itself.
+    private var idleCounts: UITestScreens.Analysis.Counts?
+
+    /// The counts while nothing runs (`idleCounts`, read once per idle stretch; a read that
+    /// failed is tried again at the next call).
+    private func currentCounts() -> UITestScreens.Analysis.Counts? {
+        guard analysisIdle else { return nil }
+        if let known = idleCounts { return known }
+        let read = UITestScreens.Analysis.counts(app, wait: 1)
+        if let read, !read.readFailed { idleCounts = read }
+        return read
     }
 
     private var analysisRunning: Bool { app.buttons["Pause"].exists }
@@ -185,19 +205,18 @@ final class DeviceConditionUITests: XCTestCase {
         return snapshot.label + " " + ((snapshot.value as? String) ?? "")
     }
 
-    /// The overview headline after a run: "Alle 246 Fotos analysiert" or "239 von 246 Fotos
-    /// analysiert", as (analysed, total).
+    /// The counts after a run, as (analysed, total): "Alle 246 Fotos analysiert" from the start
+    /// page's line, "239 von 246 Fotos analysiert" from the sheet "Analyse" (the line says the
+    /// same then, the sheet also what could not be read). Nil while something runs or when they
+    /// could not be read.
     private func analysedPhotos() -> (analysed: Int, total: Int)? {
-        let headline = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "Fotos analysiert")).firstMatch
-        guard let label = try? headline.snapshot().label else { return nil }
-        let plain = label.replacingOccurrences(of: ".", with: "")
-        if let m = plain.firstMatch(of: #/Alle (\d+) Fotos analysiert/#), let n = Int(m.1) { return (n, n) }
-        if let m = plain.firstMatch(of: #/(\d+) von (\d+) Fotos analysiert/#), let a = Int(m.1), let t = Int(m.2) { return (a, t) }
-        return nil
+        guard let counts = currentCounts(), !counts.readFailed else { return nil }
+        return (counts.analyzed, counts.photos)
     }
 
-    /// The headline says every photo is analysed ("Alle 246 Fotos analysiert"). An idle card
-    /// with "239 von 246 Fotos analysiert" is work left that nothing does: never "goes on".
+    /// Every photo is analysed ("Alle 246 Fotos analysiert", on the line or in the sheet). An
+    /// idle page with "239 von 246 Fotos analysiert" is work left that nothing does: never "goes
+    /// on".
     private var everyPhotoAnalysed: Bool {
         guard let counts = analysedPhotos() else { return false }
         return counts.total > 0 && counts.analysed == counts.total
@@ -318,7 +337,7 @@ final class DeviceConditionUITests: XCTestCase {
         // screenshot when it never got ready.
         var lastState = Date.distantPast
         let ready = waitStable("demo library analysed", timeout: 900) {
-            let met = (analysedPhotos()?.total ?? 0) >= 200 && !analysisRunning && !anything("Beispielfotos werden angelegt").exists
+            let met = analysisIdle && !anything("Beispielfotos werden angelegt").exists && (analysedPhotos()?.total ?? 0) >= 200
             if !met && Date().timeIntervalSince(lastState) >= 60 {
                 lastState = Date()
                 printPrepareState()
@@ -334,12 +353,11 @@ final class DeviceConditionUITests: XCTestCase {
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
     }
 
-    /// What `prepare` waits on, in one line: the headline, "Pause", "Fortsetzen", the seeding
-    /// text and the card's progress element.
+    /// What `prepare` waits on, in one line: the start page's analysis line, "Pause",
+    /// "Fortsetzen", the seeding text and the card's progress element.
     private func printPrepareState() {
-        let headline = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ OR label == %@", "Fotos analysiert", "Analyse aktuell")).firstMatch
-        let label = (try? headline.snapshot().label) ?? "none"
-        print("UI_FACT prepare state: headline '\(label)', Pause \(app.buttons["Pause"].exists), Fortsetzen \(app.buttons["Fortsetzen"].exists), seeding \(anything("Beispielfotos werden angelegt").exists), progress '\(progressText() ?? "none")'")
+        let label = (try? UITestScreens.Analysis.line(app).snapshot().label) ?? "none"
+        print("UI_FACT prepare state: line '\(label)', Pause \(app.buttons["Pause"].exists), Fortsetzen \(app.buttons["Fortsetzen"].exists), seeding \(anything("Beispielfotos werden angelegt").exists), progress '\(progressText() ?? "none")'")
     }
 
     private enum PhotoChoice { case full, limited, deny }
@@ -355,7 +373,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// given back inside the app: the workflow gives it back from the Mac (`grantFromHost`).
     private func onboardIfNeeded(attempt: Int = 1) {
         let extra = launchExtra
-        let welcome = button("Los geht")
+        let welcome = app.buttons["onboarding.letsGo"]
         _ = waitStable("first screen", timeout: 20, stableChecks: 1) {
             welcome.exists || app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists
         }
@@ -428,14 +446,12 @@ final class DeviceConditionUITests: XCTestCase {
         return answerPhotoQuestion(choice)
     }
 
-    /// Walks through the onboarding and answers the system's photo question with `choice`.
-    /// Returns true when the overview was reached.
+    /// Walks through the onboarding (the welcome, then the access page: decision 1A of 17.11.,
+    /// no areas page) and answers the system's photo question with `choice`. Returns true when
+    /// the main screen was reached.
     @discardableResult
     private func onboarding(_ choice: PhotoChoice) -> Bool {
-        guard tap(button("Los geht"), "welcome") else { return false }
-        // The areas step is pushed (OnboardingView). Not asserted: the tap below says it.
-        _ = UITestWait.holds(timeout: 10) { app.staticTexts["Was soll Albumist sortieren?"].exists }
-        tap(app.buttons["Weiter"], "areas")
+        guard tap(app.buttons["onboarding.letsGo"], "welcome") else { return false }
         // The access step is pushed; its own button follows below (or not, when access was
         // given before).
         _ = UITestWait.holds(timeout: 10) { app.staticTexts["Zugriff auf deine Fotos"].exists }
@@ -446,11 +462,13 @@ final class DeviceConditionUITests: XCTestCase {
             answered = answerPhotoQuestion(choice)
         }
         guard choice != .deny else { return false }
-        // With access granted the app moves on by itself; "Weiter" when it had been granted before.
-        // Checked every second (a "Weiter" tapped twice within the push adds no step).
+        // With access the analysis starts at once and the tabs follow (decision 2A); "Analyse
+        // starten" (`onboarding.start`) only when the photos could be read before. Checked every
+        // second (a button tapped twice within the push adds no step).
+        let startButton = app.buttons["onboarding.start"]
         var deniedWithoutQuestion = false
         _ = UITestWait.holds(timeout: 30, interval: 1) {
-            if button("Analyse starten").exists { return true }
+            if app.tabBars.firstMatch.exists { return true }
             // iOS answered "denied" without asking (CI after an access reset, also one left
             // by an earlier test): the caller gives the access back from the Mac and walks
             // the onboarding again (`onboardIfNeeded`), instead of failing on a missing
@@ -460,21 +478,21 @@ final class DeviceConditionUITests: XCTestCase {
                 deniedWithoutQuestion = true
                 return true
             }
-            let next = app.buttons["Weiter"]
-            if next.exists && next.isHittable { next.tap() }
+            if startButton.exists && startButton.isHittable { startButton.tap() }
             return false
         }
         if deniedWithoutQuestion {
             print("UI_FACT onboarding: photo access denied without a question")
             return false
         }
-        guard choice == .full || button("Analyse starten").exists else {
+        guard app.tabBars.firstMatch.exists else {
             // The limited picker could not be driven: the caller falls back to the switch.
-            print("UI_STEP_MISSING onboarding reached the start (\(choice))")
+            print("UI_STEP_MISSING onboarding reached the main screen (\(choice))")
             return false
         }
-        guard tap(button("Analyse starten"), "start analysis", timeout: 5) else { return false }
-        answerNotificationQuestion(allow: false)
+        // No notification question here since 3B: iOS asks only after "Bescheid sagen, wenn
+        // fertig" on the analysis card.
+        print("UI_STEP_OK onboarding reached the main screen (\(choice))")
         return true
     }
 
@@ -562,22 +580,6 @@ final class DeviceConditionUITests: XCTestCase {
         if closed { return }
         shot("x-limited-picker")
         print("UI_STEP_MISSING limited picker closed")
-    }
-
-    /// The notification question after "Analyse starten" (A10: always "Nicht erlauben" here).
-    private func answerNotificationQuestion(allow: Bool) {
-        let labels = allow ? ["Erlauben", "Allow"] : ["Nicht erlauben", "Don’t Allow", "Don't Allow"]
-        // The question may not come (asked before): no failure either way.
-        let answered = UITestWait.holds(timeout: 8) {
-            for label in labels where springboard.buttons[label].exists {
-                springboard.buttons[label].tap()
-                print("UI_STEP_OK notification question answered (\(allow ? "allow" : "don't allow"))")
-                return true
-            }
-            return false
-        }
-        if answered { return }
-        print("UI_FACT no notification question")
     }
 
     /// iOS asks before an app deletes albums. Returns true when it asked and was answered;
@@ -673,20 +675,21 @@ final class DeviceConditionUITests: XCTestCase {
         return true
     }
 
-    /// The photos of the library tab (each one is a button named with its date).
+    /// The photos of the tab "Unsortiert" (each one is a button named with its date).
     private var libraryPhotos: XCUIElementQuery {
         app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
     }
 
-    /// Two photos from the library into a new album: opens the plan for it ("Anlegen").
+    /// Two photos from the tab "Unsortiert" into a new album: opens the plan for it ("Anlegen").
     private func openManualPlan(_ title: String) -> Bool {
-        guard tap(tabButton("Mediathek"), "library for \(title)") else { return false }
+        guard tap(tabButton("Unsortiert"), "unsorted photos for \(title)") else { return false }
         // The first pass over the library comes before the photos (`library.preparing`): up to
         // the two seconds the fixed pause gave it, then the five below, as before.
         _ = UITestWait.holds(timeout: 2) { libraryPhotos.firstMatch.exists }
         if !libraryPhotos.firstMatch.waitForExistence(timeout: 5) {
-            tap(app.buttons["Alle"], "all photos for \(title)", timeout: 5)
-            // Every photo of the library (not asserted: the count below is).
+            // Everything sorted: the uncertain photos (the tab has no "Alle" since wave 1).
+            UITestScreens.Unsorted.show(app, "uncertain", named: "Unsicher", "uncertain photos for \(title)")
+            // Not asserted: the count below is.
             _ = UITestWait.holds(timeout: 5) { libraryPhotos.firstMatch.exists }
         }
         guard tap(app.buttons["Auswählen"], "select photos for \(title)") else { return false }
@@ -754,7 +757,7 @@ final class DeviceConditionUITests: XCTestCase {
             guard started else {
                 print("UI_STEP_MISSING \(name) started")
                 shot("x-plan-not-started-\(name.replacingOccurrences(of: " ", with: "-"))")
-                XCTFail("The plan for \(name) did not start: \"Jetzt umsetzen\" is still there 10 s after the tap")
+                XCTFail("The plan for \(name) did not start: \"Jetzt anlegen\" (plan.apply) is still there 10 s after the tap")
                 return nil
             }
             // The first change (the album) goes through at once; the next waits 30 s. Counted
@@ -806,7 +809,8 @@ final class DeviceConditionUITests: XCTestCase {
         return (done, total)
     }
 
-    /// The album is listed in the albums tab ("Von Albumist angelegt oder ergänzt").
+    /// The album is listed in the albums tab: its tile on the shelf "Von Albumist" (newest first)
+    /// or further down, its body named "Title, 2 Fotos" (design 5C).
     private func albumExists(_ title: String) -> Bool {
         guard tap(tabButton("Alben"), "albums tab for \(title)") else { return false }
         // pacing: kept, the albums tab lists the app's inventory, which Photos' change note
@@ -822,12 +826,12 @@ final class DeviceConditionUITests: XCTestCase {
         }
         let exists = album.exists
         print("UI_FACT album \(title) exists: \(exists)")
-        tap(tabButton("Übersicht"), "overview after albums")
+        tap(tabButton("Vorschläge"), "start page after albums")
         return exists
     }
 
-    /// How many photos the album's row in the albums tab names ("Testalbum Vollendet, 2 Fotos"),
-    /// nil when the row is not there.
+    /// How many photos the album's tile in the albums tab names (its body: "Testalbum Vollendet,
+    /// 2 Fotos"), nil when the tile is not there.
     private func albumPhotoCount(_ title: String) -> Int? {
         guard tap(tabButton("Alben"), "albums tab for the photos of \(title)") else { return nil }
         // pacing: kept, the row's photo count comes from the app's inventory, which Photos'
@@ -843,13 +847,13 @@ final class DeviceConditionUITests: XCTestCase {
         }
         let label = row.exists ? row.label : ""
         print("UI_FACT album row \(title): \(label)")
-        tap(tabButton("Übersicht"), "overview after albums")
+        tap(tabButton("Vorschläge"), "start page after albums")
         guard let count = label.firstMatch(of: #/([0-9][0-9.]*) Fotos?/#)?.1 else { return nil }
         return Int(count.replacingOccurrences(of: ".", with: ""))
     }
 
-    /// How many rows of the albums tab show the album ("Testalbum Vollendet, 2 Fotos"; a merge
-    /// suggestion naming it reads differently).
+    /// How many tiles of the albums tab show the album (each tile's body: "Testalbum Vollendet, 2
+    /// Fotos"; a merge suggestion naming it reads differently).
     private func albumRowCount(_ title: String) -> Int {
         guard tap(tabButton("Alben"), "albums tab for the rows of \(title)") else { return 0 }
         let pattern = "(.*, )?" + NSRegularExpression.escapedPattern(for: title) + ", [0-9][0-9.]* Fotos?"
@@ -857,7 +861,7 @@ final class DeviceConditionUITests: XCTestCase {
         _ = rows.firstMatch.waitForExistence(timeout: 10)
         let count = rows.count
         print("UI_FACT album rows \(title): \(count)")
-        tap(tabButton("Übersicht"), "overview after albums")
+        tap(tabButton("Vorschläge"), "start page after albums")
         return count
     }
 
@@ -998,24 +1002,30 @@ final class DeviceConditionUITests: XCTestCase {
         guard rebuildAnalysis() else { return }
         let finished = waitStable("analysis with unreadable photos finished", timeout: 900) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not complete with unreadable photos, iCloud documents and no network")
+        // The count first (it opens and closes the sheet "Analyse" itself), then the sheet's
+        // three notes of the finished run, each asserted below. Since design wave 1 the start
+        // page says only how far it got ("239 von 246 Fotos analysiert"); the notes are in the
+        // sheet.
+        let counts = analysedPhotos()
+        print("UI_FACT headline with unreadable photos \(String(describing: counts))")
+        if let counts { XCTAssertEqual(counts.total - counts.analysed, 7, "The sheet \"Analyse\" does not leave out exactly the 7 unreadable photos") }
+        let sheet = UITestScreens.Analysis.openSheet(app)
+        XCTAssertTrue(sheet, "The start page's analysis line does not open the sheet \"Analyse\"")
         let unreadableNote = anything("7 Fotos konnten noch nicht gelesen werden")
         let icloudNote = anything("Dokumente liegen nur in iCloud")
         let placesNote = anything("Orte werden später genauer bestimmt")
-        // The overview's three notes of the finished run, each asserted below.
         _ = UITestWait.holds(timeout: 10) { unreadableNote.exists && icloudNote.exists && placesNote.exists }
         shot("08-unreadable-offline")
         let unreadable = unreadableNote.exists
         print(unreadable ? "UI_STEP_OK unreadable photos counted" : "UI_STEP_MISSING unreadable photos counted")
-        XCTAssertTrue(unreadable, "The overview does not say that 7 photos could not be read")
-        let counts = analysedPhotos()
-        print("UI_FACT headline with unreadable photos \(String(describing: counts))")
-        if let counts { XCTAssertEqual(counts.total - counts.analysed, 7, "The headline does not leave out exactly the 7 unreadable photos") }
+        XCTAssertTrue(unreadable, "The sheet \"Analyse\" does not say that 7 photos could not be read")
         let icloud = icloudNote.exists
         print(icloud ? "UI_STEP_OK iCloud documents counted" : "UI_STEP_MISSING iCloud documents counted")
-        XCTAssertTrue(icloud, "The overview does not say that documents wait for iCloud")
+        XCTAssertTrue(icloud, "The sheet \"Analyse\" does not say that documents wait for iCloud")
         let places = placesNote.exists
         print(places ? "UI_STEP_OK offline places pending" : "UI_STEP_MISSING offline places pending")
-        XCTAssertTrue(places, "The overview does not say that places wait for the network")
+        XCTAssertTrue(places, "The sheet \"Analyse\" does not say that places wait for the network")
+        UITestScreens.Analysis.closeSheet(app)
         // No error loop: nothing to dismiss, nothing restarts, and nothing waits for a tap.
         let quiet = waitStable("no error loop offline", timeout: 30, stableChecks: 6) { analysisIdle && !app.alerts.firstMatch.exists }
         XCTAssertTrue(quiet, "Offline the analysis kept restarting or showed errors")
@@ -1035,15 +1045,22 @@ final class DeviceConditionUITests: XCTestCase {
         // not be read is tried again only an hour later (ContentAnalysis.retrySpacing, since
         // rc-1), so the note stays and says so; UI run 43795445305 waited 600 s for it in vain.
         start()
-        guard tap(app.buttons["Neu prüfen"], "check again online", timeout: 20) else { return }
+        // "Neu prüfen" is in the sheet "Analyse" (design wave 1), opened from the start page's line.
+        _ = UITestWait.holds(timeout: 20) { UITestScreens.Analysis.line(app).exists }
+        guard UITestScreens.Analysis.checkAgain(app, "check again online") else { return }
+        idleCounts = nil
         let calm = waitStable("check again online finished", timeout: 300) { analysisIdle && !app.alerts.firstMatch.exists }
         XCTAssertTrue(calm, "Online \"Neu prüfen\" did not finish")
-        let note = text("Fotos konnten noch nicht gelesen werden")
-        print("UI_FACT online after Neu prüfen: \(String(describing: analysedPhotos())), unreadable note: \(note.exists ? note.label : "gone")")
+        let counts = analysedPhotos()
+        UITestScreens.Analysis.openSheet(app)
+        let note = anything("Fotos konnten noch nicht gelesen werden")
+        let noteLabel = note.exists ? ((try? note.snapshot())?.label ?? "") : ""
+        print("UI_FACT online after Neu prüfen: \(String(describing: counts)), unreadable note: \(note.exists ? noteLabel : "gone")")
         if note.exists {
-            XCTAssertTrue(note.label.contains("später noch einmal"), "The unreadable note does not say that Albumist tries again later")
+            XCTAssertTrue(noteLabel.contains("später noch einmal"), "The unreadable note does not say that Albumist tries again later")
         }
         shot("09-online-again")
+        UITestScreens.Analysis.closeSheet(app)
     }
 
     // MARK: 5 Undo when Photos does not delete
@@ -1205,7 +1222,7 @@ final class DeviceConditionUITests: XCTestCase {
             XCTAssertNotNil(photos, "After \"Rest anlegen\" the album is missing")
             XCTAssertEqual(photos, 2, "After \"Rest anlegen\" the album does not hold the two photos of the plan")
             // Review P3-16: no folder for new albums, so the album lies at the top level; it
-            // stood under "Von Albumist angelegt oder ergänzt" and again under "Deine Alben".
+            // stood under "Von Albumist" ("angelegt oder ergänzt") and again under "Deine Alben".
             XCTAssertEqual(albumRowCount(continued), 1, "The album stands more than once in the albums tab")
         }
         if let undone = interruptManualPlan("Testalbum Zurueck"), tap(app.buttons["Alles rückgängig machen"].firstMatch, "undo interrupted plan") {
@@ -1220,8 +1237,9 @@ final class DeviceConditionUITests: XCTestCase {
         }
     }
 
-    /// C9: an album Albumist made is removed through Albumist (Einstellungen › Alben von
-    /// Albumist), and that removal is undone: the album is back.
+    /// C9: an album Albumist made is removed through Albumist ("…" in the album, "Rückgängig
+    /// machen": design 5C, the main way since 17.11.; the settings' "Alben von Albumist" is
+    /// gone), and that removal is undone: the album is back.
     func test08_RemoveManagedAlbumAndUndo() {
         continueAfterFailure = true
         prepare()
@@ -1229,17 +1247,18 @@ final class DeviceConditionUITests: XCTestCase {
         start()
         guard applyManualPlan(title) else { return }
         start()
-        guard tap(app.buttons["Einstellungen"], "settings for managed albums", timeout: 20) else { return }
-        let managed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Alben von Albumist")).firstMatch
-        let list = app.collectionViews.firstMatch
-        var swipes = 0
-        while !(managed.exists && managed.isHittable) && swipes < 10 { (list.exists ? list : app).swipeUp(); swipes += 1 }
-        guard tap(managed, "managed albums") else { return }
-        let managedRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
-        // The list "Alben von Albumist" with the album's row (the tap below asserts it).
-        _ = UITestWait.holds(timeout: 10) { managedRow.exists }
+        guard tap(tabButton("Alben"), "albums tab for the managed album", timeout: 20) else { return }
+        // The album's tile on the shelf "Von Albumist" (newest first), or behind its "Alle N".
+        guard let tile = UITestScreens.Albums.tile(app, titled: title) else {
+            print("UI_STEP_MISSING managed album tile")
+            shot("x-missing-managed-album-tile")
+            XCTFail("The albums tab does not show \(title)")
+            return
+        }
         shot("14-managed-albums")
-        guard tap(managedRow, "managed album row"),
+        guard UITestScreens.Cards.open(tile, in: app, "open the managed album"),
+              tap(UITestScreens.Albums.more(app), "the album's more actions"),
+              tap(UITestScreens.Albums.undo(app), "undo the album"),
               confirm("Album entfernen", "remove managed album") else { return }
         guard app.navigationBars["Vorschau"].waitForExistence(timeout: 20), tap(app.buttons["plan.apply"], "apply removal", timeout: 30) else {
             print("UI_STEP_MISSING removal plan")
@@ -1375,8 +1394,8 @@ final class DeviceConditionUITests: XCTestCase {
         print(ready ? "UI_STEP_OK full access again" : "UI_STEP_MISSING full access again")
     }
 
-    /// B5: a phone without photos, through the real onboarding (notifications declined, A10):
-    /// a calm empty state, no error, nothing that waits forever.
+    /// B5: a phone without photos, through the real onboarding (no notification question since
+    /// 3B): a calm empty state, no error, nothing that waits forever.
     func test10_EmptyLibrary() {
         continueAfterFailure = true
         // Its own database; the onboarding shows although an earlier test finished it.
@@ -1400,16 +1419,19 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(status, "The overview does not say that there is nothing to sort")
         XCTAssertFalse(anything("0 von 0 sortiert").exists, "An empty library shows the sorted ring instead of saying why")
         XCTAssertTrue(anything("Analyse aktuell").exists, "The analysis card of an empty library is not calm")
-        XCTAssertFalse(button("Vorschläge prüfen").exists, "An empty library offers suggestions")
+        let offers = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@ OR identifier == %@",
+            "startPage.all.", "suggestion.card.", "starterSet.create")).firstMatch
+        XCTAssertFalse(offers.exists, "An empty library offers suggestions (\(offers.exists ? offers.identifier : ""))")
         XCTAssertFalse(app.alerts.firstMatch.exists, "An empty library shows an error")
         XCTAssertFalse(app.buttons["Fortsetzen"].exists, "An empty library waits for a tap")
-        if tap(tabButton("Mediathek"), "library of empty library") {
-            // The library's count, there once its first pass is done (`library.preparing` before
+        if tap(tabButton("Unsortiert"), "unsorted photos of empty library") {
+            // The tab's count, there once its first pass is done (`library.preparing` before
             // it); that it says 0 is asserted below.
             _ = UITestWait.holds(timeout: 10) { anything("Fotos und Videos").exists }
             shot("22-empty-library")
             print("UI_FACT empty library screen: \(allLabels(app.scrollViews.firstMatch))")
-            XCTAssertTrue(anything("0 Fotos und Videos").exists, "The library does not say it is empty")
+            XCTAssertTrue(anything("0 Fotos und Videos").exists, "The tab \"Unsortiert\" does not say it is empty")
         }
         XCTAssertEqual(app.state, .runningForeground)
     }
@@ -1449,23 +1471,31 @@ final class DeviceConditionUITests: XCTestCase {
             print("UI_TIMING large \(what) \(String(format: "%.1f", seconds)) s")
             XCTAssertTrue(reached && seconds < limit, "\(what) took \(Int(seconds)) s with a large library (limit \(Int(limit)) s)")
         }
-        timed("library tab", limit: 15, { tabButton("Mediathek").tap() }, until: { libraryPhotos.firstMatch.exists })
-        timed("all photos", limit: 15, { app.buttons["Alle"].tap() }, until: {
+        timed("unsorted tab", limit: 15, { tabButton("Unsortiert").tap() }, until: { libraryPhotos.firstMatch.exists })
+        // The tab has no "Alle" since design wave 1: the count of its first filter, once it holds
+        // the large library's trips (their open suggestions count as unsorted; 3,000 photos
+        // came, a third of them is a safe floor whatever the analysis left uncertain).
+        timed("unsorted count", limit: 15, {}, until: {
             guard let label = try? anything("Fotos und Videos").snapshot().label else { return false }
-            return (Int(label.replacingOccurrences(of: ".", with: "").prefix { $0.isNumber }) ?? 0) >= 3200
+            return (Int(label.replacingOccurrences(of: ".", with: "").prefix { $0.isNumber }) ?? 0) >= 1000
         })
         timed("scroll library", limit: 20, { for _ in 0..<6 { app.swipeUp() } }, until: { libraryPhotos.firstMatch.exists })
         shot("24-large-library")
-        timed("overview tab", limit: 10, { tabButton("Übersicht").tap() }, until: { anything("Fotos analysiert").exists })
-        let atlas = button("Reise-Atlas")
-        timed("atlas", limit: 15, { if atlas.waitForExistence(timeout: 5) { atlas.tap() } }, until: { app.navigationBars["Reise-Atlas"].exists })
+        timed("start page tab", limit: 10, { tabButton("Vorschläge").tap() }, until: { UITestScreens.Analysis.line(app).exists })
+        let atlas = app.buttons.matching(NSPredicate(format: "identifier == %@ OR label CONTAINS %@", "startPage.atlas", "Reise-Atlas")).firstMatch
+        timed("atlas", limit: 15, {
+            if atlas.waitForExistence(timeout: 5) {
+                UITestScreens.Cards.reach(atlas, in: app)
+                atlas.tap()
+            }
+        }, until: { app.navigationBars["Reise-Atlas"].exists })
         // pacing: kept, the atlas map draws its tiles before the screenshot (no element shows it)
         sleep(2)
         shot("25-large-atlas")
         let atlasBar = app.navigationBars["Reise-Atlas"]
         if atlasBar.exists {
             app.navigationBars.firstMatch.buttons.element(boundBy: 0).tap()
-            // Back on the overview (not asserted: the search tab below is looked up either way).
+            // Back on the start page (not asserted: the search tab below is looked up either way).
             _ = UITestWait.holds(timeout: 5) { !atlasBar.exists }
         }
         let searchTab = ["Suchen", "Suche", "Search"].map { app.tabBars.buttons[$0] }.first(where: \.exists)
@@ -1648,13 +1678,14 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertLessThanOrEqual(still.seconds, 10, "The progress line stood still \(String(format: "%.1f", still.seconds)) s at '\(still.line)'")
         XCTAssertLessThan(slowestAnswer, 10, "The app took \(Int(slowestAnswer)) s to answer")
         let opened = Date()
-        tabButton("Mediathek").tap()
+        // The tab "Unsortiert" (design wave 1: no tab "Mediathek"), the photo grid of the library.
+        tabButton("Unsortiert").tap()
         let listed = libraryPhotos.firstMatch.waitForExistence(timeout: 60)
         let shown = Date()
-        print("UI_TIMING stress library tab \(String(format: "%.1f", shown.timeIntervalSince(opened))) s (\(listed))")
+        print("UI_TIMING stress unsorted tab \(String(format: "%.1f", shown.timeIntervalSince(opened))) s (\(listed))")
         // How much of that was the app's main thread (the rest is XCTest's tap and reads).
         if let stalls = mainStallsOverlapping(opened, shown) {
-            print("UI_TIMING stress library tab: main-thread stalls over 0.5 s \(stalls.map { "\($0.ms) ms" })")
+            print("UI_TIMING stress unsorted tab: main-thread stalls over 0.5 s \(stalls.map { "\($0.ms) ms" })")
         }
         shot("27-stress-library")
         // The measured launch's stalls of 2 s or more, with stacks (its own file, not the one

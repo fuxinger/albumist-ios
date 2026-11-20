@@ -50,6 +50,27 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Geändert
+- 20.11. (Design-Welle 1, Entwurf für Fuchs, noch in keinem Build): die Bildschirme im fotozentrierten Look.
+  - Tabs „Vorschläge · Unsortiert · Alben · Suche“; „Unsortiert“ mit drei Filtern.
+  - Startseite: während der ersten Analyse ein Mosaik und die schon gefundenen Reisen, danach „Dein
+    Startpaket“ (die besten Alben, vorher die Vorschau) und je Bereich eine Reihe Karten mit „Alle N“;
+    „Deine Welt“ unter den Reisen. „Anlegen“ auf einer Karte legt sofort an, mit Hinweis und „Widerrufen“;
+    die Karte zeigt „✓ Angelegt“, sobald das Album in Fotos ist. „Bescheid sagen, wenn fertig“ erst, wenn
+    die Analyse dauert; die Einführung fragt nicht mehr nach Mitteilungen.
+  - Vorschläge: Karten mit Titelbild, „Auswählen“ wie in Fotos statt eines Korbs; ein offener Vorschlag
+    zeigt ein großes Titelbild, die Fotos nach Tagen und unten zwei Knöpfe. Aus einem erledigten oder
+    persönlichen Vorschlag legt „Album anlegen“ nichts sofort an; ein nach „Anpassen“ getippter Name gilt;
+    Umbenennen und Verschieben eines eigenen Albums heißen so; „Alle auswählen“ lässt „Nicht jetzt“ aus;
+    VoiceOver nennt bei Häkchen und Knöpfen das Album.
+  - Vorschau: der Knopf sagt mit einem Wort nach „Jetzt“, was er tut; das Ergebnis einer Entfernung heißt so.
+  - Fotokarten: Titelbilder nur scharf und nur vom iPhone, sonst eine ruhige Fläche in den Farben des Fotos;
+    antwortet Fotos gerade nicht, fragt die Karte kurz darauf noch einmal. Karten-Regal mit gleich hohen
+    Karten (bei großer Schrift weniger und breitere), Startpaket-Mosaik; Hilfetexte zwei Zeilen, der Rest
+    hinter „Mehr erfahren“. VoiceOver erreicht Karte und Knöpfe einzeln.
+  - Alben: Titelbilder statt kleiner Bildchen, „Von Albumist“ oben mit „Neu“ und „+N“, Zeilen für Ordner,
+    Verlauf und Ähnliche Alben; lang drücken oder „…“ im Album macht nur dieses Album rückgängig. „Verlauf
+    und Rückgängig“ ist von den Einstellungen in den Tab Alben gezogen.
+  - Einführung: das App-Symbol, die vier Versprechen, dann gleich die Analyse.
 - 20.11. (P3-09, P3-18, Entscheidung Fuchs 17.11. „Unsortiert“): Ein Wort für eine Sache.
   „Rückgängig machen“ für alles, was Albumist angelegt hat („Alles rückgängig machen“, „Rest
   rückgängig machen“, in der Reise-Werkstatt statt „Aufheben“, auch die Meldungen nach einem

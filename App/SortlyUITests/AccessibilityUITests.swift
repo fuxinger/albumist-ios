@@ -101,6 +101,14 @@ final class AccessibilityUITests: XCTestCase {
         var historyTitle: String
         /// The label of the folder field in the settings (review P3-17: cut at the default size).
         var folderLabel: String
+        /// What the screens show while they load (their spinners' labels): the walk waits until
+        /// they are gone instead of a fixed time.
+        var planLoading: String
+        var photoLoading: String
+        /// The sorting show's one VoiceOver element (SortingShow).
+        var sortingShow: String
+        /// The receipt's share button, there once the receipt is loaded (PlanReceiptView).
+        var shareReceipt: String
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: ".*[0-9.]+ Vorschl(ag|äge) prüfen.*",
@@ -109,7 +117,9 @@ final class AccessibilityUITests: XCTestCase {
                                   applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
                                   shareAtlas: "Reise-Atlas teilen", sharePreview: "Vorschau des Teilen-Bilds", searchQuery: "Rom", country: "Italien",
                                   receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig",
-                                  folderLabel: "Ordner für neue Alben")
+                                  folderLabel: "Ordner für neue Alben", planLoading: "Plan wird erstellt",
+                                  photoLoading: "Foto wird geladen", sortingShow: "Fotos werden einsortiert",
+                                  shareReceipt: "Liste teilen")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ [Ss]uggestions?.*",
                                    suggestionTitle: "Suggestion", suggestionsTitle: "Suggestions", rowMarker: "photo",
@@ -117,7 +127,9 @@ final class AccessibilityUITests: XCTestCase {
                                    applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
                                    shareAtlas: "Share Travel Atlas", sharePreview: "Preview of the share image", searchQuery: "Rome", country: "Italy",
                                    receiptTitle: "Changes", historyTitle: "History and Undo",
-                                   folderLabel: "Folder for New Albums")
+                                   folderLabel: "Folder for New Albums", planLoading: "Creating plan",
+                                   photoLoading: "Loading photo", sortingShow: "Sorting photos",
+                                   shareReceipt: "Share List")
     }
 
     // MARK: Tests
@@ -235,7 +247,13 @@ final class AccessibilityUITests: XCTestCase {
         launch()
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
-        sleep(2)
+        // The app has turned: its window is wider than tall (frames are in the current
+        // orientation) or reports a compact height, as an iPhone in landscape does.
+        UITestWait.until("app laid out in landscape", timeout: 10) {
+            let window = app.windows.firstMatch
+            guard window.exists else { return false }
+            return window.frame.width > window.frame.height || window.verticalSizeClass == .compact
+        }
         walk("landscape", .german, short: true)
         finish("landscape")
     }
@@ -259,38 +277,45 @@ final class AccessibilityUITests: XCTestCase {
     private func walk(_ tag: String, _ w: Words, english: Bool = false, applyStarter: Bool = false, short: Bool = false) {
         let overview = tabButton(w.overviewTab)
         if overview.waitForExistence(timeout: 20) { overview.tap() }
-        sleep(2)
+        UITestWait.appears(app.navigationBars[w.overviewTab], "\(tag) overview shown", timeout: 20)
+        let reviewSuggestions = app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.reviewSuggestions)).firstMatch
+        // Its content, not only its bar: the suggestions button the walk taps next. Not asserted
+        // here, the tap below says when it is missing.
+        _ = reviewSuggestions.waitForExistence(timeout: 20)
+        // check() waits for the screen to come to rest after every swipe before it.
         check("\(tag) overview", english: english)
         if !short {
-            app.swipeUp(); app.swipeUp(); sleep(1)
+            app.swipeUp(); app.swipeUp()
             check("\(tag) overview lower", english: english)
-            app.swipeDown(); app.swipeDown(); app.swipeDown(); app.swipeDown(); sleep(1)
+            app.swipeDown(); app.swipeDown(); app.swipeDown(); app.swipeDown()
+            UITestWait.screenAtRest(app, "\(tag) overview back at the top")
         }
 
         // Suggestions and one suggestion
         // A tap that landed elsewhere (on a bar) fails here by its name, not steps later.
-        if tap(app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.reviewSuggestions)).firstMatch, "\(tag) open suggestions", timeout: 20),
+        if tap(reviewSuggestions, "\(tag) open suggestions", timeout: 20),
            opened(app.navigationBars[w.suggestionsTitle], "\(tag) suggestions") {
-            sleep(1)
             check("\(tag) suggestions", english: english)
             // A List only creates the rows on screen; at the largest text size the first row
-            // starts below the fold.
+            // starts below the fold. After each swipe the row has up to the old second to show.
             let row = suggestionRow(w.rowMarker)
             var swipes = 0
-            while !row.exists && swipes < 6 { app.swipeUp(); swipes += 1; sleep(1) }
+            while !row.exists && swipes < 6 { app.swipeUp(); swipes += 1; _ = row.waitForExistence(timeout: 1) }
             if tap(row, "\(tag) open suggestion", timeout: 10) {
                 let detailShown = app.navigationBars[w.suggestionTitle].waitForExistence(timeout: 5)
                 print(detailShown ? "UI_STEP_OK \(tag) suggestion opened" : "UI_STEP_MISSING \(tag) suggestion opened")
                 XCTAssertTrue(detailShown, "Not opened: \(tag) suggestion (the tap landed elsewhere)")
-                sleep(1)
                 check("\(tag) suggestion detail", english: english)
                 if !short {
-                    app.swipeUp(); sleep(1)
+                    app.swipeUp()
                     check("\(tag) suggestion detail lower", english: english)
                 }
-                back("\(tag) suggestion detail", confirmed: detailShown); sleep(1)
+                back("\(tag) suggestion detail", confirmed: detailShown)
+                // Gone, not "the list is there": a detail that never opened is already gone.
+                UITestWait.disappears(app.navigationBars[w.suggestionTitle], "\(tag) suggestion detail closed", timeout: 10)
             }
-            back("\(tag) suggestions", confirmed: false); sleep(1)
+            back("\(tag) suggestions", confirmed: false)
+            backOnOverview(w, "\(tag) suggestions")
         }
 
         // The starter set opens the plan; going back selects nothing. Once it has been applied
@@ -305,32 +330,45 @@ final class AccessibilityUITests: XCTestCase {
             print(planShown ? "UI_STEP_OK \(tag) starter plan opened" : "UI_STEP_MISSING \(tag) starter plan opened")
             XCTAssertTrue(planShown, "Not opened: \(tag) starter plan (the tap landed elsewhere)")
             if planShown {
-                sleep(2)
+                // The plan itself, not its spinner: the screen opens with "Plan wird erstellt".
+                UITestWait.disappears(anything(exactly: w.planLoading), "\(tag) starter plan made", timeout: 30)
                 check("\(tag) plan", english: english)
                 if !short {
-                    app.swipeUp(); app.swipeUp(); sleep(1)
+                    app.swipeUp(); app.swipeUp()
                     check("\(tag) plan lower", english: english)
                 }
                 if applyStarter, tap(button(w.applyNow), "\(tag) apply plan", timeout: 30) {
-                    // The sorting show; with Reduce Motion one album at a time, cross-faded.
-                    usleep(900_000); shot("a11y-\(slug(tag))-sorting-show-1")
+                    // The sorting show; with Reduce Motion one album at a time, cross-faded. The
+                    // first picture once the show is on screen (not asserted: a short plan may
+                    // be past it already), the second a set time later to catch a later album.
+                    _ = anything(exactly: w.sortingShow).waitForExistence(timeout: 5)
+                    shot("a11y-\(slug(tag))-sorting-show-1")
+                    // pacing: the second picture of the show, 1.5 s after the first; the time
+                    // between them is the point (another album on screen), there is no state.
                     usleep(1_500_000); shot("a11y-\(slug(tag))-sorting-show-2")
                     if button(w.undo).waitForExistence(timeout: 600) {
-                        sleep(2)
+                        // The result replaces the show, which fades out over it first.
+                        UITestWait.disappears(anything(exactly: w.sortingShow), "\(tag) sorting show ended", timeout: 10)
                         check("\(tag) result", english: english)
                         let receipt = app.buttons["result.receipt"]
                         if tap(receipt, "\(tag) open receipt", timeout: 10),
                            opened(app.navigationBars[w.receiptTitle], "\(tag) receipt") {
-                            sleep(2)
+                            // The receipt loads after the screen opens (an empty list until then):
+                            // its rows, or the share button that comes with the loaded receipt.
+                            UITestWait.until("\(tag) receipt loaded", timeout: 20) {
+                                app.collectionViews.cells.firstMatch.exists || app.buttons[w.shareReceipt].exists
+                            }
                             check("\(tag) receipt", english: english)
-                            back("\(tag) receipt", confirmed: true); sleep(1)
+                            back("\(tag) receipt", confirmed: true)
+                            UITestWait.disappears(app.navigationBars[w.receiptTitle], "\(tag) receipt closed", timeout: 10)
                         }
                     } else {
                         XCTFail("The starter plan did not finish")
                     }
                 }
             }
-            back("\(tag) starter plan", confirmed: planShown); sleep(2)
+            back("\(tag) starter plan", confirmed: planShown)
+            backOnOverview(w, "\(tag) starter plan")
         }
 
         // Travel atlas and the share image
@@ -339,18 +377,24 @@ final class AccessibilityUITests: XCTestCase {
             sleep(3)
             check("\(tag) atlas", english: english)
             if !short {
-                app.swipeUp(); app.swipeUp(); sleep(1)
+                app.swipeUp(); app.swipeUp()
                 check("\(tag) atlas lower", english: english)
                 if accessibilitySize { checkAtlasRows(tag) }
                 // A country: its photo colours sit behind the title and caption.
                 let country = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", w.country)).firstMatch
                 // Its screen is called by the country's name.
                 if tap(country, "\(tag) open country", timeout: 10), opened(app.navigationBars[w.country], "\(tag) country") {
+                    // Kept: the colour wash behind the title and caption (PhotoGlow) comes from a
+                    // photo that loads after the screen and fades in over 0.8 s. It is hidden from
+                    // VoiceOver and only fades, so neither an element nor a frame says it is
+                    // there, and the contrast audit is meant to measure the text on it.
                     sleep(2)
                     check("\(tag) country", english: english)
-                    back("\(tag) country", confirmed: true); sleep(1)
+                    back("\(tag) country", confirmed: true)
+                    UITestWait.disappears(app.navigationBars[w.country], "\(tag) country closed", timeout: 10)
                 }
-                app.swipeDown(); app.swipeDown(); app.swipeDown(); sleep(1)
+                app.swipeDown(); app.swipeDown(); app.swipeDown()
+                UITestWait.screenAtRest(app, "\(tag) atlas back at the top")
                 if tap(app.buttons[w.shareAtlas], "\(tag) share atlas", timeout: 5) {
                     let shownAt = Date()
                     // The card itself before the audit (its preview), and at least the old 3 s:
@@ -361,38 +405,55 @@ final class AccessibilityUITests: XCTestCase {
                     UITestWait.atLeast(3, since: shownAt)
                     check("\(tag) share sheet", english: english)
                     tap(button(w.done), "\(tag) close share")
-                    sleep(2)
+                    UITestWait.disappears(anything(exactly: w.sharePreview), "\(tag) share card closed", timeout: 10)
                 }
             }
-            back("\(tag) atlas", confirmed: true); sleep(1)
+            back("\(tag) atlas", confirmed: true)
+            backOnOverview(w, "\(tag) atlas")
         }
 
         // Tabs
         if tap(tabButton(w.libraryTab), "\(tag) library tab") {
-            sleep(2)
+            UITestWait.appears(app.navigationBars[w.libraryTab], "\(tag) library shown", timeout: 10)
+            // The first pass over the photos shows "Fotos werden zusammengestellt …" instead of them.
+            UITestWait.disappears(app.descendants(matching: .any).matching(identifier: "library.preparing").firstMatch,
+                                  "\(tag) library photos listed", timeout: 30)
             check("\(tag) library", english: english)
             // Design review W11/W12: the photo viewer (system toolbar) and its info sheet.
             let photo = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*")).firstMatch
             if !short, photo.waitForExistence(timeout: 5), tap(photo, "\(tag) open photo", timeout: 5) {
-                sleep(2)
+                UITestWait.appears(app.buttons["viewer.close"], "\(tag) photo viewer shown", timeout: 10)
+                // The photo itself, not its spinner ("Foto wird geladen" until Photos delivers it).
+                // Only a spinner on screen counts: the pages beside it load their own.
+                let spinners = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", w.photoLoading))
+                UITestWait.until("\(tag) photo loaded", timeout: 20) {
+                    let screen = app.frame
+                    for spinner in spinners.allElementsBoundByIndex {
+                        // A snapshot, not `frame`: a spinner that went away meanwhile is no failure.
+                        if let seen = try? spinner.snapshot(), screen.contains(CGPoint(x: seen.frame.midX, y: seen.frame.midY)) {
+                            return false
+                        }
+                    }
+                    return true
+                }
                 check("\(tag) photo viewer", english: english)
                 if tap(app.buttons["viewer.info"], "\(tag) photo info", timeout: 5) {
-                    sleep(1)
+                    UITestWait.appears(app.buttons["detail.close"], "\(tag) photo info shown", timeout: 10)
                     check("\(tag) photo info", english: english)
                     tap(app.buttons["detail.close"], "\(tag) close photo info")
-                    sleep(1)
+                    UITestWait.disappears(app.buttons["detail.close"], "\(tag) photo info closed", timeout: 10)
                 }
                 tap(app.buttons["viewer.close"], "\(tag) close photo", timeout: 5)
-                sleep(1)
+                UITestWait.disappears(app.buttons["viewer.close"], "\(tag) photo viewer closed", timeout: 10)
             }
         }
         if tap(tabButton(w.albumsTab), "\(tag) albums tab") {
-            sleep(2)
+            UITestWait.appears(app.navigationBars[w.albumsTab], "\(tag) albums shown", timeout: 10)
             check("\(tag) albums", english: english)
         }
         // Settings
         if tap(tabButton(w.overviewTab), "\(tag) back to overview"), tap(app.buttons[w.settings], "\(tag) settings") {
-            sleep(2)
+            UITestWait.appears(app.navigationBars[w.settings], "\(tag) settings shown", timeout: 10)
             check("\(tag) settings", english: english)
             if !short {
                 // Design review W16: history and undo on their own screen. Opened first, from
@@ -400,48 +461,67 @@ final class AccessibilityUITests: XCTestCase {
                 // the tree again (UI run 43773339053, "history" missing).
                 if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5),
                    opened(app.navigationBars[w.historyTitle], "\(tag) history") {
-                    sleep(1)
                     check("\(tag) history", english: english)
-                    back("\(tag) history", confirmed: true); sleep(1)
+                    back("\(tag) history", confirmed: true)
+                    UITestWait.disappears(app.navigationBars[w.historyTitle], "\(tag) history closed", timeout: 10)
                 }
                 let list = app.collectionViews.firstMatch
-                (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
+                (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp()
                 check("\(tag) settings lower", english: english)
                 checkFullyShown(w.folderLabel, identifier: "settings.rootFolder.label", "\(tag) settings", in: list.exists ? list : app)
             }
             tap(button(w.done), "\(tag) close settings")
-            sleep(1)
+            UITestWait.disappears(app.navigationBars[w.settings], "\(tag) settings closed", timeout: 10)
         }
 
         // Search last: the search tab focuses its field, and the keyboard covers the tab bar.
         if !short, tap(searchTabButton(), "\(tag) search tab") {
-            sleep(2)
+            UITestWait.appears(app.searchFields.firstMatch, "\(tag) search field shown", timeout: 10)
+            // The keyboard the focused field brings up, so the check sees it as it stays; not
+            // asserted (without it the check runs as before, on the whole screen).
+            _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
             check("\(tag) search", english: english)
             let field = app.searchFields.firstMatch
             if field.waitForExistence(timeout: 5) {
                 field.tap()
                 field.typeText(w.searchQuery)
-                // pacing: the results before the audit; nothing is asserted on them here
-                // (SearchUITests checks the results)
-                sleep(3)
+                // The search's answer before the audit: its chips, results or empty state
+                // (SearchView sets them together). What they say is checked in SearchUITests.
+                let answer = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "identifier IN %@", ["search.token", "search.ignored", "search.result", "search.empty"])).firstMatch
+                UITestWait.appears(answer, "\(tag) search answered '\(w.searchQuery)'", timeout: 10)
                 // The keyboard covers the lower half; the results and chips above it count.
                 check("\(tag) search results", english: english)
+                // The walk ends here; nothing waits for what the return does.
                 field.typeText("\n")
-                sleep(1)
             }
         }
+    }
+
+    /// Back on the overview after leaving a screen opened from it: its bar is there again. A
+    /// screen that closed by itself (see `back`) finds it at once.
+    private func backOnOverview(_ w: Words, _ step: String) {
+        UITestWait.appears(app.navigationBars[w.overviewTab], "back on the overview from \(step)", timeout: 10)
     }
 
     // MARK: Checks
 
     /// Screenshot, audit and tree checks for what is on screen now.
     private func check(_ screen: String, english: Bool = false) {
-        // Let a scroll come to rest, so screenshot, tree and audit see the same positions.
-        sleep(1)
+        // Let a scroll come to rest, so screenshot, tree and audit see the same positions. Push,
+        // sheet and fade transitions move no frame and are not seen here: the callers wait for
+        // the screen's own elements, and `confirmContrast` measures a contrast failure again.
+        // The snapshot that showed the screen still is the one the tree checks read.
+        var still: (any XCUIElementSnapshot)?
+        switch UITestWait.screenAtRest(app, "\(screen) at rest") {
+        case .still(let root): still = root
+        case .moving: break // failed in the wait
+        case .unread: print("A11Y_WARN \(screen) | not checked at rest: no snapshot")
+        }
         shot("a11y-" + slug(screen))
         let chrome = chromeFrames()
         UITestOnboarding.clock("check start \(screen)")
-        inspectTree(screen, chrome: chrome, english: english)
+        inspectTree(screen, root: still, chrome: chrome, english: english)
         audit(screen, chrome: chrome)
         UITestOnboarding.clock("check end \(screen)")
         let failures = auditFailures + screenFailures
@@ -517,6 +597,8 @@ final class AccessibilityUITests: XCTestCase {
             }
             auditFailures = []
             pendingContrast = []
+            // Kept: the pause before the second attempt of an audit that did not complete (a
+            // busy simulator). Nothing on screen says the simulator has caught up.
             sleep(2)
         }
         // "Audit failed to complete in time" twice: the screen went unaudited, and a screen nobody
@@ -533,6 +615,8 @@ final class AccessibilityUITests: XCTestCase {
         guard !pendingContrast.isEmpty else { return }
         let pending = pendingContrast
         pendingContrast = []
+        // Kept: the two seconds are the check. A fade (opacity) that the first audit measured
+        // moves no frame, so there is no state to wait for; text that lacks contrast fails both.
         sleep(2)
         var again = Set<String>()
         do {
@@ -647,14 +731,19 @@ final class AccessibilityUITests: XCTestCase {
     ]
 
     /// One snapshot of the accessibility tree: labels, placeholders, untranslated words, text
-    /// running off the side, and (reported only) small targets and overlapping text.
-    private func inspectTree(_ screen: String, chrome: [CGRect], english: Bool) {
+    /// running off the side, and (reported only) small targets and overlapping text. `given`:
+    /// the snapshot `check` already took once the screen was still; else a new one.
+    private func inspectTree(_ screen: String, root given: (any XCUIElementSnapshot)?, chrome: [CGRect], english: Bool) {
         let root: any XCUIElementSnapshot
-        do {
-            root = try app.snapshot()
-        } catch {
-            print("A11Y_WARN \(screen) | tree | no snapshot: \(error.localizedDescription)")
-            return
+        if let given {
+            root = given
+        } else {
+            do {
+                root = try app.snapshot()
+            } catch {
+                print("A11Y_WARN \(screen) | tree | no snapshot: \(error.localizedDescription)")
+                return
+            }
         }
         let bounds = root.frame
         var texts: [(label: String, frame: CGRect)] = []
@@ -868,6 +957,10 @@ final class AccessibilityUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
+    private func anything(exactly text: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
+    }
+
     private func searchTabButton() -> XCUIElement {
         for label in ["Suchen", "Suche", "Search"] where app.tabBars.buttons[label].exists {
             return tabButton(label)
@@ -880,7 +973,9 @@ final class AccessibilityUITests: XCTestCase {
         var tries = 0
         while !(button.exists && button.isHittable) && tries < 3 {
             if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            sleep(1)
+            // The bar expands after the swipe: on as soon as the button can be tapped, else the
+            // next try after the old second.
+            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
             tries += 1
         }
         return button
@@ -901,11 +996,7 @@ final class AccessibilityUITests: XCTestCase {
             } else if !tapClearOfBars(demo, "seed demo library, attempt \(attempt)") {
                 break
             }
-            let deadline = Date().addingTimeInterval(20)
-            while Date() < deadline {
-                if seeding.exists || !demo.exists { return true }
-                sleep(2)
-            }
+            if UITestWait.holds(timeout: 20, { seeding.exists || !demo.exists }) { return true }
             let tabs = app.tabBars.firstMatch
             print("UI_FACT seed demo library attempt \(attempt): nothing started; button enabled \(demo.isEnabled), hittable \(demo.isHittable), frame \(demo.frame), tab bar \(tabs.exists ? "\(tabs.frame)" : "none")")
         }
@@ -955,7 +1046,16 @@ final class AccessibilityUITests: XCTestCase {
             origin.withOffset(CGVector(dx: window.midX, dy: from))
                 .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.midX, dy: down ? from + 220 : from - 220)))
             drags += 1
-            sleep(1)
+            // The drag may fling the list on: measured once the element stops moving (the same
+            // frame twice in a row). Not asserted: an element a lazy list dropped for a moment
+            // is measured again by the loop, as after the old second.
+            var lastFrame: CGRect?
+            _ = UITestWait.holds(timeout: 5) {
+                let now: CGRect? = element.exists ? element.frame : nil
+                let same = now != nil && now == lastFrame
+                lastFrame = now
+                return same
+            }
         }
         let clear = band()
         print("UI_FACT tap \(step): element \(element.frame), clear band \(Int(clear.top))-\(Int(clear.bottom)), \(drags) drags")
@@ -1104,19 +1204,23 @@ final class AccessibilityUITests: XCTestCase {
     private func allowPhotosIfAsked() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let labels = ["Zugriff auf alle Fotos erlauben", "Allow Full Access", "Allow Access to All Photos", "Alle Fotos erlauben", "Vollzugriff erlauben"]
-        let deadline = Date().addingTimeInterval(25)
-        while Date() < deadline {
+        var answered = false
+        // Taps the alert's button when it is there; the trial step means it was not needed.
+        let done = UITestWait.holds(timeout: 25) {
             for source in [springboard, app] {
                 for label in labels where source.buttons[label].exists {
                     source.buttons[label].tap()
-                    print("UI_STEP_OK system photo alert")
-                    return
+                    answered = true
+                    return true
                 }
             }
-            if button("Analyse starten").exists { return }
-            usleep(500_000)
+            return button("Analyse starten").exists
         }
-        print("UI_STEP_MISSING system photo alert")
+        if answered {
+            print("UI_STEP_OK system photo alert")
+        } else if !done {
+            print("UI_STEP_MISSING system photo alert")
+        }
     }
 
     /// The notification question comes a while after "Analyse starten" (never within the 8 s
@@ -1126,18 +1230,16 @@ final class AccessibilityUITests: XCTestCase {
     /// the springboard and in the app for up to 20 s; when it never came, that is said.
     private func allowNotificationsIfAsked() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let deadline = Date().addingTimeInterval(20)
-        while Date() < deadline {
+        let answered = UITestWait.holds(timeout: 20) {
             for source in [springboard, app] {
                 for label in ["Erlauben", "Allow"] where source.buttons[label].exists {
                     source.buttons[label].tap()
-                    print("UI_STEP_OK notification alert")
-                    return
+                    return true
                 }
             }
-            usleep(500_000)
+            return false
         }
-        print("UI_FACT no notification alert within 20 s")
+        print(answered ? "UI_STEP_OK notification alert" : "UI_FACT no notification alert within 20 s")
     }
 
     @discardableResult
@@ -1149,6 +1251,8 @@ final class AccessibilityUITests: XCTestCase {
             streak = condition() ? streak + 1 : 0
             UITestOnboarding.reportSlowCheck(since: asked)
             if streak >= stableChecks { return true }
+            // pacing: the poll's interval, kept: "three checks in a row" means the state held for
+            // about four seconds (the analysis idle, not only between two batches).
             sleep(2)
         }
         print("UI_STEP_MISSING \(what) (timeout \(Int(timeout)) s)")

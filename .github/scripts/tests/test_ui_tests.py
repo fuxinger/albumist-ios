@@ -1541,16 +1541,17 @@ class SleepRuleTests(unittest.TestCase):
     # Calls of sleep()/usleep() per file (code only). The count may only go down; lower it here
     # when a sleep becomes a condition wait.
     CEILING = {
-        "AccessibilityUITests.swift": 48,
+        "AccessibilityUITests.swift": 6,
         "DeviceConditionUITests.swift": 45,
-        "SearchUITests.swift": 4,
+        "SearchUITests.swift": 1,
         "SortlyFlowUITests.swift": 123,
-        "SortlyLockedUITests.swift": 15,
-        "UITestOnboarding.swift": 3,
-        # The poll intervals of the condition waits (until, toBackground, never), the minimum
-        # time in the background, and atLeast: the rest of an old fixed time after the state was
-        # reached (second review of C2). Its callers are counted in AT_LEAST.
-        "UITestWait.swift": 5,
+        "SortlyLockedUITests.swift": 1,
+        "UITestOnboarding.swift": 1,
+        # The poll interval of the condition waits (holds, which until, screenAtRest and never use),
+        # toBackground's own poll, the minimum time in the background, and atLeast: the rest of
+        # an old fixed time after the state was reached (second review of C2). Its callers are
+        # counted in AT_LEAST.
+        "UITestWait.swift": 4,
     }
     # UITestWait.atLeast calls per file (a fixed minimum after a wait; second review of C2):
     # counted like the sleeps, so a new one is a decision, not a habit.

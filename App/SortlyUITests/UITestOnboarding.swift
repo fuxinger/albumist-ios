@@ -149,12 +149,19 @@ enum UITestOnboarding {
         // `try?` gave nil, which means complete).
         guard partial.waitForExistence(timeout: wait) else { return nil }
         var taken: (any XCUIElementSnapshot)?
-        for attempt in 1...3 {
-            if let snapshot = try? partial.snapshot() { taken = snapshot; break }
+        var gone = false
+        var tries = 0
+        // Three tries, half a second apart. The tries end it (as before the wait helper): three
+        // slow snapshots still get their three tries. The 30 s cap only keeps the wait finite and
+        // visible to the time-limit rule (second review of P5-05); three tries never reach it.
+        _ = UITestWait.holds(timeout: 30) {
+            tries += 1
+            if let snapshot = try? partial.snapshot() { taken = snapshot; return true }
             // The count went away between the tries: the analysis has finished.
-            if !partial.exists { return nil }
-            if attempt < 3 { usleep(500_000) }
+            gone = !partial.exists
+            return gone || tries >= 3
         }
+        if gone { return nil }
         guard let shot = taken else {
             print("UI_FACT partial analysis: the count is on screen but could not be read three times")
             return PartialAnalysis(label: "(not readable)", analyzed: 0, photos: 0, unreadable: 0, loads: "", readFailed: true)
@@ -232,16 +239,15 @@ enum UITestOnboarding {
     private static func allowPhotosIfAsked(_ app: XCUIApplication) {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let labels = ["Zugriff auf alle Fotos erlauben", "Allow Full Access", "Allow Access to All Photos", "Alle Fotos erlauben", "Vollzugriff erlauben"]
-        let deadline = Date().addingTimeInterval(25)
-        while Date() < deadline {
+        // Taps the alert's button when it is there; the trial step means it was not needed.
+        _ = UITestWait.holds(timeout: 25) {
             for source in [springboard, app] {
                 for label in labels where source.buttons[label].exists {
                     source.buttons[label].tap()
-                    return
+                    return true
                 }
             }
-            if app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Analyse starten")).firstMatch.exists { return }
-            usleep(500_000)
+            return app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Analyse starten")).firstMatch.exists
         }
     }
 

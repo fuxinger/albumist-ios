@@ -2908,3 +2908,12 @@ public actor AnalysisPipeline {
         return MatchRefresh(snapshot: snapshot, reopened: reopened)
     }
 }
+
+extension ResumedRun {
+    /// Whether the database has photos, for `markerApplies` at the app's start. Photos set
+    /// aside under "Ausgewählte Fotos" count (review P1-07): with no photo shared, a database
+    /// full of analysis is not an empty one.
+    public static func databaseHasPhotos(_ store: SortlyStore) async throws -> Bool {
+        try await store.assetCount(includingOutOfView: true) > 0
+    }
+}

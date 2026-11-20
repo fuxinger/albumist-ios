@@ -665,7 +665,8 @@ final class AppModel {
             // Where the analysis got to (UserDefaults, restored by a device backup) belongs to
             // this database only; the database folder is not backed up (review of 9f0bc40).
             let identity = try await store.identity()
-            let hasPhotos = try await store.assetCount() > 0
+            // Photos set aside under "Ausgewählte Fotos" count (review P1-07).
+            let hasPhotos = try await ResumedRun.databaseHasPhotos(store)
             databaseID = identity.id
             if let marker = AnalysisMarker.unfinished,
                !ResumedRun.markerApplies(markerDatabase: marker.database, database: identity.id, databaseHasPhotos: hasPhotos) {

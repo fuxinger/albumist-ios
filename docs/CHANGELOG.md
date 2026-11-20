@@ -97,6 +97,7 @@
   zurück kommen sie mit Analyse, Ort und Text. Endgültig gelöscht wird ein Foto erst, wenn es bei vollem Zugriff fehlt
   (Datenbank Version 6). Reisen, häufige Orte und gewählte Vorschläge behalten dabei ihre Kennung und ihre Fotos,
   auch über mehrere Auswahlen hintereinander (nicht bei einer Änderung von „Dein Zuhause“ während der Auswahl, siehe KNOWN_LIMITATIONS).
+- 20.11.: Rückgängig und „Alben von Albumist“: Löscht Albumist dabei Alben oder Ordner, sagt die Rückfrage von Albumist jetzt vorher „iOS fragt gleich noch einmal, ob Albumist die Alben löschen darf. Deine Fotos bleiben.“ Nur dann: nimmt Albumist nur Fotos aus Alben, steht dort nichts vom Löschen. Ob gelöscht wird, liest Albumist beim Tippen frisch aus Fotos (höchstens 3 s, solange dreht ein kleiner Kreisel am Knopf; danach steht der Satz sicherheitshalber), mit noch nicht gespeicherten Ergebnissen. Auch beim Weitermachen einer unterbrochenen Entfernung steht der Satz, die Karte heißt dann „Entfernen wurde unterbrochen“ mit „Rest entfernen“ (P3-07 = G3-09, `DeleteQuestionNote`, `DeleteQuestion`).
 - 19.11.: Vorschau vor dem Anlegen: Der Hinweis bei einem schon vorhandenen Albumnamen sagt jetzt, dass danach zwei
   Alben mit diesem Namen da sind (Albumist hängt keinen Zusatz an, P2-02). Der Titel folgt dem Schritt: „Vorschau“,
   „Alben werden angelegt“, „Alben werden geändert“ (Rückgängig), „Ergebnis“ (P3-15, `PlanReviewPhase`).

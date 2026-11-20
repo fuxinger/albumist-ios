@@ -47,7 +47,10 @@ struct ManagedAlbumsView: View {
             }
         } message: { state in
             if state.createdBySortly {
-                Text("Albumist hat dieses Album angelegt. Es wird gelöscht, die Fotos bleiben in deiner Mediathek. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen.")
+                // Deleted only while it holds nothing but Albumist's photos: then iOS asks after
+                // the preview, and this says so first (review 18.11., P3-07).
+                DeleteQuestionNote.message(Text("Albumist hat dieses Album angelegt. Es wird gelöscht. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen."),
+                                           deletes: model.removalDeletesAlbum(state))
             } else {
                 Text("Die \(state.addedBySortly.count) Fotos, die Albumist hinzugefügt hat, werden aus dem Album genommen. Alles andere bleibt, wie es ist.")
             }

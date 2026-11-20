@@ -3249,15 +3249,14 @@ final class AppModel {
         // What the user changed by hand since counts first: a photo they took out and put back
         // is theirs now and stays.
         guard let current = await reconcileManagedAlbums() else { return }
-        var owned: [CollectionID: Set<AssetID>] = [:]
-        for state in managedAlbums { owned[state.albumID, default: []].formUnion(state.addedBySortly) }
+        // The album records of this reconciliation, one snapshot for the whole plan.
+        let albums = managedAlbums
         // Undos of this plan that did not get everything back (plugin review W1): an album one
         // of them brought back gets the photos still missing, never a second album.
         let earlier: [ChangePlan]
         do { earlier = try await store.reverts(of: executed.id) } catch { message = .failure(error.localizedDescription); return }
-        // An album another plan made, left with only this plan's photos, goes too (plugin review N5).
-        let created: Set<CollectionID> = Set(managedAlbums.filter { $0.createdBySortly }.map { $0.albumID })
-        let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, createdByAlbumist: created, earlierUndos: earlier)
+        // The same planning as the question before it (`DeleteQuestion.undo`).
+        let undoPlan = UndoPlanner().undoPlan(for: executed, albums: albums, current: current, earlierUndos: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
             message = AppMessage(title: interruptedPlan?.reverts != nil
@@ -3275,6 +3274,36 @@ final class AppModel {
            let said = Self.remainderMessage(UndoRemainder(plan: executed, current: inventory), inHistory: false) {
             message = said
         }
+    }
+
+    // MARK: Announcing the iOS question (review 18.11., P3-07)
+    //
+    // iOS asks once more before Albumist deletes albums or folders ("delete 15 albums and 9
+    // folders"). The confirmation before says so (`DeleteQuestionNote`), but only when the
+    // change deletes one. `DeleteQuestion` works it out at the tap, the way the change itself
+    // plans: from the album list read from Photos (the app's list lacks albums an interrupted
+    // plan made), an album of the plan the list lacks looked up on its own, and the results of
+    // plans still waiting to be stored folded in. Within a few seconds; when Photos does not
+    // answer by then, it says that iOS may ask.
+
+    /// Whether taking back `executed` ("Rückgängig machen", "Rest rückgängig machen") deletes
+    /// an album or folder.
+    func undoDeletesCollections(_ executed: ChangePlan) async -> Bool {
+        let albums = managedAlbums
+        let waiting = (try? await store?.plansAwaitingFinalization()) ?? []
+        let earlier = (try? await store?.reverts(of: executed.id)) ?? []
+        return await DeleteQuestion(library: library).undo(executed, albums: albums, waiting: waiting, earlierUndos: earlier, cached: inventory)
+    }
+
+    /// Whether "Alles zurücknehmen" for the interrupted plan deletes an album or folder.
+    func interruptedUndoDeletesCollections() async -> Bool {
+        guard let interrupted = interruptedPlan, interrupted.reverts == nil else { return false }
+        return await DeleteQuestion(library: library).interruptedUndo(interrupted, cached: inventory)
+    }
+
+    /// Whether taking Albumist's changes back out of one album deletes the album.
+    func removalDeletesAlbum(_ state: ManagedAlbumState) -> Bool {
+        ManagedAlbumTracker().removalPlan(for: state, current: inventory).deletesCollections
     }
 
     /// What an undo left in Photos because Albumist cannot prove it was its own doing

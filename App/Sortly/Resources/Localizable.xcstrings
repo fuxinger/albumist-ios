@@ -1181,16 +1181,6 @@
         }
       }
     },
-    "Alben und Zuordnungen von Albumist werden entfernt. Deine Fotos bleiben unverändert." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albums and assignments made by Albumist will be removed. Your photos stay unchanged."
-          }
-        }
-      }
-    },
     "Alben werden angelegt" : {
       "localizations" : {
         "en" : {
@@ -3821,16 +3811,6 @@
         }
       }
     },
-    "Albumist entfernt die angelegten Alben und Zuordnungen wieder. Deine Fotos bleiben unverändert." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist removes the albums and assignments it created. Your photos stay unchanged."
-          }
-        }
-      }
-    },
     "Albumist ergänzt das größte Album um die fehlenden Fotos. Die anderen Alben bleiben erhalten." : {
       "localizations" : {
         "en" : {
@@ -4767,16 +4747,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "Albumist hat dieses Album angelegt. Es wird gelöscht, die Fotos bleiben in deiner Mediathek. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist created this album. It will be deleted; the photos stay in your library. If you added photos yourself, the album stays with those photos."
           }
         }
       }
@@ -5879,16 +5849,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "They won’t go into this album. They stay in your library and in other suggestions."
-          }
-        }
-      }
-    },
-    "Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt. Deine Fotos bleiben unverändert." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist removes what is certainly its own and tells you if anything stays. Your photos stay unchanged."
           }
         }
       }
@@ -12799,6 +12759,96 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "about at most %@%%"
+          }
+        }
+      }
+    },
+    "%@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@"
+          }
+        }
+      }
+    },
+    "Alben und Zuordnungen von Albumist werden entfernt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albums and assignments made by Albumist will be removed."
+          }
+        }
+      }
+    },
+    "Albumist entfernt die angelegten Alben und Zuordnungen wieder." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist removes the albums and assignments it created."
+          }
+        }
+      }
+    },
+    "Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist removes what is certainly its own and tells you if anything stays."
+          }
+        }
+      }
+    },
+    "Deine Fotos bleiben unverändert." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your photos stay unchanged."
+          }
+        }
+      }
+    },
+    "iOS fragt gleich noch einmal, ob Albumist die Alben löschen darf. Deine Fotos bleiben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS will ask once more whether Albumist may delete the albums. Your photos stay."
+          }
+        }
+      }
+    },
+    "Albumist hat dieses Album angelegt. Es wird gelöscht. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist created this album. It will be deleted. If you added photos yourself, the album stays with those photos."
+          }
+        }
+      }
+    },
+    "Entfernen wurde unterbrochen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removing Albums Was Interrupted"
+          }
+        }
+      }
+    },
+    "Rest entfernen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish Removing"
           }
         }
       }

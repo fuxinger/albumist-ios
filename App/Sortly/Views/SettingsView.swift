@@ -359,6 +359,12 @@ struct InterruptedHistoryRow: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
     @State private var confirmUndo = false
+    /// "Alles zurücknehmen" deletes albums or folders: the confirmation says that iOS asks
+    /// next (P3-07). Worked out once on the tap, not while the dialog is drawn.
+    @State private var undoDeletes = false
+    /// Albumist reads the albums to see whether the undo deletes any: a spinner beside the
+    /// button, and no second tap meanwhile (third review of P3-07, SHOULD-2).
+    @State private var askingUndo = false
 
     var body: some View {
         let done = plan.steps.filter { if case .succeeded = $0.state { true } else { false } }.count
@@ -375,13 +381,21 @@ struct InterruptedHistoryRow: View {
             .buttonStyle(.borderless) // several buttons in one list row, each tappable on its own
             .font(.subheadline)
             .disabled(model.execution.isRunning)
+            // Going on deletes albums (an undo, or a removal from "Alben von Albumist"): iOS
+            // asks right after the button (P3-07).
+            if plan.deletesCollections {
+                DeleteQuestionNote.text
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .confirmationDialog("Alles zurücknehmen?", isPresented: $confirmUndo, titleVisibility: .visible) {
             Button("Alles zurücknehmen", role: .destructive) {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
-            Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt. Deine Fotos bleiben unverändert.")
+            DeleteQuestionNote.message(Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt."),
+                                       deletes: undoDeletes)
         }
     }
 
@@ -389,6 +403,8 @@ struct InterruptedHistoryRow: View {
     @ViewBuilder
     private var buttons: some View {
         let isUndo = plan.reverts != nil
+        // A removal from "Alben von Albumist" is called one, as on the overview card (NIT-5).
+        let isRemoval = !isUndo && !plan.removalSources.isEmpty
         // Borderless buttons in one row: each label gets the 44 pt tap area itself (W9).
         Button {
             Task {
@@ -396,11 +412,20 @@ struct InterruptedHistoryRow: View {
                 await model.refreshDerived()
             }
         } label: {
-            Text(isUndo ? LocalizedStringKey("Rest zurücknehmen") : LocalizedStringKey("Rest anlegen")).minimumHitTarget()
+            Text(isUndo ? LocalizedStringKey("Rest zurücknehmen") : isRemoval ? LocalizedStringKey("Rest entfernen") : LocalizedStringKey("Rest anlegen")).minimumHitTarget()
         }
         // An interrupted undo cannot itself be taken back; it goes on or stays as it is.
         if !isUndo {
-            Button { confirmUndo = true } label: { Text("Alles zurücknehmen").minimumHitTarget() }
+            Button {
+                guard !askingUndo else { return }
+                askingUndo = true
+                Task {
+                    undoDeletes = await model.interruptedUndoDeletesCollections()
+                    askingUndo = false
+                    confirmUndo = true
+                }
+            } label: { Text("Alles zurücknehmen").checkingBeside(askingUndo).minimumHitTarget() }
+            .disabled(askingUndo)
         }
         Button { Task { await model.keepInterruptedPlanAsIs() } } label: {
             Text(isUndo ? LocalizedStringKey("So lassen") : LocalizedStringKey("Nur Erledigtes behalten")).minimumHitTarget()

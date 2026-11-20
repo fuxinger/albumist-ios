@@ -158,7 +158,8 @@ struct TripGeometryTests {
         }
         facts.append(facts[3])
         let expected = Self.build(facts)
-        #expect(expected.photoCount == facts.count)
+        // The photo given twice counts once.
+        #expect(expected.photoCount == facts.count - 1)
         for seed in 1...6 as ClosedRange<UInt64> {
             #expect(Self.build(Self.shuffled(facts, seed: seed)) == expected)
         }
@@ -227,7 +228,7 @@ struct TripGeometryTests {
         #expect(geometry.countryPhotos == ["PT": 12])
         #expect(geometry.dayCounts == [TripDay(day: Self.day("2023-04-12"), photoCount: 12, placeIndex: nil)])
 
-        // No photo on the map at all: the trip's centre.
+        // No photo on the map at all: the trip's centre, and no day with photos on the map.
         let unlocated = (0..<3).map { MapFixture.photo("blind-\($0)", at: start.addingTimeInterval(Double($0) * 60), nil) }
         let trip = Trip(id: SortlyID("blind"), start: start, end: start.addingTimeInterval(120), geotaggedAssetIDs: [],
                         inferredAssetIDs: unlocated.map(\.id), centroid: Places.rome, maxDistanceFromHomeMeters: 0, distinctStops: 0, kind: .vacation)
@@ -236,7 +237,8 @@ struct TripGeometryTests {
         #expect(blind.destinationIndex == nil)
         #expect(blind.photoCount == 3)
         #expect(blind.timeZoneIdentifier == nil)
-        #expect(blind.dayCounts == [TripDay(day: Self.day("2023-04-12"), photoCount: 3, placeIndex: nil)])
+        #expect(blind.dayCounts.isEmpty)
+        #expect(blind.firstDay == Self.day("2023-04-12") && blind.lastDay == Self.day("2023-04-12"))
     }
 
     @Test func anEmptyTripAndASinglePhoto() throws {
@@ -295,8 +297,15 @@ struct TripGeometryTests {
         let far = try #require(reach.indices.max { reach[$0] < reach[$1] })
         #expect(reach[far] > 140_000)
         #expect(geometry.route.contains { $0.placeIndex == far })
-        // Legs across the antimeridian are short.
-        #expect(geometry.legs.allSatisfy { $0.meters < 310_000 })
+        // Lines across the antimeridian are short: none goes round the Earth.
+        let points = geometry.routeCoordinates
+        #expect(zip(points, points.dropFirst()).allSatisfy { GeoMath.distance($0, $1) < 310_000 })
+        // "vor Ort" is every excursion there and back, the ones the cut left out too.
+        let hotel = geometry.places[0].coordinate
+        let everyLeg = geometry.dayPlaces.filter { $0.placeIndex != 0 }.reduce(0.0) {
+            $0 + 2 * GeoMath.distance(hotel, geometry.places[$1.placeIndex].coordinate)
+        }
+        #expect(abs(geometry.metersOnSite - everyLeg) < 1)
     }
 
     @Test func simplificationKeepsAnExcursionThereAndBack() {
@@ -305,15 +314,19 @@ struct TripGeometryTests {
         let hotel = Places.vik
         let coordinates = [hotel, Self.offset(hotel, east: 5_000), Self.offset(hotel, north: 60_000), Self.offset(hotel, east: -6_000)]
         let visits = [0, 1, 0, 2, 0, 3, 0].enumerated().map { TripGeometryBuilder.Visit(place: $1, first: $0, last: $0) }
-        let kept = TripGeometryBuilder.simplified(visits, coordinates: coordinates, limit: 4)
+        let cut = TripGeometryBuilder.simplified(visits, coordinates: coordinates, limit: 4)
+        let kept = cut.visits
         #expect(kept.count <= 4)
         #expect(kept.first?.first == 0 && kept.last?.last == 6)
         #expect(kept.contains { $0.place == 2 })
         for (a, b) in zip(kept, kept.dropFirst()) { #expect(a.place != b.place) }
+        // Each kept point starts at a visit of its place (`cutLegs` sums the legs from there on).
+        #expect(cut.starts.count == kept.count && cut.starts.first == 0)
+        #expect(zip(kept, cut.starts).allSatisfy { visits[$1] == TripGeometryBuilder.Visit(place: $0.place, first: $0.first, last: $0.first) })
         // Points on the great circle between their neighbours (here a meridian) never count.
         let line = (0..<6).map { TripGeometryBuilder.Visit(place: $0, first: $0, last: $0) }
         let lineCoordinates = (0..<6).map { Self.offset(hotel, north: Double($0) * 10_000) }
-        #expect(TripGeometryBuilder.simplified(line, coordinates: lineCoordinates, limit: 2).map(\.place) == [0, 5])
+        #expect(TripGeometryBuilder.simplified(line, coordinates: lineCoordinates, limit: 2).visits.map(\.place) == [0, 5])
         let significance = TripGeometryBuilder.significance(lineCoordinates.map(TripGeometryBuilder.UnitVector.init), depthLimit: 10)
         #expect(significance == [0, 0, 0, 0, 0, 0])
     }
@@ -352,6 +365,127 @@ struct TripGeometryTests {
         // 60 km and 6 hours: too short for "ohne Fotos".
         let near = trip("near", from: Places.munich, to: Self.augsburg, singlesAt: [])
         #expect(near.legs.count == 1 && near.legs[0].meters < 100_000 && !near.legs[0].withoutPhotos)
+    }
+
+    /// Two people's photos in one library (an iCloud Shared Library): one in Rome, one in Florence,
+    /// taken in turn. From one to the other in minutes is faster than anything travels
+    /// (`AirborneFilter.maximumFlightSpeed`): no zig-zag, one leg (review: 40 route points and
+    /// 8,994 km "vor Ort" against 230 km). Real travel, by train or by plane, stays as it is.
+    @Test func photosTakenAtTheSameTimeInTwoPlacesAreNoZigZag() throws {
+        let palermo = MapFixture.at(38.1157, 13.3615)
+        func photo(_ id: String, _ date: String, minutes: Double = 0, at place: GeoCoordinate, seed: Int) -> AssetFacts {
+            let town = place == Places.rome ? "Roma" : place == Places.florence ? "Firenze" : "Palermo"
+            return MapFixture.photo(id, at: MapFixture.date(date).addingTimeInterval(minutes * 60), Fixture.jitter(place, seed: seed, meters: 200),
+                                    country: "IT", town: town, timeZone: "Europe/Rome")
+        }
+        /// `count` photos one every `minutes`, Rome and Florence in turn, Rome first.
+        func inTurn(_ prefix: String, _ count: Int, every minutes: Double) -> [AssetFacts] {
+            (0..<count).map { i in
+                photo("\(prefix)-\(i)", "2023-05-02 08:00", minutes: Double(i) * minutes, at: i % 2 == 0 ? Places.rome : Places.florence, seed: i)
+            }
+        }
+        let direct = GeoMath.distance(Places.rome, Places.florence)
+        #expect(direct > 225_000 && direct < 235_000)
+
+        // 20 photos each, every 5 minutes in turn.
+        let shared = Self.build(inTurn("shared", 40, every: 5))
+        #expect(shared.places.map(\.name) == ["Roma", "Firenze"])
+        #expect(shared.places.map(\.photoCount) == [20, 20])
+        #expect(shared.route.map(\.placeIndex) == [0, 1])
+        #expect(shared.route[0].arrival <= shared.route[0].departure && shared.route[0].departure < shared.route[1].arrival)
+        #expect(shared.legs.count == 1 && !shared.legs[0].withoutPhotos)
+        #expect(abs(shared.metersOnSite - direct) < 2_000)
+        for seed in 1...3 as ClosedRange<UInt64> {
+            #expect(Self.build(Self.shuffled(inTurn("shared", 40, every: 5), seed: seed)) == shared)
+        }
+        // Whichever photo comes last: 21 in Rome give the same one leg.
+        let odd = Self.build(inTurn("odd", 41, every: 5))
+        #expect(odd.route.map(\.placeIndex) == [0, 1])
+        #expect(abs(odd.metersOnSite - direct) < 2_000)
+
+        // A day trip Rome → Florence → Rome, hours between: three route points.
+        let dayTrip = Self.build((0..<4).map { photo("am-\($0)", "2023-05-03 07:00", minutes: Double($0) * 10, at: Places.rome, seed: $0) }
+            + (0..<5).map { photo("flo-\($0)", "2023-05-03 11:00", minutes: Double($0) * 10, at: Places.florence, seed: $0) }
+            + (0..<4).map { photo("pm-\($0)", "2023-05-03 18:00", minutes: Double($0) * 10, at: Places.rome, seed: $0 + 10) })
+        #expect(dayTrip.route.map(\.placeIndex) == [0, 1, 0])
+        #expect(abs(dayTrip.metersOnSite - 2 * direct) < 4_000)
+
+        // A flight Rome → Palermo, an hour from the last photo in Rome to the first in Palermo:
+        // faster than any train, but a plane flies it.
+        let flight = Self.build((0..<3).map { photo("fco-\($0)", "2023-05-04 08:00", minutes: Double($0) * 10, at: Places.rome, seed: $0) }
+            + (0..<3).map { photo("pmo-\($0)", "2023-05-04 09:20", minutes: Double($0) * 10, at: palermo, seed: $0) })
+        #expect(flight.route.map(\.placeIndex) == [0, 1])
+        let flown = GeoMath.distance(Places.rome, palermo)
+        #expect(flown / 3_600 > AirborneFilter.maximumGroundSpeed)
+        #expect(abs(flight.metersOnSite - flown) < 2_000)
+
+        // Rome and Florence in turn every 2 hours: possible by train, so the route stays as it is.
+        var turns: [AssetFacts] = []
+        for k in 0..<6 {
+            for i in 0..<3 {
+                turns.append(photo("train-\(k)-\(i)", "2023-05-05 08:00", minutes: Double(k * 120 + i * 10),
+                                   at: k % 2 == 0 ? Places.rome : Places.florence, seed: k * 3 + i))
+            }
+        }
+        let byTrain = Self.build(turns)
+        #expect(byTrain.route.map(\.placeIndex) == [0, 1, 0, 1, 0, 1])
+        #expect(abs(byTrain.metersOnSite - 5 * direct) < 10_000)
+    }
+
+    /// "km vor Ort" are the legs between all route points, counted before the route is cut to
+    /// `TripGeometry.maxRoutePoints` (review: a 360-place road trip showed 7,983 km against 8,872 km
+    /// between all its day places). A leg of the cut route carries the legs it stands for.
+    @Test func kilometresOnSiteCountEveryLegBeforeTheRouteIsCut() throws {
+        // A year on the road: each day 25 km on to a new place, winding east (never more than 80°
+        // off), and every 30th day 300 km in one go.
+        var random = MapRandom(seed: 360)
+        var position = Places.lisbon
+        var facts: [AssetFacts] = []
+        for d in 0..<360 {
+            if d > 0 {
+                let meters = d % 30 == 0 ? 300_000.0 : 25_000
+                position = Self.destination(from: position, bearing: 90 + (random.unit() - 0.5) * 160, meters: meters)
+            }
+            let day = MapFixture.date("2023-01-01").addingTimeInterval(Double(d) * 86_400 + 10 * 3_600)
+            for k in 0..<3 {
+                facts.append(MapFixture.photo("road-\(d)-\(k)", at: day.addingTimeInterval(Double(k) * 600),
+                                              Fixture.jitter(position, seed: d * 3 + k, meters: 100)))
+            }
+        }
+        let geometry = Self.build(facts)
+        #expect(geometry.places.count == 360)
+        #expect(geometry.route.count <= TripGeometry.maxRoutePoints && geometry.route.count > 100)
+        #expect(geometry.legs.count == geometry.route.count - 1)
+        let places = geometry.places.map(\.coordinate)
+        let everyLeg = zip(places, places.dropFirst()).reduce(0.0) { $0 + GeoMath.distance($1.0, $1.1) }
+        #expect(everyLeg > 8_000_000)
+        #expect(abs(geometry.metersOnSite - everyLeg) < 1)
+        // The straight lines of the cut route are shorter (here by 193 km): what they leave out is
+        // in their legs.
+        let points = geometry.routeCoordinates
+        let lines = zip(points, points.dropFirst()).reduce(0.0) { $0 + GeoMath.distance($1.0, $1.1) }
+        #expect(lines < everyLeg - 150_000)
+        #expect(zip(geometry.legs, zip(points, points.dropFirst())).allSatisfy { $0.meters >= GeoMath.distance($1.0, $1.1) - 1 })
+    }
+
+    /// A leg of the cut route stands for the legs from its first point up to the next point's
+    /// first visit (those of an excursion the cut left out too): their metres added up, and
+    /// "ohne Fotos" when most of those metres were.
+    @Test func aLegOfTheCutRouteInheritsWhatMostOfItsMetresWere() {
+        let legs = [RouteLeg(meters: 150_000, withoutPhotos: true), RouteLeg(meters: 20_000, withoutPhotos: false),
+                    RouteLeg(meters: 30_000, withoutPhotos: false), RouteLeg(meters: 120_000, withoutPhotos: true),
+                    RouteLeg(meters: 130_000, withoutPhotos: false)]
+        // Six visits cut to points starting at the visits 0, 2 and 3, the last one up to visit 5:
+        // 150 of the first leg's 170 km without photos, 120 of the second's 280 km.
+        #expect(TripGeometryBuilder.cutLegs(legs, startingAt: [0, 2, 3])
+                == [RouteLeg(meters: 170_000, withoutPhotos: true), RouteLeg(meters: 280_000, withoutPhotos: false)])
+        // Two points: one leg for all of them, 270 of its 450 km without photos.
+        #expect(TripGeometryBuilder.cutLegs(legs, startingAt: [0, 4]) == [RouteLeg(meters: 450_000, withoutPhotos: true)])
+        // Exactly half is not most.
+        let half = [RouteLeg(meters: 100_000, withoutPhotos: true), RouteLeg(meters: 100_000, withoutPhotos: false)]
+        #expect(TripGeometryBuilder.cutLegs(half, startingAt: [0, 2]) == [RouteLeg(meters: 200_000, withoutPhotos: false)])
+        // Nothing cut: the legs as they are.
+        #expect(TripGeometryBuilder.cutLegs(legs, startingAt: [0, 1, 2, 3, 4, 5]) == legs)
     }
 
     /// The point `fraction` of the way from `a` to `b` on the great circle.
@@ -394,9 +528,10 @@ struct TripGeometryTests {
         let unlocated = MapFixture.photo("no-place", at: MapFixture.date("2023-06-14 23:30"), nil)
         let geometry = Self.build(tokyo + [unlocated], timeZone: MapFixture.utc)
         #expect(geometry.timeZoneIdentifier == "Asia/Tokyo")
+        // The photo without a place counts in the trip's zone, not the device's: the trip has one
+        // day. Photos per day are those on the map.
         #expect(geometry.firstDay == Self.day("2023-06-15") && geometry.lastDay == Self.day("2023-06-15"))
-        // The photo without a place counts in the trip's zone, not the device's.
-        #expect(geometry.dayCounts == [TripDay(day: Self.day("2023-06-15"), photoCount: 5, placeIndex: 0)])
+        #expect(geometry.dayCounts == [TripDay(day: Self.day("2023-06-15"), photoCount: 4, placeIndex: 0)])
         #expect(geometry.dayPlaces.map(\.day) == [Self.day("2023-06-15")])
         #expect(geometry.route.map(\.day) == [Self.day("2023-06-15")])
     }
@@ -411,7 +546,8 @@ struct TripGeometryTests {
         unlocated.timeZone = TimeZone(identifier: "Asia/Tokyo")
         let geometry = Self.build(tokyo + [unlocated], timeZone: MapFixture.utc)
         #expect(geometry.timeZoneIdentifier == "Asia/Tokyo")
-        #expect(geometry.dayCounts == [TripDay(day: Self.day("2023-06-15"), photoCount: 5, placeIndex: 0)])
+        #expect(geometry.dayCounts == [TripDay(day: Self.day("2023-06-15"), photoCount: 4, placeIndex: 0)])
+        #expect(geometry.firstDay == Self.day("2023-06-15") && geometry.lastDay == Self.day("2023-06-15"))
         #expect(geometry.dayPlaces.map(\.day) == [Self.day("2023-06-15")])
         // The clock wins over a place's zone that says otherwise.
         let mixed = MapFixture.burst("utc", count: 3, at: Places.tokyo, day: "2023-06-14", hour: 23, country: "JP", town: "Tokyo",
@@ -494,8 +630,10 @@ struct TripGeometryTests {
         #expect(geometry.countryPhotos == ["PT": 6])
         #expect(geometry.airborneCount == 5)
         #expect(geometry.photoCount == 11)
-        // Their days still count: they are photos of the trip.
-        #expect(geometry.dayCounts.map(\.photoCount) == [5, 6])
+        // They are photos of the trip and their day is one of its days, but no photos of a day on
+        // the map ("Meiste Fotos an einem Tag").
+        #expect(geometry.dayCounts == [TripDay(day: Self.day("2023-06-15"), photoCount: 6, placeIndex: 0)])
+        #expect(geometry.firstDay == Self.day("2023-06-14") && geometry.days == 2)
         let unfiltered = Self.build(lisbon + window)
         #expect(unfiltered.places.map(\.name) == ["Brive", "Lisboa"])
         #expect(unfiltered.countryPhotos == ["PT": 6, "FR": 3, "ES": 2])
@@ -520,12 +658,116 @@ struct TripGeometryTests {
         #expect(geometry.photoCount == 9)
         #expect(geometry.countryPhotos == ["PT": 4])
         #expect(geometry.places.map(\.photoCount) == [4])
-        // 23:30 UTC is the 16th in Lisbon (summer time), the trip's zone.
-        #expect(geometry.dayCounts == [TripDay(day: Self.day("2023-06-15"), photoCount: 6, placeIndex: 0),
-                                       TripDay(day: Self.day("2023-06-16"), photoCount: 1, placeIndex: nil),
-                                       TripDay(day: Self.day("2023-06-17"), photoCount: 1, placeIndex: nil)])
+        // Photos per day are those on the map; the trip's days are those of all its dated photos.
+        #expect(geometry.dayCounts == [TripDay(day: Self.day("2023-06-15"), photoCount: 4, placeIndex: 0)])
         #expect(geometry.lastDay == Self.day("2023-06-17"))
         #expect(geometry.end == MapFixture.date("2023-06-17 09:00"))
+        // 23:30 UTC is the 16th in Lisbon (summer time), the trip's zone: a trip ending then has
+        // two days.
+        let late = Self.build(lisbon + [others[0]])
+        #expect(late.lastDay == Self.day("2023-06-16") && late.days == 2)
+    }
+
+    /// "Meiste Fotos an einem Tag" (concept §5; review: it counted screenshots, photos in flight
+    /// and photos without a place): a day counts the trip's photos on the map, nothing else. The
+    /// album (`photoCount`) and the trip's days (`firstDay` to `lastDay`) still hold them all.
+    @Test func photosPerDayAreThePhotosOnTheMap() throws {
+        let lisbon = MapFixture.burst("lis", count: 6, at: Places.lisbon, day: "2023-06-15", hour: 10, country: "PT", town: "Lisboa",
+                                      timeZone: "Europe/Lisbon")
+        var screenshot = MapFixture.photo("shot", at: MapFixture.date("2023-06-15 12:00"), Places.lisbon, country: "PT", timeZone: "Europe/Lisbon")
+        screenshot.asset.subtypes = .screenshot
+        let window = (0..<3).map { i in
+            MapFixture.photo("window-\(i)", at: MapFixture.date("2023-06-14 15:00").addingTimeInterval(Double(i) * 600),
+                             MapFixture.at(44.0 - Double(i), -2.0 - Double(i)), country: "ES")
+        }
+        let packing = (0..<3).map { i in
+            MapFixture.photo("packing-\(i)", at: MapFixture.date("2023-06-13 18:00").addingTimeInterval(Double(i) * 600), Places.regensburg,
+                             country: "DE", timeZone: "Europe/Berlin", atHome: true)
+        }
+        let unlocated = MapFixture.photo("unlocated", at: MapFixture.date("2023-06-16 09:00"), nil)
+        let geometry = Self.build(lisbon + [screenshot] + window + packing + [unlocated], airborne: Set(window.map(\.id)))
+        #expect(geometry.dayCounts == [TripDay(day: Self.day("2023-06-15"), photoCount: 6, placeIndex: 0)])
+        #expect(geometry.photoCount == 14)
+        #expect(geometry.firstDay == Self.day("2023-06-13") && geometry.lastDay == Self.day("2023-06-16") && geometry.days == 4)
+    }
+
+    // MARK: Photos at home, a photo listed twice
+
+    /// Concept §8: everyday photos at home never appear on the map. A photo marked at home is never
+    /// drawn, even when it carries the trip's id (review: four packing photos at the exact home made
+    /// a place, a pin and the first route point there; the trip detection should not put them in a
+    /// trip, but the map does not rely on it): no day place, place, route point, destination, cover
+    /// or country. The album still shows it.
+    @Test func photosAtHomeAreNeverDrawn() throws {
+        let home = Places.regensburg, station = MapFixture.at(49.0118, 12.0997)
+        // The evening before: four favourite photos of the packing at the exact home, and three at
+        // the station 230 m away, which are not at home.
+        let packing = (0..<4).map { i in
+            MapFixture.photo("pack-\(i)", at: MapFixture.date("2023-04-09 17:00").addingTimeInterval(Double(i) * 300), home, country: "DE",
+                             town: "Regensburg", timeZone: "Europe/Berlin", atHome: true, favorite: true)
+        }
+        let train = MapFixture.burst("station", count: 3, at: station, day: "2023-04-09", hour: 18, jitterMeters: 30, country: "DE",
+                                     town: "Regensburg", timeZone: "Europe/Berlin")
+        let lisbon = MapFixture.burst("lis", count: 5, at: Places.lisbon, day: "2023-04-10", country: "PT", town: "Lisboa", timeZone: "Europe/Lisbon")
+            + MapFixture.burst("lis2", count: 5, at: Places.lisbon, day: "2023-04-11", country: "PT", town: "Lisboa", timeZone: "Europe/Lisbon")
+        let geometry = Self.build(packing + train + lisbon)
+        #expect(geometry.photoCount == 17)
+        #expect(geometry.places.map(\.name) == ["Regensburg", "Lisboa"])
+        #expect(geometry.places.map(\.photoCount) == [3, 10])
+        #expect(geometry.places[0].coverCandidates == ["station-0", "station-1", "station-2"])
+        #expect(train.contains { $0.asset.location == geometry.places[0].coordinate })
+        #expect(geometry.dayPlaces.map(\.photoCount) == [3, 5, 5])
+        #expect(geometry.route.map(\.placeIndex) == [0, 1])
+        #expect(geometry.destinationIndex == 1 && geometry.destination == geometry.places[1].coordinate)
+        #expect(geometry.countryPhotos == ["DE": 3, "PT": 10])
+        #expect(geometry.dayCounts.map(\.photoCount) == [3, 5, 5])
+        let points = geometry.places.map(\.coordinate) + geometry.dayPlaces.map(\.coordinate) + geometry.routeCoordinates + [geometry.destination]
+        #expect(points.allSatisfy { GeoMath.distance($0, home) > 150 })
+        // The album shows them: the trip starts with them.
+        #expect(geometry.start == MapFixture.date("2023-04-09 17:00") && geometry.firstDay == Self.day("2023-04-09"))
+
+        // Without a place, the destination is where the photos on the map gather, never home.
+        let fewer = Self.build(packing + lisbon.prefix(2))
+        #expect(fewer.places.isEmpty && fewer.route.isEmpty)
+        #expect(lisbon.prefix(2).contains { $0.asset.location == fewer.destination })
+        // Only photos at home: nothing on the map, and the trip's centre (here home) is not taken
+        // either: the destination is no place on Earth.
+        let onlyHome = Self.build(packing)
+        #expect(onlyHome.photoCount == 4 && onlyHome.dayPlaces.isEmpty && onlyHome.places.isEmpty && onlyHome.route.isEmpty)
+        #expect(onlyHome.dayCounts.isEmpty && onlyHome.countryPhotos.isEmpty && onlyHome.mainCountryKey == nil)
+        #expect(!onlyHome.destination.isPlausible)
+    }
+
+    /// A library listing one photo twice or three times counts it once (concept §5: a single wrong
+    /// photo makes no place, no record and no country; review: one Longyearbyen photo three times
+    /// made a place and "Nördlichster Ort"). Two facts of one photo that differ (two states of the
+    /// analysis) give one, the same in any order; one at home wins.
+    @Test func onePhotoListedThreeTimesCountsOnce() throws {
+        let oslo = MapFixture.at(59.9139, 10.7522), bergen = MapFixture.at(60.3913, 5.3221)
+        let city = MapFixture.burst("osl", count: 5, at: oslo, day: "2023-07-09", country: "NO", town: "Oslo", timeZone: "Europe/Oslo")
+        let lyr = MapFixture.photo("lyr", at: MapFixture.date("2023-07-10 12:00"), Places.longyearbyen, country: "SJ", town: "Longyearbyen",
+                                   timeZone: "Arctic/Longyearbyen")
+        let window = MapFixture.photo("window", at: MapFixture.date("2023-07-10 09:00"), MapFixture.at(70, 15), country: "NO")
+        let geometry = Self.build(city + [lyr, lyr, lyr, window, window], airborne: [window.id])
+        #expect(geometry.photoCount == 7)
+        #expect(geometry.airborneCount == 1)
+        #expect(geometry.places.map(\.name) == ["Oslo"])
+        #expect(geometry.countryPhotos == ["NO": 5, "SJ": 1])
+        #expect(geometry.dayCounts.map(\.photoCount) == [5, 1])
+
+        let here = MapFixture.photo("twin", at: MapFixture.date("2023-07-09 12:00"), oslo, country: "NO", town: "Oslo", timeZone: "Europe/Oslo")
+        var there = MapFixture.photo("twin", at: MapFixture.date("2023-07-09 12:00"), bergen, country: "NO", town: "Bergen", timeZone: "Europe/Oslo")
+        there.asset.isFavorite = true
+        var atHome = here
+        atHome.atHome = true
+        for pair in [[here, there], [here, atHome], [there, atHome]] {
+            let one = Self.build(city + pair), other = Self.build(pair.reversed() + city)
+            #expect(one == other)
+            #expect(one.photoCount == 6)
+            #expect(one.countryPhotos.values.reduce(0, +) <= 6)
+        }
+        // The copy at home wins: the photo is not on the map.
+        #expect(Self.build(city + [atHome, there]).countryPhotos == ["NO": 5])
     }
 
     @Test func countriesAndDisputedAreas() throws {
@@ -601,13 +843,16 @@ struct TripGeometryTests {
         #expect(place.photoCount == 10)
         #expect(place.coverCandidates == ["d-fav-large", "c-fav-small", "b-large", "h-same", "i-same", "j-same"])
 
-        // Only ordinary photos: the six largest; an id given twice is taken once, at its better
-        // rank ("o2" again as a favourite).
+        // Only ordinary photos: the six largest. An id given twice is one photo, with the facts
+        // `isKept(_:over:)` prefers whatever their order: "o2" again, later and as a favourite, is
+        // the same photo in another state, and the facts kept (the earlier, no favourite) decide.
         let ordinary = (0..<9).map { photo("o\($0)", $0, pixels: (1_000 + $0 * 100, 1_000)) }
-            + [photo("o8", 9, pixels: (1_800, 1_000)), photo("o2", 10, favorite: true, pixels: (1_200, 1_000))]
+        let again = [photo("o8", 9, pixels: (1_800, 1_000)), photo("o2", 10, favorite: true, pixels: (1_200, 1_000))]
+        #expect(!TripGeometryBuilder.isKept(again[1], over: ordinary[2]) && TripGeometryBuilder.isKept(ordinary[2], over: again[1]))
         for seed in [1, 2, 3] as [UInt64] {
-            let best = try #require(Self.build(Self.shuffled(ordinary, seed: seed)).places.first)
-            #expect(best.coverCandidates == ["o2", "o8", "o7", "o6", "o5", "o4"])
+            let best = try #require(Self.build(Self.shuffled(ordinary + again, seed: seed)).places.first)
+            #expect(best.photoCount == 9)
+            #expect(best.coverCandidates == ["o8", "o7", "o6", "o5", "o4", "o3"])
         }
     }
 
@@ -649,14 +894,49 @@ struct TripGeometryTests {
         // 150 m apart still agree, 400 m do not.
         #expect(altitude([1_600, 1_675, 1_750], at: zermatt) == 1_675)
         #expect(altitude([1_400, 1_600, 1_800], at: zermatt) == nil)
-        // One above 6,000 m (a plane's, if not filtered): none.
+        // Only scattered altitudes, no three within 150 m: none.
+        #expect(altitude([1_000, 1_200, 1_400, 1_600, 1_800, 2_000], at: zermatt) == nil)
+        // One above 6,000 m (a plane's, if not filtered) does not count; the others do.
         #expect(altitude([1_600, 1_620, 7_000], at: zermatt) == nil)
+        #expect(altitude([1_600, 1_620, 1_640, 7_000], at: zermatt) == 1_620)
+        // A cable car from the valley to the top within the place's 3 km: the highest group.
+        #expect(altitude([1_610, 1_600, 3_100, 1_620, 3_050, 3_000, 2_400], at: zermatt) == 3_050)
         // Fewer than three photos with an altitude: none; one that is no number does not count.
         #expect(altitude([1_600, 1_620, nil, nil, nil], at: zermatt) == nil)
         #expect(altitude([1_600, 1_620, .nan], at: zermatt) == nil)
         #expect(altitude([1_600, 1_620, 1_610, .nan], at: zermatt) == 1_610)
         // Below sea level is fine (the Dead Sea shore).
         #expect(altitude([-420, -415, -410], at: MapFixture.at(31.5590, 35.4732)) == -415)
+    }
+
+    /// "Höchstes Foto" (concept §5): the mean of the highest group of at least three photos of a
+    /// place whose altitudes lie within `TripGeometry.altitudeSpreadMeters` of each other (review:
+    /// summit photos from 2,600 to 2,962 m got no altitude, and the record went to a lake at 600 m).
+    @Test func aSummitKeepsItsAltitude() throws {
+        // The Eibsee one day; the next, the Zugspitze: the glacier at 2,600 m, the way up, the
+        // summit at 2,962 m, all within 1.5 km.
+        let lake = MapFixture.at(47.4571, 10.9813), summit = MapFixture.at(47.4211, 10.9853)
+        let lakeAltitudes = [600.0, 602, 598, 601]
+        let summitAltitudes = [2_600.0, 2_650, 2_700, 2_780, 2_870, 2_930, 2_945, 2_955, 2_962]
+        let photos = lakeAltitudes.indices.map { i in
+            MapFixture.photo("lake-\(i)", at: MapFixture.date("2023-08-04 10:00").addingTimeInterval(Double(i) * 600),
+                             Fixture.jitter(lake, seed: i, meters: 300), country: "DE", town: "Eibsee", timeZone: "Europe/Berlin")
+        } + summitAltitudes.indices.map { i in
+            let below = Double(summitAltitudes.count - 1 - i)
+            return MapFixture.photo("top-\(i)", at: MapFixture.date("2023-08-05 09:00").addingTimeInterval(Double(i) * 600),
+                                    Self.offset(summit, east: -below * 150, north: -below * 100), country: "DE", town: "Zugspitze",
+                                    timeZone: "Europe/Berlin")
+        }
+        var altitudes: [AssetID: Double] = [:]
+        for (i, value) in lakeAltitudes.enumerated() { altitudes[AssetID("lake-\(i)")] = value }
+        for (i, value) in summitAltitudes.enumerated() { altitudes[AssetID("top-\(i)")] = value }
+        let geometry = Self.build(photos, altitudes: altitudes)
+        #expect(geometry.places.map(\.name) == ["Eibsee", "Zugspitze"])
+        #expect(geometry.places[0].altitude == 600.25)
+        // The summit's group: everything within 150 m below its highest photo, 2,870 to 2,962 m.
+        let top = try #require(geometry.places[1].altitude)
+        #expect(abs(top - (2_870 + 2_930 + 2_945 + 2_955 + 2_962) / 5) < 1e-9)
+        #expect(geometry.places.max { ($0.altitude ?? -.infinity) < ($1.altitude ?? -.infinity) }?.name == "Zugspitze")
     }
 
     // MARK: Local days and speed
@@ -748,5 +1028,135 @@ struct TripGeometryTests {
         // A debug build on a shared machine is several times slower than the app; the bound only
         // catches work growing with the square of the photos.
         #expect(ms < 1_000)
+    }
+
+    /// Five years of a library whose home is not known, made into one trip: 50,000 photos, a day
+    /// at two to four of 24 places around home, and 30 holidays of ten days at 12 places each.
+    static func fiveYearsInOneTrip() -> [AssetFacts] {
+        var random = MapRandom(seed: 50_000)
+        /// Places 6 km apart on a grid around `centre`: never one place.
+        func grid(_ centre: GeoCoordinate, _ count: Int) -> [GeoCoordinate] {
+            (0..<count).map { k in Self.offset(centre, east: Double(k % 5 - 2) * 6_000, north: Double(k / 5 - 2) * 6_000) }
+        }
+        let around = grid(Places.regensburg, 25).enumerated().filter { $0.offset != 12 }.map(\.element)
+        let holidays = (0..<30).map { h in
+            grid(MapFixture.at(-40 + Double(h) * 3.1, -150 + Double(h) * 11.3), 12)
+        }
+        var facts: [AssetFacts] = []
+        for d in 0..<1_826 where facts.count < 50_000 {
+            let holiday = d % 60 < 10 ? holidays[(d / 60) % holidays.count] : nil
+            let spots = holiday ?? around
+            let day = MapFixture.date("2019-01-01").addingTimeInterval(Double(d) * 86_400)
+            let stops = 2 + random.int(0..<3)
+            for s in 0..<stops {
+                let spot = spots[random.int(0..<spots.count)]
+                for k in 0..<(28 / stops) where facts.count < 50_000 {
+                    let date = day.addingTimeInterval(Double(8 + s * 4) * 3_600 + Double(k) * 300)
+                    facts.append(MapFixture.photo("life-\(d)-\(s)-\(k)", at: date, Fixture.jitter(spot, seed: random.int(0..<100_000), meters: 600),
+                                                  country: holiday == nil ? "DE" : "XX", town: "Spot \(spot.latitude)",
+                                                  timeZone: holiday == nil ? "Europe/Berlin" : "UTC"))
+                }
+            }
+        }
+        return facts
+    }
+
+    /// One trip holding 50,000 photos at a few hundred places costs about what the trips of a
+    /// whole 50,000-photo library cost per photo (`MapSummaryLoadTests`); review: thousands of
+    /// day places were each compared with every place before them.
+    @Test func aTripOfFiftyThousandPhotosBuildsQuickly() {
+        let members = MapFixture.members(Self.fiveYearsInOneTrip(), of: SortlyID("life"))
+        #expect(members.count == 50_000)
+        let trip = MapFixture.trip(SortlyID("life"), members)
+        let clock = ContinuousClock()
+        var geometry: TripGeometry?
+        // Warm once (first-use costs of Foundation), then the best of three.
+        _ = TripGeometry.build(trip: trip, facts: members, airborne: [], timeZone: MapFixture.utc)
+        var best = Duration.seconds(1_000)
+        for _ in 0..<3 {
+            best = min(best, clock.measure { geometry = TripGeometry.build(trip: trip, facts: members, airborne: [], timeZone: MapFixture.utc) })
+        }
+        let ms = Double(best.components.seconds) * 1_000 + Double(best.components.attoseconds) / 1e15
+        print(String(format: "TRIP_GEOMETRY_PERF photos 50000, one trip: %.1f ms, %d day places, %d places, %d route points", ms,
+                     geometry?.dayPlaces.count ?? 0, geometry?.places.count ?? 0, geometry?.route.count ?? 0))
+        #expect(geometry?.photoCount == 50_000)
+        #expect((300...384).contains(geometry?.places.count ?? 0))
+        #expect(geometry?.route.count ?? 0 <= TripGeometry.maxRoutePoints)
+        // Debug build on a shared machine: the bound catches work growing with the square of the
+        // places, the printed figure is the one that matters.
+        #expect(ms < 3_000)
+    }
+
+    /// Day places merge into trip places on a grid (`mergedPlaces`): the same places as comparing
+    /// each with every place before it, at the antimeridian and the poles too.
+    @Test func placesMergedOnAGridAreThoseOfComparingEach() {
+        /// Each day place joins the nearest place founded within the radius, ties to the lower
+        /// index, else founds one: compared with every place before it.
+        func comparingEach(_ groups: [TripGeometryBuilder.DayGroup]) -> (placeOfGroup: [Int], count: Int) {
+            var founders: [TripGeometryBuilder.UnitVector] = []
+            var placeOfGroup: [Int] = []
+            for group in groups {
+                let point = TripGeometryBuilder.UnitVector(group.coordinate)
+                var nearest = -1, nearestChord = Double.infinity
+                for p in founders.indices {
+                    let chord = point.chordSquared(to: founders[p])
+                    if chord <= TripGeometryBuilder.placeChordSquared && chord < nearestChord { (nearest, nearestChord) = (p, chord) }
+                }
+                if nearest < 0 {
+                    founders.append(point)
+                    nearest = founders.count - 1
+                }
+                placeOfGroup.append(nearest)
+            }
+            return (placeOfGroup, founders.count)
+        }
+        let centres = [Places.rome, MapFixture.at(-16.85, 179.995), MapFixture.at(-16.85, -179.995), MapFixture.at(89.995, 30),
+                       MapFixture.at(-89.99, -120), MapFixture.at(0.02, -0.03), MapFixture.at(64.15, -21.94)]
+        var random = MapRandom(seed: 3_000)
+        for round in 0..<40 {
+            let groups = (0..<(50 + round * 10)).map { i in
+                let centre = centres[random.int(0..<centres.count)]
+                let point = Self.destination(from: centre, bearing: random.unit() * 360, meters: random.unit() * 12_000)
+                return TripGeometryBuilder.DayGroup(day: LocalDay(year: 2023, month: 1, day: 1 + i % 28), members: [i], coordinate: point)
+            }
+            let grid = TripGeometryBuilder.mergedPlaces(groups), each = comparingEach(groups)
+            #expect(grid.placeOfGroup == each.placeOfGroup && grid.count == each.count)
+        }
+        // Just inside the radius across the antimeridian and across the pole: one place each.
+        func groups(_ points: [GeoCoordinate]) -> [TripGeometryBuilder.DayGroup] {
+            points.enumerated().map {
+                TripGeometryBuilder.DayGroup(day: LocalDay(year: 2023, month: 1, day: 1), members: [$0.offset], coordinate: $0.element)
+            }
+        }
+        let fiji = MapFixture.at(-16.85, 179.999)
+        let across = groups([fiji, Self.destination(from: fiji, bearing: 90, meters: 2_990), MapFixture.at(89.99, 0), MapFixture.at(89.99, 180),
+                             Places.vik, Self.destination(from: Places.vik, bearing: 45, meters: 2_990)])
+        #expect(TripGeometryBuilder.mergedPlaces(across).placeOfGroup == [0, 0, 1, 1, 2, 2])
+        // At the radius itself, in every direction: as comparing each says.
+        for bearing in stride(from: 0.0, to: 360, by: 15) {
+            for centre in [fiji, Places.vik, MapFixture.at(89.98, 0), MapFixture.at(0.03, 0.03)] {
+                let pair = groups([centre, Self.destination(from: centre, bearing: bearing, meters: TripGeometry.placeRadiusMeters)])
+                #expect(TripGeometryBuilder.mergedPlaces(pair).placeOfGroup == comparingEach(pair).placeOfGroup)
+            }
+        }
+    }
+
+    /// Tens of thousands of trip places merge in linear time (review: each day place was compared
+    /// with every place before it, 450 million comparisons for these).
+    @Test func thirtyThousandPlacesMergeQuickly() {
+        var random = MapRandom(seed: 30_000)
+        let groups = (0..<30_000).map { i in
+            TripGeometryBuilder.DayGroup(day: LocalDay(year: 2023, month: 1, day: 1), members: [i],
+                                         coordinate: MapFixture.at(asin(2 * random.unit() - 1) * 180 / .pi, random.unit() * 360 - 180))
+        }
+        let clock = ContinuousClock()
+        var merged: (placeOfGroup: [Int], count: Int)?
+        let elapsed = clock.measure { merged = TripGeometryBuilder.mergedPlaces(groups) }
+        let ms = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1e15
+        print(String(format: "TRIP_GEOMETRY_PERF merge of 30000 day places: %.1f ms, %d places", ms, merged?.count ?? 0))
+        // Random points on the Earth lie some 130 km apart: almost every one is a place of its own.
+        #expect((merged?.count ?? 0) > 29_900)
+        // Debug build on a shared machine: some 150 ms here, against 6,600 ms comparing each.
+        #expect(ms < 2_000)
     }
 }

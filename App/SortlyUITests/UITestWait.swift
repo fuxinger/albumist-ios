@@ -35,13 +35,66 @@ enum UITestWait {
     static func until(_ what: String, timeout: TimeInterval,
                       file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) -> Bool {
         let start = Date()
+        let met = holds(timeout: timeout, condition)
+        report(met, what, since: start, timeout: timeout, file: file, line: line)
+        return met
+    }
+
+    /// `condition` holds within `timeout` seconds, checked every `interval` seconds; goes on as
+    /// soon as it does. Unlike `until` it neither prints nor fails: for a try the caller repeats
+    /// or checks itself right after (a tab bar that expands after a swipe), and for something
+    /// that may or may not come (a system alert). Every condition wait of this file polls here.
+    static func holds(timeout: TimeInterval, interval: TimeInterval = 0.5, _ condition: () -> Bool) -> Bool {
+        let start = Date()
         var met = condition()
         while !met, Date().timeIntervalSince(start) < timeout {
-            usleep(500_000)
+            // pacing: the poll's interval
+            usleep(UInt32(interval * 1_000_000))
             met = condition()
+        }
+        return met
+    }
+
+    /// `reading` gives the same value twice in a row, `interval` apart, within `timeout`
+    /// seconds: something that moved (a scroll decelerating, a drag) has come to rest. A nil
+    /// reading (the element is gone, a snapshot failed) never counts as at rest. Replaces the
+    /// fixed second "to let a scroll come to rest": it goes on once nothing moves any more, and
+    /// a screen that never stops moving fails with `UI_STEP_MISSING` instead of being audited
+    /// mid-movement.
+    @discardableResult
+    static func settled<Value: Equatable>(_ what: String, timeout: TimeInterval, interval: TimeInterval = 0.5,
+                                          file: StaticString = #filePath, line: UInt = #line,
+                                          _ reading: () -> Value?) -> Bool {
+        let start = Date()
+        var last: Value?
+        let met = holds(timeout: timeout, interval: interval) {
+            let now = reading()
+            defer { last = now }
+            return now != nil && now == last
         }
         report(met, what, since: start, timeout: timeout, file: file, line: line)
         return met
+    }
+
+    /// The screen of `app` has stopped moving: two snapshots of its whole tree, half a second
+    /// apart, put every element in the same place (to the point). For a screenshot, a tree
+    /// check or an accessibility audit after a swipe: a list still decelerating moves its rows
+    /// between the two. Animations that only fade (opacity) do not move frames and are not seen.
+    @discardableResult
+    static func screenSettled(_ app: XCUIApplication, _ what: String, timeout: TimeInterval = 20,
+                              file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        settled(what, timeout: timeout, file: file, line: line) { () -> [CGRect]? in
+            guard let root = try? app.snapshot() else { return nil }
+            var frames: [CGRect] = []
+            func visit(_ node: any XCUIElementSnapshot) {
+                let frame = node.frame
+                frames.append(CGRect(x: frame.minX.rounded(), y: frame.minY.rounded(),
+                                     width: frame.width.rounded(), height: frame.height.rounded()))
+                for child in node.children { visit(child) }
+            }
+            visit(root)
+            return frames
+        }
     }
 
     /// Presses Home and waits until iOS has the app in the background (or ended it), then keeps
@@ -169,11 +222,7 @@ enum UITestWait {
     static func never(_ what: String, for seconds: TimeInterval,
                       file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) -> Bool {
         let start = Date()
-        var seen = condition()
-        while !seen, Date().timeIntervalSince(start) < seconds {
-            usleep(500_000)
-            seen = condition()
-        }
+        let seen = holds(timeout: seconds, condition)
         let took = String(format: "%.1f", Date().timeIntervalSince(start))
         if seen {
             print("UI_STEP_MISSING \(what) (it happened after \(took) s)")

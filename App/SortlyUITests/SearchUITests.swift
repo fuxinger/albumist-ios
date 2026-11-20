@@ -41,7 +41,9 @@ final class SortlySearchUITests: XCTestCase {
         var tries = 0
         while !(button.exists && button.isHittable) && tries < 3 {
             if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            sleep(1)
+            // The bar expands after the swipe: on as soon as the button can be tapped, else the
+            // next try after the old second.
+            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
             tries += 1
         }
         return button
@@ -112,16 +114,15 @@ final class SortlySearchUITests: XCTestCase {
     private func allowPhotosIfAsked() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let labels = ["Zugriff auf alle Fotos erlauben", "Allow Full Access", "Allow Access to All Photos", "Alle Fotos erlauben", "Vollzugriff erlauben"]
-        let deadline = Date().addingTimeInterval(25)
-        while Date() < deadline {
+        // Taps the alert's button when it is there; the trial step means it was not needed.
+        _ = UITestWait.holds(timeout: 25) {
             for source in [springboard, app] {
                 for label in labels where source.buttons[label].exists {
                     source.buttons[label].tap()
-                    return
+                    return true
                 }
             }
-            if button("Analyse starten").exists { return }
-            usleep(500_000)
+            return button("Analyse starten").exists
         }
     }
 
@@ -140,6 +141,8 @@ final class SortlySearchUITests: XCTestCase {
         while Date() < deadline {
             streak = condition() ? streak + 1 : 0
             if streak >= stableChecks { return true }
+            // pacing: the poll's interval, kept: "three checks in a row" means the state held for
+            // about four seconds (the analysis idle, not only between two batches).
             sleep(2)
         }
         print("UI_STEP_MISSING \(what) (timeout \(Int(timeout)) s)")
@@ -188,7 +191,9 @@ final class SortlySearchUITests: XCTestCase {
             XCTAssertTrue(ok, "Search '\(query)' shows no chip '\(label)' (chips: \(chips()))")
             found = found && ok
         }
-        sleep(1)
+        // Chips, count and results come in one update (SearchView); the picture once the
+        // results have stopped moving under the chips.
+        UITestWait.screenSettled(app, "search '\(query)' results at rest")
         let count = search("search.count")
         print("UI_FACT search '\(query)' chips \(chips()) | \(count.exists ? count.label : "no count")")
         shot(shotName)

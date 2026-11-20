@@ -247,19 +247,22 @@ final class AccessibilityUITests: XCTestCase {
         finish("largest text")
     }
 
-    /// Landscape on the small iPhone (the app allows it): 375 pt of height for everything.
+    /// The small iPhone turned sideways. Version 1 is portrait only (Fuchs 15.11.2026,
+    /// `UISupportedInterfaceOrientations` in App/project.yml): the app must stay upright and
+    /// whole while the device lies on its side. (UI run on PR #12, 20.11.: the wait for a
+    /// landscape layout timed out, because the app rightly never turns.)
     func test4_Landscape() {
         continueAfterFailure = true
         completeOnboardingIfCutOff("test4")
         launch()
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
-        // The app has turned: its window is wider than tall (frames are in the current
-        // orientation) or reports a compact height, as an iPhone in landscape does.
-        UITestWait.until("app laid out in landscape", timeout: 10) {
+        UITestWait.until("device turned to landscape", timeout: 10) {
+            XCUIDevice.shared.orientation == .landscapeLeft
+        }
+        _ = UITestWait.never("app turned although it is portrait only", for: 3) {
             let window = app.windows.firstMatch
-            guard window.exists else { return false }
-            return window.frame.width > window.frame.height || window.verticalSizeClass == .compact
+            return window.exists && window.frame.width > window.frame.height
         }
         walk("landscape", .german, short: true)
         finish("landscape")

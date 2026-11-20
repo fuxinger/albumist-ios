@@ -3308,11 +3308,6 @@ final class AppModel {
         return await DeleteQuestion(library: library).interruptedUndo(interrupted, cached: inventory)
     }
 
-    /// Whether taking Albumist's changes back out of one album deletes the album.
-    func removalDeletesAlbum(_ state: ManagedAlbumState) -> Bool {
-        ManagedAlbumTracker().removalPlan(for: state, current: inventory).deletesCollections
-    }
-
     /// What an undo left in Photos because Albumist cannot prove it was its own doing
     /// (`UndoRemainder`, review P2-01), in words: which album or folder, how many photos where.
     /// Nil when nothing stays.

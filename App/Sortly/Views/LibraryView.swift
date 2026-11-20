@@ -57,28 +57,21 @@ struct LibraryView: View {
             if bucket != .suggestions {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(selecting ? "Fertig" : "Auswählen") {
-                        selecting.toggle()
-                        selection = []
+                        withAnimation {
+                            selecting.toggle()
+                            selection = []
+                        }
                     }
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if selecting && !selection.isEmpty {
-                // In "Ignoriert" the way back instead of ignoring again (design review D4).
-                SelectionBar(count: selection.count, ignoreAction: bucket == .ignored ? .unignore : .ignore) {
-                    addingToAlbum = Array(selection)
-                } ignore: {
-                    if bucket == .ignored { model.unignore(Array(selection)) } else { model.ignore(Array(selection)) }
-                    selection = []
-                    selecting = false
-                }
-                .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
-            } else {
-                IgnoreUndoBar()
+            if selecting {
+                selectionActions
             }
         }
-        .animation(.snappy, value: selection.isEmpty)
+        // While selecting, the tab bar goes and the actions are in the system bottom bar, as in
+        // Photos (review P3-01 = G3-04: a floating bar of its own sat above the tab bar).
+        .toolbarVisibility(selecting ? .hidden : .automatic, for: .tabBar)
+        .safeAreaInset(edge: .bottom) { IgnoreUndoBar() }
         .animation(.snappy, value: model.lastIgnored)
         .fullScreenCover(item: $viewing) { start in
             PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
@@ -224,6 +217,48 @@ struct LibraryView: View {
         }
     }
 
+    /// The actions for the selected photos, in the system bottom bar: add to an album on the
+    /// left, how many are selected in the middle, ignore on the right, like the selection in
+    /// Photos. Each button keeps its name for VoiceOver and the large content viewer.
+    @ToolbarContentBuilder
+    private var selectionActions: some ToolbarContent {
+        ToolbarItem(placement: .bottomBar) {
+            Button {
+                addingToAlbum = Array(selection)
+            } label: {
+                Label("Zu Album hinzufügen", systemImage: "rectangle.stack.badge.plus")
+            }
+            .disabled(selection.isEmpty)
+        }
+        ToolbarSpacer(.flexible, placement: .bottomBar)
+        ToolbarItem(placement: .bottomBar) {
+            Text("\(selection.count) ausgewählt")
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+        }
+        .sharedBackgroundVisibility(.hidden)
+        ToolbarSpacer(.flexible, placement: .bottomBar)
+        ToolbarItem(placement: .bottomBar) {
+            // Not red: nothing is deleted, and it can be taken back. In "Ignoriert" the way back
+            // instead of ignoring again (design review D4).
+            Button {
+                if bucket == .ignored { model.unignore(Array(selection)) } else { model.ignore(Array(selection)) }
+                withAnimation {
+                    selection = []
+                    selecting = false
+                }
+            } label: {
+                if bucket == .ignored {
+                    Label("Nicht mehr ignorieren", systemImage: "eye")
+                } else {
+                    Label("Ignorieren", systemImage: "eye.slash")
+                }
+            }
+            .disabled(selection.isEmpty)
+            .accessibilityIdentifier(bucket == .ignored ? "selection.unignore" : "selection.ignore")
+        }
+    }
+
     private func select(_ b: InboxBucket) {
         bucket = b
         selection = []
@@ -245,48 +280,6 @@ struct LibraryView: View {
             return "Alle Fotos liegen in deinen Hauptbereichen."
         case .ignored: return "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen."
         default: return "In diesem Bereich gibt es gerade nichts."
-        }
-    }
-}
-
-/// Actions for the selected photos, floating above the tab bar.
-struct SelectionBar: View {
-    enum IgnoreAction { case ignore, unignore }
-
-    var count: Int
-    var ignoreAction: IgnoreAction
-    var addToAlbum: () -> Void
-    var ignore: () -> Void
-
-    var body: some View {
-        HStack(spacing: Theme.Spacing.m) {
-            Button(action: addToAlbum) {
-                Label("Zu Album hinzufügen", systemImage: "rectangle.stack.badge.plus").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            // Not red: nothing is deleted, and it can be taken back (design review D4).
-            Button(action: ignore) {
-                switch ignoreAction {
-                case .ignore: Label("Ignorieren", systemImage: "eye.slash")
-                case .unignore: Label("Nicht mehr ignorieren", systemImage: "eye")
-                }
-            }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier(ignoreAction == .ignore ? "selection.ignore" : "selection.unignore")
-        }
-        .controlSize(.large)
-        .padding(Theme.Spacing.m)
-        .floatingPanel()
-        .padding(.horizontal, Theme.Spacing.l)
-        .padding(.bottom, Theme.Spacing.s)
-        .overlay(alignment: .topTrailing) {
-            Text(count.formatted())
-                .font(.caption.weight(.bold)).monospacedDigit()
-                .padding(.horizontal, 7).padding(.vertical, 2)
-                .background(Theme.accent, in: Capsule())
-                .foregroundStyle(Theme.onAccent)
-                .offset(x: -14, y: -8)
-                .accessibilityLabel(Text("\(count) ausgewählt"))
         }
     }
 }

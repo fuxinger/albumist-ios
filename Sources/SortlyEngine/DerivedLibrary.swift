@@ -18,6 +18,11 @@ import SortlyStore
 /// memory warning, say). Not the places "Dein Zuhause" offers: only that screen needs them, and
 /// at every refresh they would cost battery for nothing (the app makes them off the main thread
 /// when the screen asks, `AppModel.homeCandidates`).
+///
+/// Review P4-09, the rest: the facts by photo id (the photo view and the search hits; 97 ms at
+/// 50,000 photos, 267 ms at 100,000 on the main thread at the first lookup after every refresh)
+/// and the atlas of each year (75 and 151 ms on the main thread at each year chosen in the atlas)
+/// are made here too, and handed over with the facts.
 public struct DerivedLibrary: Sendable {
     public var facts: [AssetFacts] = []
     public var previewRanks: [AssetID: PreviewRank] = [:]
@@ -31,8 +36,47 @@ public struct DerivedLibrary: Sendable {
     /// The atlas of all years (`TravelAtlas.compute(facts:year: nil)`) and the years it offers.
     public var atlas = TravelAtlas()
     public var atlasYears: [Int] = []
+    /// The atlas of each year with photos (`yearAtlases(of:allYears:)`); a year without photos
+    /// has the empty atlas of that year (`emptyYearAtlas`).
+    public var yearAtlases: [Int: TravelAtlas] = [:]
+    /// The facts by photo id (`FactsByID`).
+    public var factsByID = FactsByID()
+    /// The name of the detected home from the photos around it (`HomeName.components`), when
+    /// the refresh asked for it (`AnalysisPipeline.derivedRefresh`).
+    public var homeName: PlaceComponents?
 
     public init() {}
+
+    /// `TravelAtlas.compute(facts:year:)` for every year with photos, from one pass over the
+    /// facts and the atlas of all years (`allYears`, `TravelAtlas.compute(facts:year: nil)`),
+    /// instead of a pass over all photos and the atlas of all years made again for each year.
+    /// Each year's photos are copied out one year at a time (a copy of all facts would be tens
+    /// of MB at 100,000 photos).
+    public static func yearAtlases(of facts: [AssetFacts], allYears: TravelAtlas, calendar: Calendar = .current) -> [Int: TravelAtlas] {
+        var positions: [Int: [Int]] = [:]
+        for (index, f) in facts.enumerated() {
+            guard let date = f.asset.creationDate else { continue }
+            positions[calendar.component(.year, from: date), default: []].append(index)
+        }
+        var atlases: [Int: TravelAtlas] = [:]
+        for (year, indices) in positions {
+            // In the order of the facts, as `compute(facts:year:)` filters them.
+            var atlas = TravelAtlas.compute(facts: indices.map { facts[$0] }, calendar: calendar)
+            atlas.year = year
+            atlas.newCountryCodes = atlas.countryCodes.filter { code in
+                allYears.firstVisits[code].map { calendar.component(.year, from: $0) == year } ?? false
+            }
+            atlases[year] = atlas
+        }
+        return atlases
+    }
+
+    /// The atlas of a year without photos: `TravelAtlas.compute(facts:year:)` finds nothing in it.
+    public static func emptyYearAtlas(_ year: Int) -> TravelAtlas {
+        var atlas = TravelAtlas()
+        atlas.year = year
+        return atlas
+    }
 
     /// Capture date of every photo, for time-ordered previews (the first one of an id).
     public static func creationDates(of facts: [AssetFacts]) -> [AssetID: Date] {
@@ -49,7 +93,7 @@ public struct DerivedLibrary: Sendable {
     }
 
     /// A pass over the whole library, for tests (`probe`: called as each starts and ends).
-    enum Piece: String, Sendable { case previewRanks, merges, status, firstDraw }
+    enum Piece: String, Sendable { case previewRanks, merges, status, firstDraw, factsByID, homeName }
     typealias Probe = @Sendable (Piece, _ ended: Bool) async -> Void
 }
 
@@ -63,8 +107,9 @@ extension AnalysisPipeline {
         try await derivedLibrary(snapshot: snapshot, settings: settings, managed: managed, scope: scope, ownAlbums: ownAlbums, probe: nil)
     }
 
+    /// `home`: the detected home, named from the photos around it (`DerivedLibrary.homeName`).
     nonisolated func derivedLibrary(snapshot: ProposalSnapshot?, settings: OrganizationSettings, managed: [ManagedAlbumState],
-                                    scope: OrganizationScope, ownAlbums: Set<CollectionID>,
+                                    scope: OrganizationScope, ownAlbums: Set<CollectionID>, home: GeoCoordinate? = nil,
                                     probe: DerivedLibrary.Probe?) async throws -> DerivedLibrary {
         let store = self.store
         // Each input once (`factsForOverview`), and everything read before any pass starts: once
@@ -86,8 +131,12 @@ extension AnalysisPipeline {
         }
         let ranks = Self.pass(.previewRanks, .userInitiated, probe) { PreviewRank.ranks(of: facts) }
         let firstDraw = Self.pass(.firstDraw, .userInitiated, probe) {
-            (DerivedLibrary.creationDates(of: facts), TravelAtlas.compute(facts: facts, year: nil), TravelAtlas.years(facts: facts))
+            let atlas = TravelAtlas.compute(facts: facts, year: nil)
+            return (DerivedLibrary.creationDates(of: facts), atlas, TravelAtlas.years(facts: facts),
+                    DerivedLibrary.yearAtlases(of: facts, allYears: atlas))
         }
+        let byID = Self.pass(.factsByID, .userInitiated, probe) { FactsByID(facts) }
+        let homeName = Self.pass(.homeName, .userInitiated, probe) { home.flatMap { HomeName.components(near: $0, facts: facts) } }
         let merges = Self.pass(.merges, .utility, probe) { AlbumOverlapAnalyzer().suggestions(in: inventory, excluding: ownAlbums) }
         var result = DerivedLibrary()
         result.facts = facts
@@ -95,7 +144,9 @@ extension AnalysisPipeline {
         result.removed = DerivedLibrary.removedFromProposals(stored)
         result.status = await status.value
         result.previewRanks = await ranks.value
-        (result.creationDates, result.atlas, result.atlasYears) = await firstDraw.value
+        (result.creationDates, result.atlas, result.atlasYears, result.yearAtlases) = await firstDraw.value
+        result.factsByID = await byID.value
+        result.homeName = await homeName.value
         result.merges = await merges.value
         return result
     }
@@ -111,5 +162,88 @@ extension AnalysisPipeline {
             await probe?(piece, true)
             return value
         }
+    }
+}
+
+/// Everything one `AppModel.refreshDerived` call shows, read and worked out off the main actor in
+/// one call (`AnalysisPipeline.derivedRefresh`), so the app assigns all of it together, and only
+/// when the call is still the newest (`LatestCall`). Reviews G4-03 and P4-10: the suggestions, the
+/// facts, the inventory, the history and the rest were assigned as each was read, and only the
+/// last assignment asked whether the call was the newest; two overlapping calls that ended in
+/// swapped order left an older call's facts next to the newer call's states.
+public struct DerivedRefresh: Sendable {
+    /// The suggestions with their matches (`refreshMatchesIfOutdated`).
+    public var snapshot: ProposalSnapshot?
+    /// Suggestions matched again under newer rules ("Neu geprüft").
+    public var rechecked = 0
+    public var recurringReport: RecurringPlaceReport?
+    public var detectedHome: DetectedHome?
+    /// The detected home with its name from the user's own photos (`HomeName.components`, a
+    /// pass over all photos): made here with the facts, not on the main thread when "Dein
+    /// Zuhause" or the settings draw (review P4-09).
+    public var detectedHomePlace: HomePlace?
+    public var homeNotice: HomeChangeNotice?
+    /// The newest plans the history shows (no undo plans), and whether there are more than `historyLimit`.
+    public var history: [ChangePlan] = []
+    public var historyHasMore = false
+    /// The plans taken back.
+    public var undone: Set<SortlyID> = []
+    /// Everything made from the whole library (`DerivedLibrary`).
+    public var library = DerivedLibrary()
+
+    public init() {}
+
+    /// What a call applies at once, whether or not it is still the newest when it ends: the
+    /// decisions opened again after a recheck (the store gives them out once) and the plans taken
+    /// back (settled with the free albums before the library is read, so a read that fails there
+    /// does not skip it).
+    public struct Once: Sendable {
+        public var reopened: @Sendable (Set<SortlyID>) async -> Void
+        public var undone: @Sendable (Set<SortlyID>) async -> Void
+
+        public init(reopened: @escaping @Sendable (Set<SortlyID>) async -> Void,
+                    undone: @escaping @Sendable (Set<SortlyID>) async -> Void) {
+            self.reopened = reopened
+            self.undone = undone
+        }
+
+        public static let nothing = Once(reopened: { _ in }, undone: { _ in })
+    }
+}
+
+extension AnalysisPipeline {
+    /// Everything the overview shows (`DerivedRefresh`), in the order `AppModel.refreshDerived`
+    /// read it: the matches first (results of an older matching version are matched again
+    /// once), then the small values, the plans, and everything made from the whole library.
+    /// `managed`: Albumist's own albums as the app knows them (after its album check); their ids
+    /// are left out of the albums that overlap (a country holds its trips on purpose).
+    public nonisolated func derivedRefresh(settings: OrganizationSettings, managed: [ManagedAlbumState], scope: OrganizationScope,
+                                           historyLimit: Int, once: DerivedRefresh.Once) async throws -> DerivedRefresh {
+        try await derivedRefresh(settings: settings, managed: managed, scope: scope, historyLimit: historyLimit, once: once, probe: nil)
+    }
+
+    nonisolated func derivedRefresh(settings: OrganizationSettings, managed: [ManagedAlbumState], scope: OrganizationScope,
+                                    historyLimit: Int, once: DerivedRefresh.Once,
+                                    probe: DerivedLibrary.Probe?) async throws -> DerivedRefresh {
+        let store = self.store
+        var result = DerivedRefresh()
+        let refresh = try await refreshMatchesIfOutdated()
+        await once.reopened(refresh.reopened)
+        result.snapshot = refresh.snapshot
+        result.rechecked = try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0
+        result.recurringReport = try await recurringPlaceReport()
+        result.detectedHome = try await detectedHome()
+        result.homeNotice = try await homeChangeNotice()
+        let plans = try await store.planHistory(limit: historyLimit + 1)
+        result.historyHasMore = plans.count > historyLimit
+        result.history = plans.prefix(historyLimit).filter { $0.reverts == nil }
+        result.undone = try await store.undoneTargets()
+        await once.undone(result.undone)
+        let home = result.detectedHome?.center
+        result.library = try await derivedLibrary(snapshot: refresh.snapshot, settings: settings, managed: managed, scope: scope,
+                                                  ownAlbums: Set(managed.map(\.albumID)), home: home, probe: probe)
+        let name = result.library.homeName
+        result.detectedHomePlace = home.map { HomePlace(center: $0, components: name) }
+        return result
     }
 }

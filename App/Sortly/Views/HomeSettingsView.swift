@@ -299,8 +299,12 @@ struct HomePlacePicker: View {
     @State private var query = ""
     /// The town picked as the current home, asking since when.
     /// The place picked as home and the proposed "Seit wann": worked out once when it is
-    /// picked (it goes over every photo), not on every redraw.
+    /// picked (it goes over every photo), not on every redraw, and off the main thread
+    /// (`AppModel.homeStayStart`, review P4-09).
     @State private var askingSince: SinceQuestion?
+    /// The place whose "Seit wann" is being worked out (a fraction of a second): a second tap
+    /// meanwhile does not ask twice.
+    @State private var proposing: String?
 
     struct SinceQuestion: Identifiable {
         var candidate: HomeCandidate
@@ -349,7 +353,7 @@ struct HomePlacePicker: View {
                 ForEach(candidates) { candidate in
                     Button {
                         if purpose == .current {
-                            askingSince = SinceQuestion(candidate: candidate, proposed: model.homeStayStart(candidate))
+                            askSince(candidate)
                         } else {
                             onPick(.place(candidate))
                             dismiss()
@@ -378,6 +382,17 @@ struct HomePlacePicker: View {
                 onPick(.home(question.candidate, since: since))
                 dismiss()
             }
+        }
+    }
+
+    /// "Seit wann wohnst du dort?" with the start of the latest stay there proposed.
+    private func askSince(_ candidate: HomeCandidate) {
+        guard proposing == nil else { return }
+        proposing = candidate.id
+        Task {
+            let proposed = await model.homeStayStart(candidate)
+            proposing = nil
+            askingSince = SinceQuestion(candidate: candidate, proposed: proposed)
         }
     }
 

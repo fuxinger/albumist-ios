@@ -491,7 +491,10 @@ private struct ExecutionHaptics: ViewModifier {
     }
 }
 
-/// Result of an executed plan: what happened, a way to see it in Photos, and undo.
+/// Result of an executed plan (design 7.1, N-07): what happened, counted as in its receipt and
+/// named by what the plan did (`ResultHeadline`): big "10 neue Alben", small "mit 342 Fotos",
+/// where the new albums are, a way to Photos, and "Rückgängig machen" with what it does. A
+/// removal says "1 Album entfernt", never "0 Fotos einsortiert" or where new albums are.
 struct ResultCard: View {
     @Environment(AppModel.self) private var model
     @Environment(Navigator.self) private var navigator: Navigator?
@@ -507,52 +510,45 @@ struct ResultCard: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        // What really happened (photos that were no longer there are not counted).
-        let summary = plan.appliedSummary
-        let failed = summary.failedSteps
-        let isUndo = plan.reverts != nil
+        // What really happened, counted as in the receipt ("Zahlen wie im Beleg"; photos that
+        // were no longer there are not counted), named by what the plan did.
+        let receipt = PlanReceipt(plan: plan, inventory: model.inventory)
+        let headline = ResultHeadline(receipt, kind: PlanReceipt.Kind(plan))
+        let failed = receipt.failedSteps
         Card {
             VStack(spacing: Theme.Spacing.s) {
-                Image(systemName: failed > 0 ? "exclamationmark.circle.fill" : isUndo ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill")
+                Image(systemName: failed > 0 ? "exclamationmark.circle.fill"
+                      : headline.kind == .undone ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill")
                     .font(.system(size: 56))
                     .foregroundStyle(failed == 0 ? Theme.accent : Theme.tint(for: .documents))
                     .symbolEffect(.bounce, value: appeared)
                     .accessibilityHidden(true)
-                Text(isUndo ? (failed == 0 ? "Rückgängig gemacht" : "Teilweise rückgängig gemacht") : (failed == 0 ? "Fertig" : "Teilweise fertig"))
-                    .font(.title2.weight(.bold))
-                    .accessibilityAddTraits(.isHeader)
-                Group {
-                    if isUndo {
-                        Text("Albumist hat seine Alben und Zuordnungen wieder entfernt. Deine Fotos sind unverändert.")
-                    } else {
-                        Text(Counted.resultLine(summary))
-                    }
-                }
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
+                ResultLead(headline: headline, partly: failed > 0)
                 if failed > 0 {
-                    Group {
-                        if isUndo {
-                            Text("\(failed) Schritte konnten nicht ausgeführt werden. Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist.")
-                        } else {
-                            Text("\(failed) Schritte konnten nicht ausgeführt werden. Die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
-                        }
-                    }
-                    .font(.footnote).foregroundStyle(.noteText)
-                    .multilineTextAlignment(.center)
+                    Text(ResultText.failed(failed, kind: headline.kind))
+                        .font(.footnote).foregroundStyle(.noteText)
+                        .multilineTextAlignment(.center)
                 }
-                if summary.unavailableAssets > 0 && !isUndo {
-                    Text("\(summary.unavailableAssets) \(summary.unavailableAssets.formatted()) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
+                if receipt.unavailablePhotos > 0 && headline.kind == .created {
+                    Text("\(receipt.unavailablePhotos) \(receipt.unavailablePhotos.formatted()) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
                         .font(.footnote).foregroundStyle(.noteText)
                         .multilineTextAlignment(.center)
                 }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.s)
+            // Where the new albums are, above the way to Photos (draft E3). Only after a run that
+            // made new albums: a removal or an undo has none (N-07).
+            if let way = ResultText.whereNewAlbums(headline, root: model.settings.rootFolderTitle) {
+                Text(way)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+            }
             if let photos = URL(string: "photos-redirect://") {
                 // iOS lets apps open Fotos, but not a particular album (first device test 15.11.:
                 // "Ich springe nicht zu meinen Alben"). So the button says what it does, and the
-                // way to the albums is written next to it.
+                // way to the albums is written above it.
                 // "photos-redirect://" is not documented by Apple (plugin review N8). Should iOS
                 // one day not open it, the button says so instead of staying silent.
                 Button("Fotos-App öffnen") {
@@ -565,19 +561,6 @@ struct ResultCard: View {
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                 }
-                if !isUndo {
-                    Group {
-                        let root = model.settings.rootFolderTitle.trimmingCharacters(in: .whitespaces)
-                        if root.isEmpty {
-                            Text("Deine neuen Alben findest du in Fotos unter Sammlungen › Alben.")
-                        } else {
-                            Text("Deine neuen Alben findest du in Fotos unter Sammlungen › Alben, im Ordner „\(root)“.")
-                        }
-                    }
-                    .font(.footnote).foregroundStyle(.noteText)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                }
             }
             // Pushed by value (`AppScreen`): the receipt may push "Fehlendes erneut versuchen".
             Button {
@@ -588,7 +571,8 @@ struct ResultCard: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .accessibilityIdentifier("result.receipt")
-            if !isUndo && !model.undonePlans.contains(plan.id) {
+            // A real button that says what it does (draft E3); an undo is not taken back itself.
+            if let note = headline.undoNote, !model.undonePlans.contains(plan.id) {
                 Button {
                     guard !askingUndo else { return }
                     askingUndo = true
@@ -600,11 +584,11 @@ struct ResultCard: View {
                         confirmUndo = true
                     }
                 } label: {
-                    Text("Rückgängig machen").checkingBeside(askingUndo)
+                    Label("Rückgängig machen", systemImage: "arrow.uturn.backward").checkingBeside(askingUndo)
                 }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(askingUndo)
-                Text("Auch später möglich unter Einstellungen › Verlauf und Rückgängig. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben.")
+                Text(ResultText.undoNote(note))
                     .font(.footnote).foregroundStyle(.noteText)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
@@ -627,7 +611,155 @@ struct ResultCard: View {
                 Task { await model.undo(plan) }
             }
         } message: {
-            DeleteQuestionNote.message(Text("Albumist entfernt die angelegten Alben und Zuordnungen wieder."), deletes: undoDeletes)
+            DeleteQuestionNote.message(Text(ResultText.undoQuestion(PlanReceipt.Kind(plan))), deletes: undoDeletes)
+        }
+    }
+}
+
+/// The big line of the result (design 7.1): the count in the wide figures with what it counts
+/// below it ("10" over "neue Alben"), read by VoiceOver as one heading ("10 neue Alben"), and
+/// the line below in the note grey ("mit 342 Fotos"; no arrow). Without a count the heading is
+/// a word as before ("Rückgängig gemacht", "Fertig"; the UI tests wait for it).
+private struct ResultLead: View {
+    let headline: ResultHeadline
+    /// Steps did not happen: "Teilweise fertig" above the count.
+    let partly: Bool
+    /// Big like the draft's number; a long count shrinks to fit instead of being cut.
+    @ScaledMetric(relativeTo: .largeTitle) private var numberSize: CGFloat = 60
+
+    var body: some View {
+        VStack(spacing: Theme.Spacing.xs) {
+            if let count = ResultText.count(headline.lead) {
+                if partly {
+                    Text("Teilweise fertig")
+                        .font(.headline)
+                }
+                VStack(spacing: 0) {
+                    Text(count, format: .number)
+                        .font(.system(size: numberSize, weight: .heavy).width(.expanded).monospacedDigit())
+                        .foregroundStyle(Theme.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.4)
+                    Text(ResultText.noun(headline.lead))
+                        .font(.title2.weight(.bold))
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+            } else {
+                Text(ResultText.heading(headline.lead, partly: partly))
+                    .font(.title2.weight(.bold))
+                    .accessibilityAddTraits(.isHeader)
+            }
+            if let detail = headline.detail {
+                Text(ResultText.detail(detail))
+                    .font(.body)
+                    .foregroundStyle(.noteText)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// The words of the result (`ResultHeadline`): what the count counts, the line below it, where
+/// new albums are, and what "Rückgängig machen" does. The counts are the receipt's.
+enum ResultText {
+    /// The big count; nil when the headline has none ("Rückgängig gemacht", "Fertig").
+    static func count(_ lead: ResultHeadline.Lead) -> Int? {
+        switch lead {
+        case .newAlbums(let count), .extendedAlbums(let count), .sortedPhotos(let count), .removedAlbums(let count),
+             .takenOutPhotos(let count):
+            count
+        case .undone, .plain:
+            nil
+        }
+    }
+
+    /// What the count counts, below the number (as the atlas's "1 Land", "2 Länder").
+    static func noun(_ lead: ResultHeadline.Lead) -> String {
+        switch lead {
+        case .newAlbums(let count): count == 1 ? String(localized: "neues Album") : String(localized: "neue Alben")
+        case .extendedAlbums(let count): count == 1 ? String(localized: "Album ergänzt") : String(localized: "Alben ergänzt")
+        case .sortedPhotos(let count): count == 1 ? String(localized: "Foto einsortiert") : String(localized: "Fotos einsortiert")
+        case .removedAlbums(let count): count == 1 ? String(localized: "Album entfernt") : String(localized: "Alben entfernt")
+        case .takenOutPhotos(let count):
+            count == 1 ? String(localized: "Foto herausgenommen") : String(localized: "Fotos herausgenommen")
+        case .undone, .plain: heading(lead, partly: false)
+        }
+    }
+
+    /// The heading of a result without a count.
+    static func heading(_ lead: ResultHeadline.Lead, partly: Bool) -> String {
+        if lead == .undone {
+            return partly ? String(localized: "Teilweise rückgängig gemacht") : String(localized: "Rückgängig gemacht")
+        }
+        return partly ? String(localized: "Teilweise fertig") : String(localized: "Fertig")
+    }
+
+    /// The line below the count.
+    static func detail(_ detail: ResultHeadline.Detail) -> String {
+        switch detail {
+        case .withPhotos(let count):
+            String(localized: "mit \(count) \(count.formatted()) Fotos")
+        case .extendedAndSorted(let albums, let photos):
+            Counted.join([String(localized: "\(albums) Alben ergänzt"),
+                          String(localized: "\(photos) \(photos.formatted()) Fotos einsortiert")])
+        case .photosStay:
+            String(localized: "Die Fotos bleiben in deiner Mediathek.")
+        case .undoRemoved:
+            String(localized: "Albumist hat seine Alben und Zuordnungen wieder entfernt. Deine Fotos sind unverändert.")
+        case .undoRestored:
+            String(localized: "Was Albumist entfernt hatte, ist wieder da. Deine Fotos sind unverändert.")
+        }
+    }
+
+    /// Where the new albums are (draft E3: "Du findest sie in Fotos unter Sammlungen ›
+    /// Alben."), in Albumist's folder when it has one. Nil unless the run made new albums.
+    static func whereNewAlbums(_ headline: ResultHeadline, root: String) -> String? {
+        guard headline.showsWhereNewAlbumsAre, case .newAlbums(let count) = headline.lead else { return nil }
+        let folder = root.trimmingCharacters(in: .whitespaces)
+        switch (count == 1, folder.isEmpty) {
+        case (true, true): return String(localized: "Du findest es in Fotos unter Sammlungen › Alben.")
+        case (true, false): return String(localized: "Du findest es in Fotos unter Sammlungen › Alben, im Ordner „\(folder)“.")
+        case (false, true): return String(localized: "Du findest sie in Fotos unter Sammlungen › Alben.")
+        case (false, false): return String(localized: "Du findest sie in Fotos unter Sammlungen › Alben, im Ordner „\(folder)“.")
+        }
+    }
+
+    /// What "Rückgängig machen" on the result does, below the button (draft E3).
+    static func undoNote(_ note: ResultHeadline.UndoNote) -> String {
+        switch note {
+        case .removesNewAlbums(let count):
+            String(localized: "Entfernt die \(count) neuen Alben. Deine Fotos bleiben.")
+        case .takesOutAddedPhotos(let albums):
+            String(localized: "Nimmt die hinzugefügten Fotos wieder aus deinen \(albums) Alben. Deine Fotos bleiben.")
+        case .removesNewAlbumsAndAddedPhotos:
+            String(localized: "Entfernt die neuen Alben und nimmt die hinzugefügten Fotos wieder aus deinen Alben. Deine Fotos bleiben.")
+        case .bringsBackAlbums(let count):
+            String(localized: "Legt die \(count) Alben mit denselben Fotos wieder an.")
+        case .putsBackPhotos:
+            String(localized: "Legt die herausgenommenen Fotos wieder zurück.")
+        case .general:
+            String(localized: "Entfernt nur die neuen Alben und Zuordnungen dieser Änderungen. Deine Fotos bleiben.")
+        }
+    }
+
+    /// The question before the undo; `DeleteQuestionNote` adds that the photos stay, or that iOS asks.
+    static func undoQuestion(_ kind: PlanReceipt.Kind) -> String {
+        kind == .removed ? String(localized: "Albumist bringt zurück, was es entfernt hat.")
+            : String(localized: "Albumist entfernt die angelegten Alben und Zuordnungen wieder.")
+    }
+
+    /// Steps that did not happen, with what that means for the kind of plan.
+    static func failed(_ count: Int, kind: PlanReceipt.Kind) -> String {
+        switch kind {
+        case .created:
+            String(localized: "\(count) Schritte konnten nicht ausgeführt werden. Die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
+        case .removed:
+            String(localized: "\(count) Schritte konnten nicht ausgeführt werden.")
+        case .undone:
+            String(localized: "\(count) Schritte konnten nicht ausgeführt werden. Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist.")
         }
     }
 }

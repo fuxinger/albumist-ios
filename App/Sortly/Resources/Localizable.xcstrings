@@ -81,6 +81,46 @@
         }
       }
     },
+    "%lld Alben ergänzt" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Album ergänzt"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Alben ergänzt"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld album extended"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld albums extended"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld Alben mit vielen gleichen Fotos · %lld %@ Fotos insgesamt" : {
       "localizations" : {
         "de" : {
@@ -1031,6 +1071,56 @@
         }
       }
     },
+    "Alben entfernt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albums removed"
+          }
+        }
+      }
+    },
+    "Alben ergänzt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albums extended"
+          }
+        }
+      }
+    },
+    "Album entfernt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Album removed"
+          }
+        }
+      }
+    },
+    "Album ergänzt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Album extended"
+          }
+        }
+      }
+    },
+    "Albumist bringt zurück, was es entfernt hat." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist brings back what it removed."
+          }
+        }
+      }
+    },
     "Dafür braucht Albumist Zugriff auf alle Fotos. Gerade sind nur ausgewählte Fotos freigegeben, und Albumist sieht nicht, was sonst in deinen Alben liegt. Ändern kannst du das unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff." : {
       "localizations" : {
         "en" : {
@@ -1101,6 +1191,56 @@
         }
       }
     },
+    "Die Fotos bleiben in deiner Mediathek." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The photos stay in your library."
+          }
+        }
+      }
+    },
+    "Du findest es in Fotos unter Sammlungen › Alben, im Ordner „%@“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You’ll find it in Photos under Collections › Albums, in the folder “%@”."
+          }
+        }
+      }
+    },
+    "Du findest es in Fotos unter Sammlungen › Alben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You’ll find it in Photos under Collections › Albums."
+          }
+        }
+      }
+    },
+    "Du findest sie in Fotos unter Sammlungen › Alben, im Ordner „%@“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You’ll find them in Photos under Collections › Albums, in the folder “%@”."
+          }
+        }
+      }
+    },
+    "Du findest sie in Fotos unter Sammlungen › Alben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You’ll find them in Photos under Collections › Albums."
+          }
+        }
+      }
+    },
     "Ein früheres Anlegen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach kannst du dieses Album anlegen." : {
       "localizations" : {
         "en" : {
@@ -1117,6 +1257,246 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Undoing earlier changes was interrupted. Decide on the Suggestions page how to go on; then you can create this album."
+          }
+        }
+      }
+    },
+    "Entfernt die %lld neuen Alben. Deine Fotos bleiben." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Entfernt das neue Album. Deine Fotos bleiben."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Entfernt die %lld neuen Alben. Deine Fotos bleiben."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Removes the new album. Your photos stay."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Removes the %lld new albums. Your photos stay."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Entfernt die neuen Alben und nimmt die hinzugefügten Fotos wieder aus deinen Alben. Deine Fotos bleiben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removes the new albums and takes the added photos out of your albums again. Your photos stay."
+          }
+        }
+      }
+    },
+    "Foto einsortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photo sorted"
+          }
+        }
+      }
+    },
+    "Foto herausgenommen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photo taken out"
+          }
+        }
+      }
+    },
+    "Legt die %lld Alben mit denselben Fotos wieder an." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Legt das Album mit denselben Fotos wieder an."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Legt die %lld Alben mit denselben Fotos wieder an."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Creates the album again with the same photos."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Creates the %lld albums again with the same photos."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Legt die herausgenommenen Fotos wieder zurück." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Puts the photos back into the album."
+          }
+        }
+      }
+    },
+    "mit %lld %@ Fotos" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "mit %2$@ Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "mit %2$@ Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "with %2$@ photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "with %2$@ photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "neue Alben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New albums"
+          }
+        }
+      }
+    },
+    "neues Album" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New album"
+          }
+        }
+      }
+    },
+    "Nimmt die hinzugefügten Fotos wieder aus deinen %lld Alben. Deine Fotos bleiben." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Nimmt die hinzugefügten Fotos wieder aus deinem Album. Deine Fotos bleiben."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Nimmt die hinzugefügten Fotos wieder aus deinen %lld Alben. Deine Fotos bleiben."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Takes the added photos out of your album again. Your photos stay."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Takes the added photos out of your %lld albums again. Your photos stay."
+                }
+              }
+            }
           }
         }
       }
@@ -4727,6 +5107,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suggestions rechecked"
+          }
+        }
+      }
+    },
+    "Was Albumist entfernt hatte, ist wieder da. Deine Fotos sind unverändert." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What Albumist had removed is back. Your photos are unchanged."
           }
         }
       }
@@ -8631,26 +9021,6 @@
         }
       }
     },
-    "Deine neuen Alben findest du in Fotos unter Sammlungen › Alben." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your new albums are in Photos under Collections › Albums."
-          }
-        }
-      }
-    },
-    "Deine neuen Alben findest du in Fotos unter Sammlungen › Alben, im Ordner „%@“." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your new albums are in Photos under Collections › Albums, in the folder “%@”."
-          }
-        }
-      }
-    },
     "Albumist arbeitet mit" : {
       "localizations" : {
         "en" : {
@@ -11357,16 +11727,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No Folder"
-          }
-        }
-      }
-    },
-    "Auch später möglich unter Einstellungen › Verlauf und Rückgängig. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Also possible later in Settings › History and Undo. Undo only removes the new albums and assignments; your photos stay."
           }
         }
       }

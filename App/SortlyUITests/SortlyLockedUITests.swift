@@ -88,14 +88,6 @@ final class SortlyLockedUITests: XCTestCase {
             || app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "startPage.all.")).firstMatch.exists
     }
 
-    /// The start page with nothing running (its line about the analysis, no "Pause").
-    @discardableResult
-    private func waitForIdleStartPage(_ step: String) -> Bool {
-        let idle = UITestWait.holds(timeout: 120) { UITestScreens.Analysis.isIdle(app) }
-        print(idle ? "UI_STEP_OK \(step)" : "UI_STEP_MISSING \(step)")
-        return idle
-    }
-
     /// Starts the locked app with `free` free albums left.
     private func launchLocked(freeAlbumsLeft free: Int) {
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked",
@@ -157,6 +149,14 @@ final class SortlyLockedUITests: XCTestCase {
     private func relaunch() {
         UITestAppEnd.launch(app)  // ends it first
         waitForIdleStartPage("locked start page after relaunch")
+    }
+
+    /// The start page with nothing running (its line about the analysis, no "Pause").
+    @discardableResult
+    private func waitForIdleStartPage(_ step: String) -> Bool {
+        let idle = UITestWait.holds(timeout: 120) { UITestScreens.Analysis.isIdle(app) }
+        print(idle ? "UI_STEP_OK \(step)" : "UI_STEP_MISSING \(step)")
+        return idle
     }
 
     /// The number of a row made of a title and a number, maybe with a word after it: the plan's

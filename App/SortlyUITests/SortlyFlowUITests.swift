@@ -2000,7 +2000,7 @@ final class SortlyFlowUITests: XCTestCase {
         // The kept plan is the newest history row (in the tab "Alben" since 5C); its receipt
         // says what is missing.
         guard tap(tabButton("Alben"), "albums tab after keep"),
-              UITestScreens.Albums.openHistory(app, "history after keep", timeout: 10) else { return }
+              UITestScreens.Albums.openHistory(app, "history after keep", timeout: 5) else { return }
         let row = app.buttons["history.row"].firstMatch
         // The history with its newest row free to tap (not asserted: the tap is).
         _ = UITestWait.holds(timeout: 10) { row.exists && row.isHittable }
@@ -2190,7 +2190,7 @@ final class SortlyFlowUITests: XCTestCase {
         // behind "Alle N" of their row on the start page; with one, its card stands there.
         let all = app.buttons["startPage.all.frequentPlaces"]
         let alone = UITestScreens.Cards.cards(app).containing(NSPredicate(format: "label CONTAINS %@", "Häufiger Ort")).firstMatch
-        _ = UITestWait.holds(timeout: 30) { all.exists || alone.exists || analysisIdle }
+        _ = UITestWait.holds(timeout: 10) { all.exists || alone.exists || analysisIdle }
         var swipes = 0
         while !all.exists && !alone.exists && swipes < 8 {
             app.swipeUp()

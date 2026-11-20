@@ -27,6 +27,12 @@ public enum AirborneFilter {
     /// "schneller als ein Flugzeug am Boden"): high-speed trains run at up to 350 km/h in
     /// service, planes cruise at 800 to 900 km/h over the ground. 400 km/h, in metres per second.
     public static let maximumGroundSpeed = 400.0 / 3.6
+    /// Faster than this from one photo to the next is no travel at all, not even by plane: the
+    /// fastest airliner ground speeds with a strong jet stream reach about 1,300 km/h. Such a
+    /// "leg" joins the photos of two people in one library (an iCloud Shared Library, Munich
+    /// and Rome in the same minutes) or a wrong location, and is no evidence of a flight; a
+    /// trip's route does not zig-zag along it either. 1,500 km/h, in metres per second.
+    public static let maximumFlightSpeed = 1_500.0 / 3.6
     /// Shorter legs say nothing about speed: the GPS fixes of photos seconds apart jitter by some
     /// hundred metres, which looks like any speed. A neighbour is the nearest photo at least
     /// this far away (a burst of window photos seconds apart reaches past its own burst).

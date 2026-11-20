@@ -1041,6 +1041,86 @@
         }
       }
     },
+    "Das Album konnte nicht angelegt werden. Versuch es gleich noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The album could not be created. Please try again in a moment."
+          }
+        }
+      }
+    },
+    "Deine %lld kostenlosen Alben sind angelegt. Mit einem einmaligen Kauf legst du unbegrenzt Alben an, ohne Abo." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Dein kostenloses Album ist angelegt. Mit einem einmaligen Kauf legst du unbegrenzt Alben an, ohne Abo."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Deine %lld kostenlosen Alben sind angelegt. Mit einem einmaligen Kauf legst du unbegrenzt Alben an, ohne Abo."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "You’ve created your free album. A one-time purchase lets you create unlimited albums, no subscription."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "You’ve created your %lld free albums. A one-time purchase lets you create unlimited albums, no subscription."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Der Vorschlag bleibt offen und läuft dir nicht weg." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The suggestion stays open and won’t go anywhere."
+          }
+        }
+      }
+    },
+    "Ein früheres Anlegen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach kannst du dieses Album anlegen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating albums was interrupted earlier. Decide on the Suggestions page how to go on; then you can create this album."
+          }
+        }
+      }
+    },
+    "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach kannst du dieses Album anlegen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undoing earlier changes was interrupted. Decide on the Suggestions page how to go on; then you can create this album."
+          }
+        }
+      }
+    },
     "Umstrittenes Gebiet: Zu welchem Land es gehört, ist nicht sicher. Albumist ordnet „%@“ darum keinem Land zu." : {
       "localizations" : {
         "en" : {
@@ -5101,6 +5181,16 @@
         }
       }
     },
+    "„%@“ angelegt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” created"
+          }
+        }
+      }
+    },
     "„%@“ ist eine größere Sammlung über %lld Ereignisse und wird nicht als Reisealbum verwendet." : {
       "localizations" : {
         "en" : {
@@ -5137,6 +5227,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stop offering “%@”"
+          }
+        }
+      }
+    },
+    "„%@“ rückgängig gemacht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” undone"
           }
         }
       }

@@ -48,15 +48,18 @@ public struct DerivedLibrary: Sendable {
     /// Each year's photos are copied out one year at a time (a copy of all facts would be tens
     /// of MB at 100,000 photos). A year without photos has the empty atlas of that year
     /// (`emptyYearAtlas`). Made when the atlas's year picker first asks (`AppModel.travelAtlas(year:)`),
-    /// off the main thread, never at a refresh.
-    public static func yearAtlases(of facts: [AssetFacts], allYears: TravelAtlas, calendar: Calendar = .current) -> [Int: TravelAtlas] {
+    /// off the main thread, never at a refresh. `nil` once its task is cancelled (new facts,
+    /// delta review N3): it stops early, and a cut-off result is never handed out.
+    public static func yearAtlases(of facts: [AssetFacts], allYears: TravelAtlas, calendar: Calendar = .current) -> [Int: TravelAtlas]? {
         var positions: [Int: [Int]] = [:]
         for (index, f) in facts.enumerated() {
+            if index & 4095 == 0, Task.isCancelled { return nil }
             guard let date = f.asset.creationDate else { continue }
             positions[calendar.component(.year, from: date), default: []].append(index)
         }
         var atlases: [Int: TravelAtlas] = [:]
         for (year, indices) in positions {
+            if Task.isCancelled { return nil }
             // In the order of the facts, as `compute(facts:year:)` filters them.
             var atlas = TravelAtlas.compute(facts: indices.map { facts[$0] }, calendar: calendar)
             atlas.year = year
@@ -83,9 +86,11 @@ public struct DerivedLibrary: Sendable {
     /// The detected home at `center` with its name from the user's photos around it (town, or
     /// offline the region; `HomeName.components`, a pass over all photos). Made when "Dein
     /// Zuhause" or the settings first ask (`AppModel.detectedHomePlace`), off the main thread,
-    /// never at a refresh.
-    public static func namedHome(at center: GeoCoordinate, facts: [AssetFacts]) -> HomePlace {
-        HomePlace(center: center, components: HomeName.components(near: center, facts: facts))
+    /// never at a refresh. `nil` once its task is cancelled (new facts, delta review N3): it
+    /// stops early, and a home without the name it would have had is never handed out.
+    public static func namedHome(at center: GeoCoordinate, facts: [AssetFacts]) -> HomePlace? {
+        let components = HomeName.components(near: center, facts: facts, stoppingWhen: { Task.isCancelled })
+        return Task.isCancelled ? nil : HomePlace(center: center, components: components)
     }
 
     /// The same facts, not only equal ones: the same storage (one O(1) look, cheap enough for the

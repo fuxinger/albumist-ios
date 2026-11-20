@@ -286,6 +286,29 @@ struct DerivedRefreshTests {
         #expect(DerivedLibrary.sameFacts(changed.library.factsByID.facts, changed.library.facts))
     }
 
+    /// Delta review, N3: new facts cancel what is being made for the old ones; the making then
+    /// stops and gives nothing (`nil`), so a cut-off result is never taken for a whole one.
+    @Test func whatIsMadeOnDemandGivesNothingOnceCancelled() async throws {
+        let library = try await analysed()
+        let refreshed = try await library.launch().derivedRefresh(settings: library.settings, managed: [], scope: .all, historyLimit: 50,
+                                                                  once: .nothing)
+        let facts = refreshed.library.facts, allYears = refreshed.library.atlas
+        let center = try #require(refreshed.detectedHome?.center)
+        let started = Mutex(false)
+        let making = Task.detached { () -> ([Int: TravelAtlas]?, HomePlace?) in
+            started.withLock { $0 = true }
+            while !Task.isCancelled { await Task.yield() }
+            let atlases: [Int: TravelAtlas]? = DerivedLibrary.yearAtlases(of: facts, allYears: allYears)
+            let home: HomePlace? = DerivedLibrary.namedHome(at: center, facts: facts)
+            return (atlases, home)
+        }
+        while !started.withLock({ $0 }) { await Task.yield() }
+        making.cancel()
+        let (atlases, home) = await making.value
+        #expect(atlases == nil, "a cancelled atlas of each year is handed out: \(atlases?.count ?? 0) years")
+        #expect(home == nil, "a cancelled name of the home is handed out")
+    }
+
     /// ...and what the screens get when they ask (`AppModel.travelAtlas(year:)` and
     /// `AppModel.detectedHomePlace`), made from what the refresh handed over (its facts, its atlas
     /// of all years, its detected home): each year's atlas as `TravelAtlas.compute(facts:year:)`
@@ -296,7 +319,7 @@ struct DerivedRefreshTests {
                                                                   once: .nothing)
         let facts = refreshed.library.facts
         #expect(facts == (try await library.launch().currentFacts()))
-        let atlases = DerivedLibrary.yearAtlases(of: facts, allYears: refreshed.library.atlas)
+        let atlases = try #require(DerivedLibrary.yearAtlases(of: facts, allYears: refreshed.library.atlas))
         let years = Set(facts.compactMap { f in f.asset.creationDate.map { Calendar.current.component(.year, from: $0) } })
         #expect(years.count >= 2)
         #expect(Set(atlases.keys) == years)
@@ -306,7 +329,7 @@ struct DerivedRefreshTests {
         #expect(atlases.values.contains { $0.newCountryCodes.contains("IT") })
         #expect(DerivedLibrary.emptyYearAtlas(1999) == TravelAtlas.compute(facts: facts, year: 1999))
         let home = try #require(refreshed.detectedHome, "the library has no detected home")
-        let named = DerivedLibrary.namedHome(at: home.center, facts: facts)
+        let named = try #require(DerivedLibrary.namedHome(at: home.center, facts: facts))
         #expect(named == HomePlace(center: home.center, components: HomeName.components(near: home.center, facts: facts)))
         #expect(named.components?.locality != nil, "the detected home has no town: \(String(describing: named.components))")
     }
@@ -394,6 +417,22 @@ struct DerivedRefreshAppTests {
                 }
             }
         }
+    }
+
+    /// Delta review, N3: new facts cancel the making of the atlas of each year and of the home's
+    /// name (the work stops, `whatIsMadeOnDemandGivesNothingOnceCancelled`), and a cancelled or
+    /// cut-off result is never stored.
+    @Test(arguments: Self.onDemand.dropFirst())
+    func newFactsCancelWhatIsMadeForTheOldOnes(_ item: OnDemand) throws {
+        let model = try AppSource.read("App/Sortly/Model/AppModel.swift")
+        let factsLine = try #require(AppSource.code(model).components(separatedBy: "\n").first { $0.contains("var facts: [AssetFacts] = []") })
+        #expect(factsLine.contains("\(item.task)?.cancel(); \(item.task) = nil"), "new facts leave \(item.task) running")
+        let make = AppSource.code(AppSource.body(of: item.make, in: model) ?? "")
+        let forwards = make.contains("withTaskCancellationHandler") && make.contains(".cancel() }")
+        #expect(forwards, "\(item.make)…) does not stop its detached work when it is cancelled")
+        let guarded = make.range(of: "guard let [a-z]+, !Task.isCancelled, let self, version == self.factsVersion else \\{ return \\}",
+                                 options: .regularExpression) != nil
+        #expect(guarded, "\(item.make)…) can store a cancelled or cut-off result")
     }
 
     /// Each is made only when its screen asks, off the main thread, once for each value of the

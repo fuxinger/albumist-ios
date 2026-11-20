@@ -267,7 +267,7 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = nil; atlasYearsCache = nil; yearAtlasesCache = nil; yearAtlasesTask = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; homeCandidatesTask = nil; factsVersion &+= 1; detectedHomePlaceCache = nil; detectedHomeNameTask = nil; resetSearchIndex() } }
+    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = nil; atlasYearsCache = nil; yearAtlasesCache = nil; yearAtlasesTask?.cancel(); yearAtlasesTask = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; homeCandidatesTask = nil; factsVersion &+= 1; detectedHomePlaceCache = nil; detectedHomeNameTask?.cancel(); detectedHomeNameTask = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { libraryInputsChanged() } }
     /// The photos the user ignored, and the state of each once it is no longer ignored, from
     /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
@@ -343,15 +343,17 @@ final class AppModel {
 
     /// Starts making the atlas of each year for the facts as they are, unless that is under way
     /// (`makeHomeCandidates`): observed `yearAtlasesCache` draws the atlas again when they are
-    /// there; facts that change meanwhile drop the result (`factsVersion`).
+    /// there; facts that change meanwhile cancel the making (it stops early and gives nothing,
+    /// delta review N3) and drop any result (`factsVersion`).
     private func makeYearAtlases() {
         guard yearAtlasesTask == nil else { return }
         let facts = facts, version = factsVersion, allYears = atlasCache
         yearAtlasesTask = Task { [weak self] in
-            let made = await Task.detached(priority: .userInitiated) {
+            let making = Task.detached(priority: .userInitiated) {
                 DerivedLibrary.yearAtlases(of: facts, allYears: allYears ?? TravelAtlas.compute(facts: facts, year: nil))
-            }.value
-            guard let self, version == self.factsVersion else { return }
+            }
+            let made = await withTaskCancellationHandler { await making.value } onCancel: { making.cancel() }
+            guard let made, !Task.isCancelled, let self, version == self.factsVersion else { return }
             self.yearAtlasesTask = nil
             self.yearAtlasesCache = made
         }
@@ -2469,14 +2471,15 @@ final class AppModel {
 
     /// Starts naming the detected home for the facts as they are, unless that is under way
     /// (`makeHomeCandidates`): observed `detectedHomePlaceCache` draws the screen again when it is
-    /// named; facts that change meanwhile (and with them the detected home) drop the result
-    /// (`factsVersion`).
+    /// named; facts that change meanwhile (and with them the detected home) cancel the naming
+    /// (it stops early and gives nothing, delta review N3) and drop any result (`factsVersion`).
     private func nameDetectedHome() {
         guard detectedHomeNameTask == nil, let center = detectedHome?.center else { return }
         let facts = facts, version = factsVersion
         detectedHomeNameTask = Task { [weak self] in
-            let named = await Task.detached(priority: .userInitiated) { DerivedLibrary.namedHome(at: center, facts: facts) }.value
-            guard let self, version == self.factsVersion else { return }
+            let naming = Task.detached(priority: .userInitiated) { DerivedLibrary.namedHome(at: center, facts: facts) }
+            let named = await withTaskCancellationHandler { await naming.value } onCancel: { naming.cancel() }
+            guard let named, !Task.isCancelled, let self, version == self.factsVersion else { return }
             self.detectedHomeNameTask = nil
             self.detectedHomePlaceCache = named
         }

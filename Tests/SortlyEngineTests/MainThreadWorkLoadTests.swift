@@ -128,7 +128,7 @@ extension LoadTests {
         // The name of the detected home (`AppModel.detectedHomePlace`, when "Dein Zuhause" or the
         // settings ask: `DerivedLibrary.namedHome`).
         let (nameTook, name) = MainThreadWork.fastest { DerivedLibrary.namedHome(at: munich, facts: facts) }
-        #expect(name.components?.locality == "München")
+        #expect(name?.components?.locality == "München")
         note("DerivedLibrary.namedHome", nameTook)
         // The facts by id (`DerivedLibrary.factsByID`); before: a dictionary of all facts.
         let (dictionaryTook, dictionary) = MainThreadWork.fastest { Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
@@ -147,9 +147,9 @@ extension LoadTests {
         let year = try #require(TravelAtlas.years(facts: facts).first)
         let (oneYearTook, oneYear) = MainThreadWork.fastest { TravelAtlas.compute(facts: facts, year: year) }
         let (yearsTook, atlases) = MainThreadWork.fastest { DerivedLibrary.yearAtlases(of: facts, allYears: allYears) }
-        #expect(atlases[year] == oneYear)
-        #expect(atlases.count >= 10)
-        note("DerivedLibrary.yearAtlases (\(atlases.count) years)", yearsTook, before: oneYearTook)
+        #expect(atlases?[year] == oneYear)
+        #expect((atlases?.count ?? 0) >= 10)
+        note("DerivedLibrary.yearAtlases (\(atlases?.count ?? 0) years)", yearsTook, before: oneYearTook)
         // The facts read compared with those on screen, at every refresh with as many photos
         // (`derivedLibrary(shown:)`, off the main thread; delta review, N2). Another copy: two
         // arrays of the same storage are equal at once.
@@ -168,8 +168,8 @@ extension LoadTests {
         let passes: [(String, @Sendable () -> Int)] = [
             ("HomeCandidates.make", { HomeCandidates.make(facts: facts).count }),
             ("FactsByID", { FactsByID(facts).count }),
-            ("DerivedLibrary.yearAtlases", { DerivedLibrary.yearAtlases(of: facts, allYears: allYears).count }),
-            ("DerivedLibrary.namedHome", { DerivedLibrary.namedHome(at: munich, facts: facts).components == nil ? 0 : 1 }),
+            ("DerivedLibrary.yearAtlases", { DerivedLibrary.yearAtlases(of: facts, allYears: allYears)?.count ?? 0 }),
+            ("DerivedLibrary.namedHome", { DerivedLibrary.namedHome(at: munich, facts: facts)?.components == nil ? 0 : 1 }),
             ("LibraryStatus.searchStatuses", { LibraryStatus.searchStatuses(facts: facts, states: states, resolver: resolver, scope: .all).count }),
             ("HomeCandidates.stayStart", { HomeCandidates.stayStart(near: munich, assets: facts.lazy.map { $0.asset }) == nil ? 0 : 1 }),
         ]

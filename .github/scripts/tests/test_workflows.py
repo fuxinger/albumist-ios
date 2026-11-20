@@ -501,6 +501,15 @@ class CompileFirstTests(unittest.TestCase):
             self.assertIn(setting, runs["Build UI tests"])
         # A failed build is red: no "|| true" after the build, and it is no machinery step.
         self.assertIn("exit 1", first)
+        self.assertIn("tail -30 ../build-log.txt", first)
+        # Second review of ci/tempo (S3): only the app build's failure stops the core tests and
+        # the app tests, a failed "Build UI tests" does not.
+        rules = {name: rule for name, rule, _ in steps}
+        for name in ("Core tests (macOS)", "Fresh simulator (erased and booted)", "Build and test app"):
+            with self.subTest(step=name):
+                self.assertIn("!cancelled()", rules[name])
+                self.assertIn("steps.appbuild.outcome == 'success'", rules[name])
+        self.assertIn("id: appbuild", ci)
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "earlier_attempts", os.path.join(ROOT, ".github", "scripts", "earlier_attempts.py"))

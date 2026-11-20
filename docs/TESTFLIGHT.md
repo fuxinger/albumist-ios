@@ -434,8 +434,9 @@ Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-
    test08 und test11 bilden die Gruppe `device-flows`, bis zu fünf Gruppen zugleich. Gemessen
    vorher (Pull Requests seit 18.11., Schnellmodus, Job-Median): übrige Abläufe 55,8, Gerätezustände
    43,3 Minuten. Erwartet: längste Gruppe rund 43 statt 56 Minuten (schlechtester Fall rund 50
-   statt 65). TestFlight (drei zugleich, voller Modus): unverändert rund 70 Minuten für die
-   Gruppen.
+   statt 65). TestFlight (drei zugleich, voller Modus, Barrierefreiheit als vierte gestartet):
+   rund 70–76 Minuten für die Gruppen, vorher rund 68–74 (sechs Jobs auf drei Macs gehen nicht
+   unter etwa 70); mit dem vollen Lauf vor dem Merge laufen dort meist keine Gruppen mehr.
 2. Im TestFlight-Lauf die UI-Tests schon nach den Linux-Teilen von CI starten statt nach dem
    iOS-Job (rund 16 Minuten früher). Kostet Mac-Minuten, wenn der iOS-Job dann rot wird, und
    weicht von „erst schnell, dann teuer“ ab.
@@ -459,7 +460,7 @@ Auf dem Zweig umgesetzt (kein Schritt fällt weg, kein Tor wird weicher, kein Te
 | UI-Gruppen, längste Gruppe | 56 / 65 | rund 43 / 50 |
 | Push bis UI-Urteil | 73 / 131 | rund 60 / 105 |
 | Rot, das für diese App und diesen Testcode schon feststand | 69 Minuten (8b71209) | rund 1 Minute (Job „UI known red“) |
-| TestFlight, großes Tor | 129 (ohne Konkurrenz) / 156 | gleich (Gruppenphase rund 70 wie bisher) |
+| TestFlight, großes Tor, Gruppen laufen dort | 129 (ohne Konkurrenz) / 156 | etwa gleich (Gruppenphase rund 70–76 statt 68–74) |
 | TestFlight, kleines Tor | 89 | gleich |
 
 Geänderte Regeln: „höchstens fünf Macs je Push“ (16.11.) wird „fünf laufen, die sechste wartet

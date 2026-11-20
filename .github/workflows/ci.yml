@@ -168,6 +168,9 @@ jobs:
         # PHPersistentChangeFetchResult.enumerateChanges: CI red after 27.1 min). The simulator
         # is not booted yet (nothing competes with the build, see "Pick simulator"). "Build and
         # test app" below builds again with the same settings and finds nothing to compile.
+        # Only this build's failure stops the core tests and the app tests below (a failed
+        # "Build UI tests" does not: those steps ask for this one's outcome).
+        id: appbuild
         if: steps.sim.outputs.udid != ''
         run: |
           cd App
@@ -177,7 +180,7 @@ jobs:
             -destination "id=${{ steps.sim.outputs.udid }}" \
             COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1 \
-            || { grep -E "error:" -A3 ../build-log.txt | grep -v "/SourcePackages/" | head -80; exit 1; }
+            || { grep -E "error:" -A3 ../build-log.txt | grep -v "/SourcePackages/" | head -80; echo "--- last 30 lines of the build log"; tail -30 ../build-log.txt; exit 1; }
           tail -2 ../build-log.txt
       - name: Build UI tests
         # The UI tests run in their own workflow (ui.yml); building them here finds a compile
@@ -198,10 +201,14 @@ jobs:
             -destination "id=${{ steps.sim.outputs.udid }}" \
             COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO > ../build-ui-log.txt 2>&1 \
-            || { grep -E "error:" -A3 ../build-ui-log.txt | grep -v "/SourcePackages/" | head -80; exit 1; }
+            || { grep -E "error:" -A3 ../build-ui-log.txt | grep -v "/SourcePackages/" | head -80; echo "--- last 30 lines of the build log"; tail -30 ../build-ui-log.txt; exit 1; }
           grep -E "warning: .*SortlyUITests" ../build-ui-log.txt | head -40 || true
           tail -2 ../build-ui-log.txt
       - name: Core tests (macOS)
+        # Also after a failed "Build UI tests" (its error is in the log above; the app's own
+        # tests still say what they find). Not after a failed app build or an earlier step.
+        id: core
+        if: ${{ !cancelled() && (steps.appbuild.outcome == 'success' || (success() && steps.sim.outputs.udid == '')) }}
         run: |
           set -o pipefail
           mkdir -p build
@@ -233,7 +240,8 @@ jobs:
         # empty product response" (44390350152, network up: empty list, no error), or it failed
         # with URLError -1009 (44383157858). The test session now comes before the test process's
         # first StoreKit call (PurchaseStoreKitTests, StoreKitEnvironment).
-        if: steps.sim.outputs.udid != ''
+        id: fresh
+        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' && steps.core.outcome == 'success' }}
         timeout-minutes: 20
         run: |
           UDID="${{ steps.sim.outputs.udid }}"
@@ -253,7 +261,7 @@ jobs:
             > storekit-live.log 2>&1 &
           echo "simulator $UDID erased and booted; StoreKit log recorded live (pid $!)"
       - name: Build and test app
-        if: steps.sim.outputs.udid != ''
+        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' && steps.core.outcome == 'success' && steps.fresh.outcome == 'success' }}
         run: |
           echo "LOAD at start: $(sysctl -n vm.loadavg)"
           ps -Ao pcpu=,state=,comm= -r | head -8 | cut -c1-160 | sed 's/^/SIM_TOP at start /'

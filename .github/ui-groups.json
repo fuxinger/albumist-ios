@@ -5,7 +5,7 @@
     "device: pro (the image's iPhone Pro) or se (the small iPhone), see .github/toolchain.json.",
     "flow-other is 'everything the other groups do not run', so a new test class always runs somewhere and no test runs twice",
     "(test_ui_tests.py GroupTests checks every UI test against the groups). Keep its skip list in step with the others.",
-    "The order is the start order: the longest in a full run (device-flows, device) start first. With max-parallel 5 in ui.yml and CI's macOS job still running, GitHub holds the last group (contrast, short) until a Mac is free; in a TestFlight run (max-parallel 3) the three long ones run first and the three short ones follow.",
+    "The order is the start order: the longest in a full run (device-flows, device, flow-other) start first, accessibility (the longest of the short ones) fourth. max-parallel 5 in ui.yml holds back the last group (contrast) until one ends; while CI's macOS job still runs, GitHub's account queue (five Macs) holds one more of the started groups, whichever it picks. In a TestFlight run (max-parallel 3) the three long ones run first and the three short ones follow.",
     "A change here changes the test fingerprint of the group that changed (ui_groups.py), so that group runs again.",
     "budget_min: minutes for the group's test passes (ui_tests.py budget_check); over it the run shows a warning, never red. Report-only, so not in the fingerprint.",
     "Measured in TestFlight run 44461253154 (19.11.): device 62, flow-full 12, flow-other 52, accessibility 20, contrast 15 min (the step Run UI tests).",

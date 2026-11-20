@@ -63,7 +63,8 @@ final class DeviceConditionUITests: XCTestCase {
         var tries = 0
         while !(button.exists && button.isHittable) && tries < 3 {
             if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            sleep(1)
+            // The tab bar has expanded (at most the second the fixed pause gave it); the loop checks.
+            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
             tries += 1
         }
         return button
@@ -147,6 +148,8 @@ final class DeviceConditionUITests: XCTestCase {
             UITestOnboarding.reportSlowCheck(since: asked)
             streak = met ? streak + 1 : 0
             if streak >= stableChecks { return true }
+            // pacing: the poll's interval, kept: "`stableChecks` in a row" means the state held
+            // over that many 2 s steps (prepare: about four seconds, not only between two batches).
             sleep(2)
         }
         print("UI_STEP_MISSING \(what) (timeout \(Int(timeout)) s)")
@@ -392,7 +395,8 @@ final class DeviceConditionUITests: XCTestCase {
         // nothing, hence the limit (two grant attempts of up to 90 s each, ui_tests.py).
         if app.state != .notRunning {
             let start = Date()
-            while app.state != .notRunning, Date().timeIntervalSince(start) < 190 { sleep(1) }
+            // Not asserted: a grant that changes nothing ends nothing (the launches below decide).
+            _ = UITestWait.holds(timeout: 190, interval: 1) { app.state == .notRunning }
             print("UI_FACT app \(app.state == .notRunning ? "ended" : "still running") \(Int(Date().timeIntervalSince(start))) s after the grant request")
         }
         for attempt in 1...12 {
@@ -429,9 +433,12 @@ final class DeviceConditionUITests: XCTestCase {
     @discardableResult
     private func onboarding(_ choice: PhotoChoice) -> Bool {
         guard tap(button("Los geht"), "welcome") else { return false }
-        sleep(1)
+        // The areas step is pushed (OnboardingView). Not asserted: the tap below says it.
+        _ = UITestWait.holds(timeout: 10) { app.staticTexts["Was soll Albumist sortieren?"].exists }
         tap(app.buttons["Weiter"], "areas")
-        sleep(1)
+        // The access step is pushed; its own button follows below (or not, when access was
+        // given before).
+        _ = UITestWait.holds(timeout: 10) { app.staticTexts["Zugriff auf deine Fotos"].exists }
         // "Weiter" before the iOS question (plugin review K5; it said "Zugriff erlauben" before).
         var answered = false
         if askAgain.waitForExistence(timeout: 5) {
@@ -440,20 +447,26 @@ final class DeviceConditionUITests: XCTestCase {
         }
         guard choice != .deny else { return false }
         // With access granted the app moves on by itself; "Weiter" when it had been granted before.
-        let deadline = Date().addingTimeInterval(30)
-        while Date() < deadline && !button("Analyse starten").exists {
+        // Checked every second (a "Weiter" tapped twice within the push adds no step).
+        var deniedWithoutQuestion = false
+        _ = UITestWait.holds(timeout: 30, interval: 1) {
+            if button("Analyse starten").exists { return true }
             // iOS answered "denied" without asking (CI after an access reset, also one left
             // by an earlier test): the caller gives the access back from the Mac and walks
             // the onboarding again (`onboardIfNeeded`), instead of failing on a missing
             // "Analyse starten" (test 10 in UI run 44108052342). After a question this test
             // answered, the screen is the app's doing and stays a failure below.
             if !answered, toSettings.exists {
-                print("UI_FACT onboarding: photo access denied without a question")
-                return false
+                deniedWithoutQuestion = true
+                return true
             }
             let next = app.buttons["Weiter"]
             if next.exists && next.isHittable { next.tap() }
-            sleep(1)
+            return false
+        }
+        if deniedWithoutQuestion {
+            print("UI_FACT onboarding: photo access denied without a question")
+            return false
         }
         guard choice == .full || button("Analyse starten").exists else {
             // The limited picker could not be driven: the caller falls back to the switch.
@@ -503,18 +516,23 @@ final class DeviceConditionUITests: XCTestCase {
             MainActor.assumeIsolated { self.answer(alert, choice) }
         }
         defer { removeUIInterruptionMonitor(monitor) }
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline && !photoQuestionAnswered {
+        var grantedBefore = false
+        _ = UITestWait.holds(timeout: timeout) {
+            if photoQuestionAnswered { return true }
             if let answer = [springboard.buttons.matching(predicate).firstMatch, app.alerts.buttons.matching(predicate).firstMatch].first(where: { $0.exists }) {
                 shot("photo-question-\(choice)")
                 answer.tap()
                 photoQuestionAnswered = true
-                break
+                return true
             }
-            if choice == .full && button("Analyse starten").exists { return false } // granted before
+            if choice == .full && button("Analyse starten").exists { // granted before
+                grantedBefore = true
+                return true
+            }
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap()
-            usleep(500_000)
+            return false
         }
+        if grantedBefore && !photoQuestionAnswered { return false }
         guard photoQuestionAnswered else {
             print("UI_STEP_MISSING photo question (\(choice))")
             print("UI_FACT springboard shows: \(allLabels(springboard).prefix(400))")
@@ -530,18 +548,18 @@ final class DeviceConditionUITests: XCTestCase {
     /// picked, possibly nothing).
     private func finishLimitedPicker() {
         let done = NSPredicate(format: "label IN %@", ["Done", "Fertig", "Continue", "Fortfahren"])
-        let deadline = Date().addingTimeInterval(15)
-        while Date() < deadline {
+        let closed = UITestWait.holds(timeout: 15) {
             for source in [app, springboard] {
                 if let close = source.buttons.matching(done).allElementsBoundByIndex.last(where: { $0.exists && $0.isHittable }) {
                     shot("limited-picker")
                     print("UI_FACT limited picker closed with '\(close.label)'")
                     close.tap()
-                    return
+                    return true
                 }
             }
-            usleep(500_000)
+            return false
         }
+        if closed { return }
         shot("x-limited-picker")
         print("UI_STEP_MISSING limited picker closed")
     }
@@ -549,15 +567,16 @@ final class DeviceConditionUITests: XCTestCase {
     /// The notification question after "Analyse starten" (A10: always "Nicht erlauben" here).
     private func answerNotificationQuestion(allow: Bool) {
         let labels = allow ? ["Erlauben", "Allow"] : ["Nicht erlauben", "Don’t Allow", "Don't Allow"]
-        let deadline = Date().addingTimeInterval(8)
-        while Date() < deadline {
+        // The question may not come (asked before): no failure either way.
+        let answered = UITestWait.holds(timeout: 8) {
             for label in labels where springboard.buttons[label].exists {
                 springboard.buttons[label].tap()
                 print("UI_STEP_OK notification question answered (\(allow ? "allow" : "don't allow"))")
-                return
+                return true
             }
-            usleep(500_000)
+            return false
         }
+        if answered { return }
         print("UI_FACT no notification question")
     }
 
@@ -565,8 +584,9 @@ final class DeviceConditionUITests: XCTestCase {
     /// stops waiting once `done` holds.
     private func answerDeleteQuestion(allow: Bool, timeout: TimeInterval, done: () -> Bool = { false }) -> Bool {
         let labels = allow ? ["Delete", "Löschen"] : ["Don’t Allow", "Don't Allow", "Nicht erlauben", "Cancel", "Abbrechen"]
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
+        var answered = false
+        // Ends at the answer or once `done` holds; the caller decides what a missing question means.
+        _ = UITestWait.holds(timeout: timeout) {
             for alert in [springboard.alerts.firstMatch, app.alerts.firstMatch] where alert.exists {
                 let answer = alert.buttons.matching(NSPredicate(format: "label IN %@", labels)).firstMatch
                 guard answer.exists else { continue }
@@ -574,12 +594,12 @@ final class DeviceConditionUITests: XCTestCase {
                 print("UI_FACT delete question: \(allLabels(alert))")
                 answer.tap()
                 print("UI_STEP_OK delete question answered (\(allow ? "delete" : "don't allow"))")
+                answered = true
                 return true
             }
-            if done() { return false }
-            usleep(500_000)
+            return done()
         }
-        return false
+        return answered
     }
 
     /// Taps the button of an open dialog (another button with the same label can sit behind it).
@@ -588,15 +608,15 @@ final class DeviceConditionUITests: XCTestCase {
     /// dialog that opens after it was never confirmed.
     @discardableResult
     private func confirm(_ label: String, _ step: String) -> Bool {
-        let deadline = Date().addingTimeInterval(8)
-        while Date() < deadline {
+        let tapped = UITestWait.holds(timeout: 8) {
             let candidates = app.buttons.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex
-            if let hit = candidates.last(where: { $0.exists && $0.isEnabled && $0.isHittable }) {
-                hit.tap()
-                print("UI_STEP_OK \(step)")
-                return true
-            }
-            usleep(500_000)
+            guard let hit = candidates.last(where: { $0.exists && $0.isEnabled && $0.isHittable }) else { return false }
+            hit.tap()
+            return true
+        }
+        if tapped {
+            print("UI_STEP_OK \(step)")
+            return true
         }
         print("UI_STEP_MISSING \(step)")
         shot("x-missing-" + step.replacingOccurrences(of: " ", with: "-"))
@@ -615,8 +635,13 @@ final class DeviceConditionUITests: XCTestCase {
             print("UI_FACT notice: \(text)")
             texts.append(text)
             let ok = alert.buttons["OK"]
+            let tapped = Date()
             if ok.exists { ok.tap() } else if alert.buttons.firstMatch.exists { alert.buttons.firstMatch.tap() }
-            sleep(1)
+            // That notice has gone (a next one shows after it; the loop looks for it). Not
+            // asserted: a notice still there is read and closed once more. At least the old
+            // second, so a notice that follows later still falls in the loop's look (review).
+            _ = UITestWait.holds(timeout: 3) { !alert.exists }
+            UITestWait.atLeast(1, since: tapped)
         }
         return texts
     }
@@ -639,8 +664,11 @@ final class DeviceConditionUITests: XCTestCase {
         let rebuild = app.buttons["Analyse neu aufbauen"]
         var swipes = 0
         while !(rebuild.exists && rebuild.isHittable) && swipes < 12 { (list.exists ? list : app).swipeUp(); swipes += 1 }
-        guard tap(rebuild, "rebuild analysis"), tap(app.buttons["Neu aufbauen"], "confirm rebuild") else { return false }
-        sleep(1)
+        let confirmRebuild = app.buttons["Neu aufbauen"]
+        guard tap(rebuild, "rebuild analysis"), tap(confirmRebuild, "confirm rebuild") else { return false }
+        // The dialog has closed, so "Fertig" of the settings is not behind it. Not asserted: the
+        // analysis checks after this say whether the rebuild started.
+        _ = UITestWait.holds(timeout: 5) { !confirmRebuild.exists }
         if app.buttons["Fertig"].exists { app.buttons["Fertig"].tap() }
         return true
     }
@@ -653,13 +681,18 @@ final class DeviceConditionUITests: XCTestCase {
     /// Two photos from the library into a new album: opens the plan for it ("Umsetzen").
     private func openManualPlan(_ title: String) -> Bool {
         guard tap(tabButton("Mediathek"), "library for \(title)") else { return false }
-        sleep(2)
+        // The first pass over the library comes before the photos (`library.preparing`): up to
+        // the two seconds the fixed pause gave it, then the five below, as before.
+        _ = UITestWait.holds(timeout: 2) { libraryPhotos.firstMatch.exists }
         if !libraryPhotos.firstMatch.waitForExistence(timeout: 5) {
             tap(app.buttons["Alle"], "all photos for \(title)", timeout: 5)
-            sleep(2)
+            // Every photo of the library (not asserted: the count below is).
+            _ = UITestWait.holds(timeout: 5) { libraryPhotos.firstMatch.exists }
         }
         guard tap(app.buttons["Auswählen"], "select photos for \(title)") else { return false }
-        sleep(1)
+        // Selecting: "Auswählen" turns into "Fertig" and the tab bar goes. The photos are the
+        // ones counted below.
+        _ = UITestWait.holds(timeout: 5) { app.buttons["Fertig"].exists && libraryPhotos.count >= 2 }
         guard libraryPhotos.count >= 2 else {
             print("UI_STEP_MISSING two photos for \(title)")
             XCTFail("The library shows fewer than two photos")
@@ -734,12 +767,15 @@ final class DeviceConditionUITests: XCTestCase {
             UITestAppEnd.end(app, "during \(name)")
             let closedAfter = Int(Date().timeIntervalSince(tapped))
             print("UI_FACT \(name) running when the app was closed: \(!finished) (preview left, result shown \(finished)), closed \(closedAfter) s after the tap")
+            // pacing: kept, a gap after the process has ended (awaited in UITestAppEnd.end)
+            // before the next launch; no element shows what iOS still does with the ended app.
             sleep(2)
             start()
             let card = anything("wurde unterbrochen").waitForExistence(timeout: 30)
             if card {
                 print("UI_STEP_OK interruption card for \(name)")
-                sleep(1)
+                // The card's step count ("Erledigt: 1 von 2 Schritten"), read below and asserted.
+                _ = UITestWait.holds(timeout: 5) { interruptedSteps() != nil }
                 shot("interrupted-\(name.replacingOccurrences(of: " ", with: "-"))")
                 let steps = interruptedSteps()
                 let halfDone = steps.map { $0.done > 0 && $0.done < $0.total } ?? false
@@ -773,10 +809,17 @@ final class DeviceConditionUITests: XCTestCase {
     /// The album is listed in the albums tab ("Von Albumist angelegt oder ergänzt").
     private func albumExists(_ title: String) -> Bool {
         guard tap(tabButton("Alben"), "albums tab for \(title)") else { return false }
+        // pacing: kept, the albums tab lists the app's inventory, which Photos' change note
+        // brings up to date after a plan or an undo; no element says it is current, and test07
+        // asserts that an album taken back is gone (a wait for the row would stop at a stale one).
         sleep(2)
         let album = anything(title)
         var swipes = 0
-        while !album.exists && swipes < 3 { app.swipeUp(); sleep(1); swipes += 1 }
+        while !album.exists && swipes < 3 {
+            app.swipeUp()
+            _ = UITestWait.holds(timeout: 1) { album.exists }
+            swipes += 1
+        }
         let exists = album.exists
         print("UI_FACT album \(title) exists: \(exists)")
         tap(tabButton("Übersicht"), "overview after albums")
@@ -787,10 +830,17 @@ final class DeviceConditionUITests: XCTestCase {
     /// nil when the row is not there.
     private func albumPhotoCount(_ title: String) -> Int? {
         guard tap(tabButton("Alben"), "albums tab for the photos of \(title)") else { return nil }
+        // pacing: kept, the row's photo count comes from the app's inventory, which Photos'
+        // change note brings up to date after the plan; no element says it is current (a wait
+        // for the row would read a count from before).
         sleep(2)
         let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
         var swipes = 0
-        while !row.exists && swipes < 3 { app.swipeUp(); sleep(1); swipes += 1 }
+        while !row.exists && swipes < 3 {
+            app.swipeUp()
+            _ = UITestWait.holds(timeout: 1) { row.exists }
+            swipes += 1
+        }
         let label = row.exists ? row.label : ""
         print("UI_FACT album row \(title): \(label)")
         tap(tabButton("Übersicht"), "overview after albums")
@@ -912,6 +962,8 @@ final class DeviceConditionUITests: XCTestCase {
         }
         record("before ending the app")
         UITestAppEnd.end(app, "during the analysis")
+        // pacing: kept, a gap after the process has ended (awaited in UITestAppEnd.end) before
+        // the next launch; no element shows what iOS still does with the ended app.
         sleep(2)
         start(["-SortlyUITestSlowAnalysis", "-SortlyUITestLaunchAnalysis"])
         let restarted = waitStable("analysis runs by itself after relaunch", timeout: 60, stableChecks: 1) { analysisRunning || analysisIdle }
@@ -946,18 +998,22 @@ final class DeviceConditionUITests: XCTestCase {
         guard rebuildAnalysis() else { return }
         let finished = waitStable("analysis with unreadable photos finished", timeout: 900) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not complete with unreadable photos, iCloud documents and no network")
-        sleep(2)
+        let unreadableNote = anything("7 Fotos konnten noch nicht gelesen werden")
+        let icloudNote = anything("Dokumente liegen nur in iCloud")
+        let placesNote = anything("Orte werden später genauer bestimmt")
+        // The overview's three notes of the finished run, each asserted below.
+        _ = UITestWait.holds(timeout: 10) { unreadableNote.exists && icloudNote.exists && placesNote.exists }
         shot("08-unreadable-offline")
-        let unreadable = anything("7 Fotos konnten noch nicht gelesen werden").exists
+        let unreadable = unreadableNote.exists
         print(unreadable ? "UI_STEP_OK unreadable photos counted" : "UI_STEP_MISSING unreadable photos counted")
         XCTAssertTrue(unreadable, "The overview does not say that 7 photos could not be read")
         let counts = analysedPhotos()
         print("UI_FACT headline with unreadable photos \(String(describing: counts))")
         if let counts { XCTAssertEqual(counts.total - counts.analysed, 7, "The headline does not leave out exactly the 7 unreadable photos") }
-        let icloud = anything("Dokumente liegen nur in iCloud").exists
+        let icloud = icloudNote.exists
         print(icloud ? "UI_STEP_OK iCloud documents counted" : "UI_STEP_MISSING iCloud documents counted")
         XCTAssertTrue(icloud, "The overview does not say that documents wait for iCloud")
-        let places = anything("Orte werden später genauer bestimmt").exists
+        let places = placesNote.exists
         print(places ? "UI_STEP_OK offline places pending" : "UI_STEP_MISSING offline places pending")
         XCTAssertTrue(places, "The overview does not say that places wait for the network")
         // No error loop: nothing to dismiss, nothing restarts, and nothing waits for a tap.
@@ -1018,8 +1074,11 @@ final class DeviceConditionUITests: XCTestCase {
     private func undo(fault: String?, title: String, reason: String) -> Bool {
         start(fault.map { ["-SortlyUITestDeletionFault", $0] } ?? [])
         guard applyManualPlan(title), tap(app.buttons["result.receipt"], "receipt of \(title)") else { return true }
-        sleep(2)
         let undo = app.buttons["receipt.undo"]
+        // The receipt loads after the screen opens (an empty list until then): its share button
+        // comes with the loaded receipt, the undo button at its end. Not asserted: the tap on
+        // the undo button below is.
+        _ = UITestWait.holds(timeout: 20) { app.buttons["Liste teilen"].exists || undo.exists }
         var swipes = 0
         while !(undo.exists && undo.isHittable) && swipes < 6 { app.swipeUp(); swipes += 1 }
         guard tap(undo, "undo \(title)"), confirm("Rückgängig machen", "confirm undo of \(title)") else { return true }
@@ -1036,7 +1095,9 @@ final class DeviceConditionUITests: XCTestCase {
             }
         }
         let leftOver = partial.waitForExistence(timeout: 60)
-        app.swipeUp(); sleep(1)
+        app.swipeUp()
+        // The receipt has stopped scrolling before the screenshot (fails only if it still moves).
+        UITestWait.screenAtRest(app, "partial receipt of \(title) at rest")
         shot("undo-partial-\(fault ?? "real")")
         print(leftOver ? "UI_STEP_OK partial undo shown (\(fault ?? "real question"))" : "UI_STEP_MISSING partial undo shown (\(fault ?? "real question"))")
         XCTAssertTrue(leftOver, "The receipt does not say that not everything was taken back (\(fault ?? "real question"))")
@@ -1051,7 +1112,8 @@ final class DeviceConditionUITests: XCTestCase {
         let asked = answerDeleteQuestion(allow: true, timeout: 30) { removed.exists && !partial.exists }
         print("UI_FACT second attempt asked by iOS: \(asked)")
         let complete = waitStable("rest of \(title) taken back", timeout: 60, stableChecks: 2) { removed.exists && !partial.exists }
-        app.swipeUp(); sleep(1)
+        app.swipeUp()
+        UITestWait.screenAtRest(app, "complete receipt of \(title) at rest")
         shot("undo-complete-\(fault ?? "real")")
         print(complete ? "UI_STEP_OK second attempt took back everything (\(fault ?? "real question"))" : "UI_STEP_MISSING second attempt took back everything (\(fault ?? "real question"))")
         XCTAssertTrue(complete, "The second attempt did not take back everything (\(fault ?? "real question"))")
@@ -1099,6 +1161,8 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground, "The app ended with a full disk during the plan")
         sendToBackground("before it is ended after the full disk during the plan", atLeast: 3)
         UITestAppEnd.end(app, "after the full disk during the plan")
+        // pacing: kept, a gap after the process has ended (awaited in UITestAppEnd.end) before
+        // the next launch; no element shows what iOS still does with the ended app.
         sleep(2)
         start()
         let card = anything("wurde unterbrochen")
@@ -1170,9 +1234,11 @@ final class DeviceConditionUITests: XCTestCase {
         var swipes = 0
         while !(managed.exists && managed.isHittable) && swipes < 10 { (list.exists ? list : app).swipeUp(); swipes += 1 }
         guard tap(managed, "managed albums") else { return }
-        sleep(1)
+        let managedRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        // The list "Alben von Albumist" with the album's row (the tap below asserts it).
+        _ = UITestWait.holds(timeout: 10) { managedRow.exists }
         shot("14-managed-albums")
-        guard tap(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch, "managed album row"),
+        guard tap(managedRow, "managed album row"),
               confirm("Album entfernen", "remove managed album") else { return }
         guard app.navigationBars["Vorschau"].waitForExistence(timeout: 20), tap(app.buttons["plan.apply"], "apply removal", timeout: 30) else {
             print("UI_STEP_MISSING removal plan")
@@ -1185,11 +1251,14 @@ final class DeviceConditionUITests: XCTestCase {
         let removed = receipt.waitForExistence(timeout: 120)
         print(removed ? "UI_STEP_OK managed album removed" : "UI_STEP_MISSING managed album removed")
         XCTAssertTrue(removed, "Removing the album did not finish")
+        // pacing: kept, the result card fades and scales in (PlanReviewView) before the
+        // screenshot; a fade moves no frame and no element says it is done.
         sleep(1)
         shot("15-album-removed")
         guard removed, tap(app.buttons["Rückgängig machen"].firstMatch, "undo removal"),
               confirm("Rückgängig machen", "confirm undo of removal") else { return }
         let undone = app.staticTexts["Rückgängig gemacht"].waitForExistence(timeout: 120)
+        // pacing: kept, the undo's result card fades and scales in before the screenshot (as above).
         sleep(1)
         shot("16-removal-undone")
         print(undone ? "UI_STEP_OK removal undone" : "UI_STEP_MISSING removal undone")
@@ -1217,11 +1286,13 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(screen, "Resetting photo access did not bring the \"Kein Zugriff\" screen")
         XCTAssertFalse(button("Los geht").exists, "The introduction starts again after access was taken away")
         if screen {
-            sleep(1)
+            // The screen's explanation, for the screenshot (asserted after the denial below).
+            _ = UITestWait.holds(timeout: 5) { anything("Kein Zugriff auf deine Fotos").exists }
             shot("17-no-access")
             grantOnNoAccessScreen(.deny)
             let denied = toSettings.waitForExistence(timeout: 10)
-            sleep(1)
+            // The iOS question has gone before the screenshot (not asserted: answered above).
+            _ = UITestWait.holds(timeout: 5) { !springboard.alerts.firstMatch.exists }
             shot("17a-access-denied")
             print(denied ? "UI_STEP_OK denied access explained" : "UI_STEP_MISSING denied access explained")
             XCTAssertTrue(denied, "Denied photo access offers no way to the Settings app")
@@ -1249,7 +1320,9 @@ final class DeviceConditionUITests: XCTestCase {
             limited = anything("Nur ausgewählte Fotos").waitForExistence(timeout: 30)
             print("UI_FACT limited access through the switch: \(limited)")
         }
-        sleep(1)
+        // The overview with nothing of iOS over it (question or picker) before the screenshot;
+        // not asserted: `limited` is, below.
+        _ = UITestWait.holds(timeout: 5) { app.tabBars.firstMatch.exists && !springboard.alerts.firstMatch.exists }
         shot("18-access-limited")
         XCTAssertTrue(limited, "Limited photo access is not explained on the overview")
         XCTAssertEqual(app.state, .runningForeground, "The app ended with limited access")
@@ -1261,6 +1334,9 @@ final class DeviceConditionUITests: XCTestCase {
         guard rebuildAnalysis(), waitForImageStep("image step before access is taken away") else { return }
         record("before access was taken away")
         app.resetAuthorizationStatus(for: .photos)
+        // pacing: kept, iOS ends an app whose photo access changes, and the reset reaches the
+        // privacy service on its own time; no element and no state of this app says it is done
+        // (the launch after it must not be ended by it, see grantFromHost).
         sleep(2)
         print("UI_FACT app state after access was taken away: \(app.state.rawValue)")
         start(["-SortlyUITestSlowAnalysis", "-SortlyUITestLaunchAnalysis"])
@@ -1306,13 +1382,14 @@ final class DeviceConditionUITests: XCTestCase {
         launch(["-SortlyUITestEmptyLibrary", "-onboarding.done", "NO"])
         onboardIfNeeded()
         let idle = waitStable("empty library analysed", timeout: 120) { analysisIdle }
-        sleep(1)
-        shot("21-empty-overview")
-        XCTAssertTrue(idle, "The analysis of an empty library did not end")
         // Since K6 (EmptyLibraryCard, merged from rc-2) the overview says why there is nothing
         // to sort instead of "0 von 0 sortiert": the card for an empty library, with its title
         // and explanation inside it (the card contains its elements, id overview.libraryHint).
         let hint = app.descendants(matching: .any)["overview.libraryHint"]
+        // The card before the screenshot (asserted below, with its own wait).
+        _ = UITestWait.holds(timeout: 10) { hint.exists }
+        shot("21-empty-overview")
+        XCTAssertTrue(idle, "The analysis of an empty library did not end")
         func inHint(_ text: String) -> Bool {
             hint.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
         }
@@ -1326,7 +1403,9 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertFalse(app.alerts.firstMatch.exists, "An empty library shows an error")
         XCTAssertFalse(app.buttons["Fortsetzen"].exists, "An empty library waits for a tap")
         if tap(tabButton("Mediathek"), "library of empty library") {
-            sleep(2)
+            // The library's count, there once its first pass is done (`library.preparing` before
+            // it); that it says 0 is asserted below.
+            _ = UITestWait.holds(timeout: 10) { anything("Fotos und Videos").exists }
             shot("22-empty-library")
             print("UI_FACT empty library screen: \(allLabels(app.scrollViews.firstMatch))")
             XCTAssertTrue(anything("0 Fotos und Videos").exists, "The library does not say it is empty")
@@ -1363,11 +1442,8 @@ final class DeviceConditionUITests: XCTestCase {
         func timed(_ what: String, limit: TimeInterval, _ action: () -> Void, until: () -> Bool) {
             let begin = Date()
             action()
-            var reached = until()
-            while !reached && Date().timeIntervalSince(begin) < limit * 2 {
-                usleep(250_000)
-                reached = until()
-            }
+            // Looked at every quarter second, up to twice the limit (the time is the measure).
+            let reached = UITestWait.holds(timeout: limit * 2, interval: 0.25, until)
             let seconds = Date().timeIntervalSince(begin)
             print("UI_TIMING large \(what) \(String(format: "%.1f", seconds)) s")
             XCTAssertTrue(reached && seconds < limit, "\(what) took \(Int(seconds)) s with a large library (limit \(Int(limit)) s)")
@@ -1382,9 +1458,15 @@ final class DeviceConditionUITests: XCTestCase {
         timed("overview tab", limit: 10, { tabButton("Übersicht").tap() }, until: { anything("Fotos analysiert").exists })
         let atlas = button("Reise-Atlas")
         timed("atlas", limit: 15, { if atlas.waitForExistence(timeout: 5) { atlas.tap() } }, until: { app.navigationBars["Reise-Atlas"].exists })
+        // pacing: kept, the atlas map draws its tiles before the screenshot (no element shows it)
         sleep(2)
         shot("25-large-atlas")
-        if app.navigationBars["Reise-Atlas"].exists { app.navigationBars.firstMatch.buttons.element(boundBy: 0).tap(); sleep(1) }
+        let atlasBar = app.navigationBars["Reise-Atlas"]
+        if atlasBar.exists {
+            app.navigationBars.firstMatch.buttons.element(boundBy: 0).tap()
+            // Back on the overview (not asserted: the search tab below is looked up either way).
+            _ = UITestWait.holds(timeout: 5) { !atlasBar.exists }
+        }
         let searchTab = ["Suchen", "Suche", "Search"].map { app.tabBars.buttons[$0] }.first(where: \.exists)
             ?? app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
         searchTab.tap()
@@ -1688,7 +1770,9 @@ final class DeviceConditionUITests: XCTestCase {
         var looks: [(at: Date, count: Int?)] = []
         var last = before
         var lastSeen = tapped
-        while Date().timeIntervalSince(tapped) < 60 {
+        // A look every tenth of a second, up to 60 s: until Fortsetzen shows and the count has
+        // stood still for 5 s.
+        _ = UITestWait.holds(timeout: 60, interval: 0.1) {
             let looked = Date()
             let line = progressText() ?? ""
             if firstLook == nil { firstLook = (line, Date().timeIntervalSince(looked)) }
@@ -1699,8 +1783,7 @@ final class DeviceConditionUITests: XCTestCase {
             let now = PauseCountCheck.done(in: line)
             looks.append((looked, now))
             if let now, now != last { last = now; lastSeen = Date() }
-            if resumeShown != nil && Date().timeIntervalSince(lastSeen) > 5 { break }
-            usleep(100_000)
+            return resumeShown != nil && Date().timeIntervalSince(lastSeen) > 5
         }
         let lookedUntil = Date()
         func s(_ v: Double?) -> String { v.map { String(format: "%.2f", $0) } ?? "never" }

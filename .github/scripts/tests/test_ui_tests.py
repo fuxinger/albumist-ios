@@ -1541,20 +1541,22 @@ class SleepRuleTests(unittest.TestCase):
     # Calls of sleep()/usleep() per file (code only). The count may only go down; lower it here
     # when a sleep becomes a condition wait.
     CEILING = {
-        "AccessibilityUITests.swift": 48,
-        "DeviceConditionUITests.swift": 45,
-        "SearchUITests.swift": 4,
-        "SortlyFlowUITests.swift": 123,
-        "SortlyLockedUITests.swift": 15,
-        "UITestOnboarding.swift": 3,
-        # The poll intervals of the condition waits (until, toBackground, never), the minimum
-        # time in the background, and atLeast: the rest of an old fixed time after the state was
-        # reached (second review of C2). Its callers are counted in AT_LEAST.
-        "UITestWait.swift": 5,
+        "AccessibilityUITests.swift": 6,
+        "DeviceConditionUITests.swift": 14,
+        "SearchUITests.swift": 1,
+        "SortlyFlowUITests.swift": 51,
+        "SortlyLockedUITests.swift": 1,
+        "UITestOnboarding.swift": 1,
+        # The poll interval of the condition waits (holds, which until, screenAtRest and never use),
+        # toBackground's own poll, the minimum time in the background, and atLeast: the rest of
+        # an old fixed time after the state was reached (second review of C2). Its callers are
+        # counted in AT_LEAST.
+        "UITestWait.swift": 4,
     }
     # UITestWait.atLeast calls per file (a fixed minimum after a wait; second review of C2):
     # counted like the sleeps, so a new one is a decision, not a habit.
-    AT_LEAST = {"AccessibilityUITests.swift": 1, "ReleaseSmokeUITests.swift": 1, "SortlyFlowUITests.swift": 4}
+    AT_LEAST = {"AccessibilityUITests.swift": 1, "DeviceConditionUITests.swift": 1, "ReleaseSmokeUITests.swift": 1,
+                "SortlyFlowUITests.swift": 13}
     # Long sleeps (3 s or more, or a computed length) without a "// pacing:" note, per file:
     # the ones still standing in for a state. None left since the condition waits of
     # UITestWait.swift; a new one fails test_a_long_sleep_is_pacing_and_says_so.

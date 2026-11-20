@@ -642,3 +642,56 @@ class CommandTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MergeContentTests(unittest.TestCase):
+    """The full pass before the merge (decision 20.11.2026): its greens stand for the merge only
+    when merging into main keeps the app fingerprint and every group's full test fingerprint."""
+
+    def test_differences(self):
+        self.assertEqual(ui_evidence.content_differences(HEAD, HEAD), [])
+        docs = repo(**{"docs__NOTES.md": "# notes"})
+        self.assertEqual(ui_evidence.content_differences(HEAD, docs), [])
+        self.assertEqual(ui_evidence.content_differences(HEAD, TEST_ONLY),
+                         [f"the test code of {g}" for g in ("full", "other", "small")])
+        app = repo(**{"App__Sortly__App__AlbumistApp.swift": "@main struct AlbumistApp { let x = 1 }"})
+        self.assertEqual(ui_evidence.content_differences(HEAD, app)[0], "the app")
+
+    def git(self, folder, *args):
+        import subprocess
+        done = subprocess.run(["git", *args], cwd=folder, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return done.stdout.strip()
+
+    def commit(self, folder, files, message):
+        for path, text in files.items():
+            os.makedirs(os.path.join(folder, os.path.dirname(path)), exist_ok=True)
+            with open(os.path.join(folder, path), "w", encoding="utf-8") as f:
+                f.write(text)
+        self.git(folder, "add", "-A")
+        self.git(folder, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", message)
+
+    def test_merge_into_a_main_that_moved(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.git(folder, "init", "-q", "-b", "main")
+            self.commit(folder, HEAD.contents, "base")
+            self.git(folder, "checkout", "-q", "-b", "branch")
+            self.commit(folder, {"App/Sortly/App/Feature.swift": "struct Feature {}"}, "branch work")
+            self.git(folder, "checkout", "-q", "main")
+            self.commit(folder, {"docs/NOTES.md": "# notes"}, "docs on main")
+            self.git(folder, "checkout", "-q", "branch")
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                self.assertEqual(ui_evidence.merge_content("main", cwd=folder), 0)
+            self.assertIn("UI_MERGE_CONTENT same app and test fingerprints", log.getvalue())
+            # main changes the app: the branch's greens no longer stand for the merge.
+            self.git(folder, "checkout", "-q", "main")
+            self.commit(folder, {"Sources/SortlyCore/Core.swift": "public struct Core { let y = 2 }"}, "app on main")
+            self.git(folder, "checkout", "-q", "branch")
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                self.assertEqual(ui_evidence.merge_content("main", cwd=folder), 1)
+            self.assertIn("::error title=UI merge content::merging into main changes the app", log.getvalue())
+            # A conflict is no merge content at all.
+            self.commit(folder, {"Sources/SortlyCore/Core.swift": "public struct Core { let z = 3 }"}, "conflict")
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                self.assertEqual(ui_evidence.merge_content("main", cwd=folder), 1)
+            self.assertIn("does not merge cleanly", log.getvalue())

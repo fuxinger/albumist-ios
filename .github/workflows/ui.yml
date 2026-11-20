@@ -475,7 +475,11 @@ jobs:
     # its own test code, from this run or an earlier one, and none red for that pair; the same
     # check as the TestFlight gate (ui_evidence.py gate). Also when no group had to run. The
     # release gate (ci_gate.py) needs this job green in its full form; a quick verdict (pull
-    # requests) never counts for an upload or a release. Not in a TestFlight run: there the
+    # requests) never counts for an upload or a release.
+    # Merge gate (the owner's decision of 20.11.2026, 17:12): "UI verdict (full)" of a full run
+    # started on the pull request's branch, green on its last commit, with the merge content
+    # unchanged (step "Merge content same as this commit"); the TestFlight run after the merge
+    # then reuses those greens by content and runs only groups without one. Not in a TestFlight run: there the
     # "UI gate" of testflight.yml does this.
     name: UI verdict (${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'quick' || 'full' }})
     needs: [plan, ui]
@@ -493,10 +497,28 @@ jobs:
           # The commits of earlier results, to recompute their fingerprints from git.
           fetch-depth: 0
           persist-credentials: false
+      - name: Full UI pass before the merge
+        # The owner's decision of 20.11.2026, 17:12: the full UI pass runs once before the merge
+        # (not again in the TestFlight run, whose UI gate takes its greens by content). A pull
+        # request's own runs are quick; this says how to start the full one on its branch.
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          echo "::notice title=Full UI pass before the merge::Once the last commit is pushed: Actions > UI flow > Run workflow on branch $HEAD_REF with quick off. Its job 'UI verdict (full)' must be green on the branch's last commit before the merge (docs/TESTFLIGHT.md)."
       - name: UI groups green for this app and test code
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}
+      - name: Merge content same as this commit
+        # The full pass before the merge (decision 20.11.2026): its greens stand for the merge
+        # only when merging this commit into main gives the same app fingerprint and the same
+        # full test fingerprint of every group (ui_evidence.py merge-content, git merge-tree).
+        # When main changed the app or test code since, or the merge conflicts, this is red:
+        # merge main into the branch and run the full pass again (unchanged groups are reused).
+        # Also after a red gate, so both reasons show at once.
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && !inputs.quick && github.ref != 'refs/heads/main' }}
+        run: python3 .github/scripts/ui_evidence.py merge-content --base origin/main
 
   summary:
     name: UI summary (retries and flaky tests)

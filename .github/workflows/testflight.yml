@@ -11,8 +11,11 @@ run-name: >-
 # which replaced the click of decision 5 of 18.11.). No job waits for or looks at other runs.
 #
 # Two gates (input "gate"; the owner's decision 10 of 18.11.2026, docs/TESTFLIGHT.md "Zwei Tore"):
-#   - big (the default; every build for testers and the App Store): CI, the UI flow with every
-#     group, the small stress pass, the UI gate over every group.
+#   - big (the default; every build for testers and the App Store): CI, the UI flow, the small
+#     stress pass, the UI gate over every group. Every group needs a full green for exactly this
+#     content; since the owner's decision of 20.11.2026, 17:12 the full UI pass runs once before
+#     the merge (ui.yml by hand on the pull request's branch, quick off), and the UI flow here
+#     runs only the groups without such a green (usually none), the gate takes the others.
 #   - small (the daily build for the owner's own iPhone; daily-build.yml starts it each morning
 #     when the app changed, and it can be started by hand): CI, the two short UI groups
 #     flow-full and contrast (about 18 min each), the small stress pass, the UI gate over those

@@ -468,16 +468,41 @@ in GitHubs Schlange“ (UI-Gruppen außerhalb von TestFlight fünf zugleich). Al
 kein Cache, Rot bleibt rot, „Re-run failed jobs“ nur für die Technik, Merge nur grün ohne
 Wiederholung, voller UI-Lauf und Härtetest vor jedem Upload, Freigabe vor dem Hochladen.
 
+### Voller UI-Lauf einmal vor dem Merge (Entscheidung Fuchs 20.11. 17:12 Uhr)
+
+Regeländerung: Der volle UI-Lauf läuft einmal vor dem Merge, nicht noch einmal im
+TestFlight-Lauf. Der volle Lauf vor jedem Upload bleibt Pflicht; das UI-Tor von TestFlight
+weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
+
+- **Vor dem Merge (Stufe 1)**: nach dem letzten Push des Pull Requests Actions > UI flow > Run
+  workflow auf seinem Zweig, „quick“ aus (`gh workflow run ui.yml --ref <zweig> -f quick=false`).
+  Der Lauf führt nur die Gruppen aus, die für diesen Inhalt noch kein volles Grün haben. Die
+  Pull-Request-Läufe selbst bleiben schnell (quick) und sagen das im Urteil-Job als Hinweis.
+- **Merge-Tor**: „UI verdict (full)“ dieses Laufs grün auf dem letzten Commit des Zweigs. Es
+  verlangt für jede Gruppe ein volles Grün (nie ein schnelles) für genau den App- und
+  Test-Fingerabdruck, kein Rot für diesen Schlüssel, und im Schritt „Merge content same as this
+  commit“, dass der Merge in `main` dieselben Fingerabdrücke hat (`ui_evidence.py
+  merge-content`, `git merge-tree`). Hat `main` seitdem App oder Testcode geändert oder gibt es
+  Konflikte, ist er rot: `main` in den Zweig holen und den vollen Lauf neu starten (Gruppen mit
+  gleichem Schlüssel werden übernommen, kosten also keinen Mac).
+- **Damit GitHub es erzwingt** (nur Fuchs, Einstellung, P5-09): Schutzregel für `main` mit
+  Pflicht-Prüfung „UI verdict (full)“ und „Require branches to be up to date before merging“.
+  Bis dahin gilt es als Regel für Agenten und Fuchs.
+- **TestFlight (großes Tor)**: unverändert `ui_groups: auto`; es laufen nur Gruppen ohne volles
+  Grün für genau diesen Inhalt (nach Stufe 1 meist keine), das UI-Tor prüft alle Gruppen wie
+  bisher. Härtetest, Release-Kurztest, frühere Versuche, Upload-Bedingungen und Freigabe bleiben
+  unverändert. Großes Tor dann rund 85–90 statt 129–156 Minuten (CI rund 30, Härtetest rund 45
+  neben dem Release-Kurztest, Hochladen rund 10); letzter Push bis Upload rund 2,5 statt 3,5–4
+  Stunden. Unterscheidet sich der Inhalt doch (etwas kam nach dem vollen Lauf auf `main`),
+  laufen die betroffenen Gruppen im TestFlight-Lauf wie bisher: langsamer, nie ungeprüft.
+- Achtung Mac-Warteschlange: der Lauf von Hand wartet in `mac-queue`; ein neuer Push auf
+  irgendeinen Pull Request kann ihn dort ersetzen (GitHub hält je Gruppe einen wartenden Lauf).
+  Darum erst starten, wenn der schnelle Lauf des letzten Pushs fertig ist.
+
 Noch nicht umgesetzt, Entscheidung nötig:
 
-1. **Voller Lauf einmal vor dem Merge, TestFlight übernimmt ihn**: den letzten Stand eines Pull
-   Requests von Hand voll testen (Actions > UI flow > Run workflow auf dem Zweig, „quick“ aus).
-   Die Fingerabdrücke hängen am Inhalt, nicht am Commit: ist der Merge-Commit inhaltlich gleich
-   (Zweig vor dem Merge auf dem Stand von `main`), findet das UI-Tor von TestFlight die grünen
-   vollen Ergebnisse und lässt nur Härtetest und Release-Kurztest laufen. Großes Tor dann rund
-   85–90 statt 129–156 Minuten; letzter Push bis Upload rund 2,5 statt 3,5–4 Stunden.
-   Regeländerung: ein voller UI-Lauf vor dem Merge statt im TestFlight-Lauf (der volle Lauf vor
-   dem Upload bleibt Pflicht, das Tor prüft ihn für genau diesen Inhalt).
+1. **Label statt Lauf von Hand** (später, wenn gewünscht): ein Label `full-ui` startet den vollen
+   Lauf des Pull Requests.
 2. **TestFlight vor Pull Requests**: UI-Läufe von Pull Requests warten, solange ein
    TestFlight-Lauf seine Gruppen braucht (Lauf 44629523806: Gruppen warteten 17–82 Minuten).
 3. **Bekannt rote Gruppen nicht mehr laufen lassen**: ihr Grün zählt nicht; spart je Fall

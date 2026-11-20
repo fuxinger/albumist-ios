@@ -548,6 +548,39 @@ class KnownRedTests(unittest.TestCase):
         self.assertFalse(earlier_attempts.is_machinery(steps[0][0]))
 
 
+class FullPassBeforeMergeTests(unittest.TestCase):
+    """The owner's decision of 20.11.2026, 17:12: the full UI pass runs once before the merge, its
+    verdict checks that the merge brings exactly the tested content, and TestFlight takes its
+    greens by content (ui_evidence.py) instead of running the groups again."""
+
+    def test_the_full_verdict_checks_the_merge_content(self):
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        steps = job_steps(ui, "verdict")
+        rules = {name: rule for name, rule, _ in steps}
+        runs = {name: run for name, _, run in steps}
+        merge = "Merge content same as this commit"
+        self.assertIn(merge, rules)
+        self.assertIn("python3 .github/scripts/ui_evidence.py merge-content --base origin/main", runs[merge])
+        for part in ("github.event_name == 'workflow_dispatch'", "!inputs.quick", "github.ref != 'refs/heads/main'"):
+            self.assertIn(part, rules[merge])
+        # The gate itself is unchanged: full unless quick.
+        self.assertIn("python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}",
+                      runs["UI groups green for this app and test code"])
+        # The checkout has main's history (merge-tree needs origin/main).
+        self.assertIn("fetch-depth: 0", job_blocks(ui)["verdict"])
+
+    def test_testflight_still_runs_and_gates_every_group(self):
+        tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        jobs = job_blocks(tf)
+        # Groups "auto": only those without a full green for this content run; the gate checks
+        # every group of the big gate, full (no --quick anywhere in the TestFlight run).
+        self.assertIn("default: auto", tf)
+        self.assertIn('python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS"', jobs["ui-gate"])
+        self.assertNotIn("--quick", tf)
+        self.assertIn("stress", jobs)
+        self.assertIn("release-smoke", jobs)
+
+
 class ReleaseSkipTests(unittest.TestCase):
     """In a TestFlight run (release) CI's Mac job leaves out a step only when ui.yml, called in
     the same run right after it, builds the same thing itself (coordinator's rule for C4: no

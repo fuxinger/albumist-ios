@@ -13,6 +13,14 @@ test code (the owner's rule of 17.11.).
       daily TestFlight build (testflight.yml, gate small; the owner's decision 10 of 18.11.2026).
       The rules per group are the same; the groups left out are named in the summary and the
       text as not checked.
+  python3 .github/scripts/ui_evidence.py merge-content [--base origin/main]
+      For the "UI verdict (full)" job of a full run on a pull request's branch (the full pass
+      before the merge, the owner's decision of 20.11.2026, 17:12): exits 0 only when merging
+      this commit into --base gives the same app fingerprint and the same full test fingerprint
+      of every group as this commit (git merge-tree), so this run's greens stand for exactly
+      the content the merge brings to main. Otherwise (main changed the app or test code since
+      the branch left it, or the merge has conflicts) it names what differs: merge main into
+      the branch and run the full pass again (the groups whose keys did not change are reused).
 
 Quick mode (--quick; pull requests): the tests get SORTLY_UI_QUICK=1, and
 DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips itself (XCTSkip). Every group
@@ -703,6 +711,45 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
     return 1 if blocked else 0
 
 
+def content_differences(head, merged) -> list[str]:
+    """What differs between two trees in the keys the gate uses: the app fingerprint and each
+    group's full test fingerprint (also a group that exists in only one of them)."""
+    out = []
+    if ui_groups.app_fingerprint(head) != ui_groups.app_fingerprint(merged):
+        out.append("the app")
+    mine, theirs = ui_groups.Groups(head).fingerprints(), ui_groups.Groups(merged).fingerprints()
+    for group in sorted(set(mine) | set(theirs), key=lambda g: (g not in mine, g)):
+        if mine.get(group) != theirs.get(group):
+            out.append(f"the test code of {group}")
+    return out
+
+
+def merge_content(base: str, cwd: str = ui_groups.ROOT) -> int:
+    """The full pass before the merge (decision 20.11.2026): this commit's greens stand for the
+    merge only when the merge into `base` has the same keys (content_differences)."""
+    merged = subprocess.run(["git", "merge-tree", "--write-tree", base, "HEAD"], cwd=cwd, capture_output=True, text=True)
+    if merged.returncode != 0 or not merged.stdout.strip():
+        detail = (merged.stdout + merged.stderr).strip().splitlines()[:5]
+        print(earlier_attempts.command("error", "UI merge content",
+                                       f"this commit does not merge cleanly into {base} ({' / '.join(detail)}): "
+                                       "merge it into the branch and run the full pass again"))
+        return 1
+    tree = merged.stdout.split()[0]
+    differ = content_differences(ui_groups.GitTree("HEAD", cwd), ui_groups.GitTree(tree, cwd))
+    if differ:
+        print(earlier_attempts.command("error", "UI merge content",
+                                       f"merging into {base} changes {', '.join(differ)}: this run's greens do not "
+                                       "stand for the merge. Merge it into the branch and run the full pass again "
+                                       "(groups whose keys did not change are reused)."))
+        append("GITHUB_STEP_SUMMARY", f"**Merge content differs** from this commit ({', '.join(differ)}): "
+                                      "update the branch, then the full pass again.\n")
+        return 1
+    print(f"UI_MERGE_CONTENT same app and test fingerprints as the merge into {base} (tree {tree[:12]})")
+    append("GITHUB_STEP_SUMMARY", f"Merge into {base}: same app and test fingerprints as this commit, so this "
+                                  "run's full greens stand for the merge.\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -712,7 +759,11 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("gate")
     g.add_argument("--quick", action="store_true", help="the verdict of a quick run; never for an upload")
     g.add_argument("--groups", default="", help="check only these groups (the small gate of the daily build)")
+    m = sub.add_parser("merge-content")
+    m.add_argument("--base", default="origin/main")
     args = parser.parse_args(argv)
+    if args.command == "merge-content":
+        return merge_content(args.base)
     if args.command == "plan":
         return plan(args.groups.strip(), quick=args.quick)
     run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None

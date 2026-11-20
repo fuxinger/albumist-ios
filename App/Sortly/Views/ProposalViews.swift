@@ -949,9 +949,13 @@ struct ProposalPhotosView: View {
                         Text("\(selected.count) aus Vorschlag entfernen")
                     }
                     .disabled(selected.isEmpty)
+                    .accessibilityIdentifier("proposalPhotos.remove")
                 }
             }
         }
+        // While selecting, the tab bar goes, as in Photos: the bottom bar with the button lay
+        // behind it (review P3-01 = G3-04, screenshot ui-08a-suggestion-photos).
+        .toolbarVisibility(selecting ? .hidden : .automatic, for: .tabBar)
         .confirmationDialog("Fotos aus diesem Vorschlag entfernen?", isPresented: $confirmRemove, titleVisibility: .visible) {
             Button("Entfernen", role: .destructive) {
                 let chosen = selected

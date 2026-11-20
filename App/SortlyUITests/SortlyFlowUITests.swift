@@ -60,6 +60,12 @@ final class SortlyFlowUITests: XCTestCase {
         return button
     }
 
+    /// The tab bar can be tapped (it is hidden while photos are selected, as in Photos).
+    private func tabBarHittable() -> Bool {
+        let bar = app.tabBars.firstMatch
+        return bar.exists && bar.isHittable
+    }
+
     private func anything(_ text: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
@@ -669,6 +675,12 @@ final class SortlyFlowUITests: XCTestCase {
                 if photos.count >= 2 { photos.element(boundBy: 0).tap(); photos.element(boundBy: 1).tap() }
                 sleep(1)
                 shot("16-selection")
+                // Review P3-01 = G3-04: while selecting, the tab bar is gone and the actions are in
+                // the system bottom bar, free to tap (a bar of its own floated above the tab bar).
+                let add = button("Zu Album hinzufügen")
+                UITestWait.until("library actions free to tap while selecting", timeout: 5) {
+                    add.exists && add.isHittable && !tabBarHittable()
+                }
                 if tap(button("Zu Album hinzufügen"), "add to album") {
                     sleep(2)
                     shot("17-add-to-album"); audit("add to album")
@@ -1702,5 +1714,75 @@ final class SortlyFlowUITests: XCTestCase {
         let untouched = row.waitForExistence(timeout: 5) && rowSays("Name fehlt") && !rowSays("Ausgewählt")
         print(untouched ? "UI_STEP_OK personal place untouched" : "UI_STEP_MISSING personal place untouched")
         XCTAssertTrue(untouched, "Going back from the named place stored the name or selected the suggestion")
+    }
+
+    // MARK: Taking a photo out of a suggestion
+
+    /// Review P3-01 = G3-04 (18.11.): "N aus Vorschlag entfernen" sat in the bottom bar behind
+    /// the tab bar (screenshot ui-08a-suggestion-photos), and test1 only selected a photo and
+    /// never tapped the button. Here a photo is selected, the button is tapped and confirmed,
+    /// and the suggestion has one photo less: in the title of its photos and in "Alle N Fotos
+    /// ansehen". While selecting, the tab bar is hidden (as in Photos); afterwards it is back.
+    func testRemovePhotoFromSuggestion() {
+        continueAfterFailure = true
+        completeOnboardingIfCutOff("testRemovePhotoFromSuggestion")
+        prepare()
+        guard tap(reviewSuggestionsButton(), "open suggestions to remove a photo", timeout: 30),
+              tap(suggestionRow(), "open a suggestion to remove a photo", timeout: 10),
+              UITestWait.appears(app.navigationBars["Vorschlag"], "suggestion detail", timeout: 5) else { return }
+        let all = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Alle ")).firstMatch
+        guard tap(all, "open all photos of the suggestion", timeout: 5) else { return }
+        let photo = app.buttons["proposalPhotos.photo"].firstMatch
+        guard UITestWait.appears(photo, "photos of the suggestion", timeout: 5) else { return }
+
+        // "31 Fotos": the title of the suggestion's photos is their number.
+        func count() -> Int? {
+            let bar = app.navigationBars.firstMatch
+            let titled = bar.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ Fotos?")).firstMatch
+            let title = bar.identifier.contains("Foto") ? bar.identifier : (titled.exists ? titled.label : "")
+            return title.firstMatch(of: #/([0-9.]+) Fotos?/#).flatMap { Int($0.1.replacingOccurrences(of: ".", with: "")) }
+        }
+        var seen: Int?
+        UITestWait.until("number of the suggestion's photos", timeout: 5) {
+            seen = count()
+            return seen != nil
+        }
+        guard let before = seen else { return }
+        print("UI_FACT suggestion photos before \(before)")
+        guard before >= 2 else {
+            XCTFail("The first suggestion has \(before) photo(s): nothing to take out and keep")
+            return
+        }
+
+        guard tap(button("Auswählen"), "select a photo to take out", timeout: 5) else { return }
+        photo.tap()
+        let remove = app.buttons["proposalPhotos.remove"]
+        // The button names one photo and is not behind the tab bar: the tab bar is hidden.
+        let free = UITestWait.until("remove button free to tap", timeout: 5) {
+            remove.exists && remove.isEnabled && remove.label.hasPrefix("1 ") && remove.isHittable && !tabBarHittable()
+        }
+        shot("08e-remove-from-suggestion")
+        guard free else { return }
+        remove.tap()
+        let confirm = app.buttons["Entfernen"]
+        guard tap(confirm, "confirm taking the photo out", timeout: 5) else { return }
+
+        var after: Int?
+        let fewer = UITestWait.until("suggestion has one photo less", timeout: 15) {
+            after = count()
+            return after == before - 1
+        }
+        print("UI_FACT suggestion photos after \(after.map { String($0) } ?? "-")")
+        XCTAssertEqual(after, before - 1, "Taking one photo out of the suggestion did not lower its count by one")
+        guard fewer else { return }
+        // Selecting ended: the tab bar is back, the bottom bar gone.
+        UITestWait.until("tab bar back after taking the photo out", timeout: 5) { tabBarHittable() && !remove.exists }
+        shot("08f-photo-taken-out")
+
+        back()
+        // "Alle 2 Fotos ansehen", or "1 Foto ansehen" when one photo is left (the singular has no "Alle").
+        let detailSays = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                                          "Alle \(before - 1) Foto", "\(before - 1) Foto ")).firstMatch
+        UITestWait.appears(detailSays, "suggestion says \(before - 1) photos", timeout: 5)
     }
 }

@@ -89,6 +89,9 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 20.11.: Auswählen wie in Fotos: Solange Fotos ausgewählt werden, ist die Tab-Leiste ausgeblendet. „N aus Vorschlag
+  entfernen“ lag hinter der Tab-Leiste und lässt sich jetzt antippen; in der Mediathek stehen „Zu Album hinzufügen“,
+  die Zahl der ausgewählten Fotos und „Ignorieren“ in der Leiste unten statt in einer eigenen Leiste über den Tabs (P3-01 = G3-04).
 - 19.11.: Vorschau vor dem Anlegen: Der Hinweis bei einem schon vorhandenen Albumnamen sagt jetzt, dass danach zwei
   Alben mit diesem Namen da sind (Albumist hängt keinen Zusatz an, P2-02). Der Titel folgt dem Schritt: „Vorschau“,
   „Alben werden angelegt“, „Alben werden geändert“ (Rückgängig), „Ergebnis“ (P3-15, `PlanReviewPhase`).

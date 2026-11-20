@@ -34,7 +34,10 @@ import UIKit
 /// - findings on disabled controls (WCAG 1.4.3 exempts inactive components)
 /// - findings on or under the system's Liquid Glass bars (navigation bar, tab bar, toolbar,
 ///   bottom search field): XCTest cannot measure text on glass (Apple's own "Fertig" button
-///   fails there), and content scrolling under a bar is cut by design
+///   fails there), and content scrolling under a bar is cut by design; so is content passing
+///   under the preview's own opaque bar with "Alben jetzt anlegen" ("plan.bar", review P3-05).
+///   The elements inside that bar (its promise, button and notes) are not exempt: they are
+///   audited like any content and fail the test (`ownBarElements`)
 /// - contrast findings without an element on screens with such a bar: XCTest found text it
 ///   cannot attribute (text inside a combined row), which in the UI flow was always a row
 ///   passing under the tab bar
@@ -66,6 +69,10 @@ final class AccessibilityUITests: XCTestCase {
     private var framesBeforeAudit: [String: [CGRect]] = [:]
     /// Labelled pictures that contain text (share image preview).
     private var pictureFrames: [CGRect] = []
+    /// The elements inside the preview's own bar ("plan.bar": promise, "Alben jetzt anlegen",
+    /// notes) by label and frame, noted with the chrome frames: audited like any content, a
+    /// finding on them fails as before; only what passes under the bar counts as under a bar.
+    private var ownBarElements: [(label: String, frame: CGRect)] = []
     /// "Contrast failed" findings waiting for the second contrast audit.
     private var pendingContrast: [(label: String, line: String, detail: String)] = []
 
@@ -333,6 +340,7 @@ final class AccessibilityUITests: XCTestCase {
                 // The plan itself, not its spinner: the screen opens with "Plan wird erstellt".
                 UITestWait.disappears(anything(exactly: w.planLoading), "\(tag) starter plan made", timeout: 30)
                 check("\(tag) plan", english: english)
+                expectApplyInReach("\(tag) plan", required: applyStarter)
                 if !short {
                     app.swipeUp(); app.swipeUp()
                     check("\(tag) plan lower", english: english)
@@ -536,7 +544,9 @@ final class AccessibilityUITests: XCTestCase {
     }
 
     /// Frames of the system's Liquid Glass chrome: navigation bars, tab bar, toolbars and
-    /// search fields (in iOS 26 a sheet's search field floats at the bottom like a toolbar).
+    /// search fields (in iOS 26 a sheet's search field floats at the bottom like a toolbar),
+    /// and the preview's own bar at the bottom ("plan.bar"), whose own elements are noted in
+    /// `ownBarElements` and stay audited.
     private func chromeFrames() -> [CGRect] {
         var frames: [CGRect] = []
         // The keyboard covers content like a bar does.
@@ -557,6 +567,22 @@ final class AccessibilityUITests: XCTestCase {
         for field in app.searchFields.allElementsBoundByIndex where field.exists {
             frames.append(field.frame.insetBy(dx: -8, dy: -8))
         }
+        // The preview's own bar with "Alben jetzt anlegen" (`PlanReviewView.applyBar`, review
+        // P3-05): opaque, so a row passing under it is cut by design, as under the tab bar. The
+        // elements inside it are noted (`ownBarElements`) and audited like any content: the
+        // screen's main action fails the test as before. Without them (no snapshot of the bar)
+        // the bar is not counted at all, so its button never passes as something under it.
+        ownBarElements = []
+        for bar in app.descendants(matching: .any).matching(identifier: "plan.bar").allElementsBoundByIndex where bar.exists {
+            guard let snapshot = try? bar.snapshot() else { continue }
+            frames.append(snapshot.frame)
+            // The bar itself and everything inside it.
+            var inside: [any XCUIElementSnapshot] = [snapshot]
+            while let element = inside.popLast() {
+                ownBarElements.append((element.label.trimmingCharacters(in: .whitespacesAndNewlines), element.frame))
+                inside += element.children
+            }
+        }
         // Only real bars count: at the top or bottom edge and not taller than the keyboard
         // (45 % of the screen). Anything else would exempt the middle of the screen.
         let screen = app.frame
@@ -567,6 +593,16 @@ final class AccessibilityUITests: XCTestCase {
         let described = frames.map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" }.joined(separator: "; ")
         print("A11Y_CHROME \(frames.count) frames, \(bars.count) used: \(described)")
         return bars
+    }
+
+    /// One of the elements inside the preview's own bar (`ownBarElements`): the same label and
+    /// frame. The bar does not scroll, so its elements stand where they were noted.
+    private func isOwnBarElement(label: String, frame: CGRect) -> Bool {
+        let label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ownBarElements.contains { own in
+            own.label == label && abs(own.frame.minX - frame.minX) < 1 && abs(own.frame.minY - frame.minY) < 1
+                && abs(own.frame.width - frame.width) < 1 && abs(own.frame.height - frame.height) < 1
+        }
     }
 
     private func audit(_ screen: String, chrome: [CGRect]) {
@@ -661,8 +697,8 @@ final class AccessibilityUITests: XCTestCase {
                 reason = "contrast nearly passed (system secondary text)"
             } else if type == .contrast && !element.isEnabled {
                 reason = "disabled control (WCAG exempt)"
-            } else if frames.contains(where: { frame in chrome.contains { $0.intersects(frame) } }) {
-                reason = "on or under a system Liquid Glass bar"
+            } else if !isOwnBarElement(label: label, frame: frame) && frames.contains(where: { frame in chrome.contains { $0.intersects(frame) } }) {
+                reason = "on or under a system Liquid Glass bar, or under the preview's own bar"
             } else if Self.isEmojiOnly(label) {
                 reason = "emoji only (a flag is a picture, not text)"
             } else if pictureFrames.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(frame) }) {
@@ -760,8 +796,9 @@ final class AccessibilityUITests: XCTestCase {
             seen += 1
             let frame = node.frame
             let visible = !frame.isEmpty && frame.intersects(bounds)
-            let inChrome = chrome.contains { $0.intersects(frame) }
             let label = node.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            // The preview bar's own elements are content, not something under a bar.
+            let inChrome = !isOwnBarElement(label: label, frame: frame) && chrome.contains { $0.intersects(frame) }
             let type = node.elementType
             if !label.isEmpty { framesBeforeAudit[label, default: []].append(frame) }
             if type == .image && !label.isEmpty && frame.width >= 80 && frame.height >= 80 {
@@ -1063,6 +1100,27 @@ final class AccessibilityUITests: XCTestCase {
         UITestOnboarding.clock("tap \(step)")
         origin.withOffset(CGVector(dx: element.frame.midX, dy: (clear.top + clear.bottom) / 2)).tap()
         return true
+    }
+
+    /// "Alben jetzt anlegen" is in reach as the plan opens, without scrolling and clear of the tab
+    /// bar, at this walk's text size and orientation (review P3-05 = G3-05: it stood at the end
+    /// of the plan, below the fold). Content under the tab bar counts as hittable for XCUITest,
+    /// so the frame is read too. `required`: the walk applies the plan next, so the button has to
+    /// be there; otherwise a plan that something stops (no button) is only reported.
+    private func expectApplyInReach(_ step: String, required: Bool) {
+        let apply = app.buttons["plan.apply"]
+        guard required || apply.waitForExistence(timeout: 5) else {
+            print("UI_FACT \(step): no \"plan.apply\" (something stops the plan), its reach not checked")
+            return
+        }
+        let tabs = app.tabBars.firstMatch
+        let reached = UITestWait.until("\(step): button in reach without scrolling", timeout: 10) {
+            apply.exists && apply.isHittable && app.frame.contains(apply.frame)
+                && (!tabs.exists || apply.frame.maxY <= tabs.frame.minY + 1)
+        }
+        if !reached {
+            print("UI_FACT \(step): button \(apply.exists ? "\(apply.frame)" : "missing"), tab bar \(tabs.exists ? "\(tabs.frame)" : "missing")")
+        }
     }
 
     @discardableResult

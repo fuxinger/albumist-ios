@@ -64,6 +64,22 @@ final class SortlyLockedUITests: XCTestCase {
         }
     }
 
+    /// `element` is in sight as the plan opens, without scrolling and clear of the tab bar
+    /// (review P3-05 = G3-05: the button and the unlock card stood at the end of the plan, below
+    /// the fold). Content under the tab bar counts as hittable for XCUITest, so the frame is read.
+    @discardableResult
+    private func expectInReach(_ element: XCUIElement, _ what: String) -> Bool {
+        let tabs = app.tabBars.firstMatch
+        let reached = UITestWait.until("\(what) in reach without scrolling", timeout: 10) {
+            element.exists && element.isHittable && app.frame.contains(element.frame)
+                && (!tabs.exists || element.frame.maxY <= tabs.frame.minY + 1)
+        }
+        if !reached {
+            print("UI_FACT \(what): \(element.exists ? "\(element.frame)" : "missing"), tab bar \(tabs.exists ? "\(tabs.frame)" : "missing")")
+        }
+        return reached
+    }
+
     /// The number on "N Vorschläge prüfen", 0 without the button.
     private func openSuggestionCount() -> Int {
         let review = reviewSuggestionsButton()
@@ -326,6 +342,9 @@ final class SortlyLockedUITests: XCTestCase {
         }
         if cardShown {
             print("UI_STEP_OK unlock card")
+            // At the top of the plan, where "Alben jetzt anlegen" would be in reach otherwise.
+            expectInReach(unlock, "unlock card (locked)")
+            shot("74-locked-plan-unlock")
             XCTAssertFalse(app.buttons["plan.apply"].exists, "A plan over the free albums offered \"Alben jetzt anlegen\"")
             // With or without a price from StoreKit (W7: "Preis wird geladen …" until it is there).
             XCTAssertTrue(app.buttons["unlock.buy"].exists, "No unlock button")
@@ -337,6 +356,8 @@ final class SortlyLockedUITests: XCTestCase {
         let start = app.buttons["plan.apply"]
         // Waited for (also after "jetzt kostenlos anlegen", which had a fixed 3 s before).
         UITestWait.appears(start, "the plan within the free albums can be applied (locked)", timeout: 23)
+        expectInReach(start, "\"Alben jetzt anlegen\" (locked)")
+        shot("75-locked-plan-free")
         // What is free afterwards: the free albums less what this plan uses ("Die ersten N"
         // made the plan anew, so its summary is read again).
         let used = cardShown ? (rowCount("Neue Alben", timeout: 10) ?? 0) + (rowCount("Ergänzte Alben", timeout: 0) ?? 0) : planned

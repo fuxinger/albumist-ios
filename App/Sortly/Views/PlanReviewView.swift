@@ -6,6 +6,11 @@ import SortlyEngine
 /// Final preview before anything changes (prompt §7, Schritt 8–10): summary, guarantees,
 /// conflicts, execution with progress, result and undo.
 ///
+/// The button that runs the plan stands at the bottom of the screen, above the tab bar, with the
+/// promise in one line above it (`applyBar`; review P3-05 = G3-05: it was the last thing of the
+/// plan, below the fold, and so were the promises). It is there only while the plan is on screen
+/// and can run; what stops the plan stands at the top of the plan instead (`Obstacle`).
+///
 /// The body only reads what it shows. Everything worked out from the plan (summary, album
 /// list, conflict texts, free albums, the albums of the sorting show) is `PlanReviewFacts`,
 /// made off the main thread once per plan and album list; the step counter while the plan
@@ -29,6 +34,9 @@ struct PlanReviewView: View {
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
+    /// At the accessibility text sizes and in landscape on an iPhone the bar is compact (`compactBar`).
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     /// The screen loads once; coming back from another tab keeps the result and its undo.
     @State private var didLoad = false
     private static let top = "plan.top"
@@ -71,10 +79,8 @@ struct PlanReviewView: View {
                         // screen neither jumps to the top nor takes away "Anlegen" while Photos
                         // reports a change.
                         ProgressView("Plan wird erstellt").frame(maxWidth: .infinity).padding(.top, 60)
-                    } else if let plan = model.plan, let facts {
-                        planContent(plan, facts) {
-                            reader.scrollTo(Self.top, anchor: .top)
-                        }
+                    } else if let previewed {
+                        planContent(previewed.plan, previewed.facts, obstacle: previewed.obstacle)
                     } else {
                         ContentUnavailableView("Nichts zu tun", systemImage: "checkmark.circle",
                                                description: Text("Es gibt gerade keine ausgewählten Vorschläge."))
@@ -88,6 +94,17 @@ struct PlanReviewView: View {
                 }
                 .padding(Theme.Spacing.l)
                 .id(Self.top)
+            }
+            // The button in reach while the plan scrolls under it (review P3-05 = G3-05). In the
+            // safe area, so above the tab bar and never behind it; only while the plan is on
+            // screen and can run: not during the sorting show, the run or over the result.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let previewed, previewed.obstacle == nil {
+                    applyBar(previewed.plan, previewed.facts) {
+                        reader.scrollTo(Self.top, anchor: .top)
+                    }
+                    .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
         }
         .background(Theme.background)
@@ -132,6 +149,33 @@ struct PlanReviewView: View {
                         inventory: model.inventoryVersion)
     }
 
+    /// The plan on screen, with what stops it: nil during the sorting show, the run, over a
+    /// result and while the plan is made. One value for the plan and the bar under it, so the
+    /// button never stands where the plan is not shown.
+    private var previewed: (plan: ChangePlan, facts: PlanReviewFacts, obstacle: Obstacle?)? {
+        guard show == nil, !model.execution.isRunning, model.execution.finished == nil, !loading,
+              let plan = model.plan, let facts, factsKey.samePlan(as: factsMadeFor) else { return nil }
+        return (plan, facts, obstacle(for: plan, facts))
+    }
+
+    /// What stops the plan before it runs; shown at the top of the plan instead of the button.
+    private enum Obstacle {
+        /// Only selected photos are shared: Photos lets an app make albums only with all.
+        case fullAccess
+        /// A plan that was cut off is settled first (plugin review K2).
+        case interruptedPlan
+        /// More albums than are still free.
+        case unlock
+    }
+
+    /// In the order the preview has always asked (`AppModel.execute` and `run` ask the same).
+    private func obstacle(for plan: ChangePlan, _ facts: PlanReviewFacts) -> Obstacle? {
+        if model.access == .limited && !UITestSupport.isRunning { return .fullAccess }
+        if PlanGate.refusal(for: plan, interrupted: model.interruptedPlan) != nil { return .interruptedPlan }
+        if !purchases.allows(albums: facts.freeAlbumUse) { return .unlock }
+        return nil
+    }
+
     /// Works out what the screen shows of the current plan, off the main thread.
     private func makeFacts() async {
         guard let plan = model.plan else { return }
@@ -153,9 +197,14 @@ struct PlanReviewView: View {
 
     // MARK: Plan
 
+    /// The plan, from what stops it (if anything) to the way out. The button that runs it is
+    /// not part of it: it stands in the bar at the bottom (`applyBar`).
     @ViewBuilder
-    private func planContent(_ plan: ChangePlan, _ facts: PlanReviewFacts, scrollToTop: @escaping () -> Void) -> some View {
+    private func planContent(_ plan: ChangePlan, _ facts: PlanReviewFacts, obstacle: Obstacle?) -> some View {
         let summary = facts.summary
+        // What stops the plan is the first thing seen as the preview opens (review P3-05): it
+        // stood at the end, where the button stood, below the fold.
+        if let obstacle { obstacleCard(obstacle, facts) }
         Text("Das ändert sich in Fotos").font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
         if plan.retries != nil {
             // "Fehlendes erneut versuchen" (I16): say that this is not the whole plan again.
@@ -179,23 +228,12 @@ struct PlanReviewView: View {
 
         if !facts.albums.isEmpty { PlanAlbumList(albums: facts.albums) }
 
-        // Said as what does not happen (design review W1): "0 Originale gelöscht" left
-        // "Originale gelöscht" in the mind when skimming or listening. A number only if a
-        // plan ever were to do it.
-        Card {
-            if summary.originalsDeleted == 0 {
-                guarantee(Text("Kein Original wird gelöscht"))
-            } else {
-                warning(Text("\(summary.originalsDeleted) Originale werden gelöscht"))
-            }
-            if summary.originalCopiesCreated == 0 {
-                guarantee(Text("Es werden keine Kopien angelegt"))
-            } else {
-                warning(Text("\(summary.originalCopiesCreated) Kopien werden angelegt"))
-            }
-            Text("Fotos werden nur in Alben einsortiert. Die Originale bleiben, wo sie sind, und jede Änderung lässt sich rückgängig machen.")
-                .font(.footnote).foregroundStyle(.noteText)
-        }
+        // The promises themselves stand in one line above the button (`promise`); what they
+        // mean stays here, under the albums.
+        Text("Fotos werden nur in Alben einsortiert. Die Originale bleiben, wo sie sind, und jede Änderung lässt sich rückgängig machen.")
+            .font(.footnote).foregroundStyle(.noteText)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, Theme.Spacing.l)
 
         if !facts.conflicts.isEmpty {
             Card {
@@ -207,11 +245,33 @@ struct PlanReviewView: View {
             }
         }
 
-        let blocking = facts.isBlocking
-        let albums = facts.freeAlbumUse
-        if model.access == .limited && !UITestSupport.isRunning {
+        // Where room is short the bar holds the button and what explains it (`compactBar`); the
+        // promise and the free albums left stand here, at the end of the plan.
+        if obstacle == nil && compactBar {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                promise(summary)
+                freeAlbumNote(facts)
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+        }
+        if prebuilt == nil && hasSelection {
+            // The way out: nothing selected, back to the open suggestions.
+            Button("Auswahl aufheben") {
+                model.clearSelection()
+                dismiss()
+            }
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+    }
+
+    /// What stops the plan, in the words it always had; it stands where the preview opens.
+    @ViewBuilder
+    private func obstacleCard(_ obstacle: Obstacle, _ facts: PlanReviewFacts) -> some View {
+        switch obstacle {
+        case .fullAccess:
             FullAccessCard()
-        } else if PlanGate.refusal(for: plan, interrupted: model.interruptedPlan) != nil {
+        case .interruptedPlan:
             // One plan at a time (plugin review K2): the one that was cut off is settled first.
             Card {
                 // Names what was cut off: creating albums or taking them back.
@@ -224,52 +284,111 @@ struct PlanReviewView: View {
                     .font(.subheadline).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        } else if !purchases.allows(albums: albums) {
-            UnlockCard(albumsInPlan: albums, onLimit: limitToFreeAlbums)
-        } else {
-            Button {
-                let albums = SortingShow.albums(from: facts.filledAlbums)
-                if !albums.isEmpty {
-                    withAnimation(.smooth(duration: 0.4)) {
-                        show = albums
-                        scrollToTop()
-                    }
+        case .unlock:
+            UnlockCard(albumsInPlan: facts.freeAlbumUse, onLimit: limitToFreeAlbums)
+        }
+    }
+
+    /// The bar at the bottom of the preview, as in Apple's own confirmations: the promise in
+    /// one line, the button, and what the button needs said. On the screen's background, so
+    /// the plan that scrolls under it never shows through its words, and inside the safe area,
+    /// so it ends above the tab bar.
+    private func applyBar(_ plan: ChangePlan, _ facts: PlanReviewFacts, scrollToTop: @escaping () -> Void) -> some View {
+        VStack(spacing: Theme.Spacing.s) {
+            if !compactBar { promise(facts.summary) }
+            applyButton(plan, facts, scrollToTop: scrollToTop)
+            // Why the button waits and that iOS asks next: beside it at every size (P3-07).
+            applyNotes(facts)
+            if !compactBar { freeAlbumNote(facts) }
+        }
+        .multilineTextAlignment(.center)
+        // As the onboarding's button: clear of the tab bar, which takes taps a little above it.
+        .padding(.horizontal, Theme.Spacing.l)
+        .padding(.vertical, Theme.Spacing.m)
+        .frame(maxWidth: .infinity)
+        .background(Theme.background)
+        // A container of its own: an identifier on a plain container is handed down to every
+        // element inside (`EmptyLibraryCard`), and the button keeps "plan.apply". The
+        // accessibility test counts rows passing under the bar as cut, as under the tab bar.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("plan.bar")
+    }
+
+    /// Where room is short the bar holds the button and what explains it, nothing more: at the
+    /// accessibility text sizes, and in landscape on an iPhone, where the whole bar could fill
+    /// most of the room between the navigation bar and the tab bar (second review of P3-05).
+    private var compactBar: Bool {
+        typeSize.isAccessibilitySize || verticalSizeClass == .compact
+    }
+
+    /// Runs the plan, with the sorting show when photos go into albums.
+    private func applyButton(_ plan: ChangePlan, _ facts: PlanReviewFacts, scrollToTop: @escaping () -> Void) -> some View {
+        Button {
+            let albums = SortingShow.albums(from: facts.filledAlbums)
+            if !albums.isEmpty {
+                withAnimation(.smooth(duration: 0.4)) {
+                    show = albums
+                    scrollToTop()
                 }
-                Task { await model.execute(plan) }
-            } label: {
-                applyTitle(summary)
             }
-            .buttonStyle(PrimaryButtonStyle())
-            // Not while a change in "Dein Zuhause" makes the suggestions again (the plan would
-            // not start, after the fly animation).
-            .disabled(blocking || facts.hasNoSteps || model.homeChangeRunning)
-            .accessibilityIdentifier("plan.apply")
-            if blocking {
-                Text("Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“.")
-                    .font(.footnote).foregroundStyle(.noteText)
-            }
-            // A removal from "Alben von Albumist", or the retry of one, deletes albums: iOS asks
-            // right after this button, and this screen is the confirmation before it (review
-            // 18.11., P3-07).
-            if summary.deletedContainers > 0 {
-                DeleteQuestionNote.text
-                    .font(.footnote).foregroundStyle(.noteText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !purchases.isUnlocked && !Purchases.unlockedForUITests && albums > 0 && purchases.allows(albums: albums) {
-                Text("Kostenlos. Danach hast du noch \(purchases.remainingFreeAlbums - albums) von \(Purchases.freeAlbumLimit) Gratis-Alben.")
-                    .font(.footnote).foregroundStyle(.noteText)
+            Task { await model.execute(plan) }
+        } label: {
+            applyTitle(facts.summary)
+        }
+        .buttonStyle(PrimaryButtonStyle())
+        // Not while a change in "Dein Zuhause" makes the suggestions again (the plan would
+        // not start, after the fly animation).
+        .disabled(facts.isBlocking || facts.hasNoSteps || model.homeChangeRunning)
+        .accessibilityIdentifier("plan.apply")
+    }
+
+    /// What the button needs said beside it at every size: why it waits, and that iOS asks
+    /// next (second review of P3-05: at the accessibility sizes both stood at the end of the
+    /// plan, and a removal could be started without the iOS question announced).
+    @ViewBuilder
+    private func applyNotes(_ facts: PlanReviewFacts) -> some View {
+        let summary = facts.summary
+        if facts.isBlocking {
+            Text("Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“.")
+                .font(.footnote).foregroundStyle(.noteText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        // A removal from "Alben von Albumist", or the retry of one, deletes albums: iOS asks
+        // right after this button, and this screen is the confirmation before it (review
+        // 18.11., P3-07).
+        if summary.deletedContainers > 0 {
+            DeleteQuestionNote.text
+                .font(.footnote).foregroundStyle(.noteText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The free albums this plan leaves: under the button, or at the end of the plan where
+    /// room is short (`compactBar`).
+    @ViewBuilder
+    private func freeAlbumNote(_ facts: PlanReviewFacts) -> some View {
+        let albums = facts.freeAlbumUse
+        if !purchases.isUnlocked && !Purchases.unlockedForUITests && albums > 0 && purchases.allows(albums: albums) {
+            Text("Kostenlos. Danach hast du noch \(purchases.remainingFreeAlbums - albums) von \(Purchases.freeAlbumLimit) Gratis-Alben.")
+                .font(.footnote).foregroundStyle(.noteText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The two promises in one line (review P3-05; design review W1: said as what does not
+    /// happen, as "0 Originale gelöscht" left "Originale gelöscht" in the mind when skimming or
+    /// listening). A number only if a plan ever were to do it.
+    private func promise(_ summary: PlanSummary) -> some View {
+        Group {
+            if summary.originalsDeleted == 0 && summary.originalCopiesCreated == 0 {
+                guarantee(Text("Kein Original wird gelöscht oder kopiert.").foregroundStyle(.noteText))
+            } else {
+                if summary.originalsDeleted > 0 { warning(Text("\(summary.originalsDeleted) Originale werden gelöscht")) }
+                if summary.originalCopiesCreated > 0 { warning(Text("\(summary.originalCopiesCreated) Kopien werden angelegt")) }
             }
         }
-        if prebuilt == nil && hasSelection {
-            // The way out: nothing selected, back to the open suggestions.
-            Button("Auswahl aufheben") {
-                model.clearSelection()
-                dismiss()
-            }
-            .font(.subheadline.weight(.semibold))
-            .frame(maxWidth: .infinity, minHeight: 44)
-        }
+        .font(.footnote)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// "Die ersten N jetzt anlegen", only for plans built from accepted suggestions.

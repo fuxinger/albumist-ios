@@ -97,6 +97,12 @@
   verweigert hat, sagt die kurze Zeile „Läuft, solange Albumist offen ist“ statt der Fertig-Uhrzeit (die steht dann
   in „Details“). Der Sperrbildschirm sagt nun ebenfalls „Läuft im Hintergrund weiter, dort aber langsamer“ statt
   „Läuft weiter, auch wenn du die App verlässt“ (P3-08, P4-13).
+- 20.11.: Vorschau: „Alben jetzt anlegen“ steht unten über der Tab-Leiste und ist ohne Scrollen erreichbar, darüber in
+  einer Zeile „Kein Original wird gelöscht oder kopiert.“ (vorher beides erst am Ende der Albenliste). Was den Plan
+  aufhält (voller Zugriff nötig, unterbrochenes Anlegen, Albumist freischalten), steht jetzt oben in der Vorschau, und
+  dann gibt es keinen Knopf; während der Sortier-Show und über dem Ergebnis steht die Leiste nicht. Bei den größten
+  Schriftgrößen und quer auf dem iPhone bleiben unten der Knopf und was zu ihm gehört (warum er wartet, die Rückfrage
+  von iOS vor dem Löschen von Alben); die Zusage und die Zahl der Gratis-Alben stehen dann am Ende (P3-05 = G3-05).
 - 20.11.: Kleine graue Texte (Fußnoten, Zahlen, Erklärungen auf Karten und in Listen) sind gut lesbar und bleiben doch heller als der Haupttext: das neue Grau `.noteText` (`Theme.noteText`, hell 5,9:1 auf weißen Karten statt 3,4:1, überall mindestens 4,6:1; dunkel 7,5:1 auf Karten, mindestens 4,7:1; mit erhöhtem Kontrast deutlich stärker) an 145 Stellen in 21 Dateien statt des System-Graus. Das dunklere `Theme.secondaryText` bleibt für Text auf dem Farbschein der Fotos. `secondary_text_rule.py` lehnt neues kleines System-Grau ab (P3-14).
 - 20.11.: Auswählen wie in Fotos: Solange Fotos ausgewählt werden, ist die Tab-Leiste ausgeblendet. „N aus Vorschlag
   entfernen“ lag hinter der Tab-Leiste und lässt sich jetzt antippen; in der Mediathek stehen „Zu Album hinzufügen“,

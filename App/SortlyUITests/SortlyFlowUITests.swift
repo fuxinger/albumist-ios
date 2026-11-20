@@ -100,6 +100,29 @@ final class SortlyFlowUITests: XCTestCase {
         return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
     }
 
+    /// The preview's next step is in reach as it opens, without scrolling and clear of the tab
+    /// bar: "Alben jetzt anlegen" in the bar at the bottom, or the unlock card at the top of the
+    /// plan in its place (review P3-05 = G3-05: both stood at the end of the plan, below the
+    /// fold). Content under the tab bar counts as hittable for XCUITest, so the frame is read too.
+    @discardableResult
+    private func expectPlanStartInReach(_ step: String) -> Bool {
+        let tabs = app.tabBars.firstMatch
+        func inReach(_ element: XCUIElement) -> Bool {
+            guard element.exists, element.isHittable else { return false }
+            let frame = element.frame
+            return app.frame.contains(frame) && (!tabs.exists || frame.maxY <= tabs.frame.minY + 1)
+        }
+        let apply = app.buttons["plan.apply"]
+        let unlock = app.staticTexts["Albumist freischalten"]
+        let reached = UITestWait.until("\(step): start in reach without scrolling", timeout: 30) {
+            inReach(apply) || inReach(unlock)
+        }
+        if !reached {
+            print("UI_FACT \(step): button \(apply.exists ? "\(apply.frame)" : "missing"), tab bar \(tabs.exists ? "\(tabs.frame)" : "missing")")
+        }
+        return reached
+    }
+
     private func back() {
         let bar = app.navigationBars.firstMatch
         if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
@@ -548,6 +571,7 @@ final class SortlyFlowUITests: XCTestCase {
             // The plan's content, not only its bar: the start button, the unlock card or the album
             // list ("Plan wird erstellt" before it). Not asserted: only the screenshot needs it.
             _ = UITestWait.holds(timeout: 20) { planContentShown() }
+            if preview { expectPlanStartInReach("starter preview") }
             shot("06c-starter-plan")
             back()
             // pacing: kept, the check below says nothing got selected, and it looks after the
@@ -669,6 +693,7 @@ final class SortlyFlowUITests: XCTestCase {
                 app.buttons["plan.apply"].exists || app.staticTexts["Albumist freischalten"].exists || list.exists
             }
             UITestWait.atLeast(3, since: shownAt)
+            expectPlanStartInReach("plan")
             shot("10-plan"); audit("plan")
             print(list.waitForExistence(timeout: 5) ? "UI_STEP_OK plan lists albums" : "UI_STEP_MISSING plan lists albums")
             if list.exists {

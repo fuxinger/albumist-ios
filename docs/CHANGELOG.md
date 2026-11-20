@@ -52,7 +52,8 @@
 ### Geändert
 - 20.11. (P3-09, P3-18, Entscheidung Fuchs 17.11. „Unsortiert“): Ein Wort für eine Sache.
   „Rückgängig machen“ für alles, was Albumist angelegt hat („Alles rückgängig machen“, „Rest
-  rückgängig machen“, in der Reise-Werkstatt statt „Aufheben“), „Widerrufen“ nur im kurzen
+  rückgängig machen“, in der Reise-Werkstatt statt „Aufheben“, auch die Meldungen nach einem
+  unterbrochenen Rückgängigmachen: „Dort kannst du den Rest rückgängig machen.“), „Widerrufen“ nur im kurzen
   Hinweis direkt danach; Belege sagen „Vollständig angelegt“, „Angelegt am“ (beim Entfernen
   „entfernt“, beim Rückgängigmachen „Vollständig rückgängig gemacht“, „Teilweise rückgängig
   gemacht“, auch in Albumzeilen und im geteilten Text) statt „umgesetzt“; „Unsortiert“ statt „Nicht sortiert“ (Liste, Foto-Info, Suche);

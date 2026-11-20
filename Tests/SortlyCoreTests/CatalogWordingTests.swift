@@ -69,20 +69,10 @@ struct CatalogWordingTests {
         ("\\btest run\\b", "Albumist works with"),
     ]
 
-    /// Texts of `AppModel.swift`, which other work changes at the same time: to be reworded
-    /// there („rückgängig machen“), then removed here. Each is still in the catalog.
-    static let rewordedElsewhere: [String: String] = [
-        "Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.":
-            "AppModel.swift (other work): „Ein früheres Rückgängigmachen …“",
-        "Nicht alles ließ sich zurücknehmen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest zurücknehmen.":
-            "AppModel.swift (other work): „… rückgängig machen. … den Rest rückgängig machen.“",
-        "Albumist konnte den unterbrochenen Vorgang gerade nicht zurücknehmen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn zurücknehmen.":
-            "AppModel.swift (other work): „… nicht rückgängig machen. … ihn rückgängig machen.“",
-        "Erst das unterbrochene Zurücknehmen abschließen":
-            "AppModel.swift (other work); PlanReviewView already says „Erst das unterbrochene Rückgängigmachen abschließen“",
-        "Albumist hat zurückgenommen, was sicher von Albumist war.":
-            "AppModel.swift (other work): „Albumist hat rückgängig gemacht, …“",
-    ]
+    /// Texts of files that other work changes at the same time: to be reworded there, then
+    /// removed here. Each is still in the catalog. Empty: the texts of `AppModel.swift` say
+    /// „rückgängig machen“ too (second review of P3-09).
+    static let rewordedElsewhere: [String: String] = [:]
 
     static func matches(_ text: String, _ pattern: String) -> Bool {
         text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
@@ -162,6 +152,9 @@ struct CatalogWordingTests {
         // The undo of an interrupted plan.
         ("Alles rückgängig machen", "Undo Everything"),
         ("Rest rückgängig machen", "Undo the Rest"),
+        // The message that points to it.
+        ("Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen.",
+         "Not everything could be undone. The interrupted run is now in Settings › History and Undo, where you can undo the rest."),
         // Right after „Ignorieren“, as in iOS.
         ("Widerrufen", "Undo"),
         // The receipt.

@@ -11251,12 +11251,12 @@
         }
       }
     },
-    "Nicht alles ließ sich zurücknehmen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest zurücknehmen." : {
+    "Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Not everything could be taken back. The interrupted run is now in Settings › History and Undo, where you can take back the rest."
+            "value" : "Not everything could be undone. The interrupted run is now in Settings › History and Undo, where you can undo the rest."
           }
         }
       }
@@ -11361,12 +11361,12 @@
         }
       }
     },
-    "Albumist konnte den unterbrochenen Vorgang gerade nicht zurücknehmen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn zurücknehmen." : {
+    "Albumist konnte den unterbrochenen Vorgang gerade nicht rückgängig machen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn rückgängig machen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist couldn’t take back the interrupted changes just now. They are now under Settings › History and Undo, where you can take them back."
+            "value" : "Albumist couldn’t undo the interrupted changes just now. They are now under Settings › History and Undo, where you can undo them."
           }
         }
       }
@@ -11481,7 +11481,7 @@
         }
       }
     },
-    "Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter." : {
+    "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -11497,16 +11497,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Undoing earlier changes was interrupted. Decide on the overview how to go on. Then you can continue here, and nothing is undone twice."
-          }
-        }
-      }
-    },
-    "Erst das unterbrochene Zurücknehmen abschließen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Finish the Interrupted Undo First"
           }
         }
       }
@@ -13821,12 +13811,12 @@
         }
       }
     },
-    "Albumist hat zurückgenommen, was sicher von Albumist war." : {
+    "Albumist hat rückgängig gemacht, was sicher von Albumist war." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist took back everything that was surely its own."
+            "value" : "Albumist undid everything that was surely its own."
           }
         }
       }

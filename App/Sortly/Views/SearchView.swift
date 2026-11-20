@@ -223,7 +223,7 @@ struct SearchView: View {
             .scrollIndicators(.hidden)
         }
         HStack {
-            Text("\(result.ids.count.formatted()) Treffer").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+            Text("\(result.ids.count) \(result.ids.count.formatted()) Treffer").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
                 .accessibilityIdentifier("search.count")
             Spacer()
             // The search becomes an album in Photos (through the normal preview).

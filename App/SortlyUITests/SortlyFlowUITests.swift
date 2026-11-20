@@ -1701,8 +1701,8 @@ final class SortlyFlowUITests: XCTestCase {
             tap(done, "close settings after restore")
         }
         if tap(app.buttons["overview.restoredFromBackup.ok"], "dismiss restored card") {
-            // The card goes (asserted right after; up to 5 s on a slow Mac).
-            _ = UITestWait.holds(timeout: 5) { !card.exists }
+            // The card goes (asserted right after, within the old second).
+            _ = UITestWait.holds(timeout: 1) { !card.exists }
             let gone = !card.exists
             print(gone ? "UI_STEP_OK restored card dismissed" : "UI_STEP_MISSING restored card dismissed")
             XCTAssertTrue(gone, "The restored card did not go away")
@@ -2050,8 +2050,8 @@ final class SortlyFlowUITests: XCTestCase {
             shot("72-adjust-with-name")
             tap(app.buttons["Abbrechen"], "close Anpassen without choosing")
             XCTAssertTrue(waitGone(title, timeout: 5), "\"Abbrechen\" did not close \"Anpassen\"")
-            // The name from "Anpassen" in the field (asserted right after; up to 5 s on a slow Mac).
-            _ = UITestWait.holds(timeout: 5) { !changed.isEmpty && (field.value as? String ?? "") == changed }
+            // The name from "Anpassen" in the field (asserted right after, within the old second).
+            _ = UITestWait.holds(timeout: 1) { !changed.isEmpty && (field.value as? String ?? "") == changed }
             let afterwards = field.value as? String ?? ""
             print("UI_FACT name in the suggestion after Anpassen '\(afterwards)'")
             let synced = !changed.isEmpty && afterwards == changed

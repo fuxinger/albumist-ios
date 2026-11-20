@@ -121,6 +121,46 @@
         }
       }
     },
+    "%lld Fotos ohne Ort" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto ohne Ort"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos ohne Ort"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo without a location"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos without a location"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld ignorierte Fotos" : {
       "localizations" : {
         "de" : {
@@ -414,6 +454,46 @@
                 "stringUnit" : {
                   "state" : "translated",
                   "value" : "%lld days"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld ausgeschlossene Fotos" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ausgeschlossenes Foto"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ausgeschlossene Fotos"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld excluded photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld excluded photos"
                 }
               }
             }
@@ -2121,6 +2201,26 @@
         }
       }
     },
+    "Die Zahl kommt mit den ersten Vorschlägen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The number arrives with the first suggestions."
+          }
+        }
+      }
+    },
+    "Die Zahl kommt, sobald die Analyse weiterläuft." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The number arrives once the analysis continues."
+          }
+        }
+      }
+    },
     "Die pausierte Analyse läuft dann weiter." : {
       "localizations" : {
         "en" : {
@@ -2821,6 +2921,16 @@
         }
       }
     },
+    "Kein Bereich zählt als sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No area counts as sorted"
+          }
+        }
+      }
+    },
     "Kein Zugriff auf die Fotos" : {
       "localizations" : {
         "en" : {
@@ -3251,6 +3361,16 @@
         }
       }
     },
+    "Nicht mitgezählt: %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not counted: %@."
+          }
+        }
+      }
+    },
     "Nicht nachgeprüft" : {
       "localizations" : {
         "en" : {
@@ -3287,6 +3407,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nothing Left to Do"
+          }
+        }
+      }
+    },
+    "Nichts zu sortieren" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing to sort"
           }
         }
       }
@@ -3387,6 +3517,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Still free"
+          }
+        }
+      }
+    },
+    "Noch nicht gezählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not counted yet"
           }
         }
       }
@@ -4351,12 +4491,32 @@
         }
       }
     },
+    "Wird gezählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Counting"
+          }
+        }
+      }
+    },
     "Wird später fortgesetzt" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Will continue later"
+          }
+        }
+      }
+    },
+    "Wird weitergezählt, sobald die Analyse weiterläuft." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Counting resumes once the analysis continues."
           }
         }
       }
@@ -7923,6 +8083,16 @@
         }
       }
     },
+    "Zuletzt %@ von %@ sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last count: %1$@ of %2$@ sorted"
+          }
+        }
+      }
+    },
     "Zuletzt %@ von %@ sortiert. Die neue Zahl kommt mit den ersten Vorschlägen." : {
       "localizations" : {
         "en" : {
@@ -8219,6 +8389,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Creating albums was interrupted earlier. Decide on the overview how to go on; then you can continue here."
+          }
+        }
+      }
+    },
+    "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose which areas count under “Counts as Sorted” in Settings."
           }
         }
       }
@@ -9376,6 +9556,46 @@
                       "value" : "%arg different days"
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos außerhalb deiner Hauptbereiche" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto außerhalb deiner Hauptbereiche"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos außerhalb deiner Hauptbereiche"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo outside your main areas"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos outside your main areas"
                 }
               }
             }

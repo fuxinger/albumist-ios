@@ -104,18 +104,73 @@ struct OverviewView: View {
         .refreshable { await model.refreshDerived() }
     }
 
+    /// What the first card says about the sorted count, decided in `SortedCountCard` (tested on
+    /// Linux, review P3-03): with the same facts about the analysis as the card for an
+    /// empty library (`EmptyLibraryCard.state(for:)`), so the two never both stay away and
+    /// "0 von 0 sortiert" never shows; and with the analysis card below, so "Wird gezählt"
+    /// turns only while that card shows the analysis working.
+    private var sortedCount: SortedCountCard {
+        let analysis = model.analysis
+        return SortedCountCard.make(.init(
+            progress: model.progress, leftOut: model.leftOut, recount: model.recount, settings: model.settings,
+            hasSuggestions: !model.proposals.isEmpty, analysisRunning: analysis.isRunning,
+            analysisPaused: analysis.lastReport?.pausedBecause != nil || analysis.needsResume,
+            analysedOnce: AnalysisMarker.completedOnce || analysis.lastReport?.isComplete == true,
+            analysisCard: model.analysisCard))
+    }
+
     private var statusCard: some View {
         // Largest text sizes stack the ring above the text instead of squeezing it.
         let layout = typeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Spacing.m))
             : AnyLayout(HStackLayout(spacing: Theme.Spacing.l))
+        let side = min(ringSide, 150)
         return Card {
-            layout {
-                if let recount = model.recount {
+            // Every number here agrees with "Alle 246 Fotos analysiert" below: the ring's total
+            // and what it leaves out add up to those photos (P3-03).
+            switch sortedCount {
+            case .counting:
+                // No suggestion yet, so no photo can count as sorted: no "0 von 0" or "0 von 246"
+                // (first start, after the decisions came back from the backup).
+                layout {
+                    ProgressView()
+                        .controlSize(.large)
+                        .frame(width: side, height: side)
+                        .accessibilityHidden(true) // "Wird gezählt" beside it says it
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("Wird gezählt")
+                            .font(.headline)
+                        Text("Die Zahl kommt mit den ersten Vorschlägen.")
+                            .font(.subheadline)
+                            .foregroundStyle(.noteText)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            case .notCountedYet:
+                // The same before the first suggestions, while the analysis does not run (paused,
+                // waiting for the device or for Photos, ended early): nothing turns, the card
+                // below says why (second review of P3-03).
+                layout {
+                    Image(systemName: "hourglass")
+                        .font(.largeTitle)
+                        .foregroundStyle(.noteText)
+                        .frame(width: side, height: side)
+                        .accessibilityHidden(true) // "Noch nicht gezählt" beside it says it
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("Noch nicht gezählt")
+                            .font(.headline)
+                        Text("Die Zahl kommt, sobald die Analyse weiterläuft.")
+                            .font(.subheadline)
+                            .foregroundStyle(.noteText)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            case .recounting(let recount):
+                layout {
                     // Rebuilding: no false 0 %, the last count marked as being recounted.
                     ProgressView()
                         .controlSize(.large)
-                        .frame(width: min(ringSide, 150), height: min(ringSide, 150))
+                        .frame(width: side, height: side)
                         .accessibilityHidden(true) // "Wird neu gezählt" beside it says it
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                         Text("Wird neu gezählt")
@@ -135,18 +190,67 @@ struct OverviewView: View {
                         .monospacedDigit()
                     }
                     .accessibilityElement(children: .combine)
-                } else {
-                    ProgressRing(fraction: model.progress.fullyShare)
-                        .frame(width: min(ringSide, 150), height: min(ringSide, 150))
+                }
+            case .recountWaiting(let recount):
+                // The same held count while the analysis does not work (paused, waiting for the
+                // device or for Photos, ended early): it stands still, nothing turns, the card
+                // below says why (third look at P3-03).
+                layout {
+                    Image(systemName: "hourglass")
+                        .font(.largeTitle)
+                        .foregroundStyle(.noteText)
+                        .frame(width: side, height: side)
+                        .accessibilityHidden(true) // the held count beside it says it
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        Text("\(model.progress.fully.formatted()) von \(model.progress.total.formatted()) sortiert")
+                        Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert")
                             .font(.headline)
                             .monospacedDigit()
-                        if model.progress.partially > 0 {
+                        Text("Wird weitergezählt, sobald die Analyse weiterläuft.")
+                            .font(.subheadline)
+                            .foregroundStyle(.noteText)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            case .noMainAreaChosen:
+                // No main area counts (none chosen, or the chosen ones turned off): the ring
+                // stayed at "0 von 300 sortiert" for good.
+                Label("Kein Bereich zählt als sortiert", systemImage: "circle.dashed")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen.")
+                    .font(.subheadline)
+                    .foregroundStyle(.noteText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { showSettings = true } label: { TapTarget("Einstellungen öffnen") }
+            case .nothingToSort(let notCounted):
+                // Counted, and every photo is left out (all of them ignored, for example):
+                // said in words, not as "0 von 0 sortiert" (question to Fuchs, 18.11.).
+                Label("Nichts zu sortieren", systemImage: "checkmark.circle")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    Text(primaryAreasText)
+                    if let text = notCountedText(notCounted, besidesRing: false) {
+                        Text(text)
+                    }
+                }
+                .font(.subheadline)
+                .foregroundStyle(.noteText)
+                .monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
+            case .ring(let ring):
+                layout {
+                    ProgressRing(fraction: ring.fraction)
+                        .frame(width: side, height: side)
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("\(ring.fully.formatted()) von \(ring.total.formatted()) sortiert")
+                            .font(.headline)
+                            .monospacedDigit()
+                        if ring.partially > 0 {
                             // Photos already in a matching album for one main area but not yet for the
                             // other count as partly sorted; without this line the ring looked too low
                             // (device test 15.11.: 157 sorted, 1,199 partly).
-                            Text("Dazu \(model.progress.partially) teilweise sortiert")
+                            Text("Dazu \(ring.partially) teilweise sortiert")
                                 .font(.subheadline)
                                 .monospacedDigit()
                         }
@@ -168,10 +272,11 @@ struct OverviewView: View {
                         Text(primaryAreasText)
                             .font(.subheadline)
                             .foregroundStyle(.noteText)
-                        if let leftOutText {
-                            Text(leftOutText)
+                        if let text = notCountedText(ring.notCounted, besidesRing: true) {
+                            Text(text)
                                 .font(.subheadline)
                                 .foregroundStyle(.noteText)
+                                .monospacedDigit()
                         }
                         if model.interruptedPlan != nil {
                             // The unfinished run counts only once the user has decided above
@@ -189,37 +294,57 @@ struct OverviewView: View {
     private var primaryAreasText: String {
         // Quoted, so "Länder und Orte" and "Reisen" do not read as one list of three.
         let open = Locale.current.quotationBeginDelimiter ?? "\"", close = Locale.current.quotationEndDelimiter ?? "\""
-        let names = OrganizationArea.available.filter { model.settings.primaryAreas.contains($0) }
+        // Only the main areas that are on count (`SortedCountCard.countedAreas`): the start can
+        // turn "Länder und Orte" and "Reisen" off while they stay main areas (P3-03).
+        let counted = SortedCountCard.countedAreas(model.settings)
+        let names = OrganizationArea.available.filter { counted.contains($0) }
             .map { open + String(localized: $0.titleResource) + close }
         // Only photos the main areas apply to count, so the total is smaller than the library
         // (device test 15.11.: "141 von 5.737 sortiert" next to "14.351 von 14.352 Fotos analysiert").
         return String(localized: "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: \(names.formatted(.list(type: .and))).")
     }
 
-    /// Photos with a place or a trip that still do not count, so a total smaller than the
-    /// library has a reason on screen: since home no longer counts for "Länder und Orte", the
-    /// total shrank without a word (review of the sorted count, 16.11.).
-    private var leftOutText: String? {
+    /// Every photo the ring leaves out, each in one group (`SortedCountCard.NotCounted`): with
+    /// the ring's total they are the photos of "Alle 246 Fotos analysiert" below. Before, home
+    /// and "kein eigenes Album" were said, and the photos without a place nowhere, so "82 von 176
+    /// sortiert" and "57 Fotos von zu Hause" did not add up to 246 (P3-03). Since home no longer
+    /// counts for "Länder und Orte", the total shrank without a word (review of the sorted count,
+    /// 16.11.). In the core's order (`NotCounted.groups`): the one group said with a relative
+    /// clause comes last, where the period closes it.
+    private func notCountedText(_ notCounted: SortedCountCard.NotCounted, besidesRing: Bool) -> String? {
         var parts: [String] = []
-        if model.leftOut.home > 0 {
-            parts.append(String(localized: "\(model.leftOut.home) Fotos von zu Hause"))
-        }
-        if model.leftOut.noAlbum > 0 {
-            parts.append(String(localized: "\(model.leftOut.noAlbum) Fotos, für die sich kein eigenes Album lohnt"))
-        }
-        // Ignored photos are neither sorted nor open, so they leave the ring (Fuchs 18.11.):
-        // said here, so a total that shrinks after "Ignorieren" has its reason on screen.
-        // With "Nur 2026" the ring counts the ignored photos of that year only ("Ignoriert" in
-        // the library holds all of them).
-        if model.progress.ignored > 0 {
-            if case .year(let year) = model.analysisScope {
-                parts.append(String(localized: "\(model.progress.ignored) ignorierte Fotos aus \(String(year))"))
-            } else {
-                parts.append(String(localized: "\(model.progress.ignored) ignorierte Fotos"))
+        for group in notCounted.groups {
+            switch group {
+            case .home(let n):
+                parts.append(String(localized: "\(n) Fotos von zu Hause"))
+            case .noMainArea(let n, let isNoPlace):
+                // No place, a screenshot; with "Reisen" as the only main area also photos from home.
+                if isNoPlace {
+                    parts.append(String(localized: "\(n) Fotos ohne Ort"))
+                } else {
+                    parts.append(String(localized: "\(n) Fotos außerhalb deiner Hauptbereiche"))
+                }
+            case .ignored(let n):
+                // Ignored photos are neither sorted nor open, so they leave the ring (Fuchs 18.11.):
+                // said here, so a total that shrinks after "Ignorieren" has its reason on screen.
+                // With "Nur 2026" the ring counts the ignored photos of that year only ("Ignoriert"
+                // in the library holds all of them).
+                if case .year(let year) = model.analysisScope {
+                    parts.append(String(localized: "\(n) ignorierte Fotos aus \(String(year))"))
+                } else {
+                    parts.append(String(localized: "\(n) ignorierte Fotos"))
+                }
+            case .excluded(let n):
+                // Excluded from the analysis (no switch in the app today): only when there are some.
+                parts.append(String(localized: "\(n) ausgeschlossene Fotos"))
+            case .noAlbum(let n):
+                parts.append(String(localized: "\(n) Fotos, für die sich kein eigenes Album lohnt"))
             }
         }
         guard !parts.isEmpty else { return nil }
-        return String(localized: "Außerdem nicht mitgezählt: \(parts.formatted(.list(type: .and))).")
+        let list = parts.formatted(.list(type: .and))
+        return besidesRing ? String(localized: "Außerdem nicht mitgezählt: \(list).")
+            : String(localized: "Nicht mitgezählt: \(list).")
     }
 
     @ViewBuilder
@@ -654,7 +779,9 @@ struct LimitedAccessCard: View {
     var body: some View {
         Card {
             Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline).accessibilityAddTraits(.isHeader)
-            Text("Albumist sieht nur die \(model.progress.allPhotos) Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff.")
+            // Every photo Albumist reads, not the ring's: with "Nur 2026" those are only the
+            // photos of 2026, and the card said "sieht nur die 12 Fotos" of 40 shared (P3-03).
+            Text("Albumist sieht nur die \(model.facts.count) Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff.")
                 .font(.subheadline).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
             #if targetEnvironment(simulator)

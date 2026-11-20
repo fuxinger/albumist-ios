@@ -193,7 +193,7 @@ struct FolderTile: View {
     var folder: CollectionSnapshot
 
     var body: some View {
-        let albums = Self.albums(in: folder, inventory: model.inventory)
+        let albums = AlbumTabSections.albums(in: folder, inventory: model.inventory)
         let covers = albums.prefix(4).map { AlbumCover($0, model: model, count: 2) }
         let count = Text("\(albums.count) Alben")
         Button {
@@ -252,26 +252,6 @@ struct FolderTile: View {
     private func cell(_ covers: [AlbumCover], _ index: Int) -> some View {
         let cover = index < covers.count ? covers[index] : nil
         return CoverPhoto(ids: cover.map { $0.hidden ? [] : $0.ids } ?? [], aspectRatio: 1, cornerRadius: 0)
-    }
-
-    /// The albums in `folder` at any depth, in the order Photos lists them (folders' albums after
-    /// the folder's own, each level by `AlbumTabSections.order`).
-    static func albums(in folder: CollectionSnapshot, inventory: CollectionInventory) -> [CollectionSnapshot] {
-        var albums: [CollectionSnapshot] = []
-        var queue = [folder]
-        var seen: Set<CollectionID> = [folder.id]
-        while !queue.isEmpty {
-            let current = queue.removeFirst()
-            let children = current.childIDs.compactMap { inventory[$0] }.sorted(by: AlbumTabSections.order)
-            for child in children where seen.insert(child.id).inserted {
-                if child.kind == .folder {
-                    queue.append(child)
-                } else if child.kind != .smartAlbum {
-                    albums.append(child)
-                }
-            }
-        }
-        return albums
     }
 }
 

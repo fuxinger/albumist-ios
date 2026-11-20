@@ -167,6 +167,34 @@ public struct AlbumTabSections: Sendable, Equatable {
         return dates
     }
 
+    /// What a folder shows (`FolderScreen`): its folders and albums, folders first, then by title
+    /// as Photos sorts them; no smart albums (Photos keeps them out of folders).
+    public static func children(of folder: CollectionSnapshot, in inventory: CollectionInventory) -> [CollectionSnapshot] {
+        folder.childIDs.compactMap { inventory[$0] }.filter { $0.kind != .smartAlbum }.sorted(by: order)
+    }
+
+    /// The albums in `folder` at any depth, as the folder shows them: its own albums first, then
+    /// those of its folders, level by level (the covers and the number of a folder's tile). A
+    /// folder listed twice, or inside itself, counts once.
+    public static func albums(in folder: CollectionSnapshot, inventory: CollectionInventory) -> [CollectionSnapshot] {
+        var albums: [CollectionSnapshot] = []
+        var queue = [folder]
+        var seen: Set<CollectionID> = [folder.id]
+        var next = 0
+        while next < queue.count {
+            let current = queue[next]
+            next += 1
+            for child in children(of: current, in: inventory) where seen.insert(child.id).inserted {
+                if child.kind == .folder {
+                    queue.append(child)
+                } else {
+                    albums.append(child)
+                }
+            }
+        }
+        return albums
+    }
+
     /// The folder at the top level that `collection` lies in, at any depth; `nil` for a
     /// collection at the top level itself, or one whose folders are not all in the list.
     static func topFolder(above collection: CollectionSnapshot, in inventory: CollectionInventory) -> CollectionSnapshot? {

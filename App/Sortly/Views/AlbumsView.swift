@@ -219,9 +219,7 @@ struct FolderScreen: View {
     var body: some View {
         Group {
             if let folder = model.inventory[id] {
-                let children = folder.childIDs.compactMap { model.inventory[$0] }
-                    .filter { $0.kind != .smartAlbum }
-                    .sorted(by: AlbumTabSections.order)
+                let children = AlbumTabSections.children(of: folder, in: model.inventory)
                 // The first record of an album, as the undo reads it (`AlbumTabSections`).
                 let managed = Dictionary(model.managedAlbums.map { ($0.albumID, $0) }, uniquingKeysWith: { first, _ in first })
                 ScrollView {

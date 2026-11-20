@@ -217,6 +217,40 @@ struct AlbumTabDesignTests {
         #expect(sections.albumistAlbums.map(\.id) == ["a1"])
     }
 
+    // MARK: - Inside a folder
+
+    /// A folder shows its folders first, then its albums, each by title as Photos sorts them
+    /// ("Album 2" before "Album 10"); a smart album and a child missing from the list are not shown.
+    @Test func aFolderShowsItsFoldersFirstThenItsAlbumsByTitle() {
+        let trips = CollectionSnapshot(id: "f", title: "Reisen", kind: .folder, childIDs: ["a10", "sub", "a2", "smart", "gone"])
+        let sub = CollectionSnapshot(id: "sub", title: "2024", kind: .folder, parentID: "f")
+        let ten = CollectionSnapshot(id: "a10", title: "Album 10", parentID: "f")
+        let two = CollectionSnapshot(id: "a2", title: "Album 2", parentID: "f")
+        let smart = CollectionSnapshot(id: "smart", title: "Favoriten", kind: .smartAlbum, parentID: "f")
+        let inventory = CollectionInventory([trips, sub, ten, two, smart])
+        #expect(AlbumTabSections.children(of: trips, in: inventory).map(\.id) == ["sub", "a2", "a10"])
+        #expect(AlbumTabSections.children(of: sub, in: inventory).isEmpty)
+    }
+
+    /// A folder's tile shows covers of its own albums first, then of its folders' albums, and
+    /// counts the albums at every depth (as its row does); a folder listed twice or inside itself
+    /// counts once.
+    @Test func aFoldersAlbumsAreItsOwnFirstThenThoseOfItsFolders() {
+        let trips = CollectionSnapshot(id: "f", title: "Reisen", kind: .folder, childIDs: ["y24", "rom", "y23", "y24"])
+        let y24 = CollectionSnapshot(id: "y24", title: "2024", kind: .folder, parentID: "f", childIDs: ["kyoto", "f"])
+        let y23 = CollectionSnapshot(id: "y23", title: "2023", kind: .folder, parentID: "f", childIDs: ["lissabon"])
+        let rome = CollectionSnapshot(id: "rom", title: "Rom", parentID: "f", assetIDs: Self.photos(3))
+        let kyoto = CollectionSnapshot(id: "kyoto", title: "Kyoto", parentID: "y24", assetIDs: Self.photos(2, "k"))
+        let lisbon = CollectionSnapshot(id: "lissabon", title: "Lissabon", parentID: "y23", assetIDs: Self.photos(2, "l"))
+        let inventory = CollectionInventory([trips, y24, y23, rome, kyoto, lisbon])
+        #expect(AlbumTabSections.albums(in: trips, inventory: inventory).map(\.id) == ["rom", "lissabon", "kyoto"])
+        #expect(AlbumTabSections.albums(in: y24, inventory: inventory).map(\.id) == ["kyoto", "rom", "lissabon"])
+        // The count of the tile is the count of the row.
+        let sections = AlbumTabSections(inventory: inventory, managed: [Self.state(rome)])
+        #expect(sections.rows.first == .folder(trips, albums: 3))
+        #expect(AlbumTabSections.albums(in: CollectionSnapshot(id: "e", title: "Leer", kind: .folder), inventory: inventory).isEmpty)
+    }
+
     // MARK: - Large libraries
 
     /// 300 albums of Albumist's in 3 folders and 40 of the user's: every one once, the shelf

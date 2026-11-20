@@ -1,13 +1,17 @@
 import SwiftUI
 
-/// Tinted (not filled) word button for cards, ≥ 44 pt, wraps instead of truncating.
+/// Tinted (not filled) word button for cards, ≥ 44 pt; its word is never broken: one line up to the largest
+/// standard size (shrinking to 85 % before it would be cut), wrapping at the accessibility sizes.
 ///
 /// Design rule 3: one filled main button per page at most; actions on cards are tinted: the
 /// accent as text on a light fill of the accent, a capsule at least 44 pt high ("Anlegen",
 /// "Ergänzen …", "Benennen …", "Ansehen …", "✓ Angelegt"). Not glass: it sits in the content.
 /// Under a compact `PhotoCard` it spans the card's width (`cardActionFillsWidth`), elsewhere it is
-/// as wide as its words. At large text sizes the words wrap and the capsule grows; its corners
-/// grow with the text, so a one-line button stays a capsule.
+/// as wide as its words; the room beside the word is `cardActionInset` (18 pt, 10 in a card side
+/// by side). Up to the largest standard text size the word keeps to one line and shrinks a little
+/// (to 85 %) rather than break, so buttons side by side stay equally high; `CardShelf` and
+/// `PhotoCard` give it the width it needs. At the accessibility sizes the words wrap and the
+/// capsule grows; its corners grow with the text, so a one-line button stays a capsule.
 ///
 /// WCAG 2 contrast of the text on its fill (sRGB, alpha composited), on a card:
 /// light 5.09:1 (11 % fill on white), Increase Contrast 6.92:1 (deeper teal);
@@ -29,6 +33,8 @@ private struct CardActionButtonBody: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.cardActionFillsWidth) private var fillsWidth
+    @Environment(\.cardActionInset) private var inset
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// Half the height of a one-line button, growing with the text.
     @ScaledMetric(relativeTo: .body) private var radius: CGFloat = 22
 
@@ -37,9 +43,11 @@ private struct CardActionButtonBody: View {
         configuration.label
             .font(.body.weight(.semibold))
             .multilineTextAlignment(.center)
+            .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+            .minimumScaleFactor(0.85)
             .fixedSize(horizontal: false, vertical: true)
             .foregroundStyle(isEnabled ? Theme.accent : Theme.noteText)
-            .padding(.horizontal, 18)
+            .padding(.horizontal, inset)
             .padding(.vertical, 10)
             .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: 44)
             .background(fill, in: shape)
@@ -66,11 +74,22 @@ private struct CardActionFillsWidthKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct CardActionInsetKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 18
+}
+
 extension EnvironmentValues {
     /// Whether a `CardActionButtonStyle` button spans the width it is offered (`PhotoCard` sets
-    /// it for the actions below a compact card's text and at accessibility sizes).
+    /// it for the actions of its cards; a large card offers the word's own width beside the text).
     var cardActionFillsWidth: Bool {
         get { self[CardActionFillsWidthKey.self] }
         set { self[CardActionFillsWidthKey.self] = newValue }
+    }
+
+    /// The room left and right of the word inside a `CardActionButtonStyle` capsule: 18 pt as in
+    /// the drafts, 10 in a card side by side, where the word needs the width (`PhotoCard`).
+    var cardActionInset: CGFloat {
+        get { self[CardActionInsetKey.self] }
+        set { self[CardActionInsetKey.self] = newValue }
     }
 }

@@ -161,6 +161,46 @@ jobs:
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --role default)
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+      - name: Build app and its tests
+        # Compile first (tempo plan 20.11.): the app and its unit tests are built before the
+        # macOS core tests (5-6 min) and the fresh simulator (2-10 min), so a compile error that
+        # only the Mac finds is red about 12 min after the push instead of 27 (61e9b8c,
+        # PHPersistentChangeFetchResult.enumerateChanges: CI red after 27.1 min). The simulator
+        # is not booted yet (nothing competes with the build, see "Pick simulator"). "Build and
+        # test app" below builds again with the same settings and finds nothing to compile.
+        if: steps.sim.outputs.udid != ''
+        run: |
+          cd App
+          xcodebuild build-for-testing \
+            -project Sortly.xcodeproj \
+            -scheme Sortly \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1 \
+            || { grep -E "error:" -A3 ../build-log.txt | grep -v "/SourcePackages/" | head -80; exit 1; }
+          tail -2 ../build-log.txt
+      - name: Build UI tests
+        # The UI tests run in their own workflow (ui.yml); building them here finds a compile
+        # error in them within minutes of this job instead of after the long simulator setup
+        # there. Right after the app's build (tempo plan 20.11.), before the core tests and the
+        # simulator, with the same build settings, so the app is not compiled a second time.
+        # Not in a TestFlight run (release): there ui.yml's "UI build" builds exactly this
+        # (scheme SortlyUI, build-for-testing) right after this job, in the same run, and a
+        # compile error stops the upload there (about 1 min of this Mac, TestFlight run
+        # 44461253154). test_workflows.py ReleaseSkipTests: a step left out in release mode is
+        # one whose build ui.yml really does itself.
+        if: steps.sim.outputs.udid != '' && !inputs.release
+        run: |
+          cd App
+          xcodebuild build-for-testing \
+            -project Sortly.xcodeproj \
+            -scheme SortlyUI \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO > ../build-ui-log.txt 2>&1 \
+            || { grep -E "error:" -A3 ../build-ui-log.txt | grep -v "/SourcePackages/" | head -80; exit 1; }
+          grep -E "warning: .*SortlyUITests" ../build-ui-log.txt | head -40 || true
+          tail -2 ../build-ui-log.txt
       - name: Core tests (macOS)
         run: |
           set -o pipefail
@@ -265,25 +305,6 @@ jobs:
               curl -sS -o /dev/null -m 15 -w "$url: HTTP %{http_code}, connect %{time_connect} s, total %{time_total} s\n" "$url" 2>&1 || true
             done
           fi
-      - name: Build UI tests
-        # The UI tests run in their own workflow (ui.yml); building them here finds a compile
-        # error in them within this run instead of after the long simulator setup there. Not in
-        # a TestFlight run (release): there ui.yml's "UI build" builds exactly this (scheme
-        # SortlyUI, build-for-testing) right after this job, in the same run, and a compile error
-        # stops the upload there (about 1 min of this Mac, TestFlight run 44461253154).
-        # test_workflows.py ReleaseSkipTests: a step left out in release mode is one whose
-        # build ui.yml really does itself.
-        if: steps.sim.outputs.udid != '' && !inputs.release
-        run: |
-          cd App
-          xcodebuild build-for-testing \
-            -project Sortly.xcodeproj \
-            -scheme SortlyUI \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
-            CODE_SIGNING_ALLOWED=NO > ../build-ui-log.txt 2>&1 \
-            || { grep -E "error:" -A3 ../build-ui-log.txt | grep -v "/SourcePackages/" | head -80; exit 1; }
-          grep -E "warning: .*SortlyUITests" ../build-ui-log.txt | head -40 || true
-          tail -2 ../build-ui-log.txt
       - name: Export strings for translation
         if: success() && steps.sim.outputs.udid != ''
         run: |

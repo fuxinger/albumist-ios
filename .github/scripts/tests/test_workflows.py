@@ -474,6 +474,42 @@ def job_steps(text, job):
     return steps
 
 
+class CompileFirstTests(unittest.TestCase):
+    """Tempo plan 20.11.: CI's Mac job compiles the app, its unit tests and the UI tests before
+    the macOS core tests and the fresh simulator, so a compile error only the Mac finds is red
+    within minutes (61e9b8c was red after 27 min). Every step stays."""
+
+    def test_the_mac_job_builds_before_it_tests(self):
+        ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        steps = job_steps(ci, "ios")
+        names = [name for name, _, _ in steps]
+        for name in ("Build app and its tests", "Build UI tests", "Core tests (macOS)",
+                     "Fresh simulator (erased and booted)", "Build and test app", "Export strings for translation"):
+            self.assertIn(name, names)
+        order = [names.index(n) for n in ("Pick simulator", "Build app and its tests", "Build UI tests",
+                                          "Core tests (macOS)", "Fresh simulator (erased and booted)", "Build and test app")]
+        self.assertEqual(order, sorted(order))
+        runs = {name: run for name, _, run in steps}
+        first = runs["Build app and its tests"]
+        self.assertRegex(first, r"xcodebuild build-for-testing\b")
+        self.assertIn("-scheme Sortly\n", first.replace(" \\", ""))
+        # The same build settings as the test step, so that one compiles nothing again.
+        test = runs["Build and test app"]
+        for setting in ("COMPILER_INDEX_STORE_ENABLE=NO", "CODE_SIGNING_ALLOWED=NO"):
+            self.assertIn(setting, first)
+            self.assertIn(setting, test)
+            self.assertIn(setting, runs["Build UI tests"])
+        # A failed build is red: no "|| true" after the build, and it is no machinery step.
+        self.assertIn("exit 1", first)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "earlier_attempts", os.path.join(ROOT, ".github", "scripts", "earlier_attempts.py"))
+        earlier_attempts = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(earlier_attempts)
+        self.assertFalse(earlier_attempts.is_machinery("Build app and its tests"))
+        self.assertFalse(earlier_attempts.is_machinery("Build UI tests"))
+
+
 class ReleaseSkipTests(unittest.TestCase):
     """In a TestFlight run (release) CI's Mac job leaves out a step only when ui.yml, called in
     the same run right after it, builds the same thing itself (coordinator's rule for C4: no

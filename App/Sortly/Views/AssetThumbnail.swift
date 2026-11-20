@@ -49,6 +49,16 @@ final class ThumbnailCache {
         return (image, screenshot)
     }
 
+    /// Looks the ids up in one batch (`photoAsset`), so a cover whose first photo was not sharp
+    /// waits for Photos once for all its other candidates, not once for each of them.
+    func lookUp(_ ids: [AssetID]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for id in ids {
+                group.addTask { _ = await self.photoAsset(for: id) }
+            }
+        }
+    }
+
     private func load(_ asset: ThumbnailRequest.Asset, pixels: CGSize, key: NSString) async -> UIImage? {
         let image = await ThumbnailRequest.load(asset, size: pixels, manager: manager)
         // A cancelled request is not kept: what came back may not be the prepared thumbnail.

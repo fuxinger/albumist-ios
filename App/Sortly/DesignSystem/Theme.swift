@@ -22,6 +22,8 @@ enum Theme {
         /// the smaller card, the smaller corner).
         static let largeCard: CGFloat = 26
         static let compactCard: CGFloat = 22
+        /// The photo of an album tile, without a card around it (draft E4).
+        static let photoTile: CGFloat = 14
     }
 
     /// Named asset instead of `Color.accentColor`, so off-screen renders (share image) keep the teal too.

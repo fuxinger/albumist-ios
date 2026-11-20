@@ -13,8 +13,10 @@ import SwiftUI
 /// light 5.09:1 (11 % fill on white), Increase Contrast 6.92:1 (deeper teal);
 /// dark 5.71:1 (18 % fill on #1C1C1E), 4.67:1 on a card in a sheet (#2C2C2E), Increase Contrast
 /// 6.19:1 and 4.92:1. Pressed, the fill fades to half, so the text only gains contrast
-/// (light 5.6:1, dark 6.8:1). Disabled: `Theme.noteText` on the grey fill (5.1:1 light, 5.6:1
-/// dark), never the accent. Increase Contrast adds an accent edge (non-text 3:1 and more).
+/// (light 5.52:1, dark 6.92:1, in a sheet 5.62:1). Disabled: `Theme.noteText` on the grey fill
+/// (5.13:1 light, 5.62:1 dark), never the accent. Increase Contrast adds an accent edge (the
+/// accent itself on the card: 8.27:1 light, 9.48:1 dark, 7.38:1 in a sheet, far above the 3:1
+/// for a control's outline). Off a card, on the grouped background: light 4.59:1, so keep it on cards.
 struct CardActionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         CardActionButtonBody(configuration: configuration)

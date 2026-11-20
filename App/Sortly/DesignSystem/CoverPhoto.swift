@@ -13,13 +13,18 @@ import SortlyCore
 /// - At most `CoverLoader.attempts` ids are tried, one after the other, each asked for at the
 ///   drawn size; Photos is asked off the main thread (`ThumbnailRequest`), the asset lookups go
 ///   through the cache's batched lookup, and leaving the screen cancels what is still asked.
-/// - None sharp: a calm surface in the colours of the best preview there was (four colours,
-///   never the picture), or a soft accent tint when there was none. Counted for the diagnostic
-///   report (`CoverStats`).
+/// - None sharp: a calm surface in the colours of the first small preview there was (four
+///   colours, never the picture), or a soft accent tint when there was none; the same tint while
+///   a photo loads, never an empty grey. Counted for the diagnostic report (`CoverStats`).
 /// - `hidesPreview`: "Vorschau ausgeblendet" on a neutral ground, nothing is loaded.
-/// - Crop ("Bildausschnitt", `CoverLoader.focus`): screenshots keep their top, a photo taller than
-///   the cover keeps its upper part (the crop centred a third down, where faces and heads are in
-///   most portraits), anything else is cropped around its middle. Cheap: no image analysis.
+/// - `placeholderSymbol`: an SF Symbol on the calm placeholder once it is clear there is no
+///   sharp photo (a suggestion of screenshots or documents has no cover candidates at all,
+///   `PreviewPicker.coverCandidates`), so the card looks meant that way, not empty.
+/// - `onOutcome`: told once the cover knows whether it shows a sharp photo, for a card that
+///   turns smaller when there is none ("ein anderes Foto oder die kleine Karte").
+/// - Crop ("Bildausschnitt", `CoverLoader.focus`): screenshots keep their top; a photo cut at top
+///   and bottom keeps its upper part (portraits centred a third down, where faces and heads are,
+///   landscapes 40 % down); cut at the sides, around the middle. Cheap: no image analysis.
 ///
 /// Decorative for VoiceOver: the card around it says what it shows.
 struct CoverPhoto: View {
@@ -27,16 +32,21 @@ struct CoverPhoto: View {
     private let aspectRatio: CGFloat
     private let cornerRadius: CGFloat
     private let hidesPreview: Bool
+    private let placeholderSymbol: String?
+    private let onOutcome: (@MainActor (CoverOutcome) -> Void)?
 
     @Environment(\.displayScale) private var displayScale
     @State private var width: CGFloat = 0
     @State private var loaded: CoverLoader.Loaded?
 
-    init(ids: [AssetID], aspectRatio: CGFloat = 4.0 / 3.0, cornerRadius: CGFloat = Theme.Radius.card, hidesPreview: Bool = false) {
+    init(ids: [AssetID], aspectRatio: CGFloat = 4.0 / 3.0, cornerRadius: CGFloat = Theme.Radius.card, hidesPreview: Bool = false,
+         placeholderSymbol: String? = nil, onOutcome: (@MainActor (CoverOutcome) -> Void)? = nil) {
         self.ids = ids
         self.aspectRatio = max(aspectRatio, 0.1)
         self.cornerRadius = cornerRadius
         self.hidesPreview = hidesPreview
+        self.placeholderSymbol = placeholderSymbol
+        self.onOutcome = onOutcome
     }
 
     /// The ids that are tried: the first `CoverLoader.attempts` real ones.
@@ -65,16 +75,22 @@ struct CoverPhoto: View {
             .clipShape(shape)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .task(id: request) {
-                guard let request else { return }
+                guard let request else {
+                    // No photo to try at all (only screenshots or documents): known at once.
+                    if !hidesPreview && candidates.isEmpty { onOutcome?(.noSharpPhoto) }
+                    return
+                }
                 let started = ContinuousClock.now
                 let result = await CoverLoader.load(request)
                 guard !Task.isCancelled else { return }
-                // A cover from the cache is there at once; one that took a moment fades in.
+                // A cover from the cache is there at once; one that took a moment fades in
+                // (a cross-fade, calm with Reduce Motion too).
                 if ContinuousClock.now - started > .milliseconds(60) {
                     withAnimation(.easeOut(duration: 0.2)) { loaded = result }
                 } else {
                     loaded = result
                 }
+                onOutcome?(result.outcome)
             }
             .accessibilityHidden(true)
     }
@@ -95,9 +111,11 @@ struct CoverPhoto: View {
             }
             .transition(.opacity)
         } else if case .placeholder(let colors)? = current {
-            CoverPlaceholder(colors: colors)
+            CoverPlaceholder(colors: colors, symbol: placeholderSymbol)
         } else {
-            CoverPlaceholder(colors: [])
+            // Loading, or nothing to load: the same calm surface, the symbol only once it is
+            // clear that no photo comes (no flash of it while a photo loads).
+            CoverPlaceholder(colors: [], symbol: candidates.isEmpty ? placeholderSymbol : nil)
         }
     }
 }
@@ -128,6 +146,7 @@ private struct CroppedCover: View {
 /// Never the blurry picture itself, never an empty grey (test case 6 of the report).
 private struct CoverPlaceholder: View {
     let colors: [Color]
+    var symbol: String?
 
     var body: some View {
         ZStack {
@@ -140,6 +159,14 @@ private struct CoverPlaceholder: View {
             } else {
                 LinearGradient(colors: [Theme.accent.opacity(0.16), Theme.accent.opacity(0.06)],
                                startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+            if let symbol {
+                // Decorative (the card says what it is); the note grey holds 3:1 and more on
+                // these light washes, and its dark-mode grey on the dark ones.
+                Image(systemName: symbol)
+                    .font(.title)
+                    .foregroundStyle(.noteText)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             }
         }
     }
@@ -172,6 +199,14 @@ private struct HiddenCoverPreview: View {
     }
 }
 
+/// What a `CoverPhoto` found at its size, for a card that turns smaller when no photo is sharp.
+enum CoverOutcome: Equatable, Sendable {
+    /// A photo that is sharp at the drawn size is shown.
+    case sharp
+    /// No id had a sharp photo on the device (or there was none to try): the calm placeholder.
+    case noSharpPhoto
+}
+
 /// Loads covers for `CoverPhoto`: the first of the candidates that is sharp at the drawn size.
 @MainActor
 enum CoverLoader {
@@ -188,18 +223,28 @@ enum CoverLoader {
     struct Loaded {
         var ids: [AssetID]
         var shown: Shown
+
+        var outcome: CoverOutcome {
+            if case .photo = shown { return .sharp }
+            return .noSharpPhoto
+        }
     }
 
     enum Shown {
         /// A sharp photo and where its crop is centred.
         case photo(UIImage, focus: UnitPoint)
-        /// No sharp photo: the placeholder, in the four colours of the best preview there was.
+        /// No sharp photo: the placeholder, in the four colours of the first small preview there
+        /// was (the cover's own, when it had one).
         case placeholder([Color])
     }
 
     static func load(_ request: Request) async -> Loaded {
         var blurry: UIImage?
         for (index, id) in request.ids.enumerated() {
+            guard !Task.isCancelled else { break }
+            // The first one was not sharp (or not there): the others are looked up together,
+            // one wait for Photos instead of one for each.
+            if index == 1, request.ids.count > 2 { await ThumbnailCache.shared.lookUp(Array(request.ids.dropFirst())) }
             guard let cover = await ThumbnailCache.shared.cover(for: id, pixels: request.pixels) else { continue }
             if Task.isCancelled { return Loaded(ids: request.ids, shown: .placeholder([])) }
             if ThumbnailRequest.isSharp(cover.image, for: request.pixels) {
@@ -216,20 +261,24 @@ enum CoverLoader {
         return Loaded(ids: request.ids, shown: .placeholder(colors))
     }
 
-    /// Where the crop of a cover is centred, as a share of the image ("Bildausschnitt"):
+    /// Where the crop of a cover is centred, as a share of the image ("Bildausschnitt"; faces and
+    /// the subject must not be cut):
     /// - a screenshot keeps its top, where its title is (as `ThumbnailGrid` shows them);
-    /// - a photo in portrait format that is cut at top and bottom keeps its upper part: the crop
-    ///   is centred a third down (as far as the image reaches), where faces and heads are in most
-    ///   portraits; a portrait in a wide card loses its lower part, not the heads;
-    /// - anything else is cropped around its middle (a landscape in a wide card loses a little at
-    ///   its sides or at top and bottom, evenly).
-    /// Cheap on purpose: no image analysis per cover, only the image's format.
+    /// - a photo in portrait format cut at top and bottom keeps its upper part: the crop is
+    ///   centred a third down, as far as the image reaches, where faces and heads are in most
+    ///   portraits (a portrait in a wide card loses its legs and the ground, not the heads);
+    /// - a photo in landscape format cut at top and bottom loses a little more at the bottom than
+    ///   at the top (centred 40 % down): heads of people and the tops of buildings and mountains
+    ///   stay, the foreground gives way (a 4:3 photo in a 2:1 card keeps 7 % to 73 % of its height);
+    /// - cut at the sides (a landscape photo in a square tile): around its middle.
+    /// Cheap on purpose: no image analysis per cover (the analysis runs Vision on the same chips
+    /// at the same time), only the formats of the image and the cover.
     nonisolated static func focus(imageSize: CGSize, screenshot: Bool, target: CGSize) -> UnitPoint {
         if screenshot { return UnitPoint(x: 0.5, y: 0) }
         guard imageSize.width > 0, imageSize.height > 0, target.width > 0, target.height > 0 else { return .center }
         let cutAtTopAndBottom = imageSize.width / imageSize.height < target.width / target.height
-        let portrait = imageSize.height > imageSize.width
-        return cutAtTopAndBottom && portrait ? UnitPoint(x: 0.5, y: 1.0 / 3.0) : .center
+        guard cutAtTopAndBottom else { return .center }
+        return UnitPoint(x: 0.5, y: imageSize.height > imageSize.width ? 1.0 / 3.0 : 0.4)
     }
 
     /// Four calm colours of a preview, worked out off the main thread (`PhotoPalette.sample`).

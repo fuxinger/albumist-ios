@@ -40,6 +40,7 @@ struct LearnMore: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint(title)
+            .accessibilityIdentifier("learnMore.open")
         }
         .sheet(isPresented: $showsFull) {
             LearnMoreSheet(title: title, full: full)
@@ -64,6 +65,7 @@ private struct LearnMoreSheet: View {
                     full
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("learnMore.text")
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Theme.Spacing.l)
@@ -73,6 +75,7 @@ private struct LearnMoreSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Fertig") { dismiss() }
+                        .accessibilityIdentifier("learnMore.done")
                 }
             }
         }

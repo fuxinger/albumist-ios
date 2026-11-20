@@ -550,9 +550,10 @@ class ReleaseSmokeTests(unittest.TestCase):
         # before the groups.
         ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
         found = re.search(r"\n      max-parallel: \$\{\{ inputs\.release && (\d) \|\| (\d) \}\}\n", ui)
-        self.assertIsNotNone(found, "ui.yml: max-parallel ${{ inputs.release && N || 4 }}")
+        self.assertIsNotNone(found, "ui.yml: max-parallel ${{ inputs.release && N || 5 }}")
         in_release, otherwise = int(found.group(1)), int(found.group(2))
-        self.assertEqual(otherwise, 4)
+        # Outside TestFlight five groups (tempo plan 20.11.; beside CI's Mac job GitHub queues one).
+        self.assertEqual(otherwise, 5)
         tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         beside = [job for job in ("stress", "release-smoke")
                   if [n.strip() for n in job_field(tf, job, "needs").split(",")] == ["tests"]]

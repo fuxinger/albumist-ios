@@ -922,9 +922,9 @@ class GroupTests(unittest.TestCase):
             return any(test == e or test.startswith(e + "/") for e in entries)
         return (not only or hits(only)) and not hits(skip)
 
-    def test_five_groups_and_the_contrast_job(self):
+    def test_six_groups_and_the_contrast_job(self):
         groups = self.groups()
-        self.assertEqual(set(groups), {"device", "flow-full", "flow-other", "accessibility", "contrast"})
+        self.assertEqual(set(groups), {"device-flows", "device", "flow-other", "accessibility", "flow-full", "contrast"})
         test5 = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
         self.assertEqual(groups["contrast"]["only"], test5)
         self.assertEqual(groups["contrast"]["increase_contrast"], "true")
@@ -934,18 +934,24 @@ class GroupTests(unittest.TestCase):
         self.assertNotIn("increase_contrast", groups["accessibility"])
         self.assertEqual(groups["device"]["device"], "pro")
         self.assertNotIn("reduce_motion", groups["device"])
+        # Tempo plan 20.11.: the large library and the undo / interrupted-plan tests have their
+        # own group, so neither device conditions nor other flows sets the run's time alone.
+        self.assertEqual(groups["device-flows"]["device"], "pro")
+        self.assertIn("DeviceConditionUITests/test11_LargeLibrary", groups["device-flows"]["only"].split())
 
-    def test_at_most_four_groups_at_a_time(self):
-        # With CI's one macOS job, five macOS jobs at the peak; contrast (the shortest) waits.
-        import re
+    def test_at_most_five_groups_at_a_time(self):
+        # With CI's one macOS job, six asked for at the peak; GitHub queues the last one
+        # (contrast, short) until a Mac is free (tempo plan 20.11.).
         # Three when TestFlight calls it (test_workflows.py ReleaseSmokeTests: five Macs at most).
-        self.assertRegex(self.workflow(), r"\n      max-parallel: \$\{\{ inputs\.release && 3 \|\| 4 \}\}\n")
+        self.assertRegex(self.workflow(), r"\n      max-parallel: \$\{\{ inputs\.release && 3 \|\| 5 \}\}\n")
         self.assertEqual(list(self.groups())[-1], "contrast")
+        # The two longest in a full run start first (TestFlight runs three at a time).
+        self.assertEqual(list(self.groups())[:2], ["device-flows", "device"])
 
     def test_other_flows_skip_exactly_what_the_others_run(self):
         groups = self.groups()
         others = set()
-        for name in ("device", "flow-full", "accessibility", "contrast"):
+        for name in ("device-flows", "device", "flow-full", "accessibility", "contrast"):
             others |= set(groups[name]["only"].split())
         covered = {t for t in others if not any(t != o and t.startswith(o + "/") for o in others)}
         self.assertEqual(set(groups["flow-other"]["skip"].split()), covered)

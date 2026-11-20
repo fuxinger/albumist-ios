@@ -213,8 +213,10 @@ Actions > **TestFlight feedback** > Run workflow.
 
 ## UI-Tests: nur betroffene Gruppen (Regel Fuchs, 17.11.2026)
 
-Die UI-Tests laufen in fünf Gruppen (`.github/ui-groups.json`): Gerätezustände, voller Ablauf
-mit Video, übrige Abläufe mit Kauf und Suche, Barrierefreiheit, Kontrast. Seit 18.11. läuft
+Die UI-Tests laufen in sechs Gruppen (`.github/ui-groups.json`): Rückgängig, unterbrochener
+Plan und große Mediathek (`device-flows`, seit 20.11.), Gerätezustände, übrige Abläufe mit Kauf
+und Suche, Barrierefreiheit, voller Ablauf mit Video, Kontrast; bis zu fünf zugleich (im
+TestFlight-Lauf drei). Seit 18.11. läuft
 eine Gruppe nur noch, wenn es für sie kein grünes Ergebnis für genau diese App und genau ihren
 Testcode gibt.
 
@@ -375,7 +377,7 @@ Testcode gibt.
   in beiden Modi. Für die Freigabe eines Commits, der nur schnelle Läufe hat: „UI flow“ von
   Hand ohne `quick` starten; dann laufen alle Gruppen ohne volles Grün für diesen Stand.
 - Von Hand: Actions > **UI flow** > Run workflow, Feld **groups**: `auto` (Vorgabe), `all`
-  (alle Gruppen) oder Gruppennamen (`device flow-full flow-other accessibility contrast`), und
+  (alle Gruppen) oder Gruppennamen (`device-flows device flow-other accessibility flow-full contrast`), und
   **quick** (aus = voller Lauf). In **TestFlight** gibt es dafür **ui_groups** (`auto` oder
   `all`); TestFlight läuft immer voll.
 
@@ -410,7 +412,8 @@ Gemessen aus den Job-Protokollen der Läufe zu Commit 4bb7fdd (Pull Request 1): 
   Sekunden, weil der Simulator gleichzeitig startet und die Platte belegt. Nicht geändert.
 - Barrierefreiheit startete 14 Minuten später als die anderen Gruppen: alle fünf Macs waren
   belegt (CIs iOS-Job, drei Gruppen und 26 Minuten lang die CodeQL-Swift-Analyse, die am Ende
-  scheiterte). Kontrast wartet ohnehin, bis eine Gruppe fertig ist (höchstens vier zugleich).
+  scheiterte). Kontrast wartet ohnehin, bis eine Gruppe fertig ist (damals höchstens vier
+  zugleich; seit 20.11. fünf, GitHub hält die sechste, solange CIs Mac-Job läuft).
 
 Umgesetzt (18.11.):
 
@@ -423,10 +426,12 @@ Umgesetzt (18.11.):
 
 Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-Tests neu messen):
 
-1. Gruppen neu verteilen: Gerätezustände (58 Minuten Testzeit, test11 allein 26) und übrige
-   Abläufe (54) bestimmen die Dauer, voller Ablauf (10) und Kontrast (12) sind kurz. Zum
-   Beispiel test11 in die Gruppe „voller Ablauf“ und test05/07/08 zu den Gerätezuständen: die
-   längste Gruppe hätte dann etwa 45 statt 58 Minuten Testzeit.
+1. ~~Gruppen neu verteilen~~ umgesetzt 20.11. (Tempo-Plan): Gerätezustände test05, test07,
+   test08 und test11 bilden die Gruppe `device-flows`, bis zu fünf Gruppen zugleich. Gemessen
+   vorher (Pull Requests seit 18.11., Schnellmodus, Job-Median): übrige Abläufe 55,8, Gerätezustände
+   43,3 Minuten. Erwartet: längste Gruppe rund 43 statt 56 Minuten (schlechtester Fall rund 50
+   statt 65). TestFlight (drei zugleich, voller Modus): unverändert rund 70 Minuten für die
+   Gruppen.
 2. Im TestFlight-Lauf die UI-Tests schon nach den Linux-Teilen von CI starten statt nach dem
    iOS-Job (rund 16 Minuten früher). Kostet Mac-Minuten, wenn der iOS-Job dann rot wird, und
    weicht von „erst schnell, dann teuer“ ab.

@@ -386,18 +386,32 @@ final class DeviceConditionUITests: XCTestCase {
     /// `relaunchWith`: the test's own launch arguments (nil: a fast start).
     @discardableResult
     private func grantFromHost(relaunchWith extra: [String]? = nil) -> Bool {
-        print("UI_HOST_GRANT_PHOTOS")
-        // iOS ends an app whose photo access changes, so the Mac's grant ends the running app. A
-        // launch before the grant lands loses its new process to it: UI run 44355110562 (test 09)
-        // launched 5 s after the request, the grant took 8 s and ended that launch ("Application
-        // ... does not have a process ID", a failure no later attempt could undo). So the first
-        // launch waits until the grant has ended the app; a grant that changes nothing ends
-        // nothing, hence the limit (two grant attempts of up to 90 s each, ui_tests.py).
-        if app.state != .notRunning {
+        // The Mac writes "granted" or "failed" into this file once its grant is done
+        // (`write_host_answer` in ui_tests.py). A path with a space could not be named in the
+        // line: then the bare request, and the wait below as before.
+        let answer = NSTemporaryDirectory() + "uitest-host-answer-\(UUID().uuidString)"
+        let answered = ProcessInfo.processInfo.environment["SORTLY_HOST_HELPER"] == "1"
+            && !answer.contains(where: \.isWhitespace)
+        print(answered ? "UI_HOST_GRANT_PHOTOS \(answer)" : "UI_HOST_GRANT_PHOTOS")
+        defer { try? FileManager.default.removeItem(atPath: answer) }
+        // A launch before the grant lands loses its new process to it: UI run 44355110562 (test
+        // 09) launched 5 s after the request, the grant took 8 s and ended that launch
+        // ("Application ... does not have a process ID", a failure no later attempt could undo).
+        // So the first launch waits until the Mac says its grant is done. Without that answer
+        // it waits until the grant has ended the app, up to the limit (two grant attempts of up
+        // to 90 s each, ui_tests.py). That end never came: in 9 of 9 requests the app was still
+        // running after 190 s (UI runs 44617747359, 44630953220, job 136352444126), about 9.5
+        // minutes of test09 each run.
+        if answered || app.state != .notRunning {
             let start = Date()
-            // Not asserted: a grant that changes nothing ends nothing (the launches below decide).
-            _ = UITestWait.holds(timeout: 190, interval: 1) { app.state == .notRunning }
-            print("UI_FACT app \(app.state == .notRunning ? "ended" : "still running") \(Int(Date().timeIntervalSince(start))) s after the grant request")
+            // Not asserted: a grant that changes nothing ends nothing, and a failed grant is
+            // answered "failed" (the launches below decide either way).
+            _ = UITestWait.holds(timeout: 190, interval: 1) {
+                (answered && FileManager.default.fileExists(atPath: answer)) || (!answered && app.state == .notRunning)
+            }
+            let reply = answered ? (try? String(contentsOfFile: answer, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+            print("UI_FACT app \(app.state == .notRunning ? "ended" : "still running") \(Int(Date().timeIntervalSince(start))) s after the grant request"
+                  + (answered ? ", the Mac answered '\(reply ?? "nothing")'" : ""))
         }
         for attempt in 1...12 {
             // pacing: the gap between launch attempts; the grant's end of the app is awaited above

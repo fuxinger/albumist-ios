@@ -1009,6 +1009,52 @@ class HostGrantTests(unittest.TestCase):
             grants.check()
         self.assertEqual(len(granted), 2)
 
+    # Device test09 waited 190 s after each grant request for an end of the app that never came
+    # (9 of 9 requests in UI runs 44617747359, 44630953220 and job 136352444126). A request that
+    # names an answer file gets "granted" or "failed" there once the grant is done.
+    DEVICE = "/Users/runner/Library/Developer/CoreSimulator/Devices/U/data/Containers/Data/Application/X/tmp"
+
+    def test_a_request_with_an_answer_file_is_read_with_its_path(self):
+        log = f"UI_HOST_GRANT_PHOTOS {self.DEVICE}/uitest-host-answer-1A2B\nUI_HOST_GRANT_PHOTOS\n"
+        self.assertEqual(ui_tests.host_requests(log), [("grant", None, f"{self.DEVICE}/uitest-host-answer-1A2B"),
+                                                       ("grant", None, None)])
+        self.assertEqual(ui_tests.host_grant_requests(log), 2)
+        # A relative path or a second word is no request (the line is not the test's).
+        self.assertEqual(ui_tests.host_requests("UI_HOST_GRANT_PHOTOS tmp/a\nUI_HOST_GRANT_PHOTOS /a b\n"), [])
+
+    def test_the_watcher_answers_after_the_grant_with_its_result(self):
+        done = []
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "log.txt")
+            with open(path, "w") as log:
+                log.write("UI_HOST_GRANT_PHOTOS /D/a\nUI_HOST_GRANT_PHOTOS\nUI_HOST_GRANT_PHOTOS /D/b\n")
+            results = iter([True, True, False])
+            watcher = ui_tests.HostGrants("U", path, interval=0.01,
+                                          grant=lambda: done.append("grant") or next(results),
+                                          answer=lambda answer, text: done.append((answer, text)))
+            watcher.check()
+        self.assertEqual(done, ["grant", ("/D/a", "granted"), "grant", "grant", ("/D/b", "failed")])
+
+    def test_the_answer_is_written_only_into_a_test_file_of_this_simulator(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = os.path.join(root, "Devices", "U", "data", "tmp")
+            os.makedirs(folder)
+            good = os.path.join(folder, "uitest-host-answer-0F-9")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(ui_tests.write_host_answer("U", good, "granted"))
+                with open(good, encoding="utf-8") as answer:
+                    self.assertEqual(answer.read(), "granted\n")
+                other = os.path.join(root, "Devices", "V", "tmp")
+                os.makedirs(other)
+                for path in (os.path.join(other, "uitest-host-answer-1"),          # another simulator
+                             os.path.join(folder, "Sortly.sqlite"),                # not an answer file
+                             os.path.join(folder, "..", "uitest-host-answer-1"),   # climbs out
+                             os.path.join(folder, "missing", "uitest-host-answer-1"),
+                             "uitest-host-answer-1"):
+                    self.assertFalse(ui_tests.write_host_answer("U", path, "granted"), path)
+            self.assertEqual(sorted(os.listdir(folder)), ["uitest-host-answer-0F-9"])
+            self.assertEqual(os.listdir(other), [])
+
 
 class HostTerminateTests(unittest.TestCase):
     """A device test asks the Mac to end the app before its next launch (UI_HOST_TERMINATE_APP,

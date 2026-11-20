@@ -408,6 +408,39 @@ struct DataSafetyTests {
         #expect(try Data(contentsOf: folders[2].appendingPathComponent("sortly.sqlite")) == Data("db 2".utf8))
     }
 
+    /// "Neu aufbauen" after a start that failed with the store already open (AppModel.load):
+    /// the old connection is still open while its files go to the quarantine and a new database
+    /// starts under the same name. When the old connection closes, it must not touch the new
+    /// database's files: SQLite deletes the log and shared memory of a closing connection by
+    /// name, which is now the new database's (second review of prep/rename).
+    @Test func anOldConnectionClosingAfterTheQuarantineLeavesTheNewDatabasesLog() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("sortly.sqlite")
+        var earlier: SortlyStore? = try SortlyStore(url: url)
+        try await earlier?.setValue("earlier", forKey: "user.marker")
+        #expect(SortlyStore.quarantineDatabase(at: url) != nil)
+        let rebuilt = try SortlyStore(url: url)
+        try await rebuilt.setValue("rebuilt", forKey: "user.marker")
+        #if os(Linux)
+        // The old connection really is open on the quarantined files, and really closes below.
+        func openInQuarantine() -> Int {
+            let fds = (try? FileManager.default.contentsOfDirectory(atPath: "/proc/self/fd")) ?? []
+            return fds.filter { ((try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/fd/\($0)")) ?? "").contains(dir.lastPathComponent + "/Quarantine/") }.count
+        }
+        #expect(openInQuarantine() > 0)
+        #endif
+        earlier = nil
+        #if os(Linux)
+        #expect(openInQuarantine() == 0)
+        #endif
+        // The new database's committed row is still where the next start reads it.
+        #expect(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        let next = try SortlyStore(url: url)
+        #expect(try await next.value(String.self, forKey: "user.marker") == "rebuilt")
+        _ = rebuilt
+    }
+
     /// A restore that did not happen (failed, full disk, copy from a newer version) leaves an
     /// empty database next to a full copy. The next save of the copy must not replace it with
     /// the empty state, or the decisions would be gone for good.

@@ -531,6 +531,7 @@ final class DeviceConditionUITests: XCTestCase {
         }
         defer { removeUIInterruptionMonitor(monitor) }
         var grantedBefore = false
+        var deniedWithoutQuestion = false
         _ = UITestWait.holds(timeout: timeout) {
             if photoQuestionAnswered { return true }
             if let answer = [springboard.buttons.matching(predicate).firstMatch, app.alerts.buttons.matching(predicate).firstMatch].first(where: { $0.exists }) {
@@ -543,10 +544,18 @@ final class DeviceConditionUITests: XCTestCase {
                 grantedBefore = true
                 return true
             }
+            // "Einstellungen öffnen": the app has iOS's answer already, "denied", so no question
+            // comes any more (the CI simulator after an access reset). Waiting out the 25 s for it
+            // cost test09 about 20 s at each such step; the result is the same as after them.
+            if toSettings.exists {
+                deniedWithoutQuestion = true
+                return true
+            }
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap()
             return false
         }
         if grantedBefore && !photoQuestionAnswered { return false }
+        if deniedWithoutQuestion && !photoQuestionAnswered { print("UI_FACT photo question: access denied without a question") }
         guard photoQuestionAnswered else {
             print("UI_STEP_MISSING photo question (\(choice))")
             print("UI_FACT springboard shows: \(allLabels(springboard).prefix(400))")
@@ -1363,7 +1372,10 @@ final class DeviceConditionUITests: XCTestCase {
         // Without the iOS question in CI the answer is "denied": given back from the Mac. When
         // that failed (recorded by `grantFromHost`), nothing after it can pass: the test ends
         // here instead of waiting 17 more minutes for an analysis without access (44108052342).
-        if !app.tabBars.firstMatch.waitForExistence(timeout: 10), !grantFromHost() { return }
+        // The overview, or "Einstellungen öffnen" (denied without a question: no overview can
+        // come before the grant, so the 10 s are not waited out).
+        _ = UITestWait.holds(timeout: 10) { app.tabBars.firstMatch.exists || toSettings.exists }
+        if !app.tabBars.firstMatch.exists, !grantFromHost() { return }
         let back = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         print(back ? "UI_STEP_OK overview after access came back" : "UI_STEP_MISSING overview after access came back")
         if !back { shot("x-no-overview-after-access") }

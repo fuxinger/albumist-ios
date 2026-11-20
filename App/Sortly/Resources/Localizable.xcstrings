@@ -1121,6 +1121,26 @@
         }
       }
     },
+    "Albumist kann Alben nur anlegen, wenn du alle Fotos freigibst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist can only create albums when you share all photos."
+          }
+        }
+      }
+    },
+    "Albumist ordnet Fotos nur Alben zu. Ein Album verweist nur auf deine Fotos." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist only assigns photos to albums. An album only points to your photos."
+          }
+        }
+      }
+    },
     "Anlegen …" : {
       "localizations" : {
         "en" : {
@@ -1251,12 +1271,32 @@
         }
       }
     },
+    "Ein früheres Anlegen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating albums was interrupted earlier. Decide on the Suggestions page how to go on. Then you can continue here, and nothing is created twice."
+          }
+        }
+      }
+    },
     "Ein früheres Anlegen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach kannst du dieses Album anlegen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Creating albums was interrupted earlier. Decide on the Suggestions page how to go on; then you can create this album."
+          }
+        }
+      }
+    },
+    "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt rückgängig gemacht." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undoing earlier changes was interrupted. Decide on the Suggestions page how to go on. Then you can continue here, and nothing is undone twice."
           }
         }
       }
@@ -1317,6 +1357,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Removes the new albums and takes the added photos out of your albums again. Your photos stay."
+          }
+        }
+      }
+    },
+    "Entscheide auf der Seite „Vorschläge“, wie es weitergeht." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decide on the Suggestions page how to go on."
+          }
+        }
+      }
+    },
+    "Erneut versuchen legt nur an, was fehlt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trying again only creates what is missing."
           }
         }
       }
@@ -1467,6 +1527,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist no longer suggests ignored photos. The photo itself stays unchanged."
+          }
+        }
+      }
+    },
+    "Jede Änderung lässt sich rückgängig machen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every change can be undone."
           }
         }
       }
@@ -1677,6 +1747,26 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Nur was beim letzten Anlegen gefehlt hat." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only what was missing last time."
+          }
+        }
+      }
+    },
+    "Rückgängigmachen wurde unterbrochen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo Was Interrupted"
           }
         }
       }
@@ -2527,16 +2617,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist creates a new album anyway and no longer offers it for this suggestion. The album itself stays unchanged."
-          }
-        }
-      }
-    },
-    "Albumist ordnet Fotos nur Alben zu. Löschen, Bearbeiten oder Kopieren von Fotos gibt es in Albumist nicht. Ein Album verweist nur auf deine Fotos." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist only assigns photos to albums. Deleting, editing or copying photos does not exist in Albumist. An album only points to your photos."
           }
         }
       }
@@ -5311,6 +5391,16 @@
         }
       }
     },
+    "Was mit deinen Fotos passiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What Happens to Your Photos"
+          }
+        }
+      }
+    },
     "Zu den Reisen" : {
       "localizations" : {
         "en" : {
@@ -7197,16 +7287,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Full Access Needed"
-          }
-        }
-      }
-    },
-    "Albumist kann Alben nur anlegen, wenn du alle Fotos freigibst. Gerade sind nur ausgewählte Fotos freigegeben." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist can only create albums when you share all photos. Right now only selected photos are shared."
           }
         }
       }
@@ -10071,16 +10151,6 @@
         }
       }
     },
-    "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Creating albums was interrupted earlier. Decide on the overview how to go on. Then you can continue here, and nothing is created twice."
-          }
-        }
-      }
-    },
     "Alle Änderungen ansehen" : {
       "localizations" : {
         "en" : {
@@ -12087,16 +12157,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Undoing earlier changes was interrupted. Decide on the overview how to go on; then you can continue here."
-          }
-        }
-      }
-    },
-    "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt rückgängig gemacht." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Undoing earlier changes was interrupted. Decide on the overview how to go on. Then you can continue here, and nothing is undone twice."
           }
         }
       }

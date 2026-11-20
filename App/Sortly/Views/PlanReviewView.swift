@@ -209,10 +209,11 @@ struct PlanReviewView: View {
         if let obstacle { obstacleCard(obstacle, facts) }
         Text("Das ändert sich in Fotos").font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
         if plan.retries != nil {
-            // "Fehlendes erneut versuchen" (I16): say that this is not the whole plan again.
-            Text("Nur was beim letzten Anlegen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt.")
-                .font(.subheadline).foregroundStyle(.noteText)
-                .fixedSize(horizontal: false, vertical: true)
+            // "Fehlendes erneut versuchen" (I16): say that this is not the whole plan again; two
+            // lines, the rest behind "Mehr erfahren" (decision 8A).
+            LearnMore(short: Text("Nur was beim letzten Anlegen gefehlt hat."),
+                      full: Text("Nur was beim letzten Anlegen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt."),
+                      title: Text("Fehlendes erneut versuchen"))
         }
         Card {
             if summary.newFolders > 0 { row("folder.badge.plus", "Neue Ordner", summary.newFolders) }
@@ -231,10 +232,11 @@ struct PlanReviewView: View {
         if !facts.albums.isEmpty { PlanAlbumList(albums: facts.albums) }
 
         // The promises themselves stand in one line above the button (`promise`); what they
-        // mean stays here, under the albums.
-        Text("Fotos werden nur in Alben einsortiert. Die Originale bleiben, wo sie sind, und jede Änderung lässt sich rückgängig machen.")
-            .font(.footnote).foregroundStyle(.noteText)
-            .fixedSize(horizontal: false, vertical: true)
+        // mean stays here, under the albums: two lines, the rest behind "Mehr erfahren"
+        // (decision 8A).
+        LearnMore(short: Text("Jede Änderung lässt sich rückgängig machen."),
+                  full: Text("Fotos werden nur in Alben einsortiert. Die Originale bleiben, wo sie sind, und jede Änderung lässt sich rückgängig machen."),
+                  title: Text("Was mit deinen Fotos passiert"))
             .padding(.horizontal, Theme.Spacing.l)
 
         if !facts.conflicts.isEmpty {
@@ -280,11 +282,13 @@ struct PlanReviewView: View {
                 let isUndo = model.interruptedPlan?.reverts != nil
                 Label(isUndo ? LocalizedStringKey("Erst das unterbrochene Rückgängigmachen abschließen") : LocalizedStringKey("Erst das unterbrochene Anlegen abschließen"),
                       systemImage: "pause.circle").font(.headline)
-                Text(isUndo
-                     ? LocalizedStringKey("Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt rückgängig gemacht.")
-                     : LocalizedStringKey("Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt."))
-                    .font(.subheadline).foregroundStyle(.noteText)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Where to settle it in two lines, the rest behind "Mehr erfahren" (decision 8A).
+                // The plan that was cut off is decided on the tab "Vorschläge".
+                LearnMore(short: Text("Entscheide auf der Seite „Vorschläge“, wie es weitergeht."),
+                          full: Text(isUndo
+                                     ? LocalizedStringKey("Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt rückgängig gemacht.")
+                                     : LocalizedStringKey("Ein früheres Anlegen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt.")),
+                          title: Text(isUndo ? LocalizedStringKey("Rückgängigmachen wurde unterbrochen") : LocalizedStringKey("Anlegen wurde unterbrochen")))
             }
         case .unlock:
             UnlockCard(albumsInPlan: facts.freeAlbumUse, onLimit: limitToFreeAlbums)
@@ -814,8 +818,10 @@ struct FullAccessCard: View {
     var body: some View {
         Card {
             Label("Voller Zugriff nötig", systemImage: "photo.on.rectangle.angled").font(.headline)
-            Text("Albumist kann Alben nur anlegen, wenn du alle Fotos freigibst. Gerade sind nur ausgewählte Fotos freigegeben.")
+            // Two lines (decision 8A); the title says that full access is missing.
+            Text("Albumist kann Alben nur anlegen, wenn du alle Fotos freigibst.")
                 .font(.subheadline).foregroundStyle(.noteText)
+                .fixedSize(horizontal: false, vertical: true)
             Text("Einstellungen › Apps › Albumist › Fotos › Voller Zugriff")
                 .font(.footnote).foregroundStyle(.noteText)
             if let url = URL(string: UIApplication.openSettingsURLString) {

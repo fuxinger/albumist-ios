@@ -193,7 +193,8 @@ struct PlanReceiptView: View {
         } header: {
             Text("Deine Originale")
         } footer: {
-            Text("Albumist ordnet Fotos nur Alben zu. Löschen, Bearbeiten oder Kopieren von Fotos gibt es in Albumist nicht. Ein Album verweist nur auf deine Fotos.")
+            // Two lines (decision 8A): the rows above say that nothing was deleted, edited or copied.
+            Text("Albumist ordnet Fotos nur Alben zu. Ein Album verweist nur auf deine Fotos.")
         }
     }
 
@@ -233,7 +234,10 @@ struct PlanReceiptView: View {
             Text("Nicht erledigt")
         } footer: {
             if canRepair(receipt) {
-                Text("Erneut versuchen legt nur an, was fehlt; nichts wird doppelt angelegt, und du siehst vorher, was passiert. Du kannst es auch so lassen: Das Erledigte bleibt, und die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
+                // Two lines, the rest behind "Mehr erfahren" (decision 8A).
+                LearnMore(short: Text("Erneut versuchen legt nur an, was fehlt."),
+                          full: Text("Erneut versuchen legt nur an, was fehlt; nichts wird doppelt angelegt, und du siehst vorher, was passiert. Du kannst es auch so lassen: Das Erledigte bleibt, und die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor."),
+                          title: Text("Fehlendes erneut versuchen"))
             }
         }
     }

@@ -12832,6 +12832,26 @@
           }
         }
       }
+    },
+    "Entfernen wurde unterbrochen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removing Was Interrupted"
+          }
+        }
+      }
+    },
+    "Rest entfernen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish Removing"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

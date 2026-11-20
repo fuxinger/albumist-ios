@@ -19,7 +19,7 @@ import SortlyTestSupport
 ///   that deletes without a dialog.
 /// - For a dialog the test checks only that its message uses `DeleteQuestionNote`, not the
 ///   condition it passes: that the condition is right is what the core tests here check
-///   (`ChangePlan.undoDeletesCollections`, `InterruptedPlanUndo.deletesCollections`,
+///   (`DeleteQuestion`, `InterruptedPlanUndo.deletesCollections`,
 ///   `deletesCollections`), and the app passes the result of `AppModel` (syntax only on Linux).
 /// - Without a dialog (`directCalls`) it checks the `if` the note stands in, next to the call.
 @Suite("Announcing the iOS question before albums are deleted")
@@ -120,56 +120,52 @@ struct DeleteQuestionNoteTests {
         #expect(!InterruptedPlanUndo.deletesCollections(interrupted: onlyAdded, current: mine))
     }
 
-    /// The list the prediction gets may be older than Photos: an interrupted plan never reached
-    /// the step that reads the albums again, so its new album is not in the app's list, while
-    /// the undo (after `reconcileInterrupted` and a fresh read) deletes it. An album or folder
-    /// the plan made that the list lacks counts as deleted: saying that iOS asks when it then
-    /// does not is harmless, not saying it is the finding (second review of P3-07, MUST-1).
-    @Test func anAlbumThePlanMadeThatTheListLacksCountsAsDeleted() {
+    /// The app's list may be older than Photos: an interrupted plan never reached the step that
+    /// reads the albums again, so its new album is not in it, while the undo (after
+    /// `reconcileInterrupted` and a fresh read) deletes it. The question reads the albums at the
+    /// tap, and looks up on its own an album of the plan the list still lacks (second review of
+    /// P3-07, MUST-1; third review, NIT-1).
+    @Test func anAlbumThePlanMadeThatTheAppsListLacksCounts() async {
         let stale = CollectionInventory()
+        let empty = CollectionSnapshot(id: "a1", title: "Rom")
         let made = Self.plan([
             PlanStep(id: "0", operation: .createAlbum(key: "A", title: "Rom", parent: .topLevel), sourceID: nil, state: .succeeded(createdID: "a1", verifiedAt: Date())),
             PlanStep(id: "1", operation: .createAlbum(key: "B", title: "Paris", parent: .topLevel), sourceID: nil, state: .pending),
         ], resolved: ["A": "a1"])
-        #expect(InterruptedPlanUndo.deletesCollections(interrupted: made, current: stale))
+        #expect(await Self.question(listed: CollectionInventory([empty])).interruptedUndo(made, cached: stale))
+        #expect(await Self.question(listed: CollectionInventory(), found: [empty]).interruptedUndo(made, cached: stale))
         // Its id only written down inside the change (Photos ran it, the app ended).
         var noted = ExecutionRecord()
         noted.maybeCreated["A"] = "a1"
         let cutOff = Self.plan([
             PlanStep(id: "0", operation: .createAlbum(key: "A", title: "Rom", parent: .topLevel), sourceID: nil, state: .running(startedAt: Date())),
         ], record: noted)
-        #expect(InterruptedPlanUndo.deletesCollections(interrupted: cutOff, current: stale))
+        #expect(await Self.question(listed: CollectionInventory([empty])).interruptedUndo(cutOff, cached: stale))
         // An album found by its name after an interruption is never deleted: no word about it.
         var adopted = ExecutionRecord()
         adopted.adoptedKeys = ["A"]
         let found = Self.plan([
             PlanStep(id: "0", operation: .createAlbum(key: "A", title: "Rom", parent: .topLevel), sourceID: nil, state: .succeeded(createdID: "a1", verifiedAt: Date())),
         ], resolved: ["A": "a1"], record: adopted)
-        #expect(!InterruptedPlanUndo.deletesCollections(interrupted: found, current: stale))
+        #expect(found.collectionsMade.isEmpty)
+        #expect(!(await Self.question(listed: CollectionInventory([empty])).interruptedUndo(found, cached: stale)))
     }
 
-    /// The same for "Rückgängig machen": an album of the plan the list lacks counts, one an
-    /// earlier undo of the plan deleted does not (it is gone for good, "Rest rückgängig machen"
-    /// then deletes nothing more of it).
-    @Test func anUndoCountsAnAlbumTheListLacksUnlessAnEarlierUndoDeletedIt() {
+    /// "Rest rückgängig machen" after an undo that deleted "Rom": the album is gone for good, the
+    /// look-up finds nothing, and only the user's photos are taken out: nothing said.
+    @Test func anAlbumAnEarlierUndoDeletedIsNotCounted() async {
         let made = Self.plan([
             PlanStep(id: "0", operation: .createAlbum(key: "A", title: "Rom", parent: .topLevel), sourceID: nil, state: .succeeded(createdID: "a1", verifiedAt: Date())),
             PlanStep(id: "1", operation: .addAssets(album: .existing("mine"), assets: ["x"]), sourceID: nil, state: Self.done),
         ], resolved: ["A": "a1"])
-        let stale = CollectionInventory([CollectionSnapshot(id: "mine", title: "Familie", assetIDs: ["own", "x"])])
-        let undo = UndoPlanner().undoPlan(for: made, current: stale, owned: ["mine": ["x"]])
-        #expect(!undo.deletesCollections)
-        #expect(made.undoDeletesCollections(undo, current: stale))
+        let listed = CollectionInventory([CollectionSnapshot(id: "mine", title: "Familie", assetIDs: ["own", "x"])])
+        let records = [ManagedAlbumState(albumID: "mine", sourceID: SortlyID("s"), lastKnownTitle: "Familie", lastKnownParentID: nil,
+                                         lastKnownMembers: ["own", "x"], addedBySortly: ["x"], createdBySortly: false)]
         var earlier = Self.plan([
             PlanStep(id: "0", operation: .deleteCollection("a1", title: "Rom"), sourceID: nil, state: Self.done),
         ])
         earlier.reverts = made.id
-        #expect(!made.undoDeletesCollections(undo, current: stale, earlierUndos: [earlier]))
-        // Listed and only the user's photos taken out: nothing deleted, nothing said.
-        let listed = CollectionInventory([CollectionSnapshot(id: "mine", title: "Familie", assetIDs: ["own", "x"]),
-                                          CollectionSnapshot(id: "a1", title: "Rom", assetIDs: ["own"])])
-        let keeps = UndoPlanner().undoPlan(for: made, current: listed, owned: ["mine": ["x"]])
-        #expect(!made.undoDeletesCollections(keeps, current: listed))
+        #expect(!(await Self.question(listed: listed).undo(made, albums: records, waiting: [], earlierUndos: [earlier], cached: listed)))
     }
 
     /// An interrupted removal from "Alben von Albumist" (no `reverts`), or its retry, deletes
@@ -182,6 +178,123 @@ struct DeleteQuestionNoteTests {
         #expect(removal.reverts == nil)
         removal.steps[0].state = .running(startedAt: Date())
         #expect(removal.deletesCollections)
+    }
+
+    // MARK: The question at the tap (third review)
+
+    static let rome = CollectionSnapshot(id: "a1", title: "Rom", assetIDs: ["x"])
+
+    /// A plan that made "Rom" (a1) and put x in it.
+    static var madeRome: ChangePlan {
+        plan([
+            PlanStep(id: "0", operation: .createAlbum(key: "A", title: "Rom", parent: .topLevel), sourceID: nil, state: .succeeded(createdID: "a1", verifiedAt: Date())),
+            PlanStep(id: "1", operation: .addAssets(album: .planned("A"), assets: ["x"]), sourceID: nil, state: done),
+        ], resolved: ["A": "a1"])
+    }
+
+    static func question(listed: CollectionInventory?, found: [CollectionSnapshot] = [], limit: Duration = .seconds(3)) -> DeleteQuestion {
+        DeleteQuestion(listAlbums: {
+            guard let listed else { throw CancellationError() }
+            return listed
+        }, lookUp: { id in found.first { $0.id == id } }, limit: limit)
+    }
+
+    /// The plan's results are not stored yet (a full disk): "Rückgängig machen" stores them
+    /// first and then deletes "Rom", so iOS asks. The question folds them in the same way
+    /// (SHOULD-1; before: no records, nothing predicted, "Deine Fotos bleiben unverändert").
+    @Test func resultsStillWaitingToBeStoredAreFoldedIn() async {
+        let answer = await Self.question(listed: CollectionInventory([Self.rome]))
+            .undo(Self.madeRome, albums: [], waiting: [Self.madeRome], earlierUndos: [], cached: CollectionInventory())
+        #expect(answer)
+    }
+
+    /// An album of the plan the list lacks is looked up on its own (W3): there, it is deleted;
+    /// gone (the user deleted it, a removal took it, a create that never landed), nothing is
+    /// said (NIT-1; before, every such undo announced a question iOS never asked).
+    @Test func anAlbumTheListLacksIsLookedUpOnItsOwn() async {
+        let records = ManagedAlbumTracker().record(Self.madeRome, into: [], inventory: CollectionInventory([Self.rome]))
+        let found = await Self.question(listed: CollectionInventory(), found: [Self.rome])
+            .undo(Self.madeRome, albums: records, waiting: [], earlierUndos: [], cached: CollectionInventory())
+        #expect(found)
+        let gone = await Self.question(listed: CollectionInventory())
+            .undo(Self.madeRome, albums: records, waiting: [], earlierUndos: [], cached: CollectionInventory())
+        #expect(!gone)
+        // An id written down for a create that never landed.
+        var noted = ExecutionRecord()
+        noted.earlierMaybeCreated = ["ghost"]
+        let interrupted = Self.plan([
+            PlanStep(id: "0", operation: .createAlbum(key: "A", title: "Rom", parent: .topLevel), sourceID: nil, state: .running(startedAt: Date())),
+        ], record: noted)
+        #expect(!(await Self.question(listed: CollectionInventory()).interruptedUndo(interrupted, cached: CollectionInventory())))
+        // The interrupted plan's album, only the list lacks it.
+        let cutOff = Self.plan([
+            PlanStep(id: "0", operation: .createAlbum(key: "A", title: "Rom", parent: .topLevel), sourceID: nil, state: .running(startedAt: Date())),
+        ], resolved: ["A": "a1"])
+        let empty = CollectionSnapshot(id: "a1", title: "Rom")
+        #expect(await Self.question(listed: CollectionInventory(), found: [empty]).interruptedUndo(cutOff, cached: CollectionInventory()))
+    }
+
+    /// Photos could not be read: the safe side, iOS may ask whenever the plan made an album or
+    /// folder (NIT-2), and never for a plan that made none and deletes nothing.
+    @Test func withoutTheAlbumListTheAnswerIsTheSafeSide() async {
+        let records = ManagedAlbumTracker().record(Self.madeRome, into: [], inventory: CollectionInventory([Self.rome]))
+        // The app's list says the user put a photo of their own in: no deletion planned from it.
+        let cached = CollectionInventory([CollectionSnapshot(id: "a1", title: "Rom", assetIDs: ["x", "own"])])
+        #expect(await Self.question(listed: nil).undo(Self.madeRome, albums: records, waiting: [], earlierUndos: [], cached: cached))
+        #expect(await Self.question(listed: nil).interruptedUndo(Self.madeRome, cached: cached))
+        let onlyAdded = Self.plan([
+            PlanStep(id: "0", operation: .addAssets(album: .existing("mine"), assets: ["x"]), sourceID: nil, state: Self.done),
+        ])
+        let mine = CollectionInventory([CollectionSnapshot(id: "mine", title: "Familie", assetIDs: ["own", "x"])])
+        #expect(!(await Self.question(listed: nil).undo(onlyAdded, albums: [], waiting: [], earlierUndos: [], cached: mine)))
+    }
+
+    /// Photos takes long to list the albums: the dialog does not wait for it. After the limit
+    /// the answer is the safe side (SHOULD-2).
+    @Test func aSlowAlbumListIsNotWaitedFor() async {
+        let slow = DeleteQuestion(listAlbums: {
+            try await Task.sleep(for: .seconds(60))
+            return CollectionInventory([CollectionSnapshot(id: "a1", title: "Rom", assetIDs: ["x", "own"])])
+        }, lookUp: { _ in nil }, limit: .milliseconds(50))
+        let clock = ContinuousClock()
+        let started = clock.now
+        let answer = await slow.undo(Self.madeRome, albums: [], waiting: [], earlierUndos: [], cached: CollectionInventory([Self.rome]))
+        // Far below the slow list's minute; not tighter, the parallel suite can starve a timer.
+        #expect(clock.now - started < .seconds(20))
+        #expect(answer)
+    }
+
+    /// An interrupted removal from "Alben von Albumist" is called one: "Entfernen wurde
+    /// unterbrochen", "Rest entfernen", not "Anlegen" right above "iOS fragt … löschen" (NIT-5).
+    @Test func anInterruptedRemovalIsCalledARemoval() throws {
+        for (file, type) in [("App/Sortly/Views/OverviewView.swift", "struct InterruptedPlanCard"),
+                             ("App/Sortly/Views/SettingsView.swift", "struct InterruptedHistoryRow")] {
+            let source = AppSource.code(try AppSource.read(file), keepStrings: true)
+            let body = try #require(AppSource.body(of: type, in: source), "\(type)")
+            #expect(body.contains("\"Rest entfernen\""), "\(type)")
+            #expect(body.contains("removalSources"), "\(type)")
+        }
+        let card = AppSource.code(try AppSource.read("App/Sortly/Views/OverviewView.swift"), keepStrings: true)
+        #expect(AppSource.body(of: "struct InterruptedPlanCard", in: card)?.contains("\"Entfernen wurde unterbrochen\"") == true)
+    }
+
+    /// The buttons that ask first show that Albumist checks, and take no second tap meanwhile
+    /// (SHOULD-2): a spinner beside the title (`checkingBeside`), and a guard.
+    @Test func theButtonsThatAskFirstShowTheyCheck() throws {
+        var found = 0
+        for file in AppSource.swiftFiles(under: "App/Sortly/Views") {
+            let source = try AppSource.read(file)
+            for call in ["undoDeletesCollections(", "interruptedUndoDeletesCollections("] {
+                for site in AppSource.callSites(of: call, in: source) {
+                    let code = Self.scalars(AppSource.code(source))
+                    let body = try #require(Self.enclosingType(of: site.offset, in: source).map { Self.string(code[$0]) })
+                    found += 1
+                    #expect(body.contains(".checkingBeside("), "\(file): \(call) without a spinner")
+                    #expect(body.contains("guard !"), "\(file): \(call) without ignoring a second tap")
+                }
+            }
+        }
+        #expect(found >= 4)
     }
 
     // MARK: Reading the App

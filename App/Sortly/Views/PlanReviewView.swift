@@ -377,6 +377,9 @@ struct ResultCard: View {
     @State private var confirmUndo = false
     /// The undo deletes albums or folders: the confirmation says that iOS asks next (P3-07).
     @State private var undoDeletes = false
+    /// Albumist reads the albums to see whether the undo deletes any: a spinner beside the
+    /// button, and no second tap meanwhile (third review of P3-07, SHOULD-2).
+    @State private var askingUndo = false
     @State private var appeared = false
     @State private var photosDidNotOpen = false
     @Environment(\.openURL) private var openURL
@@ -464,13 +467,19 @@ struct ResultCard: View {
             }
             .accessibilityIdentifier("result.receipt")
             if !isUndo && !model.undonePlans.contains(plan.id) {
-                Button("Rückgängig machen") {
+                Button {
+                    guard !askingUndo else { return }
+                    askingUndo = true
                     Task {
                         undoDeletes = await model.undoDeletesCollections(plan)
+                        askingUndo = false
                         confirmUndo = true
                     }
+                } label: {
+                    Text("Rückgängig machen").checkingBeside(askingUndo)
                 }
                     .buttonStyle(SecondaryButtonStyle())
+                    .disabled(askingUndo)
                 Text("Auch später möglich unter Einstellungen › Verlauf und Rückgängig. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

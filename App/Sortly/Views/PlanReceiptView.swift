@@ -19,6 +19,9 @@ struct PlanReceiptView: View {
     @State private var confirmUndo = false
     /// The undo deletes albums or folders: the confirmation says that iOS asks next (P3-07).
     @State private var undoDeletes = false
+    /// Albumist reads the albums to see whether the undo deletes any: a spinner beside the
+    /// button, and no second tap meanwhile (third review of P3-07, SHOULD-2).
+    @State private var askingUndo = false
     /// "Erneut versuchen": the plan with what is missing, opened in the normal review.
     @Environment(Navigator.self) private var navigator: Navigator?
     /// "Fehlendes erneut versuchen" is building its plan: the button waits (a second tap
@@ -330,8 +333,10 @@ struct PlanReceiptView: View {
                         Label(text, systemImage: "exclamationmark.triangle")
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
-                    Button("Rest rückgängig machen", role: .destructive) { askUndo() }
-                        .disabled(model.execution.isRunning || retrying)
+                    Button(role: .destructive) { askUndo() } label: {
+                        Text("Rest rückgängig machen").checkingBeside(askingUndo)
+                    }
+                        .disabled(model.execution.isRunning || retrying || askingUndo)
                         .accessibilityIdentifier("receipt.undoRest")
                 } else if !undo.isComplete {
                     Text("Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist.")
@@ -347,8 +352,10 @@ struct PlanReceiptView: View {
         } else if !receipt.isUndo && !model.undonePlans.contains(plan.id)
                     && (plan.status == .completed || plan.status == .completedWithErrors) {
             Section {
-                Button("Rückgängig machen", role: .destructive) { askUndo() }
-                    .disabled(model.execution.isRunning || retrying)
+                Button(role: .destructive) { askUndo() } label: {
+                    Text("Rückgängig machen").checkingBeside(askingUndo)
+                }
+                    .disabled(model.execution.isRunning || retrying || askingUndo)
                     .accessibilityIdentifier("receipt.undo")
             } footer: {
                 Text("Entfernt nur die neuen Alben und Zuordnungen dieser Änderungen. Deine Fotos bleiben.")
@@ -359,8 +366,11 @@ struct PlanReceiptView: View {
     /// "Rückgängig machen" and "Rest rückgängig machen" ask first, and say whether iOS asks too
     /// (from the albums read fresh from Photos, a moment after the tap).
     private func askUndo() {
+        guard !askingUndo else { return }
+        askingUndo = true
         Task {
             undoDeletes = await model.undoDeletesCollections(plan)
+            askingUndo = false
             confirmUndo = true
         }
     }

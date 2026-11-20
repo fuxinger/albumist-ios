@@ -514,14 +514,22 @@ struct InterruptedPlanCard: View {
     /// "Alles zurücknehmen" deletes albums or folders: the confirmation says that iOS asks
     /// next (P3-07). Worked out once on the tap, not while the dialog is drawn.
     @State private var undoDeletes = false
+    /// Albumist reads the albums to see whether the undo deletes any: a spinner beside the
+    /// button, and no second tap meanwhile (third review of P3-07, SHOULD-2).
+    @State private var askingUndo = false
 
     var body: some View {
         let done = plan.steps.filter { if case .succeeded = $0.state { true } else { false } }.count
         let isUndo = plan.reverts != nil
+        // A removal from "Alben von Albumist" (or its retry) is called one: "Rest anlegen" above
+        // "iOS fragt … löschen" read as a contradiction (third review of P3-07, NIT-5).
+        let isRemoval = !isUndo && !plan.removalSources.isEmpty
         Card {
             Group {
                 if isUndo {
                     Label("Rückgängig wurde unterbrochen", systemImage: "pause.circle")
+                } else if isRemoval {
+                    Label("Entfernen wurde unterbrochen", systemImage: "pause.circle")
                 } else {
                     Label("Anlegen wurde unterbrochen", systemImage: "pause.circle")
                 }
@@ -536,17 +544,23 @@ struct InterruptedPlanCard: View {
             } else {
                 // The ways out (I16). An interrupted undo cannot itself be taken back (Photos
                 // cannot bring deleted albums back): it can only go on or stay as it is.
-                Button(isUndo ? LocalizedStringKey("Rest zurücknehmen") : LocalizedStringKey("Rest anlegen")) { Task { await model.resumeInterruptedPlan() } }
+                Button(isUndo ? LocalizedStringKey("Rest zurücknehmen") : isRemoval ? LocalizedStringKey("Rest entfernen") : LocalizedStringKey("Rest anlegen")) { Task { await model.resumeInterruptedPlan() } }
                     .buttonStyle(PrimaryButtonStyle())
                     .accessibilityIdentifier("interrupted.resume")
                 if !isUndo {
-                    Button("Alles zurücknehmen") {
+                    Button {
+                        guard !askingUndo else { return }
+                        askingUndo = true
                         Task {
                             undoDeletes = await model.interruptedUndoDeletesCollections()
+                            askingUndo = false
                             confirmUndo = true
                         }
+                    } label: {
+                        Text("Alles zurücknehmen").checkingBeside(askingUndo)
                     }
                         .buttonStyle(SecondaryButtonStyle())
+                        .disabled(askingUndo)
                         .accessibilityIdentifier("interrupted.undo")
                 }
                 Button { Task { await model.keepInterruptedPlanAsIs() } } label: {

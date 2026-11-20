@@ -19,3 +19,20 @@ enum DeleteQuestionNote {
         return Text("\(lead) \(tail)")
     }
 }
+
+extension View {
+    /// A button title with a small spinner beside it while Albumist checks whether the change
+    /// deletes albums (a moment, at most `DeleteQuestion.limit`), as Apple's own buttons do
+    /// while they work (third review of P3-07, SHOULD-2).
+    func checkingBeside(_ checking: Bool) -> some View {
+        HStack(spacing: Theme.Spacing.s) {
+            if checking {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityHidden(true) // the value below says it
+            }
+            self
+        }
+        .accessibilityValue(checking ? Text("Wird vorbereitet") : Text(verbatim: ""))
+    }
+}

@@ -203,24 +203,6 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
         return made
     }
 
-    /// Whether taking this plan back with `undo` (planned from `current`) deletes an album or
-    /// folder, said before it runs (iOS asks once more, review 18.11., P3-07). An album or
-    /// folder this plan made that `current` does not list counts too: the list may be older
-    /// than Photos (an interrupted plan never read the albums again), and the undo then works
-    /// from a fresh one. Saying that iOS asks when it then does not is harmless; not saying it
-    /// is the finding (second review, MUST-1). Albums an earlier undo of this plan deleted
-    /// (`earlierUndos`) are gone for good and do not count.
-    public func undoDeletesCollections(_ undo: ChangePlan?, current: CollectionInventory, earlierUndos: [ChangePlan] = []) -> Bool {
-        if undo?.deletesCollections == true { return true }
-        var gone = Set<CollectionID>()
-        for earlier in earlierUndos {
-            for step in earlier.steps {
-                if case .deleteCollection(let id, _) = step.operation, case .succeeded = step.state { gone.insert(id) }
-            }
-        }
-        return collectionsMade.contains { current[$0] == nil && !gone.contains($0) }
-    }
-
     /// Media an add or remove step verifiably changed: the settled journal entry, and nothing
     /// while the outcome is unclear (interrupted, or the read-back failed), so an intent is
     /// never counted as done (audit 2, 6.2). Plans from versions without a journal fall back

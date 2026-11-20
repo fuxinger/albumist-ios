@@ -50,6 +50,16 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Geändert
+- 20.11.: Große Mediatheken: Keine Rechnung über alle Fotos mehr auf dem Haupt-Strang, wenn ein Bildschirm sie braucht
+  (Fable P4-09). Der Atlas jedes Jahres, die Fotodaten nach Kennung (Foto-Ansicht, Treffer der Suche) und der Name
+  des erkannten Zuhauses entstehen beim Auffrischen der Übersicht abseits des Haupt-Strangs und kommen mit den
+  Fotodaten; „Seit wann wohnst du dort?“ rechnet seinen Vorschlag im Hintergrund (vorher bei 50.000 Fotos auf
+  Linux: Jahr im Atlas 75 ms, erstes Foto nach jeder Änderung 97 ms, je bei 100.000 Fotos das Doppelte). Die Orte
+  in „Dein Zuhause“ und der Status für die Suche liefen schon abseits. Die Fotodaten nach Kennung sind keine zweite
+  Kopie aller Fotodaten mehr, sondern ein Verweis je Foto, und bleiben bei einer Speicherwarnung.
+- 20.11.: Auffrischen der Übersicht: Alles, was es zeigt, kommt in einem Paket aus der Analyse (`DerivedRefresh`)
+  und wird nur vom neuesten Aufruf zugewiesen; ein älterer Aufruf, der danach scheitert, zeigt keinen Fehler mehr
+  über dem neueren Stand (Fable P4-10 = G4-03, mit einem Test zweier überlappender Aufrufe).
 - 18.11. (Entscheidungen Fuchs 1 und 2, Fable P1-05/P1-06): Eine Bedeutung für „sortiert“.
   Ignorierte Fotos zählen im Ring nicht mehr mit (weder sortiert noch offen); der Ring erreicht
   100 %, sobald alles nicht Ignorierte sortiert ist, und „Ignorieren“ vergrößert nie die Zahl

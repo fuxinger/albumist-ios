@@ -438,6 +438,22 @@ struct DerivedRefreshAppTests {
         #expect(ask.contains("guard proposing == nil else { return }"), "a second tap asks twice")
     }
 
+    /// Delta review of the second review, S1: the atlas share sheet read the atlas live, so a
+    /// refresh that emptied the atlas of each year switched an open sheet's card and "Teilen" to
+    /// the atlas of all years for a moment. The sheet gets the atlas (and the count) captured
+    /// when "Teilen" is tapped (`.sheet(item:)`), never the model's.
+    @Test func theShareSheetSharesTheAtlasAsItWasWhenTapped() throws {
+        let view = try AppSource.read("App/Sortly/Views/Atlas.swift")
+        let screen = AppSource.code(try #require(AppSource.body(of: "struct AtlasView", in: view)))
+        #expect(screen.contains(".sheet(item: $sharing)"), "the share sheet is not opened with a captured value")
+        let sheet = AppSource.calls(of: "ShareCardSheet(", in: screen)
+        #expect(sheet.count == 1)
+        let captured = sheet.allSatisfy { $0.hasPrefix("atlas: shared.atlas, sortedPhotos: shared.sortedPhotos,") && !$0.contains("model.travelAtlas") }
+        #expect(captured, "the share sheet reads the atlas live: \(sheet)")
+        let tap = screen.contains("sharing = SharedAtlas(atlas: atlas, sortedPhotos: model.progress.fully)")
+        #expect(tap, "Teilen does not capture the atlas shown")
+    }
+
     /// The line of `source` at a position in Unicode scalars, trimmed.
     static func line(at offset: Int, in source: String) -> String {
         let scalars = Array(source.unicodeScalars)

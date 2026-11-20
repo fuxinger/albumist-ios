@@ -200,7 +200,9 @@ struct AtlasView: View {
     @State private var story: String?
     @State private var storyScope: PhotoStory.Scope = .trips
     @State private var writing = false
-    @State private var sharing = false
+    /// The atlas shared, captured when "Teilen" is tapped: a refresh meanwhile (it empties the
+    /// atlas of each year for a moment) does not change the card that is shared.
+    @State private var sharing: SharedAtlas?
     /// nil = all years.
     @State private var year: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -238,7 +240,9 @@ struct AtlasView: View {
         .navigationTitle("Reise-Atlas")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { sharing = true } label: { Image(systemName: "square.and.arrow.up") }
+                Button {
+                    if let atlas { sharing = SharedAtlas(atlas: atlas, sortedPhotos: model.progress.fully) }
+                } label: { Image(systemName: "square.and.arrow.up") }
                     .accessibilityLabel("Reise-Atlas teilen")
                     .disabled(order.isEmpty)
             }
@@ -248,8 +252,8 @@ struct AtlasView: View {
             // atlas is still being made.
             revealed = .max
         }
-        .sheet(isPresented: $sharing) {
-            ShareCardSheet(atlas: atlas ?? model.travelAtlas(), sortedPhotos: model.progress.fully, map: model.worldMap)
+        .sheet(item: $sharing) { shared in
+            ShareCardSheet(atlas: shared.atlas, sortedPhotos: shared.sortedPhotos, map: model.worldMap)
         }
         .task {
             outlines = await AtlasOutlines.shared.load(from: model.worldMap)
@@ -265,6 +269,13 @@ struct AtlasView: View {
             }
         }
     }
+}
+
+/// The atlas and the sorted count as they were when "Teilen" was tapped (`AtlasView.sharing`).
+struct SharedAtlas: Identifiable {
+    let id = UUID()
+    var atlas: TravelAtlas
+    var sortedPhotos: Int
 }
 
 extension AtlasView {

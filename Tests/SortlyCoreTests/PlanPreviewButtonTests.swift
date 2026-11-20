@@ -46,20 +46,19 @@ struct PlanPreviewButtonTests {
         }
     }
 
-    /// The conditions of the `if` and `else` blocks around the first `target` in `text`,
-    /// outermost first, as code (comments and strings left out); nil when `target` is not there.
-    /// An `else` block counts as the condition "else".
-    static func conditions(around target: String, in text: String) -> [String]? {
+    /// The `if` and `else` blocks of `text`, in order, as code (comments and strings left out):
+    /// each with its condition ("else" for an `else` block) and the positions of its braces, in
+    /// Unicode scalars of `code`.
+    static func blocks(in text: String) -> (code: [Unicode.Scalar], blocks: [(condition: String, open: Int, close: Int)]) {
         let code = Array(AppSource.code(text).unicodeScalars)
-        guard let at = index(of: Array(target.unicodeScalars), in: code) else { return nil }
         func isName(_ scalar: Unicode.Scalar) -> Bool { CharacterSet.alphanumerics.contains(scalar) || scalar == "_" }
         func isWord(_ word: String, at i: Int) -> Bool {
             let letters = Array(word.unicodeScalars)
             guard i + letters.count <= code.count, Array(code[i..<(i + letters.count)]) == letters else { return false }
             return (i == 0 || !isName(code[i - 1])) && (i + letters.count == code.count || !isName(code[i + letters.count]))
         }
-        var found: [String] = []
-        for i in 0..<at {
+        var found: [(condition: String, open: Int, close: Int)] = []
+        for i in code.indices {
             guard let keyword = isWord("if", at: i) ? "if" : isWord("else", at: i) ? "else" : nil else { continue }
             // The block: the first `{` outside parentheses, up to its matching `}`.
             var open = i + keyword.unicodeScalars.count
@@ -76,11 +75,23 @@ struct PlanPreviewButtonTests {
                 if code[close] == "}" { depth -= 1; if depth == 0 { break } }
                 close += 1
             }
-            guard open < at, at < close else { continue }
-            let condition = keyword == "if" ? String(String.UnicodeScalarView(code[(i + 2)..<open])) : "else"
-            found.append(condition.trimmingCharacters(in: .whitespacesAndNewlines))
+            let condition = keyword == "if" ? String(String.UnicodeScalarView(code[(i + 2)..<min(open, code.count)])) : "else"
+            found.append((condition.trimmingCharacters(in: .whitespacesAndNewlines), open, close))
         }
-        return found
+        return (code, found)
+    }
+
+    /// The conditions of the `if` and `else` blocks around the first `target` in `text`,
+    /// outermost first (`blocks`); nil when `target` is not there.
+    static func conditions(around target: String, in text: String) -> [String]? {
+        let (code, blocks) = Self.blocks(in: text)
+        guard let at = index(of: Array(target.unicodeScalars), in: code) else { return nil }
+        return blocks.filter { $0.open < at && at < $0.close }.map(\.condition)
+    }
+
+    /// The conditions of every `if` in `text` (`blocks`).
+    static func ifConditions(in text: String) -> [String] {
+        blocks(in: text).blocks.map(\.condition).filter { $0 != "else" }
     }
 
     static func index(of wanted: [Unicode.Scalar], in scalars: [Unicode.Scalar]) -> Int? {
@@ -251,5 +262,23 @@ struct PlanPreviewButtonTests {
         let walk = AppSource.code(try AppSource.read("App/SortlyUITests/AccessibilityUITests.swift"), keepStrings: true)
         let chrome = try #require(AppSource.body(of: "func chromeFrames(", in: walk))
         #expect(chrome.contains("\"plan.bar\""), "the accessibility test does not count the bar")
+    }
+
+    /// Only what passes under the bar counts as under a bar in the accessibility test. The bar's
+    /// own promise, button and notes ("Alben jetzt anlegen", the screen's main action) are
+    /// audited like any content, a finding on them fails the test as before the bar was known:
+    /// `chromeFrames` notes the elements inside "plan.bar", and neither the tree checks nor the
+    /// audit let them pass as under a bar.
+    @Test func theBarsOwnTextAndButtonAreStillAuditedAsErrors() throws {
+        let walk = AppSource.code(try AppSource.read("App/SortlyUITests/AccessibilityUITests.swift"), keepStrings: true)
+        let chrome = try #require(AppSource.body(of: "func chromeFrames(", in: walk))
+        #expect(chrome.contains(/\bownBarElements\s*(=|\.append\()/), "the elements inside the bar are not noted")
+        let tree = try #require(AppSource.body(of: "func inspectTree(", in: walk))
+        let inChrome = try #require(tree.split(separator: "\n").first { $0.contains(/\blet\s+inChrome\b/) }.map(String.init))
+        #expect(inChrome.contains(/!\s*isOwnBarElement\(/), "the tree checks skip the bar's own elements: \(inChrome)")
+        let record = try #require(AppSource.body(of: "func record(", in: walk))
+        let exemption = try #require(Self.ifConditions(in: record).first { $0.contains("chrome.contains") },
+                                     "no exemption for bars in the audit")
+        #expect(exemption.contains(/!\s*isOwnBarElement\(/), "the bar's own elements pass as under a bar: \(exemption)")
     }
 }

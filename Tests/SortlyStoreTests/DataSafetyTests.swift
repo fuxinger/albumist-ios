@@ -408,6 +408,87 @@ struct DataSafetyTests {
         #expect(try Data(contentsOf: folders[2].appendingPathComponent("sortly.sqlite")) == Data("db 2".utf8))
     }
 
+    /// "Neu aufbauen" takes stray logs of the other name too (no database of that name): a
+    /// stale log must not be replayed into the database built next (second review of prep/rename).
+    @Test func theQuarantineTakesAStrayLogOfTheOtherNameButNotItsDatabase() throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("old.sqlite")
+        for name in ["old.sqlite", "old.sqlite-wal", "new.sqlite-wal", "new.sqlite-shm"] {
+            try Data(name.utf8).write(to: dir.appendingPathComponent(name))
+        }
+        let aside = try #require(SortlyStore.quarantineDatabase(at: url, otherName: "new.sqlite"))
+        let moved = try FileManager.default.contentsOfDirectory(atPath: aside.path).sorted()
+        #expect(moved == ["new.sqlite-shm", "new.sqlite-wal", "old.sqlite", "old.sqlite-wal"])
+        // A database file of the other name is the user's data: it stays, with its log.
+        for name in ["new.sqlite", "new.sqlite-wal"] { try Data(name.utf8).write(to: dir.appendingPathComponent(name)) }
+        try Data("db".utf8).write(to: url)
+        let second = try #require(SortlyStore.quarantineDatabase(at: url, otherName: "new.sqlite"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: second.path) == ["old.sqlite"])
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("new.sqlite-wal").path))
+    }
+
+    /// Stray logs set aside by the database move (`Quarantine/<time>-stray`) never push out a
+    /// quarantined database: each kind keeps its two newest folders (re-check of prep/rename).
+    @Test func strayFoldersDoNotCountAgainstTheQuarantinedDatabases() throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("old.sqlite")
+        func quarantine(_ time: Double) throws -> String {
+            try Data("db \(time)".utf8).write(to: url)
+            return try #require(SortlyStore.quarantineDatabase(at: url, now: Date(timeIntervalSince1970: time))).lastPathComponent
+        }
+        func stray(_ time: Double) throws -> String {
+            let aside = DatabaseFile.strayFolder(in: dir, now: Date(timeIntervalSince1970: time))
+            try FileManager.default.createDirectory(at: aside, withIntermediateDirectories: true)
+            try Data("stale log".utf8).write(to: aside.appendingPathComponent("new.sqlite-wal"))
+            return aside.lastPathComponent
+        }
+        func kept() throws -> Set<String> {
+            Set(try FileManager.default.contentsOfDirectory(atPath: dir.appendingPathComponent("Quarantine").path))
+        }
+        let first = try quarantine(1_700_000_000)
+        let strays = [try stray(1_700_000_100), try stray(1_700_000_200)]
+        let second = try quarantine(1_700_000_300)
+        #expect(try kept() == Set([first, second] + strays))
+        let third = [try stray(1_700_000_400)]
+        let last = try quarantine(1_700_000_500)
+        #expect(try kept() == Set([second, last, strays[1]] + third))
+    }
+
+    /// "Neu aufbauen" after a start that failed with the store already open (AppModel.load):
+    /// the old connection is still open while its files go to the quarantine and a new database
+    /// starts under the same name. When the old connection closes, it must not touch the new
+    /// database's files: SQLite deletes the log and shared memory of a closing connection by
+    /// name, which is now the new database's (second review of prep/rename).
+    @Test func anOldConnectionClosingAfterTheQuarantineLeavesTheNewDatabasesLog() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("sortly.sqlite")
+        var earlier: SortlyStore? = try SortlyStore(url: url)
+        try await earlier?.setValue("earlier", forKey: "user.marker")
+        #expect(SortlyStore.quarantineDatabase(at: url) != nil)
+        let rebuilt = try SortlyStore(url: url)
+        try await rebuilt.setValue("rebuilt", forKey: "user.marker")
+        #if os(Linux)
+        // The old connection really is open on the quarantined files, and really closes below.
+        func openInQuarantine() -> Int {
+            let fds = (try? FileManager.default.contentsOfDirectory(atPath: "/proc/self/fd")) ?? []
+            return fds.filter { ((try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/fd/\($0)")) ?? "").contains(dir.lastPathComponent + "/Quarantine/") }.count
+        }
+        #expect(openInQuarantine() > 0)
+        #endif
+        earlier = nil
+        #if os(Linux)
+        #expect(openInQuarantine() == 0)
+        #endif
+        // The new database's committed row is still where the next start reads it.
+        #expect(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        let next = try SortlyStore(url: url)
+        #expect(try await next.value(String.self, forKey: "user.marker") == "rebuilt")
+        _ = rebuilt
+    }
+
     /// A restore that did not happen (failed, full disk, copy from a newer version) leaves an
     /// empty database next to a full copy. The next save of the copy must not replace it with
     /// the empty state, or the decisions would be gone for good.

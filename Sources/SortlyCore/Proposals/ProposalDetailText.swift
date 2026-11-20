@@ -74,10 +74,21 @@ public enum PhotoDays {
     /// Datum". The headers name the year only when the photos span several years.
     public static func group(_ ids: [AssetID], facts: [AssetID: AssetFacts], fallback: TimeZone,
                              words: ProposalWords = .german) -> [PhotoDay] {
+        group(ids, fallback: fallback, words: words) { facts[$0] }
+    }
+
+    /// The same with the model's facts by id (`AppModel.factsByID`).
+    public static func group(_ ids: [AssetID], facts: FactsByID, fallback: TimeZone,
+                             words: ProposalWords = .german) -> [PhotoDay] {
+        group(ids, fallback: fallback, words: words) { facts[$0] }
+    }
+
+    private static func group(_ ids: [AssetID], fallback: TimeZone, words: ProposalWords,
+                              facts: (AssetID) -> AssetFacts?) -> [PhotoDay] {
         var byDay: [Int: [AssetID]] = [:]
         var undated: [AssetID] = []
         for id in ids {
-            guard let wall = facts[id]?.wallClock(or: fallback) else {
+            guard let wall = facts(id)?.wallClock(or: fallback) else {
                 undated.append(id)
                 continue
             }

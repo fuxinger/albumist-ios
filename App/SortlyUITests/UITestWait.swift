@@ -55,6 +55,19 @@ enum UITestWait {
         return met
     }
 
+    /// `element` lies above the bottom of the navigation bar `bar` and not inside it: content
+    /// that counts as hittable for XCUITest, but a tap there lands on the bar. As
+    /// `bar.exists && !bar.frame.contains(element.frame) && element.frame.midY < bar.frame.maxY`,
+    /// read from one snapshot of each instead of five queries (every property of an
+    /// `XCUIElement` asks the app again; the taps of the flow and device tests ask this before
+    /// each of their taps). The element's frame is read as before when its snapshot fails, so an
+    /// element that is gone still fails the test there.
+    static func underNavigationBar(_ element: XCUIElement, _ bar: XCUIElement) -> Bool {
+        guard let barFrame = (try? bar.snapshot())?.frame else { return false }
+        let frame = (try? element.snapshot())?.frame ?? element.frame
+        return !barFrame.contains(frame) && frame.midY < barFrame.maxY
+    }
+
     /// What `screenAtRest` found.
     enum ScreenRest {
         /// Two snapshots in a row put every element in the same place; the last of them.
@@ -129,9 +142,11 @@ enum UITestWait {
     ///
     /// The Home press itself can be lost on the CI simulator: in UI run 44497741096 (19.11.) the
     /// app stayed in the foreground (state 4) for 30 s after it in test03 and test06, while
-    /// simctl calls to the same simulator timed out. So a press without effect after 20 s is
+    /// simctl calls to the same simulator timed out. So a press without effect after 8 s is
     /// tried once more (15 s), and then the Settings app is brought to the front (30 s), which
-    /// sends this app to the background without SpringBoard's Home gesture. Each extra try is a
+    /// sends this app to the background without SpringBoard's Home gesture. The first press had
+    /// 20 s until 20.11.: on the CI simulator it never had an effect in 13 of 13 presses, and the
+    /// second one always did within 1.4 s. Each extra try is a
     /// counted flaky retry (`UI_FLAKY_RETRY <Class.test>`, from `test`), never silent; the test
     /// fails only when no way reached the background. Every Home press of the UI tests goes
     /// through here. The time in the background never counts from the first press: after a late
@@ -153,8 +168,13 @@ enum UITestWait {
             return nil
         }
         // Plain values, no closures: XCUIDevice and XCUIApplication belong to the main actor.
+        // The first press gets 8 s (it had 20 s): in all 13 Home presses of the UI job logs
+        // collected for the tempo plan (18.-20.11., among them UI runs 44617747359 and
+        // 44630953220) the app was still in the foreground 20 s after the first press and in
+        // the background 1.0-1.4 s after the second. A first press that works shows within a second or two;
+        // the second press and the Settings app keep their times.
         let ways: [(name: String, wait: TimeInterval)] = [
-            ("Home press", min(timeout, 20)), ("second Home press", 15), ("Settings app in front", 30),
+            ("Home press", min(timeout, 8)), ("second Home press", 15), ("Settings app in front", 30),
         ]
         var reached = false
         var inBackgroundSince = pressed

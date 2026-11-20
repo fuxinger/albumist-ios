@@ -82,78 +82,28 @@ struct MemoryPressureTests {
         #expect(pressure.warnings == 2)
     }
 
-    /// Stands for `AppModel.factsByID` (re-review of P4-06): the index of all photos, made at the
-    /// first lookup the same way, kept until the facts change or a warning drops it.
-    final class FactsOwner {
-        let facts: [AssetFacts]
-        private(set) var builds = 0
-        private var factsIndex: [AssetID: AssetFacts]?
-        var indexIsDropped: Bool { factsIndex == nil }
-
-        init(_ facts: [AssetFacts]) { self.facts = facts }
-
-        var factsByID: [AssetID: AssetFacts] {
-            if let factsIndex { return factsIndex }
-            builds += 1
-            let index = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            factsIndex = index
-            return index
-        }
-
-        func dropCaches() { factsIndex = nil }
-    }
-
-    static func photo(_ id: String, trip: String) -> AssetFacts {
-        AssetFacts(asset: AssetSnapshot(id: AssetID(id), creationDate: Fixture.date("2024-05-01")), tripID: SortlyID(trip))
-    }
-
-    static let photos = [photo("p1", trip: "t1"), photo("p2", trip: "t2"), photo("p1", trip: "t3")]
-
-    @Test func aWarningDropsTheFactsIndex() {
-        let pressure = MemoryPressure()
-        let owner = FactsOwner(Self.photos)
-        _ = owner.factsByID
-        pressure.register("library caches", owner: owner) { $0.dropCaches() }
-
-        pressure.warning()
-
-        #expect(owner.indexIsDropped, "the facts index was kept through a memory warning")
-        #expect(owner.facts == Self.photos, "the facts were touched")
-    }
-
-    @Test func theNextLookupMakesTheFactsIndexAgainWithTheSameResult() {
-        let pressure = MemoryPressure()
-        let owner = FactsOwner(Self.photos)
-        let before = owner.factsByID
-        pressure.register("library caches", owner: owner) { $0.dropCaches() }
-        pressure.warning()
-
-        let after = owner.factsByID
-
-        #expect(owner.builds == 2)
-        #expect(after == before)
-        #expect(after[AssetID("p1")]?.tripID == SortlyID("t1"), "the first photo with an id no longer wins")
-        #expect(after[AssetID("p2")]?.tripID == SortlyID("t2"))
-        #expect(after[AssetID("p9")] == nil)
-        // Made once, then kept: no lookup searches the facts one by one.
-        _ = owner.factsByID
-        #expect(owner.builds == 2)
-    }
-
-    /// Re-review: the App's `factsByID` is the dictionary again, made at the next lookup after a
-    /// warning exactly like `FactsOwner.factsByID`; no lookup stays a search through all photos.
-    @Test func theAppMakesTheFactsIndexAgainAtTheNextLookup() throws {
+    /// The App's facts by id (review P4-09): an index per photo into the facts, made off the main
+    /// thread with them and handed over by the refresh, never made on the main thread at a lookup
+    /// (before: a dictionary of all facts at the first lookup after every refresh and after every
+    /// warning, 97 ms at 50,000 photos). It is no second copy of the facts any more (review
+    /// P4-06), so a warning keeps it: dropped, the next lookup would have to make it on the main
+    /// thread again or find nothing. Its lookups (first photo of an id wins) are tested with the
+    /// engine (`DerivedRefreshTests.factsByIDKeepsTheFirstPhotoOfAnID`).
+    @Test func theAppKeepsTheFactsIndexHandedOverWithTheFacts() throws {
         let model = AppSource.code(try AppSource.read("App/Sortly/Model/AppModel.swift"))
-        let lookup = AppSource.body(of: "var factsByID: [AssetID: AssetFacts]", in: model) ?? ""
-        let rebuilds = lookup.contains("if let factsIndex { return factsIndex }")
-            && lookup.contains("Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })")
-            && lookup.contains("factsIndex = index")
-        #expect(rebuilds, "the next lookup does not make the facts index again")
+        let lookup = AppSource.body(of: "var factsByID: FactsByID", in: model) ?? ""
+        #expect(!lookup.isEmpty, "no facts by id")
+        let handedOver = lookup.contains("return factsIndex ?? FactsByID()")
+        #expect(handedOver, "the lookup does not use the index handed over with the facts")
+        let madeHere = lookup.contains("Dictionary(") || lookup.contains("FactsByID(facts")
+        #expect(!madeHere, "the lookup makes the index on the main thread")
         let purge = AppSource.body(of: "func dropCaches(", in: model) ?? ""
         let dropped = purge.contains("factsIndex = nil")
-        #expect(dropped, "the facts index is kept through a memory warning")
-        let searches = model.contains("FactsLookup") || model.contains("factsIndexDropped")
-        #expect(!searches, "lookups stay a search through all photos after a warning")
+        #expect(!dropped, "a memory warning drops the facts index: the next lookup finds nothing")
+        let refresh = AppSource.body(of: "func refreshDerived(", in: model) ?? ""
+        #expect(refresh.contains("factsIndex = derived.factsByID"), "the refresh does not hand over the facts index")
+        let searches = model.contains("factsIndexDropped") || model.contains("facts.first(where:")
+        #expect(!searches, "lookups are a search through all photos")
     }
 
     @Test func theDiagnosticLineHasCountsAndNamesOfCachesOnly() {
@@ -187,7 +137,7 @@ struct MemoryPressureTests {
         #expect(thumbnailsRegister, "the thumbnails are not registered")
 
         let purge = AppSource.code(AppSource.body(of: "func dropCaches(", in: model) ?? "")
-        for cache in ["searchIndexStore.dropCache()", "factsIndex = nil", "datesCache = nil", "countryCache = [:]"] {
+        for cache in ["searchIndexStore.dropCache()", "datesCache = nil", "countryCache = [:]"] {
             #expect(purge.contains(cache), "\(cache) is kept through a memory warning")
         }
         // Released off the main thread (second review, 4).
@@ -195,9 +145,10 @@ struct MemoryPressureTests {
         // State, and what a running search or analysis waits for, is never dropped. Neither are
         // the library's areas (a few MB; the grid would lose its place under the photo view) nor
         // the atlas (a few KB, 100 to 250 ms to make again on the main thread): second review, 1-2.
+        // Nor the facts by id: an index per photo now, made only with the facts (review P4-09).
         let state = ["facts", "states", "snapshot", "decisions", "userTitles", "inventory", "removedFromProposals",
                      "managedAlbums", "history", "statesIfNotIgnored", "ignoredIDs", "libraryBucketsTask",
-                     "libraryBuckets", "libraryBucketsMadeFor", "atlasCache"]
+                     "libraryBuckets", "libraryBucketsMadeFor", "atlasCache", "factsIndex"]
         for name in state {
             let assigned = purge.range(of: "\\b\(name)\\s*(=(?!=)|\\[|\\.remove)", options: .regularExpression) != nil
             #expect(!assigned, "a memory warning changes \(name)")

@@ -54,7 +54,8 @@ final class SortlyFlowUITests: XCTestCase {
         while !(button.exists && button.isHittable) && tries < 3 {
             // Minimized bar: scroll back up first, then tap the bar itself to expand it.
             if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            sleep(1)
+            // The tab bar has expanded (at most the second the fixed pause gave it); the loop checks.
+            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
             tries += 1
         }
         return button
@@ -141,6 +142,8 @@ final class SortlyFlowUITests: XCTestCase {
             let tree = app.debugDescription.replacing(#/0x[0-9a-f]+/#, with: "")
             if tree == last { break }
             last = tree
+            // pacing: kept, "the same tree a second apart" is the condition, and the six reads
+            // (not a time) bound it: on a slow Mac one read of the tree takes seconds.
             sleep(1)
         }
         // An element that changes while the audit reads the screen (a progress bar finishing)
@@ -169,18 +172,19 @@ final class SortlyFlowUITests: XCTestCase {
     private func allowPhotosIfAsked() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let labels = ["Zugriff auf alle Fotos erlauben", "Allow Full Access", "Allow Access to All Photos", "Alle Fotos erlauben", "Vollzugriff erlauben"]
-        let deadline = Date().addingTimeInterval(25)
-        while Date() < deadline {
+        var answered = false
+        let done = UITestWait.holds(timeout: 25) {
             for source in [springboard, app] {
                 for label in labels where source.buttons[label].exists {
                     source.buttons[label].tap()
                     print("UI_STEP_OK system photo alert")
-                    return
+                    answered = true
+                    return true
                 }
             }
-            if button("Analyse starten").exists { return } // access was already granted
-            usleep(500_000)
+            return button("Analyse starten").exists // access was already granted
         }
+        if done || answered { return }
         print("UI_STEP_MISSING system photo alert")
     }
 
@@ -188,15 +192,16 @@ final class SortlyFlowUITests: XCTestCase {
     /// uses notifications to say that a long analysis finished while it was away).
     private func declineNotificationsIfAsked() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let deadline = Date().addingTimeInterval(8)
-        while Date() < deadline {
+        // The question may not come (asked before): no failure either way.
+        let declined = UITestWait.holds(timeout: 8) {
             for label in ["Nicht erlauben", "Don’t Allow", "Don't Allow"] where springboard.buttons[label].exists {
                 springboard.buttons[label].tap()
                 print("UI_STEP_OK notification alert declined")
-                return
+                return true
             }
-            usleep(500_000)
+            return false
         }
+        if declined { return }
         print("UI_FACT no notification alert")
     }
 
@@ -210,6 +215,9 @@ final class SortlyFlowUITests: XCTestCase {
             streak = condition() ? streak + 1 : 0
             UITestOnboarding.reportSlowCheck(since: asked)
             if streak >= stableChecks { return true }
+            // pacing: the poll's interval, kept: "`stableChecks` in a row" means the state held
+            // over that many 2 s steps (the analysis idle for about four seconds, not only between
+            // two batches).
             sleep(2)
         }
         print("UI_STEP_MISSING \(what) (timeout \(Int(timeout)) s)")
@@ -259,7 +267,10 @@ final class SortlyFlowUITests: XCTestCase {
         } else if button("Los geht").exists {
             // A first start without the fast start's introduction: the real onboarding.
             tap(button("Los geht"), "welcome (prepare)")
-            sleep(1)
+            // The areas step is pushed: its "Weiter" (the welcome screen has none) can be tapped.
+            // Not asserted: the tap below says it.
+            let areasNext = app.buttons["Weiter"]
+            _ = UITestWait.holds(timeout: 10) { areasNext.exists && areasNext.isHittable }
             tap(app.buttons["Weiter"], "areas (prepare)")
             if noAccess.waitForExistence(timeout: 5) { noAccess.tap(); allowPhotosIfAsked() }
             if app.buttons["Weiter"].waitForExistence(timeout: 3) { app.buttons["Weiter"].tap() }
@@ -280,9 +291,15 @@ final class SortlyFlowUITests: XCTestCase {
     /// Two photos from the library into a new album: opens its plan ("Umsetzen").
     private func openManualPlan(_ title: String) -> Bool {
         guard tap(tabButton("Mediathek"), "library for \(title)") else { return false }
-        sleep(2)
         let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
-        if !photos.firstMatch.waitForExistence(timeout: 5) { tap(app.buttons["Alle"], "all photos for \(title)", timeout: 5); sleep(2) }
+        // The first pass over the library comes before the photos (`library.preparing`): up to
+        // the two seconds the fixed pause gave it, then the five below, as before.
+        _ = UITestWait.holds(timeout: 2) { photos.firstMatch.exists }
+        if !photos.firstMatch.waitForExistence(timeout: 5) {
+            tap(app.buttons["Alle"], "all photos for \(title)", timeout: 5)
+            // Every photo of the library (not asserted: the count below is).
+            _ = UITestWait.holds(timeout: 5) { photos.count >= 2 }
+        }
         guard tap(app.buttons["Auswählen"], "select photos for \(title)"), photos.count >= 2 else { return false }
         photos.element(boundBy: 0).tap()
         photos.element(boundBy: 1).tap()
@@ -302,9 +319,22 @@ final class SortlyFlowUITests: XCTestCase {
         // "16 Vorschläge prüfen", or "1 Vorschlag prüfen" when one is left.
         let open = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ Vorschl(ag|äge) prüfen")).firstMatch
         if !apply.waitForExistence(timeout: 5), open.waitForExistence(timeout: 10), tap(open, "open suggestions for \(what)") {
-            sleep(1)
-            if button("empfohlene auswählen").waitForExistence(timeout: 5) { button("empfohlene auswählen").tap(); sleep(1) }
-            back(); sleep(1)
+            let list = app.navigationBars["Vorschläge"]
+            let recommended = button("empfohlene auswählen")
+            // The list is pushed; its "empfohlene auswählen" (when something is recommended) is
+            // looked for below, and tapped once it can be.
+            _ = UITestWait.holds(timeout: 10) { list.exists }
+            if recommended.waitForExistence(timeout: 5) {
+                _ = UITestWait.holds(timeout: 5) { recommended.isHittable }
+                recommended.tap()
+                // The list offers "N ausgewählte Alben anlegen" once something is selected;
+                // whether it is, the wait for it after going back says.
+                _ = button("ausgewählte Alben anlegen").waitForExistence(timeout: 5)
+            }
+            back()
+            // Gone first: the list has its own "ausgewählte Alben anlegen" at the bottom, the one
+            // below must be the overview's.
+            _ = UITestWait.holds(timeout: 10) { !list.exists }
             apply = button("ausgewählte Alben anlegen")
         }
         if apply.waitForExistence(timeout: 5) {
@@ -316,6 +346,13 @@ final class SortlyFlowUITests: XCTestCase {
         return openManualPlan("Testalbum \(what)")
     }
 
+    /// The plan screen shows its content, not only its bar: the start button, the unlock card or
+    /// the list of albums it makes ("Plan wird erstellt" comes before them).
+    private func planContentShown() -> Bool {
+        app.buttons["plan.apply"].exists || app.staticTexts["Albumist freischalten"].exists
+            || app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Diese Alben werden")).firstMatch.exists
+    }
+
     /// Applies a plan, so the history holds one; the app is started again afterwards.
     @discardableResult
     private func applyRecommended(_ what: String, relaunchWith extra: [String] = []) -> Bool {
@@ -323,6 +360,8 @@ final class SortlyFlowUITests: XCTestCase {
         let done = button("Rückgängig machen").waitForExistence(timeout: 900)
         print(done ? "UI_STEP_OK plan for \(what) finished" : "UI_STEP_MISSING plan for \(what) finished")
         XCTAssertTrue(done, "The plan for \(what) did not finish")
+        // pacing: kept, the app stores the finished plan (history, free albums) after the result
+        // shows; no element says it is written, and the launch below ends the app.
         sleep(2)
         launch(extra)
         return done
@@ -462,7 +501,10 @@ final class SortlyFlowUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(trips, 8, "Too few trips detected in the demo library: \(teaser.label)")
         }
         shot("06-overview"); audit("overview")
-        app.swipeUp(); sleep(1)
+        app.swipeUp()
+        // pacing: kept, the scroll comes to rest before the screenshot (only the picture needs
+        // it; a wait for a still screen would also fail on content that changes, review).
+        sleep(1)
         shot("06b-overview-areas")
         app.swipeDown(); app.swipeDown()
 
@@ -472,8 +514,14 @@ final class SortlyFlowUITests: XCTestCase {
             tap(starter, "open starter set")
             let preview = app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
             print(preview ? "UI_STEP_OK starter preview opened" : "UI_STEP_MISSING starter preview opened")
-            sleep(2); shot("06c-starter-plan")
-            back(); sleep(2)
+            // The plan's content, not only its bar: the start button, the unlock card or the album
+            // list ("Plan wird erstellt" before it). Not asserted: only the screenshot needs it.
+            _ = UITestWait.holds(timeout: 20) { planContentShown() }
+            shot("06c-starter-plan")
+            back()
+            // pacing: kept, the check below says nothing got selected, and it looks after the
+            // old two seconds (a wait for the overview would look sooner).
+            sleep(2)
             let leftover = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "ausgewählte")).firstMatch.exists
             print(leftover ? "UI_STEP_MISSING nothing selected after starter preview" : "UI_STEP_OK nothing selected after starter preview")
             XCTAssertFalse(leftover, "Going back from the starter preview left suggestions selected")
@@ -484,13 +532,17 @@ final class SortlyFlowUITests: XCTestCase {
 
         // Suggestions
         if tap(reviewSuggestionsButton(), "open suggestions", timeout: 20) {
-            sleep(1)
+            let suggestionsBar = app.navigationBars["Vorschläge"]
+            // The list with its rows (the audit then waits for a still tree itself). Not
+            // asserted: the row is tapped below.
+            _ = UITestWait.holds(timeout: 10) { suggestionsBar.exists && suggestionRow().exists }
             shot("07-suggestions"); audit("suggestions")
             // Rows live in a List (collection view), not a scroll view. The first cell can be
             // the "N empfohlene auswählen" button, so pick the first real suggestion row.
             let first = suggestionRow()
             if tap(first, "open first suggestion", timeout: 10) {
-                sleep(1)
+                // Up to the second of the old pause, then the five below, as before.
+                _ = UITestWait.holds(timeout: 1) { app.navigationBars["Vorschlag"].exists }
                 let opened = app.navigationBars["Vorschlag"].waitForExistence(timeout: 5)
                 print(opened ? "UI_STEP_OK suggestion detail opened" : "UI_STEP_MISSING suggestion detail opened")
                 XCTAssertTrue(opened, "Tapping a suggestion did not open its detail")
@@ -509,15 +561,26 @@ final class SortlyFlowUITests: XCTestCase {
                         shot("08a-suggestion-photos"); audit("suggestion photos")
                         tap(button("Fertig"), "end photo selection")
                     }
-                    back(); sleep(1)
+                    back()
+                    // Back on the detail: the photos of that screen are gone (not asserted).
+                    _ = UITestWait.holds(timeout: 5) { !photo.exists }
                 }
                 // "Album anlegen" opens a preview; back without creating selects nothing.
                 let create = app.buttons["Album anlegen"]
                 if create.exists {
                     create.tap()
-                    if app.navigationBars["Vorschau"].waitForExistence(timeout: 20) { sleep(1); back(); sleep(1) }
+                    let singlePreview = app.navigationBars["Vorschau"]
+                    if singlePreview.waitForExistence(timeout: 20) {
+                        // The preview's content, as a user sees it before going back (not asserted).
+                        _ = UITestWait.holds(timeout: 10) { planContentShown() }
+                        back()
+                        _ = UITestWait.holds(timeout: 5) { !singlePreview.exists }
+                    }
                 }
-                back(); sleep(1)
+                back()
+                // pacing: kept, the check below says nothing got selected, and it looks after the
+                // old second (a wait for the list would look sooner).
+                sleep(1)
                 let selected = suggestionRow().label.contains("Ausgewählt")
                 print(selected ? "UI_STEP_MISSING nothing selected after single preview" : "UI_STEP_OK nothing selected after single preview")
                 XCTAssertFalse(selected, "Going back from a single preview left the suggestion selected")
@@ -527,25 +590,36 @@ final class SortlyFlowUITests: XCTestCase {
                 shot("08b-back-to-list")
             }
             if tap(button("empfohlene auswählen"), "accept recommended") {
-                sleep(1)
+                // The list offers "N ausgewählte Alben anlegen" once something is selected (not
+                // asserted: the plan below needs it and says so).
+                _ = button("ausgewählte Alben anlegen").waitForExistence(timeout: 5)
                 shot("09-accepted")
             }
-            back(); sleep(1)
+            back()
+            // Back on the overview (not asserted: the travel area is looked for below).
+            _ = UITestWait.holds(timeout: 10) { !suggestionsBar.exists }
         }
 
         // Area list: open a suggestion and come back (reported: rows not tappable, warning triangle on back)
         let travel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Reisen")).firstMatch
         if tap(travel, "open travel area", timeout: 10) {
-            sleep(1)
+            // The area's list is pushed (the overview has no list rows); its first row can be
+            // tapped. Not asserted: the tap below says it.
+            _ = UITestWait.holds(timeout: 10) { suggestionRow().exists && suggestionRow().isHittable }
             if tap(suggestionRow(), "open trip suggestion", timeout: 10) {
                 let opened = app.navigationBars["Vorschlag"].waitForExistence(timeout: 5)
                 print(opened ? "UI_STEP_OK trip detail opened" : "UI_STEP_MISSING trip detail opened")
                 XCTAssertTrue(opened, "Tapping a trip suggestion did not open its detail")
                 shot("08c-trip-detail")
-                back(); sleep(1)
+                back()
+                // Back on the trips (not asserted: only the screenshot needs it).
+                _ = UITestWait.holds(timeout: 5) { !app.navigationBars["Vorschlag"].exists }
                 shot("08d-back-to-trips")
             }
-            back(); sleep(1)
+            back()
+            // pacing: kept, the trip list has its own "ausgewählte Alben anlegen", and the tap
+            // below must find the overview's; the second lets the list leave the screen.
+            sleep(1)
         }
 
         // Apply
@@ -562,33 +636,54 @@ final class SortlyFlowUITests: XCTestCase {
             shot("10-plan"); audit("plan")
             print(list.waitForExistence(timeout: 5) ? "UI_STEP_OK plan lists albums" : "UI_STEP_MISSING plan lists albums")
             if list.exists {
-                app.swipeUp(); sleep(1)
+                app.swipeUp()
+                // pacing: kept, the scroll comes to rest before the screenshot, and after the
+                // swipe back before the tap on "Jetzt umsetzen" measures its place.
+                sleep(1)
                 shot("10a-plan-albums")
-                app.swipeDown(); sleep(1)
+                app.swipeDown()
+                // pacing: kept (as above)
+                sleep(1)
             }
             if tap(app.buttons["plan.apply"], "apply plan", timeout: 30) {
                 let applied = Date()
                 // Mid-show frames of "photos fly into albums".
+                // pacing: kept, the screenshots are meant to fall 1.1 s and 2 s into the show
                 usleep(1_100_000); shot("10b-show")
+                // pacing: kept (as above)
                 usleep(900_000); shot("10c-show")
                 XCTAssertTrue(button("Rückgängig machen").waitForExistence(timeout: 900), "Plan did not finish")
                 print("UI_TIMING apply \(Int(Date().timeIntervalSince(applied))) s")
+                // pacing: kept, the result card fades and scales in after the show (PlanReviewView);
+                // a fade moves no frame and no element says it is done.
                 sleep(1)
                 shot("11-result"); audit("result")
                 // The change receipt: what really changed, from the execution journal.
                 let receipt = app.buttons["result.receipt"]
-                if !receipt.isHittable { app.swipeUp(); sleep(1) }
+                if !receipt.isHittable {
+                    app.swipeUp()
+                    // pacing: kept, the scroll comes to rest before the tap measures the button's place
+                    sleep(1)
+                }
                 if tap(receipt, "open change receipt", timeout: 10) {
-                    sleep(2)
+                    // The receipt loads after the screen opens (an empty list until then); its share
+                    // button comes with the loaded receipt. Not asserted: the check below is.
+                    _ = UITestWait.holds(timeout: 20) { app.buttons["Liste teilen"].exists }
                     let checked = anything("Kein Original gelöscht").waitForExistence(timeout: 5)
                     print(checked ? "UI_STEP_OK receipt shows originals untouched" : "UI_STEP_MISSING receipt shows originals untouched")
                     shot("11a-receipt"); audit("receipt")
-                    app.swipeUp(); sleep(1)
+                    app.swipeUp()
+                    // pacing: kept, the scroll comes to rest before the screenshot
+                    sleep(1)
                     shot("11b-receipt-albums")
-                    back(); sleep(1)
+                    back()
+                    // Back on the result (not asserted: the way back below does not need it).
+                    _ = UITestWait.holds(timeout: 5) { !app.navigationBars["Änderungen"].exists }
                 }
             }
-            back(); sleep(2)
+            back()
+            // Back on the overview (not asserted: test 1 ends here).
+            _ = UITestWait.holds(timeout: 10) { app.navigationBars["Übersicht"].exists }
         }
 
         print("UI_FACT notifications declined, the app went on: \(app.state == .runningForeground)")
@@ -612,7 +707,9 @@ final class SortlyFlowUITests: XCTestCase {
             // pacing: the map draws its tiles for the screenshot (the screen is there)
             sleep(3)
             shot("12-atlas")
-            app.swipeUp(); sleep(1)
+            app.swipeUp()
+            // pacing: kept, the scroll comes to rest before the screenshot
+            sleep(1)
             shot("12b-atlas-list")
             // A country opens its photos (list row; the map does the same for sighted users).
             let italy = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Italien")).firstMatch
@@ -623,11 +720,17 @@ final class SortlyFlowUITests: XCTestCase {
                 let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*")).count
                 print("UI_FACT country photos \(photos)")
                 XCTAssertGreaterThan(photos, 5, "The country screen shows no photos")
+                // pacing: kept, the photo colour behind the country's title loads and fades in
+                // before the screenshot; no element and no frame shows it.
                 sleep(1)
                 shot("12c-country")
-                back(); sleep(1)
+                back()
             }
-            if tap(app.buttons["Reise-Atlas teilen"], "share atlas") {
+            let shareAtlas = app.buttons["Reise-Atlas teilen"]
+            // Back on the atlas: its share button in the bar can be tapped (not asserted: the
+            // tap below says it).
+            _ = UITestWait.holds(timeout: 10) { shareAtlas.exists && shareAtlas.isHittable }
+            if tap(shareAtlas, "share atlas") {
                 let shownAt = Date()
                 // The card itself (its preview and the share button), and at least the old 3 s:
                 // the outlines and the cover load after the sheet is shown (second review of C2).
@@ -637,31 +740,58 @@ final class SortlyFlowUITests: XCTestCase {
                 UITestWait.atLeast(3, since: shownAt)
                 shot("13-share-card")
                 tap(button("Fertig"), "close share")
-                sleep(2) // the sheet slides away before the navigation bar answers again
+                // pacing: kept, the sheet slides away before the navigation bar answers again
+                sleep(2)
             }
-            back(); sleep(1)
+            let atlasBar = app.navigationBars["Reise-Atlas"]
+            back()
+            // Back on the overview (not asserted: the tab below is looked for either way).
+            _ = UITestWait.holds(timeout: 10) { !atlasBar.exists }
         }
 
         // Library
         if tap(tabButton("Mediathek"), "library tab") {
-            sleep(2)
-            shot("14-library")
             let photo = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*")).firstMatch
+            // The first pass over the library comes before the photos (`library.preparing`): up to
+            // the two seconds the fixed pause gave it, then the three below, as before.
+            _ = UITestWait.holds(timeout: 2) { photo.exists }
+            shot("14-library")
             // After the plan ran, "Nicht sortiert" can be empty: show the sorted photos instead.
             if !photo.waitForExistence(timeout: 3), tap(button("Sortiert"), "sorted photos") {
-                sleep(2)
+                // The sorted photos (not asserted: the tap on one below is).
+                _ = UITestWait.holds(timeout: 5) { photo.exists }
                 shot("14b-library-sorted")
             }
             // Design review W11/W12: a tap opens the photo large, its details behind "i",
             // and a pull down closes it, as in Photos.
             if tap(photo, "open photo") {
-                sleep(2)
+                let info = app.buttons["viewer.info"]
+                // The viewer with its "i" free to tap, and the photo itself rather than its
+                // spinner ("Foto wird geladen"; only one on screen counts, the pages beside it
+                // load their own). Not asserted: the tap below is, and only the screenshot needs
+                // the photo.
+                let spinners = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Foto wird geladen"))
+                _ = UITestWait.holds(timeout: 10) {
+                    guard info.exists && info.isHittable else { return false }
+                    let screen = app.frame
+                    for spinner in spinners.allElementsBoundByIndex {
+                        // A snapshot, not `frame`: a spinner that went away meanwhile is no failure.
+                        if let seen = try? spinner.snapshot(), screen.contains(CGPoint(x: seen.frame.midX, y: seen.frame.midY)) {
+                            return false
+                        }
+                    }
+                    return true
+                }
                 shot("15-photo-viewer")
-                if tap(app.buttons["viewer.info"], "photo info") {
-                    sleep(1)
+                if tap(info, "photo info") {
+                    let detailClose = app.buttons["detail.close"]
+                    // The info sheet with its close button free to tap (not asserted: the tap is).
+                    _ = UITestWait.holds(timeout: 10) { detailClose.exists && detailClose.isHittable }
                     shot("15a-photo-detail")
-                    tap(app.buttons["detail.close"], "close photo info")
-                    sleep(1)
+                    tap(detailClose, "close photo info")
+                    // The sheet has gone, so the pull below reaches the viewer (not asserted: the
+                    // viewer's close is).
+                    _ = UITestWait.holds(timeout: 10) { !detailClose.exists }
                 }
                 let close = app.buttons["viewer.close"]
                 app.swipeDown(velocity: .slow)
@@ -673,16 +803,20 @@ final class SortlyFlowUITests: XCTestCase {
             if tap(button("Auswählen"), "select mode") {
                 let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
                 if photos.count >= 2 { photos.element(boundBy: 0).tap(); photos.element(boundBy: 1).tap() }
-                sleep(1)
-                shot("16-selection")
                 // Review P3-01 = G3-04: while selecting, the tab bar is gone and the actions are in
                 // the system bottom bar, free to tap (a bar of its own floated above the tab bar).
                 let add = button("Zu Album hinzufügen")
+                // Before the screenshot without failing; the same is asserted right after it.
+                _ = UITestWait.holds(timeout: 5) { add.exists && add.isHittable && !tabBarHittable() }
+                shot("16-selection")
                 UITestWait.until("library actions free to tap while selecting", timeout: 5) {
                     add.exists && add.isHittable && !tabBarHittable()
                 }
                 if tap(button("Zu Album hinzufügen"), "add to album") {
-                    sleep(2)
+                    let closeAdd = button("Schließen")
+                    // The sheet with its close button free to tap (the audit then waits for a
+                    // still tree itself). Not asserted: the tap below is.
+                    _ = UITestWait.holds(timeout: 10) { closeAdd.exists && closeAdd.isHittable }
                     shot("17-add-to-album"); audit("add to album")
                     tap(button("Schließen"), "close add")
                 }
@@ -693,11 +827,12 @@ final class SortlyFlowUITests: XCTestCase {
 
         // Albums
         if tap(tabButton("Alben"), "albums tab") {
-            sleep(2)
-            shot("18-albums")
             // Design review W12: an album shows all its photos, and each opens large.
             // An album with photos: an empty one has none to open.
             let album = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "(.*[^0-9.])?[1-9][0-9.]* Fotos?")).firstMatch
+            // Up to the two seconds of the old pause, then the five of the tap below, as before.
+            _ = UITestWait.holds(timeout: 2) { album.exists }
+            shot("18-albums")
             if tap(album, "open an album", timeout: 5) {
                 let photo = app.buttons["album.photo"].firstMatch
                 if tap(photo, "open a photo of the album", timeout: 10) {
@@ -707,15 +842,18 @@ final class SortlyFlowUITests: XCTestCase {
                     shot("18a-album-photo")
                     closeViewerIfOpen()
                 }
-                back(); sleep(1)
+                back()
+                // Back on the albums: the album's photos are gone (not asserted).
+                _ = UITestWait.holds(timeout: 5) { !app.buttons["album.photo"].firstMatch.exists }
             }
         }
 
         // Search (the system names the search tab itself)
         if tap(searchTabButton(), "search tab") {
-            sleep(1)
-            shot("19-search-empty")
             let field = app.searchFields.firstMatch
+            // Up to the second of the old pause, then the five below, as before.
+            _ = UITestWait.holds(timeout: 1) { field.exists }
+            shot("19-search-empty")
             if field.waitForExistence(timeout: 5) {
                 field.tap()
                 field.typeText("Rom")
@@ -725,7 +863,8 @@ final class SortlyFlowUITests: XCTestCase {
                 shot("20-search-rom")
                 // Close the keyboard: it covers the tab bar, and a tap on "Übersicht" would hit it.
                 field.typeText("\n")
-                sleep(1)
+                // The keyboard has gone (not asserted: the test ends here).
+                _ = UITestWait.holds(timeout: 5) { !app.keyboards.firstMatch.exists }
             }
         }
     }
@@ -956,7 +1095,11 @@ final class SortlyFlowUITests: XCTestCase {
 
     private func closeViewerIfOpen() {
         let close = app.buttons["viewer.close"]
-        if close.waitForExistence(timeout: 2) { close.tap(); sleep(1) }
+        if close.waitForExistence(timeout: 2) {
+            close.tap()
+            // The viewer has closed (not asserted: the callers go on either way).
+            _ = UITestWait.holds(timeout: 5) { !close.exists }
+        }
     }
 
     /// Reise-Werkstatt (I07), from the trip list. The demo library's Iceland trip is

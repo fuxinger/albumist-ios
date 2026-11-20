@@ -1544,7 +1544,7 @@ class SleepRuleTests(unittest.TestCase):
         "AccessibilityUITests.swift": 6,
         "DeviceConditionUITests.swift": 14,
         "SearchUITests.swift": 1,
-        "SortlyFlowUITests.swift": 123,
+        "SortlyFlowUITests.swift": 87,
         "SortlyLockedUITests.swift": 1,
         "UITestOnboarding.swift": 1,
         # The poll interval of the condition waits (holds, which until, screenAtRest and never use),

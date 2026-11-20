@@ -24,19 +24,30 @@ final class SortlyFlowUITests: XCTestCase {
         UITestAppEnd.launch(app)
     }
 
-    /// The first suggestion row of a list ("57 Fotos" is in every row, never in a button).
+    /// The first card of a list of suggestions (`suggestion.row`, design wave 1: photo cards two
+    /// in a row instead of list rows).
     private func suggestionRow() -> XCUIElement {
-        app.collectionViews.cells.containing(NSPredicate(format: "label MATCHES %@", "[0-9.]+ Fotos?")).element(boundBy: 0)
+        UITestScreens.SuggestionList.cards(app).firstMatch
     }
 
     private func button(_ text: String) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
-    /// "16 Vorschläge prüfen", or "1 Vorschlag prüfen" once a single suggestion is left open
-    /// (UI run 43796844064: the locked run after a complete flow found only the singular).
-    private func reviewSuggestionsButton() -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9.]+ Vorschl(ag|äge) prüfen.*")).firstMatch
+    /// The start page "Vorschläge" at the root of its tab: its gear "Einstellungen" is only there
+    /// (the list of all suggestions has the same title). Goes back from a list, a suggestion or
+    /// a preview pushed on it, at most four steps.
+    @discardableResult
+    private func backToStartPage() -> Bool {
+        let tab = app.tabBars.buttons["Vorschläge"]
+        if tab.exists && !tab.isSelected { tabButton("Vorschläge").tap() }
+        let settings = app.buttons["Einstellungen"]
+        var steps = 0
+        while !UITestWait.holds(timeout: 2, { app.navigationBars["Vorschläge"].exists && settings.exists }) && steps < 4 {
+            back()
+            steps += 1
+        }
+        return app.navigationBars["Vorschläge"].exists && settings.exists
     }
 
     /// The search tab (`Tab(role: .search)`) carries the system's own label.
@@ -69,8 +80,7 @@ final class SortlyFlowUITests: XCTestCase {
 
     /// The actions of a suggestion besides its two buttons ("Album anlegen", "Nicht jetzt"): in
     /// the "…" menu at the top right since review P3-06.
-    private static let menuActions = ["Anpassen", "Auswählen und später anlegen", "Reise teilen oder zusammenlegen",
-                                      "Keine Reise, hier bin ich öfter"]
+    private static let menuActions = ["Anpassen", "Reise teilen oder zusammenlegen", "Keine Reise, hier bin ich öfter"]
 
     /// The "…" button at the top right of a suggestion, by its identifier or, where the toolbar
     /// does not pass that on, by its name.
@@ -289,7 +299,8 @@ final class SortlyFlowUITests: XCTestCase {
                     return true
                 }
             }
-            return button("Analyse starten").exists // access was already granted
+            // Access was granted already: the app went on (the tabs, or "Analyse starten").
+            return app.tabBars.firstMatch.exists || app.buttons["onboarding.start"].exists
         }
         if done || answered { return }
         print("UI_STEP_MISSING system photo alert")
@@ -331,15 +342,14 @@ final class SortlyFlowUITests: XCTestCase {
         return false
     }
 
-    /// The overview says the analysis is done ("Alle 412 Fotos analysiert", or "Analyse fertig"
-    /// right after a long run) and nothing runs (no "Pause").
-    /// The Pause button first: while the analysis runs it is there, and one query answers.
-    /// Every other query reads the whole screen, and during the analysis such a read held the
-    /// app's main thread for 16 to 48 s (UI run 43979263666: each long stall began within half
-    /// a second of a check of this wait).
+    /// The start page says the analysis is done ("Alle 412 Fotos analysiert", or "Analyse
+    /// fertig" right after a long run: its line `analysis.summary` or `analysis.finished`) and
+    /// nothing runs (no "Pause"). The Pause button first: while the analysis runs it is there,
+    /// and one query answers. Queries that read the whole screen held the app's main thread for
+    /// 16 to 48 s during the analysis (UI run 43979263666: each long stall began within half a
+    /// second of a check of this wait); these two ask for one element each.
     private var analysisIdle: Bool {
-        !app.buttons["Pause"].exists
-            && (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
+        UITestScreens.Analysis.isIdle(app)
     }
 
     /// The card's progress element (one element, B1): value "120 von 412 Fotos, fertig gegen
@@ -399,40 +409,34 @@ final class SortlyFlowUITests: XCTestCase {
             allowPhotosIfAsked()
             // Opened once more, so the fast start runs as with access (demo library, if missing).
             launch(["-SortlyUITestFastStart"])
-        } else if button("Los geht").exists {
-            // A first start without the fast start's introduction: the real onboarding.
-            tap(button("Los geht"), "welcome (prepare)")
-            // The areas step is pushed: its "Weiter" (the welcome screen has none) can be tapped.
-            // Not asserted: the tap below says it.
-            let areasNext = app.buttons["Weiter"]
-            _ = UITestWait.holds(timeout: 10) { areasNext.exists && areasNext.isHittable }
-            tap(app.buttons["Weiter"], "areas (prepare)")
-            if noAccess.waitForExistence(timeout: 5) { noAccess.tap(); allowPhotosIfAsked() }
-            if app.buttons["Weiter"].waitForExistence(timeout: 3) { app.buttons["Weiter"].tap() }
-            tap(button("Analyse starten"), "start analysis (prepare)", timeout: 20)
-            declineNotificationsIfAsked()
+        } else if app.buttons["onboarding.letsGo"].exists {
+            // A first start without the fast start's introduction: the real onboarding, the
+            // welcome and the access page (design wave 1).
+            tap(app.buttons["onboarding.letsGo"], "welcome (prepare)")
+            let started = UITestOnboarding.passAccessPage(app)
+            print(started ? "UI_STEP_OK access page (prepare)" : "UI_STEP_MISSING access page (prepare)")
         }
         let demo = button("Beispiel-Mediathek anlegen")
         if demo.waitForExistence(timeout: 3), !anything("Beispielfotos werden angelegt").exists { demo.tap() }
         let ready = waitStable("demo library analysed", timeout: 900) {
-            anything("Fotos analysiert").exists && !app.buttons["Pause"].exists && !anything("Beispielfotos werden angelegt").exists
-                && !button("Beispiel-Mediathek anlegen").exists
+            analysisIdle && !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists
         }
         print(ready ? "UI_STEP_OK prepared" : "UI_STEP_MISSING prepared")
         XCTAssertTrue(ready, "The demo library was not created and analysed")
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
     }
 
-    /// Two photos from the library into a new album: opens its plan ("Anlegen").
+    /// Two photos from the tab "Unsortiert" into a new album: opens its plan ("Anlegen").
     private func openManualPlan(_ title: String) -> Bool {
-        guard tap(tabButton("Mediathek"), "library for \(title)") else { return false }
+        guard tap(tabButton("Unsortiert"), "unsorted photos for \(title)") else { return false }
         let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
         // The first pass over the library comes before the photos (`library.preparing`): up to
         // the two seconds the fixed pause gave it, then the five below, as before.
         _ = UITestWait.holds(timeout: 2) { photos.firstMatch.exists }
         if !photos.firstMatch.waitForExistence(timeout: 5) {
-            tap(app.buttons["Alle"], "all photos for \(title)", timeout: 5)
-            // Every photo of the library (not asserted: the count below is).
+            // Everything sorted: the uncertain photos (the tab has no "Alle" since wave 1).
+            UITestScreens.Unsorted.show(app, "uncertain", named: "Unsicher", "uncertain photos for \(title)")
+            // Not asserted: the count below is.
             _ = UITestWait.holds(timeout: 5) { photos.count >= 2 }
         }
         guard tap(app.buttons["Auswählen"], "select photos for \(title)"), photos.count >= 2 else { return false }
@@ -447,38 +451,15 @@ final class SortlyFlowUITests: XCTestCase {
         return app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
     }
 
-    /// Opens the plan of the recommended suggestions (or of what is selected already); a new
-    /// album of two photos when nothing is recommended.
+    /// Opens the plan of several suggestions as the start page offers them ("Dein Startpaket",
+    /// or the ticks of an area's list: "Alle auswählen", "N Alben anlegen"); a new album of two
+    /// photos when nothing is left to tick.
     private func openRecommendedPlan(_ what: String) -> Bool {
-        var apply = button("ausgewählte Alben anlegen")
-        // "16 Vorschläge prüfen", or "1 Vorschlag prüfen" when one is left.
-        let open = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ Vorschl(ag|äge) prüfen")).firstMatch
-        if !apply.waitForExistence(timeout: 5), open.waitForExistence(timeout: 10), tap(open, "open suggestions for \(what)") {
-            let list = app.navigationBars["Vorschläge"]
-            let recommended = button("empfohlene auswählen")
-            // The list is pushed; its "empfohlene auswählen" (when something is recommended) is
-            // looked for below, and tapped once it can be.
-            _ = UITestWait.holds(timeout: 10) { list.exists }
-            if recommended.waitForExistence(timeout: 5) {
-                _ = UITestWait.holds(timeout: 5) { recommended.isHittable }
-                recommended.tap()
-                // The list offers "N ausgewählte Alben anlegen" once something is selected;
-                // whether it is, the wait for it after going back says.
-                _ = button("ausgewählte Alben anlegen").waitForExistence(timeout: 5)
-            }
-            back()
-            // pacing: kept, the list has its own "ausgewählte Alben anlegen" at the bottom and
-            // the one below must be the overview's; the bar swaps when the pop starts, so its
-            // end is not seen (review), and the second lets the list leave.
-            sleep(1)
-            apply = button("ausgewählte Alben anlegen")
-        }
-        if apply.waitForExistence(timeout: 5) {
-            guard tap(apply, "open plan for \(what)", timeout: 20) else { return false }
-            // The plan's screen, not a fixed 3 s (the callers tap "Jetzt umsetzen" on it next).
-            return UITestWait.appears(app.navigationBars["Vorschau"], "plan screen for \(what)", timeout: 30)
-        }
-        print("UI_FACT nothing recommended for \(what): a new album of two photos instead")
+        backToStartPage()
+        if UITestScreens.StartPage.openPlan(app, "plan for \(what)", timeout: 10) { return true }
+        print("UI_FACT nothing to tick for \(what): a new album of two photos instead")
+        // Out of a list that had nothing to tick, so the tab "Vorschläge" shows its start page later.
+        backToStartPage()
         return openManualPlan("Testalbum \(what)")
     }
 
@@ -507,22 +488,24 @@ final class SortlyFlowUITests: XCTestCase {
 
     // MARK: Tests
 
-    /// The demo library is fully readable: the analysis card says "Alle N Fotos analysiert"
-    /// and no photo counts as unreadable. UI runs reported "0 von 246 Fotos analysiert" and
-    /// "246 Fotos konnten noch nicht gelesen werden" for weeks without failing.
+    /// The demo library is fully readable: the start page says "Alle N Fotos analysiert" (or
+    /// "Analyse fertig" with that count in the sheet "Analyse") and no photo counts as
+    /// unreadable. UI runs reported "0 von 246 Fotos analysiert" and "246 Fotos konnten noch
+    /// nicht gelesen werden" for weeks without failing.
     private func assertEveryPhotoAnalysed(_ when: String, file: StaticString = #filePath, line: UInt = #line) {
-        let card = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Alle ", "Fotos analysiert")).firstMatch
-        _ = card.waitForExistence(timeout: 10)
-        // Any other analysis line (e.g. "0 von 246 Fotos analysiert") is printed for the log.
-        let other = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fotos analysiert")).firstMatch
-        print("UI_FACT analysis card \(when): \(card.exists ? card.label : "not found (\(other.exists ? other.label : "-"))") | \(card.exists ? (card.value as? String ?? "-") : "-")")
-        let unreadable = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "konnten noch nicht gelesen")).firstMatch
-        if unreadable.exists { print("UI_FACT unreadable \(when): \(unreadable.label)") }
-        let all = card.exists && card.label.hasPrefix("Alle ")
-        print(all && !unreadable.exists ? "UI_STEP_OK every photo analysed \(when)" : "UI_STEP_MISSING every photo analysed \(when)")
-        XCTAssertTrue(card.exists, "No analysis card \(when)", file: file, line: line)
-        XCTAssertTrue(all, "Not every demo photo analysed \(when): \(card.label)", file: file, line: line)
-        XCTAssertFalse(unreadable.exists, "Demo photos unreadable \(when): \(unreadable.label)", file: file, line: line)
+        let counts = UITestScreens.Analysis.counts(app, wait: 10)
+        print("UI_FACT analysis \(when): \(counts.map { "'\($0.label)' | \($0.loads)" } ?? "no line on the start page")")
+        if let counts, counts.unreadable > 0 { print("UI_FACT unreadable \(when): \(counts.unreadableText)") }
+        let all = counts?.complete == true && (counts?.photos ?? 0) > 0
+        print(all ? "UI_STEP_OK every photo analysed \(when)" : "UI_STEP_MISSING every photo analysed \(when)")
+        guard let counts else {
+            XCTFail("No analysis line on the start page \(when)", file: file, line: line)
+            return
+        }
+        XCTAssertFalse(counts.readFailed, "The analysis count could not be read \(when): \(counts.label)", file: file, line: line)
+        XCTAssertGreaterThan(counts.photos, 0, "No photo counted \(when): \(counts.label)", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(counts.analyzed, counts.photos, "Not every demo photo analysed \(when): \(counts.label)", file: file, line: line)
+        XCTAssertEqual(counts.unreadable, 0, "Demo photos unreadable \(when): \(counts.unreadableText)", file: file, line: line)
     }
 
     /// Set by test 1 at its start and its end; the runner keeps them for the later tests.
@@ -552,45 +535,34 @@ final class SortlyFlowUITests: XCTestCase {
         }
         launch()
 
-        // Onboarding: a fresh simulator always starts at the welcome screen.
-        let welcome = button("Los geht").waitForExistence(timeout: 20)
+        // Onboarding: a fresh simulator always starts at the welcome screen. After "Los geht’s"
+        // only the access page (design wave 1, 1A: no areas page, no trial step and no question
+        // about notifications; with access the analysis starts by itself).
+        let letsGo = app.buttons["onboarding.letsGo"]
+        let welcome = letsGo.waitForExistence(timeout: 20)
         if !welcome {
             print("UI_STEP_MISSING welcome screen")
             XCTFail("test1_FullFlow must start on a fresh simulator: no welcome screen, so the onboarding checks did not run")
         }
         if welcome {
             shot("01-welcome"); audit("welcome")
-            tap(button("Los geht"), "welcome")
-            shot("02-areas")
-            // Cities can be chosen right at the start (off by default).
-            let cities = app.switches.matching(NSPredicate(format: "label BEGINSWITH %@", "Städte")).firstMatch
-            print(cities.waitForExistence(timeout: 3) ? "UI_STEP_OK cities switch in onboarding" : "UI_STEP_MISSING cities switch in onboarding")
-            tap(button("Weiter"), "areas")
+            tap(letsGo, "welcome")
             shot("03-access")
-            // Design review W13: every step after the welcome screen has the system way back.
+            // Design review W13: the access page has the system way back to the welcome.
             if app.navigationBars.buttons.firstMatch.waitForExistence(timeout: 5) {
                 back()
-                let areasAgain = app.staticTexts["Was soll Albumist sortieren?"].waitForExistence(timeout: 5)
-                print(areasAgain ? "UI_STEP_OK onboarding back to areas" : "UI_STEP_MISSING onboarding back to areas")
-                XCTAssertTrue(areasAgain, "Back from the access step did not return to the areas")
-                tap(button("Weiter"), "areas again")
+                let welcomeAgain = letsGo.waitForExistence(timeout: 5)
+                print(welcomeAgain ? "UI_STEP_OK onboarding back to the welcome" : "UI_STEP_MISSING onboarding back to the welcome")
+                XCTAssertTrue(welcomeAgain, "Back from the access page did not return to the welcome")
+                tap(letsGo, "welcome again")
             } else {
                 print("UI_STEP_MISSING onboarding back button")
-                XCTFail("The access step has no back button")
+                XCTFail("The access page has no back button")
             }
-            if app.buttons["access.continue"].waitForExistence(timeout: 5) {
-                app.buttons["access.continue"].tap()
-                allowPhotosIfAsked()
-            }
-            // With access granted the app moves on by itself; "Weiter" only appears when
-            // access had been granted before.
-            if button("Weiter").waitForExistence(timeout: 3) { button("Weiter").tap() }
-            let trial = button("Analyse starten").waitForExistence(timeout: 20)
-            print(trial ? "UI_STEP_OK access granted" : "UI_STEP_MISSING access granted")
-            XCTAssertTrue(trial, "Onboarding did not reach the trial step")
-            shot("04-trial"); audit("trial")
-            tap(button("Analyse starten"), "start analysis")
-            declineNotificationsIfAsked()
+            audit("access")
+            let started = UITestOnboarding.passAccessPage(app)
+            print(started ? "UI_STEP_OK access granted" : "UI_STEP_MISSING access granted")
+            XCTAssertTrue(started, "The onboarding did not reach the tabs after the access page")
         }
 
         // Demo library
@@ -610,10 +582,19 @@ final class SortlyFlowUITests: XCTestCase {
             shot("05-overview-empty")
             tap(demo, "seed demo library")
             let started = Date()
-            // The demo card disappears from the overview once every photo is in the library.
+            // The demo card disappears from the start page once every photo is in the library.
             let seeded = UITestOnboarding.demoLibraryCreated(app)
             XCTAssertTrue(seeded, "Demo library not created")
             print("UI_TIMING seed \(Int(Date().timeIntervalSince(started))) s")
+            // A10: iOS asks about notifications only after "Bescheid sagen, wenn fertig" (3B) on
+            // a long analysis. The question is declined; the app must work just the same.
+            let notify = app.buttons["analysis.notify"]
+            if notify.waitForExistence(timeout: 15), tap(notify, "Bescheid sagen, wenn fertig") {
+                declineNotificationsIfAsked()
+                shot("05b-notify-declined")
+            } else {
+                print("UI_FACT no \"Bescheid sagen, wenn fertig\" during the analysis of the demo library")
+            }
         } else {
             print("UI_STEP_MISSING demo button")
             XCTFail("No \"Beispiel-Mediathek anlegen\" on a fresh simulator: the empty-library checks and the seeding did not run")
@@ -623,14 +604,14 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
         print("UI_TIMING analysis \(Int(Date().timeIntervalSince(analysed))) s")
         assertEveryPhotoAnalysed("after seeding")
-        // With every photo readable the suggestions reach the overview a little after the
-        // analysis card says done (run 43774578089: the overview changed during its audit,
-        // which ended test1 there). The audit waits for them.
+        // With every photo readable the suggestions reach the start page a little after the
+        // analysis line says done (run 43774578089: the page changed during its audit, which
+        // ended test1 there). The audit waits for them: "Dein Startpaket" or the cards.
         let offers = Date()
-        let ready = waitStable("suggestions on the overview", timeout: 180) {
-            app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ (Vorschläge|Vorschlag) prüfen|[0-9]+ Alben (kostenlos )?anlegen")).firstMatch.exists
+        let ready = waitStable("suggestions on the start page", timeout: 180) {
+            UITestScreens.StartPage.starterSet(app).exists || UITestScreens.Cards.cards(app).firstMatch.exists
         }
-        print("UI_FACT suggestions on the overview \(ready) after \(Int(Date().timeIntervalSince(offers))) s")
+        print("UI_FACT suggestions on the start page \(ready) after \(Int(Date().timeIntervalSince(offers))) s")
         // The demo library holds 12 trips; "1 Reisen" was a real detection bug.
         let teaser = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Dein Reise-Atlas")).firstMatch
         if teaser.waitForExistence(timeout: 10) {
@@ -646,9 +627,12 @@ final class SortlyFlowUITests: XCTestCase {
         shot("06b-overview-areas")
         app.swipeDown(); app.swipeDown()
 
-        // Fuchs, 14.11.: looking at the starter set and going back must not select anything.
-        let starter = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ Alben (kostenlos )?anlegen")).firstMatch
+        // Fuchs, 14.11.: looking at the starter set and going back must not make or select
+        // anything. Since wave 1 a preview holds its own picks and Back gives them back; the
+        // start page offers its starter set as long as nothing is made.
+        let starter = UITestScreens.StartPage.starterSet(app)
         if starter.waitForExistence(timeout: 5) {
+            let offered = starter.label
             tap(starter, "open starter set")
             let preview = app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
             print(preview ? "UI_STEP_OK starter preview opened" : "UI_STEP_MISSING starter preview opened")
@@ -658,117 +642,80 @@ final class SortlyFlowUITests: XCTestCase {
             if preview { expectPlanStartInReach("starter preview") }
             shot("06c-starter-plan")
             back()
-            // pacing: kept, the check below says nothing got selected, and it looks after the
-            // old two seconds (a wait for the overview would look sooner).
+            // pacing: kept, the check below says nothing was made, and it looks after the old
+            // two seconds (a wait for the start page would look sooner).
             sleep(2)
-            let leftover = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "ausgewählte")).firstMatch.exists
-            print(leftover ? "UI_STEP_MISSING nothing selected after starter preview" : "UI_STEP_OK nothing selected after starter preview")
-            XCTAssertFalse(leftover, "Going back from the starter preview left suggestions selected")
+            let again = starter.waitForExistence(timeout: 5)
+            print(again ? "UI_STEP_OK starter set offered again after its preview ('\(offered)' → '\(starter.label)')"
+                        : "UI_STEP_MISSING starter set offered again after its preview")
+            XCTAssertTrue(again, "Going back from the starter preview took the starter set away (was something made?)")
             shot("06d-back-from-starter")
         } else {
             print("UI_STEP_MISSING starter set card")
         }
 
-        // Suggestions
-        if tap(reviewSuggestionsButton(), "open suggestions", timeout: 20) {
+        // Suggestions: the trips behind "Alle N" (the start page's row shows a few of them), as
+        // photo cards (`suggestion.row`). Reported before wave 1: rows not tappable, a warning
+        // triangle on back.
+        var planOpened = false
+        if UITestScreens.StartPage.openList(app, area: "trips", "open suggestions") {
             let openedAt = Date()
-            let suggestionsBar = app.navigationBars["Vorschläge"]
-            // The list with its rows (the audit then waits for a still tree itself). Not
-            // asserted: the row is tapped below. The push moves no frame at its end: at least
-            // the old second for the screenshot (review).
-            _ = UITestWait.holds(timeout: 10) { suggestionsBar.exists && suggestionRow().exists }
+            // The push moves no frame at its end: at least the old second for the screenshot.
             UITestWait.atLeast(1, since: openedAt)
             shot("07-suggestions"); audit("suggestions")
-            // Rows live in a List (collection view), not a scroll view. The first cell can be
-            // the "N empfohlene auswählen" button, so pick the first real suggestion row.
             let first = suggestionRow()
-            if tap(first, "open first suggestion", timeout: 10) {
+            if UITestScreens.Cards.open(first, in: app, "open first suggestion") {
                 // Up to the second of the old pause, then the five below, as before.
-                _ = UITestWait.holds(timeout: 1) { app.navigationBars["Vorschlag"].exists }
-                let opened = app.navigationBars["Vorschlag"].waitForExistence(timeout: 5)
+                _ = UITestWait.holds(timeout: 1) { UITestScreens.SuggestionPage.isShown(app) }
+                let opened = UITestWait.holds(timeout: 5) { UITestScreens.SuggestionPage.isShown(app) }
                 print(opened ? "UI_STEP_OK suggestion detail opened" : "UI_STEP_MISSING suggestion detail opened")
                 XCTAssertTrue(opened, "Tapping a suggestion did not open its detail")
                 shot("08-suggestion-detail"); audit("suggestion detail")
-                // Design review D3: every photo of a suggestion is a named button (its date),
-                // so VoiceOver and Voice Control can pick photos to take out.
-                let all = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Alle ")).firstMatch
-                if tap(all, "open all photos of the suggestion", timeout: 5) {
-                    let photo = app.buttons["proposalPhotos.photo"].firstMatch
-                    let named = photo.waitForExistence(timeout: 5) && photo.label.range(of: "20[0-9][0-9]", options: .regularExpression) != nil
-                    print(named ? "UI_STEP_OK suggestion photos are named buttons (\(photo.label))" : "UI_STEP_MISSING suggestion photos are named buttons")
-                    XCTAssertTrue(named, "The photos of a suggestion are not buttons named by their date")
-                    if tap(button("Auswählen"), "select photos of the suggestion", timeout: 5) {
-                        photo.tap()
-                        XCTAssertTrue(photo.isSelected, "A selected photo does not report the selected trait")
-                        shot("08a-suggestion-photos"); audit("suggestion photos")
-                        tap(button("Fertig"), "end photo selection")
-                    }
-                    back()
-                    // Back on the detail: the photos of that screen are gone (not asserted).
-                    _ = UITestWait.holds(timeout: 5) { !photo.exists }
-                }
-                // "Album anlegen" opens a preview; back without creating selects nothing.
-                let create = app.buttons["Album anlegen"]
-                if create.exists {
-                    create.tap()
-                    let singlePreview = app.navigationBars["Vorschau"]
-                    if singlePreview.waitForExistence(timeout: 20) {
-                        // The preview's content, as a user sees it before going back (not asserted).
-                        _ = UITestWait.holds(timeout: 10) { planContentShown() }
-                        back()
-                        // Back on the detail: its "Album anlegen" can be tapped again (not
-                        // asserted: the way back goes on).
-                        _ = UITestWait.holds(timeout: 5) { create.exists && create.isHittable }
-                    }
+                checkTwoActionsAndMenu("suggestion")
+                // The page's one filled button ("Album anlegen", "N Fotos ergänzen", …). Not
+                // tapped: for a new album it makes the album at once since wave 1 (7B).
+                let main = app.buttons["proposal.create"]
+                print(main.exists ? "UI_FACT suggestion's main button '\(main.label)'" : "UI_STEP_MISSING suggestion's main button")
+                XCTAssertTrue(main.exists, "The suggestion's page has no main button (proposal.create)")
+                // Design review D3: every photo of a suggestion is a named button (its date), so
+                // VoiceOver and Voice Control can pick photos to take out. On the page itself by
+                // day since wave 1, below the cover: built once they come near.
+                let photo = UITestScreens.SuggestionPage.photoInReach(app)
+                let named = photo.map { $0.label.range(of: "20[0-9][0-9]", options: .regularExpression) != nil } ?? false
+                print(named ? "UI_STEP_OK suggestion photos are named buttons (\(photo?.label ?? ""))" : "UI_STEP_MISSING suggestion photos are named buttons")
+                XCTAssertTrue(named, "The photos of a suggestion are not buttons named by their date")
+                if let photo, named, tap(UITestScreens.SuggestionPage.selectPhotos(app), "select photos of the suggestion", timeout: 5) {
+                    // The bottom bar with "N aus Vorschlag entfernen" took the place of the page's bar.
+                    let picked = UITestScreens.SuggestionPage.photoInReach(app) ?? photo
+                    picked.tap()
+                    XCTAssertTrue(picked.isSelected, "A selected photo does not report the selected trait")
+                    shot("08a-suggestion-photos"); audit("suggestion photos")
+                    tap(UITestScreens.SuggestionPage.endSelection(app), "end photo selection")
                 }
                 back()
-                // pacing: kept, the check below says nothing got selected, and it looks after the
-                // old second (a wait for the list would look sooner).
-                sleep(1)
-                let selected = suggestionRow().label.contains("Ausgewählt")
-                print(selected ? "UI_STEP_MISSING nothing selected after single preview" : "UI_STEP_OK nothing selected after single preview")
-                XCTAssertFalse(selected, "Going back from a single preview left the suggestion selected")
-                let list = app.navigationBars["Vorschläge"].waitForExistence(timeout: 5)
+                let list = suggestionRow().waitForExistence(timeout: 5)
                 print(list ? "UI_STEP_OK back to suggestions" : "UI_STEP_MISSING back to suggestions")
                 XCTAssertTrue(list, "Back from a suggestion did not return to the list")
                 shot("08b-back-to-list")
             }
-            if tap(button("empfohlene auswählen"), "accept recommended") {
-                // The list offers "N ausgewählte Alben anlegen" once something is selected (not
-                // asserted: the plan below needs it and says so).
-                _ = button("ausgewählte Alben anlegen").waitForExistence(timeout: 5)
+            // "Auswählen" as in Photos (decision 9 of 18.11., in place of the basket): ticks,
+            // "Alle auswählen", then "N Alben anlegen" opens the preview of the ticked ones.
+            let selecting = UITestScreens.SuggestionList.select(app, "select suggestions")
+            print(selecting ? "UI_STEP_OK select suggestions" : "UI_STEP_MISSING select suggestions")
+            XCTAssertTrue(selecting, "The list of trips offers no \"Auswählen\" with \"Alle auswählen\"")
+            if selecting, tap(app.buttons["suggestions.selectAll"], "accept all trips") {
+                let create = UITestScreens.SuggestionList.createSelected(app)
+                UITestWait.until("\"N Alben anlegen\" offered for the ticked trips", timeout: 5) { create.exists && create.isEnabled }
                 shot("09-accepted")
+                planOpened = tap(create, "open plan", timeout: 20)
             }
-            back()
-        }
-
-        // Area list: open a suggestion and come back (reported: rows not tappable, warning triangle on back)
-        let travel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Reisen")).firstMatch
-        // Back on the overview: its travel area can be tapped (not asserted: the tap below is).
-        _ = UITestWait.holds(timeout: 10) { travel.exists && travel.isHittable }
-        if tap(travel, "open travel area", timeout: 10) {
-            // The area's list is pushed (the overview has no list rows); its first row can be
-            // tapped. Not asserted: the tap below says it.
-            _ = UITestWait.holds(timeout: 10) { suggestionRow().exists && suggestionRow().isHittable }
-            if tap(suggestionRow(), "open trip suggestion", timeout: 10) {
-                let opened = app.navigationBars["Vorschlag"].waitForExistence(timeout: 5)
-                print(opened ? "UI_STEP_OK trip detail opened" : "UI_STEP_MISSING trip detail opened")
-                XCTAssertTrue(opened, "Tapping a trip suggestion did not open its detail")
-                shot("08c-trip-detail")
-                checkTwoActionsAndMenu("trip")
-                back()
-                // pacing: kept, the pop ends before the screenshot (the bar swaps when it starts)
-                sleep(1)
-                shot("08d-back-to-trips")
-            }
-            back()
-            // pacing: kept, the trip list has its own "ausgewählte Alben anlegen", and the tap
-            // below must find the overview's; the second lets the list leave the screen.
-            sleep(1)
+        } else {
+            print("UI_STEP_MISSING open suggestions")
+            XCTFail("Missing: open suggestions (\"Alle N\" of the trips on the start page)")
         }
 
         // Apply
-        if tap(button("ausgewählte Alben anlegen"), "open plan", timeout: 20) {
+        if planOpened {
             let shownAt = Date()
             // The plan names every album it will make, not only the counts.
             let list = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Diese Alben werden")).firstMatch
@@ -784,7 +731,7 @@ final class SortlyFlowUITests: XCTestCase {
             if list.exists {
                 app.swipeUp()
                 // pacing: kept, the scroll comes to rest before the screenshot, and after the
-                // swipe back before the tap on "Jetzt umsetzen" measures its place.
+                // swipe back before the tap on "Jetzt anlegen" measures its place.
                 sleep(1)
                 shot("10a-plan-albums")
                 app.swipeDown()
@@ -828,9 +775,8 @@ final class SortlyFlowUITests: XCTestCase {
                     _ = UITestWait.holds(timeout: 5) { receipt.exists && receipt.isHittable }
                 }
             }
-            back()
-            // Back on the overview (not asserted: test 1 ends here).
-            _ = UITestWait.holds(timeout: 10) { app.navigationBars["Übersicht"].exists }
+            // Back past the list of trips to the start page (not asserted: test 1 ends here).
+            backToStartPage()
         }
 
         print("UI_FACT notifications declined, the app went on: \(app.state == .runningForeground)")
@@ -891,24 +837,25 @@ final class SortlyFlowUITests: XCTestCase {
                 sleep(2)
             }
             back()
-            // Back on the overview: the library tab can be tapped (not asserted: the tab below
-            // is looked for either way).
-            let libraryTab = app.tabBars.buttons["Mediathek"]
+            // Back on the start page: the tab "Unsortiert" can be tapped (not asserted: the tab
+            // below is looked for either way).
+            let libraryTab = app.tabBars.buttons["Unsortiert"]
             _ = UITestWait.holds(timeout: 10) { libraryTab.exists && libraryTab.isHittable }
         }
 
-        // Library
-        if tap(tabButton("Mediathek"), "library tab") {
+        // The tab "Unsortiert" (6B: the library's tab of before)
+        if tap(tabButton("Unsortiert"), "library tab") {
             let photo = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*")).firstMatch
             // pacing: kept, the thumbnails draw into their places before the screenshot; the
             // first button is there before them (review).
             sleep(2)
             shot("14-library")
-            // After the plan ran, "Unsortiert" can be empty: show the sorted photos instead.
-            if !photo.waitForExistence(timeout: 3), tap(button("Sortiert"), "sorted photos") {
+            // After the plan ran, "Unsortiert" can be empty: the uncertain photos instead (the tab
+            // shows no sorted photos since wave 1, those are in Photos' albums).
+            if !photo.waitForExistence(timeout: 3), UITestScreens.Unsorted.show(app, "uncertain", named: "Unsicher", "uncertain photos") {
                 let sortedAt = Date()
-                // The sorted photos (not asserted: the tap on one below is), and their thumbnails
-                // drawn for the screenshot: at least the old two seconds.
+                // The uncertain photos (not asserted: the tap on one below is), and their
+                // thumbnails drawn for the screenshot: at least the old two seconds.
                 _ = UITestWait.holds(timeout: 5) { photo.exists }
                 UITestWait.atLeast(2, since: sortedAt)
                 shot("14b-library-sorted")
@@ -1027,7 +974,7 @@ final class SortlyFlowUITests: XCTestCase {
                 // (SearchUITests checks the results)
                 sleep(3)
                 shot("20-search-rom")
-                // Close the keyboard: it covers the tab bar, and a tap on "Übersicht" would hit it.
+                // Close the keyboard: it covers the tab bar, and a tap on "Vorschläge" would hit it.
                 field.typeText("\n")
                 // The keyboard has gone (not asserted: the test ends here).
                 _ = UITestWait.holds(timeout: 5) { !app.keyboards.firstMatch.exists }
@@ -1035,121 +982,116 @@ final class SortlyFlowUITests: XCTestCase {
         }
     }
 
-    /// Undo of a plan from the history in the settings: one question from iOS, everything gone.
+    /// Undo of a plan from "Verlauf und Rückgängig" (in the tab "Alben" since 5C, no longer in
+    /// the settings): one question from iOS, everything gone.
     func test1c_UndoFromHistory() {
         continueAfterFailure = true
         prepare()
         applyRecommended("undo")
-        // Settings and undo
-        if tap(tabButton("Übersicht"), "overview tab") {
-            if tap(app.buttons["Einstellungen"], "settings") {
-                let settingsAt = Date()
-                let historyButton = app.buttons["settings.history"]
-                // The settings sheet with its first row free to tap (not asserted: the tap is),
-                // and at least the old second for the sheet to slide up for the screenshot.
-                _ = UITestWait.holds(timeout: 10) { historyButton.exists && historyButton.isHittable }
-                UITestWait.atLeast(1, since: settingsAt)
-                shot("21-settings")
-                // Design review W16: history and undo are the first row, on their own screen.
-                let history = tap(historyButton, "open history and undo", timeout: 5)
-                let row = app.buttons["history.row"].firstMatch
-                if history {
-                    let historyAt = Date()
-                    // The history with its newest row free to tap (not asserted: the tap is), and
-                    // at least the old second for the push to end for the screenshot.
-                    _ = UITestWait.holds(timeout: 10) { row.exists && row.isHittable }
-                    UITestWait.atLeast(1, since: historyAt)
-                    shot("21h-history")
+        // History and undo
+        if tap(tabButton("Alben"), "albums tab") {
+            let albumsAt = Date()
+            let historyButton = UITestScreens.Albums.historyRow(app)
+            // The tab with its row "Verlauf und Rückgängig" (not asserted: the tap is), and
+            // at least the old second for the tab to draw for the screenshot.
+            _ = UITestWait.holds(timeout: 10) { historyButton.exists }
+            UITestWait.atLeast(1, since: albumsAt)
+            shot("21-albums")
+            // Design review W16: history and undo on their own screen.
+            let history = tap(historyButton, "open history and undo", timeout: 5)
+            let row = app.buttons["history.row"].firstMatch
+            if history {
+                let historyAt = Date()
+                // The history with its newest row free to tap (not asserted: the tap is), and
+                // at least the old second for the push to end for the screenshot.
+                _ = UITestWait.holds(timeout: 10) { row.exists && row.isHittable }
+                UITestWait.atLeast(1, since: historyAt)
+                shot("21h-history")
+            }
+            // A history row opens the plan's change receipt; undo lives there.
+            let opened = history && tap(row, "history row opens receipt", timeout: 10)
+            let undo = app.buttons["receipt.undo"]
+            if opened {
+                let receiptAt = Date()
+                // The receipt loads after the screen opens (an empty list until then): its
+                // share button comes with it. Not asserted: the undo below is. At least the
+                // old two seconds for the push to end for the screenshot.
+                _ = UITestWait.holds(timeout: 20) { app.buttons["Liste teilen"].exists || undo.exists }
+                UITestWait.atLeast(2, since: receiptAt)
+                shot("21a-history-receipt")
+            }
+            if opened && !undo.exists {
+                var more = 0
+                while !undo.exists && more < 6 { app.swipeUp(); more += 1 }
+            }
+            if opened, tap(undo, "undo in receipt", timeout: 10) {
+                // Another "Rückgängig machen" (the result card further back) can exist in
+                // the hierarchy; tap the one in the dialog that is really on screen.
+                let dialog = app.staticTexts["Diese Änderungen rückgängig machen?"].waitForExistence(timeout: 5)
+                print(dialog ? "UI_STEP_OK undo dialog" : "UI_STEP_MISSING undo dialog")
+                shot("21b-undo-dialog")
+                let confirms = app.buttons.matching(identifier: "Rückgängig machen").allElementsBoundByIndex
+                print("UI_FACT undo confirm buttons \(confirms.count), hittable \(confirms.filter(\.isHittable).count)")
+                if let confirm = confirms.first(where: \.isHittable) {
+                    confirm.tap()
+                    print("UI_STEP_OK confirm undo")
+                } else {
+                    print("UI_STEP_MISSING confirm undo")
                 }
-                // A history row opens the plan's change receipt; undo lives there.
-                let opened = history && tap(row, "history row opens receipt", timeout: 10)
-                let undo = app.buttons["receipt.undo"]
-                if opened {
-                    let receiptAt = Date()
-                    // The receipt loads after the screen opens (an empty list until then): its
-                    // share button comes with it. Not asserted: the undo below is. At least the
-                    // old two seconds for the push to end for the screenshot.
-                    _ = UITestWait.holds(timeout: 20) { app.buttons["Liste teilen"].exists || undo.exists }
-                    UITestWait.atLeast(2, since: receiptAt)
-                    shot("21a-history-receipt")
-                }
-                if opened && !undo.exists {
-                    var more = 0
-                    while !undo.exists && more < 6 { app.swipeUp(); more += 1 }
-                }
-                if opened, tap(undo, "undo in receipt", timeout: 10) {
-                    // Another "Rückgängig machen" (the result card further back) can exist in
-                    // the hierarchy; tap the one in the dialog that is really on screen.
-                    let dialog = app.staticTexts["Diese Änderungen rückgängig machen?"].waitForExistence(timeout: 5)
-                    print(dialog ? "UI_STEP_OK undo dialog" : "UI_STEP_MISSING undo dialog")
-                    shot("21b-undo-dialog")
-                    let confirms = app.buttons.matching(identifier: "Rückgängig machen").allElementsBoundByIndex
-                    print("UI_FACT undo confirm buttons \(confirms.count), hittable \(confirms.filter(\.isHittable).count)")
-                    if let confirm = confirms.first(where: \.isHittable) {
-                        confirm.tap()
-                        print("UI_STEP_OK confirm undo")
-                    } else {
-                        print("UI_STEP_MISSING confirm undo")
-                    }
-                    // iOS asks before an app deletes albums. All albums go in one request, so
-                    // this must be one question, not one per album.
-                    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-                    var questions = 0
-                    let end = Date().addingTimeInterval(40)
-                    while Date() < end {
-                        let alert = springboard.alerts.firstMatch
-                        if alert.waitForExistence(timeout: 3) {
-                            if questions == 0 { shot("22-delete-question") }
-                            let delete = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Delete", "Löschen"])).firstMatch
-                            if delete.exists {
-                                delete.tap()
-                                questions += 1
-                                // pacing: kept, the count of questions looks for a second one
-                                // after the old two seconds (the check is that there is none).
-                                sleep(2)
-                            } else { break }
-                        } else if app.staticTexts["Rückgängig gemacht"].exists {
-                            break
-                        }
-                    }
-                    print("UI_FACT undo questions \(questions)")
-                    XCTAssertLessThanOrEqual(questions, 1, "Undo asked more than once before deleting albums")
-                    let undone = app.staticTexts["Rückgängig gemacht"].waitForExistence(timeout: 30)
-                    print(undone ? "UI_STEP_OK undo finished" : "UI_STEP_MISSING undo finished")
-                    if !undone {
-                        for alert in app.alerts.allElementsBoundByIndex { print("UI_FACT app alert \(alert.label)") }
-                        shot("22-undo-not-finished")
-                    }
-                    XCTAssertTrue(undone, "Undo did not finish")
-                    // The receipt now ends with what the undo removed.
-                    app.swipeUp(); app.swipeUp()
-                    // pacing: kept, the scroll comes to rest before the screenshot, and the reloaded
-                    // receipt's rows are read right after it (one of them must not be there).
-                    sleep(1)
-                    shot("22-after-undo")
-                    // "Rückgängig gemacht" is also the section title of a partial undo; on the
-                    // first real iPhone nothing was taken back and the test would not have
-                    // noticed (15.11.). Everything must be gone.
-                    let partial = anything("Nicht alles ließ sich rückgängig machen").exists || anything("teilweise rückgängig").exists
-                    let removedRow = anything("Entfernte Alben und Ordner").exists
-                    print(!partial && removedRow ? "UI_STEP_OK undo took back everything" : "UI_STEP_MISSING undo took back everything (partial \(partial), removed row \(removedRow))")
-                    XCTAssertFalse(partial, "Undo was only partial")
-                    XCTAssertTrue(removedRow, "Undo removed no albums or folders")
-                }
-                if opened {
-                    back()
-                    // Back on the history: its row can be tapped (not asserted: the way back goes on).
-                    _ = UITestWait.holds(timeout: 5) { row.exists && row.isHittable }
-                }
-                let done = button("Fertig")
-                if history {
-                    back()
-                    // Back on the settings, with "Fertig" free to tap (not asserted: the tap is).
-                    _ = UITestWait.holds(timeout: 10) {
-                        !app.navigationBars["Verlauf und Rückgängig"].exists && done.exists && done.isHittable
+                // iOS asks before an app deletes albums. All albums go in one request, so
+                // this must be one question, not one per album.
+                let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                var questions = 0
+                let end = Date().addingTimeInterval(40)
+                while Date() < end {
+                    let alert = springboard.alerts.firstMatch
+                    if alert.waitForExistence(timeout: 3) {
+                        if questions == 0 { shot("22-delete-question") }
+                        let delete = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Delete", "Löschen"])).firstMatch
+                        if delete.exists {
+                            delete.tap()
+                            questions += 1
+                            // pacing: kept, the count of questions looks for a second one
+                            // after the old two seconds (the check is that there is none).
+                            sleep(2)
+                        } else { break }
+                    } else if app.staticTexts["Rückgängig gemacht"].exists {
+                        break
                     }
                 }
-                tap(done, "close settings")
+                print("UI_FACT undo questions \(questions)")
+                XCTAssertLessThanOrEqual(questions, 1, "Undo asked more than once before deleting albums")
+                let undone = app.staticTexts["Rückgängig gemacht"].waitForExistence(timeout: 30)
+                print(undone ? "UI_STEP_OK undo finished" : "UI_STEP_MISSING undo finished")
+                if !undone {
+                    for alert in app.alerts.allElementsBoundByIndex { print("UI_FACT app alert \(alert.label)") }
+                    shot("22-undo-not-finished")
+                }
+                XCTAssertTrue(undone, "Undo did not finish")
+                // The receipt now ends with what the undo removed.
+                app.swipeUp(); app.swipeUp()
+                // pacing: kept, the scroll comes to rest before the screenshot, and the reloaded
+                // receipt's rows are read right after it (one of them must not be there).
+                sleep(1)
+                shot("22-after-undo")
+                // "Rückgängig gemacht" is also the section title of a partial undo; on the
+                // first real iPhone nothing was taken back and the test would not have
+                // noticed (15.11.). Everything must be gone.
+                let partial = anything("Nicht alles ließ sich rückgängig machen").exists || anything("teilweise rückgängig").exists
+                let removedRow = anything("Entfernte Alben und Ordner").exists
+                print(!partial && removedRow ? "UI_STEP_OK undo took back everything" : "UI_STEP_MISSING undo took back everything (partial \(partial), removed row \(removedRow))")
+                XCTAssertFalse(partial, "Undo was only partial")
+                XCTAssertTrue(removedRow, "Undo removed no albums or folders")
+            }
+            if opened {
+                back()
+                // Back on the history: its row can be tapped (not asserted: the way back goes on).
+                _ = UITestWait.holds(timeout: 5) { row.exists && row.isHittable }
+            }
+            if history {
+                back()
+                // Back on the tab "Alben" (not asserted: the test ends here).
+                _ = UITestWait.holds(timeout: 10) { !app.navigationBars["Verlauf und Rückgängig"].exists }
             }
         }
     }
@@ -1159,17 +1101,20 @@ final class SortlyFlowUITests: XCTestCase {
     func test1d_TripWorkshop() {
         continueAfterFailure = true
         prepare()
-        let travel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Reisen")).firstMatch
         let trips = app.navigationBars["Reisen"]
-        if tap(travel, "open travel area for workshop", timeout: 10) {
-            // The trips list with its rows (the overview has none), before the workshop scrolls
-            // it. Not asserted: the workshop's taps are.
+        // The trips behind "Alle N" of their row on the start page.
+        if UITestScreens.StartPage.openList(app, area: "trips", "open travel area for workshop", timeout: 10) {
+            // The trips list with its cards, before the workshop scrolls it. Not asserted: the
+            // workshop's taps are.
             _ = UITestWait.holds(timeout: 10) { trips.exists && suggestionRow().exists }
             tripWorkshop()
-            back()
-            // Back on the overview: its settings button can be tapped (not asserted: the tap is).
+            // Back on the start page: its settings button can be tapped (not asserted: the tap is).
+            backToStartPage()
             let settingsButton = app.buttons["Einstellungen"]
             _ = UITestWait.holds(timeout: 10) { settingsButton.exists && settingsButton.isHittable }
+        } else {
+            print("UI_STEP_MISSING open travel area for workshop")
+            XCTFail("Missing: open travel area for workshop (\"Alle N\" of the trips on the start page)")
         }
         // The trip changes from the workshop can be taken back in the settings.
         if tap(app.buttons["Einstellungen"], "settings for trip reset") {
@@ -1207,6 +1152,11 @@ final class SortlyFlowUITests: XCTestCase {
     /// ("Widerrufen") and later in "Ignoriert" ("Nicht mehr ignorieren"). Runs in the library.
     private func ignoreAndUndo() {
         let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
+        // The filter the photos come from ("Unsortiert", or "Unsicher" once everything is
+        // sorted): the way back from "Ignoriert" (the tab has no "Alle" since wave 1).
+        let from = UITestScreens.Unsorted.filters.first { UITestScreens.Unsorted.filter(app, $0).isSelected } ?? "unorganized"
+        let fromFilter = UITestScreens.Unsorted.filter(app, from)
+        let ignoredFilter = UITestScreens.Unsorted.filter(app, "ignored")
         func ignoreTwo(_ step: String) -> Bool {
             guard tap(button("Auswählen"), "select mode for \(step)") else { return false }
             guard photos.count >= 2 else { print("UI_STEP_MISSING two photos for \(step)"); return false }
@@ -1232,7 +1182,7 @@ final class SortlyFlowUITests: XCTestCase {
             // 44592357899: "Missing: undo ignore", the same test green an hour earlier).
             if tap(app.buttons["ignore.undo"], "undo ignore") {
                 XCTAssertTrue(waitGone(note, timeout: 5), "The ignore note stayed after Widerrufen")
-                tap(app.buttons["Ignoriert"], "ignored area after undo")
+                tap(ignoredFilter, "ignored area after undo")
                 // "Keine Fotos" shows only in an empty area other than "Unsortiert": up to the
                 // two seconds of the old pause, then the five below, as before.
                 let noPhotos = anything("Keine Fotos")
@@ -1240,8 +1190,8 @@ final class SortlyFlowUITests: XCTestCase {
                 let empty = noPhotos.waitForExistence(timeout: 5)
                 print(empty ? "UI_STEP_OK undo restored the photos" : "UI_STEP_MISSING undo restored the photos")
                 XCTAssertTrue(empty, "Widerrufen left photos in Ignoriert")
-                tap(app.buttons["Alle"], "all photos")
-                // Every photo again ("Ignoriert" was empty), two of them selected next (not
+                tap(fromFilter, "photos of \(from) again")
+                // The photos again ("Ignoriert" was empty), two of them selected next (not
                 // asserted: `ignoreTwo` checks the count).
                 _ = UITestWait.holds(timeout: 5) { photos.count >= 2 }
             }
@@ -1263,7 +1213,7 @@ final class SortlyFlowUITests: XCTestCase {
             }
             // pacing: kept, the library counts again after the note has ended
             sleep(2)
-            tap(app.buttons["Ignoriert"], "ignored area")
+            tap(ignoredFilter, "ignored area")
             // pacing: kept, the area's photos: the grid and its count show in every area, so no
             // element says it is "Ignoriert" that shows; the count below is asserted after the
             // old time.
@@ -1318,7 +1268,7 @@ final class SortlyFlowUITests: XCTestCase {
                     XCTAssertTrue(empty, "Nicht mehr ignorieren in the detail did not bring the photo back")
                 }
             }
-            tap(app.buttons["Alle"], "all photos after unignore")
+            tap(fromFilter, "photos of \(from) after unignore")
         }
     }
 
@@ -1350,8 +1300,9 @@ final class SortlyFlowUITests: XCTestCase {
     /// scrolled past it); after the split the parts may carry two different places.
     private func tripWorkshop() {
         let iceland = "August 2023"
+        // The trips' cards (`suggestion.row`) whose name says `text`.
         func tripRows(_ text: String) -> XCUIElementQuery {
-            app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", text))
+            UITestScreens.SuggestionList.cards(app).containing(NSPredicate(format: "label CONTAINS %@", text))
         }
         func tripRow(_ text: String) -> XCUIElement { tripRows(text).element(boundBy: 0) }
         func openWorkshop(_ row: XCUIElement, _ step: String) -> Bool {
@@ -1362,7 +1313,8 @@ final class SortlyFlowUITests: XCTestCase {
                 // pacing: kept, the scroll comes to rest before the tap measures the element's place
                 sleep(1)
             }
-            guard tap(row, "open trip for " + step, timeout: 10) else { return false }
+            // The card's body opens it (its one action button would make or add instead).
+            guard tap(row.buttons["photoCard.body"], "open trip for " + step, timeout: 10) else { return false }
             // Review P3-06: the workshop is in the "…" menu at the top right of the trip.
             guard tap(moreActionsButton(), "more actions of the trip for " + step, timeout: 5) else { return false }
             let reshape = menuItem("proposal.reshapeTrip", "Reise teilen oder zusammenlegen")
@@ -1503,18 +1455,22 @@ final class SortlyFlowUITests: XCTestCase {
     /// without an answer: "Keine Reise" would turn the stays there into an album of the place and
     /// plan the trips anew.
     private func noTripQuestion() {
-        let travel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Reisen")).firstMatch
-        guard tap(travel, "open travel area for Keine Reise", timeout: 10) else { return }
+        backToStartPage()
+        guard UITestScreens.StartPage.openList(app, area: "trips", "open travel area for Keine Reise", timeout: 10) else {
+            print("UI_STEP_MISSING open travel area for Keine Reise")
+            XCTFail("Missing: open travel area for Keine Reise (\"Alle N\" of the trips on the start page)")
+            return
+        }
         defer { back() }
         guard UITestWait.appears(app.navigationBars["Reisen"], "trips for Keine Reise", timeout: 10) else { return }
-        // Rows of a List exist only once they are on screen: one swipe per look.
-        let row = app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", "August 2023")).element(boundBy: 0)
+        // The list builds its cards only once they come near: one swipe per look.
+        let row = UITestScreens.SuggestionList.cards(app).containing(NSPredicate(format: "label CONTAINS %@", "August 2023")).element(boundBy: 0)
         UITestWait.until("Iceland trip in the list for Keine Reise", timeout: 20) {
             if row.exists && row.isHittable { return true }
             app.swipeUp()
             return false
         }
-        guard tap(row, "open trip for Keine Reise", timeout: 5) else { return }
+        guard tap(row.buttons["photoCard.body"], "open trip for Keine Reise", timeout: 5) else { return }
         defer { back() }
         guard tap(moreActionsButton(), "more actions of the trip for Keine Reise", timeout: 5) else { return }
         let noTrip = menuItem("proposal.oftenHere", "Keine Reise, hier bin ich öfter")
@@ -1537,7 +1493,7 @@ final class SortlyFlowUITests: XCTestCase {
         settled(title, "Keine Reise? at rest", tappable: false)
         shot("66b-no-trip-question")
         if closeDialog(title, "Keine Reise? closed without an answer") {
-            let kept = app.navigationBars["Vorschlag"].exists
+            let kept = UITestScreens.SuggestionPage.isShown(app)
             print(kept ? "UI_STEP_OK the trip stays after Keine Reise? was closed" : "UI_STEP_MISSING the trip stays after Keine Reise? was closed")
             XCTAssertTrue(kept, "Closing \"Keine Reise?\" without an answer left the trip")
         }
@@ -1552,38 +1508,34 @@ final class SortlyFlowUITests: XCTestCase {
         if UITestOnboarding.completeIfNeeded(app, in: test) { shot("x-onboarded-again-\(test)") }
     }
 
-    /// Creates albums once if "Verlauf und Rückgängig" is empty: the starter set, else the
-    /// suggestions already selected.
+    /// Creates albums once if "Verlauf und Rückgängig" (in the tab "Alben" since 5C) is empty:
+    /// several suggestions as one plan, as the start page offers them ("Dein Startpaket", or the
+    /// ticks of an area's list).
     private func ensureHistory() {
-        guard tap(app.buttons["Einstellungen"], "settings before backup"),
-              tap(app.buttons["settings.history"], "history before backup", timeout: 5) else { return }
+        guard tap(tabButton("Alben"), "albums tab before backup"),
+              UITestScreens.Albums.openHistory(app, "history before backup") else { return }
         let noChanges = app.staticTexts["Noch keine Änderungen"]
         // The history shows its rows or says it has none (both come from the app's memory).
         _ = UITestWait.holds(timeout: 10) { noChanges.exists || app.buttons["history.row"].firstMatch.exists }
         let empty = noChanges.exists
         print("UI_FACT history empty before backup \(empty)")
         back()
-        let closeSettings = button("Fertig")
-        // Back on the settings, with "Fertig" free to tap (not asserted: the tap is).
-        _ = UITestWait.holds(timeout: 10) {
-            !app.navigationBars["Verlauf und Rückgängig"].exists && closeSettings.exists && closeSettings.isHittable
-        }
-        tap(closeSettings, "close settings before backup")
-        // The settings sheet has gone (not asserted: the overview's buttons are looked for below).
-        _ = UITestWait.holds(timeout: 10) { !app.navigationBars["Einstellungen"].exists }
+        // Back on the tab "Alben" (not asserted: the start page is looked for below).
+        _ = UITestWait.holds(timeout: 10) { !app.navigationBars["Verlauf und Rückgängig"].exists }
+        backToStartPage()
         guard empty else { return }
-        let starter = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ Alben (kostenlos )?anlegen")).firstMatch
-        let selected = button("ausgewählte Alben anlegen")
-        let open = starter.waitForExistence(timeout: 10) ? starter : selected
-        guard tap(open, "open a plan for the backup", timeout: 10),
-              app.navigationBars["Vorschau"].waitForExistence(timeout: 20),
-              tap(app.buttons["plan.apply"], "apply a plan for the backup", timeout: 30) else { return }
+        guard UITestScreens.StartPage.openPlan(app, "open a plan for the backup", timeout: 10) else {
+            print("UI_STEP_MISSING open a plan for the backup")
+            XCTFail("Missing: open a plan for the backup (no \"Dein Startpaket\", no \"Alle N\" to tick)")
+            return
+        }
+        guard tap(app.buttons["plan.apply"], "apply a plan for the backup", timeout: 30) else { return }
         let done = button("Rückgängig machen").waitForExistence(timeout: 900)
         print(done ? "UI_STEP_OK plan for the backup applied" : "UI_STEP_MISSING plan for the backup applied")
         XCTAssertTrue(done, "The plan for the backup did not finish")
-        back()
+        backToStartPage()
         // pacing: kept, the analysis after the plan starts on its own time; the idle wait
-        // below must not see the overview before it started.
+        // below must not see the start page before it started.
         sleep(2)
         _ = waitStable("analysis before backup", timeout: 180) { analysisIdle }
     }
@@ -1594,7 +1546,10 @@ final class SortlyFlowUITests: XCTestCase {
     private let sweepSkip = ["Pause", "Neu prüfen", "jetzt anlegen", "jetzt einsortieren", "jetzt ausführen", "zurücknehmen", "Rest anlegen",
                              "Erledigtes behalten", "ignorieren", "Widerrufen", "Rückgängig", "Fotos-App öffnen", "Alle Jahre", "Ganze Mediathek dazunehmen", "arbeitet mit", "Nur 20", "Löschen", "Entfernen", "Anlegen",
                              "Übernehmen", "Nicht jetzt", "ergänzen", "so lassen", "Fortsetzen", "Beispiel", "Ignorieren", "Auswählen",
-                             "aufheben", "gleichen Fotos"]
+                             "aufheben", "gleichen Fotos",
+                             // Design wave 1: "Bescheid sagen, wenn fertig" asks iOS about
+                             // notifications; "Jetzt ändern" applies a change of home.
+                             "Bescheid", "Jetzt ändern"]
 
     private func isSafe(_ label: String) -> Bool {
         !label.isEmpty && !sweepSkip.contains { label.localizedCaseInsensitiveContains($0) }
@@ -1605,7 +1560,8 @@ final class SortlyFlowUITests: XCTestCase {
         return bar.exists ? bar.identifier : "-"
     }
 
-    /// Closes a sheet or popover if one is open; returns true if it did.
+    /// Closes a sheet or popover if one is open; returns true if it did. A popover without a
+    /// button of its own ("Was heißt sortiert?" at the ring) closes with a tap around it.
     @discardableResult
     private func closeSheet() -> Bool {
         for label in ["Fertig", "Abbrechen", "Schließen"] {
@@ -1616,6 +1572,13 @@ final class SortlyFlowUITests: XCTestCase {
                 _ = UITestWait.holds(timeout: 5) { !b.exists }
                 return true
             }
+        }
+        let around = app.otherElements["PopoverDismissRegion"]
+        if around.exists {
+            around.tap()
+            // The popover has gone (not asserted: the sweep goes on).
+            _ = UITestWait.holds(timeout: 5) { !around.exists }
+            return true
         }
         return false
     }
@@ -1668,7 +1631,10 @@ final class SortlyFlowUITests: XCTestCase {
         for i in 0..<min(query.count, 8) {
             let element = query.element(boundBy: i)
             let label = rowLabel(element)
-            if label.isEmpty {
+            if element.identifier.hasPrefix("library.filter.") {
+                // The filters of "Unsortiert" change what the tab shows, not the screen.
+                print("UI_SWEEP_SKIP \(screen) › \(label) (filter)")
+            } else if label.isEmpty {
                 print("UI_SWEEP_SKIP \(screen) row \(i) (no label, no text)")
             } else if element.label.isEmpty && !looksLikeRow(element) {
                 print("UI_SWEEP_SKIP \(screen) › \(label) (section header or footer text)")
@@ -1765,8 +1731,8 @@ final class SortlyFlowUITests: XCTestCase {
             print("UI_SWEEP_SKIP Suchen › \(label) › photo (not hittable)")
         }
         // Leave the search: "Abbrechen", or on iOS 26 the field's "Schließen" (UI run
-        // 43964816778: the search stayed open with its keyboard, and the tap on the
-        // "Übersicht" tab after the sweep left the app on "Suchen").
+        // 43964816778: the search stayed open with its keyboard, and the tap on the tab
+        // "Vorschläge" after the sweep left the app on "Suchen").
         for label in ["Abbrechen", "Schließen"] where app.buttons[label].exists && app.buttons[label].isHittable {
             let leave = app.buttons[label]
             leave.tap()
@@ -1821,8 +1787,8 @@ final class SortlyFlowUITests: XCTestCase {
             print("UI_FACT album plan for \(purpose) interrupted by the restart \(cut)")
             XCTAssertFalse(cut, "The album plan for \(purpose) shows as interrupted after the restart")
         }
-        tap(tabButton("Übersicht"), "overview before \(purpose)")
-        _ = app.navigationBars["Übersicht"].waitForExistence(timeout: 10)
+        tap(tabButton("Vorschläge"), "start page before \(purpose)")
+        _ = app.navigationBars["Vorschläge"].waitForExistence(timeout: 10)
         guard made else { return }
         // After a plan the analysis starts again on its own time: up to 2 s for its "Pause",
         // then the overview idle over three checks (as in ensureHistory, without a fixed pause).
@@ -1838,7 +1804,7 @@ final class SortlyFlowUITests: XCTestCase {
         prepare()
         UITestWait.appears(app.tabBars.firstMatch, "tab bar before the sweep", timeout: 60)
         ensureAlbumForSweep()
-        // The old 5 s at least (second review of C2): the overview settles before the sweep.
+        // The old 5 s at least (second review of C2): the start page settles before the sweep.
         UITestWait.atLeast(5, since: prepared)
         // A sweep that reaches nothing proves nothing: every tab and the suggestions list must
         // lead somewhere, the albums tab too (the test made an album above when it had none).
@@ -1846,8 +1812,8 @@ final class SortlyFlowUITests: XCTestCase {
             print("UI_SWEEP_TAB \(tab) \(reached)")
             if reached == 0 { XCTFail("The sweep reached no screen from \(tab)") }
         }
-        check("Übersicht", sweep("Übersicht", depth: 0))
-        for tab in ["Mediathek", "Alben", "Suchen"] {
+        check("Vorschläge", sweep("Vorschläge", depth: 0))
+        for tab in ["Unsortiert", "Alben", "Suchen"] {
             let button = tab == "Suchen" ? searchTabButton() : tabButton(tab)
             guard button.waitForExistence(timeout: 5) else {
                 print("UI_STEP_MISSING sweep tab \(tab)")
@@ -1867,33 +1833,33 @@ final class SortlyFlowUITests: XCTestCase {
                 check(tab, sweep(tab, depth: 0))
             }
         }
-        // Suggestions list, the screen that had dead rows.
-        // Back on the overview before looking for its button: a tab tap while the search is
-        // still active can leave the app on "Suchen" (UI run 43964816778).
-        let overview = app.navigationBars["Übersicht"]
+        // A list of suggestions, the screen that had dead rows: the trips behind "Alle N".
+        // Back on the start page before looking for it: a tab tap while the search is still
+        // active can leave the app on "Suchen" (UI run 43964816778). The list of all suggestions
+        // has the same title; only the start page has the gear "Einstellungen".
+        let startPage = app.navigationBars["Vorschläge"]
+        let gear = app.buttons["Einstellungen"]
         var tries = 0
         repeat {
-            tabButton("Übersicht").tap()
+            tabButton("Vorschläge").tap()
             // Up to the second of the old pause, then the three of the loop's check, as before.
-            _ = UITestWait.holds(timeout: 1) { overview.exists }
+            _ = UITestWait.holds(timeout: 1) { startPage.exists && gear.exists }
             tries += 1
-        } while !overview.waitForExistence(timeout: 3) && tries < 3
-        let suggestions = reviewSuggestionsButton()
-        if suggestions.waitForExistence(timeout: 5) {
-            suggestions.tap()
+        } while !(startPage.waitForExistence(timeout: 3) && gear.exists) && tries < 3
+        if UITestScreens.StartPage.openList(app, area: "trips", "suggestions for the sweep", timeout: 5) {
             // pacing: kept, the sweep reads the list's title as its start right after; read
-            // during the push it would take the overview's and fail "back".
+            // during the push it would take the start page's and fail "back".
             sleep(2)
-            check("Vorschläge", sweep("Vorschläge", depth: 0))
+            check("Reisen", sweep("Reisen", depth: 0))
             back()
         } else {
             print("UI_STEP_MISSING sweep suggestions")
-            // What the overview showed instead (UI runs 43930271358, 43930277920, 43949880264
-            // left no picture of it): screen title, buttons and the analysis card.
+            // What the start page showed instead (UI runs 43930271358, 43930277920, 43949880264
+            // left no picture of it): screen title, buttons and the analysis line.
             let buttons = app.buttons.allElementsBoundByIndex.prefix(30).map(\.label).filter { !$0.isEmpty }
-            print("UI_FACT sweep overview: \(screenTitle) | \(buttons.joined(separator: " | "))")
+            print("UI_FACT sweep start page: \(screenTitle) | \(buttons.joined(separator: " | "))")
             shot("x-sweep-no-suggestions")
-            XCTFail("No \"Vorschläge prüfen\" on the overview for the sweep")
+            XCTFail("No \"Alle N\" of the trips on the start page for the sweep")
         }
         print("UI_SWEEP_DONE")
     }
@@ -1930,9 +1896,9 @@ final class SortlyFlowUITests: XCTestCase {
         print("UI_FACT restore included history \(withHistory)")
         shot("40-restored-card"); audit("restored card")
 
-        // The history is back and the settings say when the copy was made.
-        if tap(app.buttons["Einstellungen"], "settings after restore"),
-           tap(app.buttons["settings.history"], "history after restore", timeout: 5) {
+        // The history is back (in the tab "Alben" since 5C) and says when the copy was made.
+        if tap(tabButton("Alben"), "albums tab after restore"),
+           UITestScreens.Albums.openHistory(app, "history after restore", timeout: 5) {
             // Up to the second of the old pause for a history row: the check below says the
             // history is not empty, so "Noch keine Änderungen" does not end this wait early.
             _ = UITestWait.holds(timeout: 1) { app.buttons["history.row"].firstMatch.exists }
@@ -1943,18 +1909,15 @@ final class SortlyFlowUITests: XCTestCase {
                 (list.exists ? list : app).swipeUp()
                 swipes += 1
             }
-            print(saved.exists ? "UI_STEP_OK backup date in settings" : "UI_STEP_MISSING backup date in settings")
+            print(saved.exists ? "UI_STEP_OK backup date in the history" : "UI_STEP_MISSING backup date in the history")
             let empty = app.staticTexts["Noch keine Änderungen"].exists
             print("UI_FACT history empty after restore \(empty)")
             XCTAssertFalse(empty, "The history is empty after the restore")
-            shot("41-settings-backup")
+            shot("41-history-backup")
             back()
-            let done = button("Fertig")
-            // Back on the settings, with "Fertig" free to tap (not asserted: the tap is).
-            _ = UITestWait.holds(timeout: 10) {
-                !app.navigationBars["Verlauf und Rückgängig"].exists && done.exists && done.isHittable
-            }
-            tap(done, "close settings after restore")
+            // Back on the tab "Alben" (not asserted: the start page is tapped next).
+            _ = UITestWait.holds(timeout: 10) { !app.navigationBars["Verlauf und Rückgängig"].exists }
+            tap(tabButton("Vorschläge"), "start page after restore")
         }
         if tap(app.buttons["overview.restoredFromBackup.ok"], "dismiss restored card") {
             // The card goes (asserted right after, within the old second).
@@ -2034,12 +1997,10 @@ final class SortlyFlowUITests: XCTestCase {
         sleep(2)
         shot("50b-after-keep")
 
-        // The kept plan is the newest history row; its receipt says what is missing.
-        guard tap(app.buttons["Einstellungen"], "settings after keep") else { return }
-        let historyButton = app.buttons["settings.history"]
-        // The settings sheet with its first row free to tap (not asserted: the tap is).
-        _ = UITestWait.holds(timeout: 10) { historyButton.exists && historyButton.isHittable }
-        guard tap(historyButton, "history after keep", timeout: 5) else { return }
+        // The kept plan is the newest history row (in the tab "Alben" since 5C); its receipt
+        // says what is missing.
+        guard tap(tabButton("Alben"), "albums tab after keep"),
+              UITestScreens.Albums.openHistory(app, "history after keep", timeout: 10) else { return }
         let row = app.buttons["history.row"].firstMatch
         // The history with its newest row free to tap (not asserted: the tap is).
         _ = UITestWait.holds(timeout: 10) { row.exists && row.isHittable }
@@ -2063,7 +2024,7 @@ final class SortlyFlowUITests: XCTestCase {
         print(plan ? "UI_STEP_OK retry plan opened" : "UI_STEP_MISSING retry plan opened")
         XCTAssertTrue(plan, "\"Fehlendes erneut versuchen\" did not open a plan")
         // The plan's content, not only its bar (the audit then waits for a still tree itself).
-        // Not asserted: the tap on "Jetzt umsetzen" below is.
+        // Not asserted: the tap on "Jetzt anlegen" below is.
         _ = UITestWait.holds(timeout: 30) { planContentShown() }
         shot("53-retry-plan"); audit("retry plan")
         if tap(app.buttons["plan.apply"], "apply retry plan", timeout: 30) {
@@ -2148,13 +2109,13 @@ final class SortlyFlowUITests: XCTestCase {
         record("after background")
         shot("61-after-background")
 
-        // Switch tabs while it runs, then back to the overview.
-        for name in ["Mediathek", "Alben"] {
+        // Switch tabs while it runs, then back to the start page.
+        for name in ["Unsortiert", "Alben"] {
             // pacing: a while on each tab during the analysis (the test's design); the tap is checked
             if tap(tabButton(name), "tab \(name) during analysis") { sleep(3) }
         }
-        tap(tabButton("Übersicht"), "back to overview during analysis")
-        // pacing: kept, the overview's card is read once after the old time: each look for it
+        tap(tabButton("Vorschläge"), "back to the start page during analysis")
+        // pacing: kept, the start page's card is read once after the old time: each look for it
         // reads the whole tree, which held the app's main thread during the analysis (UI run
         // 43979263666), so it is not polled here.
         sleep(2)
@@ -2174,11 +2135,14 @@ final class SortlyFlowUITests: XCTestCase {
         assertEveryPhotoAnalysed("after background and tabs")
         shot("63-analysis-done"); audit("analysis done")
 
-        // "Neu prüfen" finds nothing new and says so.
-        if tap(app.buttons["Neu prüfen"], "check again") {
-            let said = waitStable("check result shown", timeout: 120) { analysisIdle && anything("keine neuen Fotos").exists }
+        // "Neu prüfen" (in the sheet "Analyse" since wave 1) finds nothing new, and the sheet
+        // says so once the check has ended.
+        if UITestScreens.Analysis.checkAgain(app, "check again") {
+            let idle = waitStable("check finished", timeout: 120) { analysisIdle }
+            let said = idle && UITestScreens.Analysis.openSheet(app) && anything("keine neuen Fotos").waitForExistence(timeout: 5)
             print(said ? "UI_STEP_OK check says no new photos" : "UI_STEP_MISSING check says no new photos")
             shot("64-check-again")
+            UITestScreens.Analysis.closeSheet(app)
         }
 
         // Trial year: chosen in the settings, shown on the overview, taken back there.
@@ -2221,23 +2185,35 @@ final class SortlyFlowUITests: XCTestCase {
         continueAfterFailure = true
         completeOnboardingIfCutOff("test7")
         prepare()
-        guard tap(reviewSuggestionsButton(), "open suggestions for a personal place", timeout: 30) else { return }
-        // The list with its rows before it is scrolled (the overview has none). Not asserted:
-        // the row is looked for below.
-        _ = UITestWait.holds(timeout: 10) { app.navigationBars["Vorschläge"].exists && suggestionRow().exists }
-        // The demo library's second frequent place (`DemoLibrary.grandma`) has no name. Its
-        // section comes after the countries and trips, and the list only makes the rows on
-        // screen, so the list is scrolled until the row is there.
-        let row = app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", "Häufiger Ort")).firstMatch
+        // The demo library's second frequent place (`DemoLibrary.grandma`) has no name: its card
+        // says "Häufiger Ort" and "Benennen …". With more than one frequent place open they are
+        // behind "Alle N" of their row on the start page; with one, its card stands there.
+        let all = app.buttons["startPage.all.frequentPlaces"]
+        let alone = UITestScreens.Cards.cards(app).containing(NSPredicate(format: "label CONTAINS %@", "Häufiger Ort")).firstMatch
+        _ = UITestWait.holds(timeout: 30) { all.exists || alone.exists || analysisIdle }
         var swipes = 0
-        while !(row.exists && row.isHittable) && swipes < 12 {
+        while !all.exists && !alone.exists && swipes < 8 {
             app.swipeUp()
-            // pacing: kept, the scroll comes to rest before the tap measures the element's place
-            sleep(1)
             swipes += 1
+            // The page comes to rest; the next look follows at once when the row is there.
+            _ = UITestWait.holds(timeout: 1) { all.exists || alone.exists }
         }
-        guard tap(row, "open personal place suggestion", timeout: 5) else { return }
-        let opened = app.navigationBars["Vorschlag"].waitForExistence(timeout: 5)
+        var found: XCUIElement?
+        if all.exists {
+            if UITestScreens.StartPage.openList(app, area: "frequentPlaces", "open suggestions for a personal place") {
+                found = UITestScreens.SuggestionList.card(app, containing: "Häufiger Ort", swipes: 12)
+            }
+        } else if alone.exists {
+            found = alone
+        }
+        guard let row = found else {
+            print("UI_STEP_MISSING personal place suggestion")
+            shot("x-missing-personal-place")
+            XCTFail("No suggestion \"Häufiger Ort\" on the start page or behind \"Alle N\" of the frequent places")
+            return
+        }
+        guard UITestScreens.Cards.open(row, in: app, "open personal place suggestion") else { return }
+        let opened = UITestWait.holds(timeout: 5) { UITestScreens.SuggestionPage.isShown(app) }
         print(opened ? "UI_STEP_OK personal place detail opened" : "UI_STEP_MISSING personal place detail opened")
         XCTAssertTrue(opened, "Tapping the personal place did not open its detail")
 
@@ -2282,7 +2258,7 @@ final class SortlyFlowUITests: XCTestCase {
         // pacing: kept, the check below says Return opened nothing, and it looks after the old
         // two seconds.
         sleep(2)
-        let stayed = app.navigationBars["Vorschlag"].exists && !app.navigationBars["Vorschau"].exists
+        let stayed = UITestScreens.SuggestionPage.isShown(app) && !app.navigationBars["Vorschau"].exists
         print(stayed ? "UI_STEP_OK return creates nothing" : "UI_STEP_MISSING return creates nothing")
         XCTAssertTrue(stayed, "Return in the name field left the suggestion")
 
@@ -2320,21 +2296,22 @@ final class SortlyFlowUITests: XCTestCase {
             shot("73-name-back-from-adjust")
         }
 
-        // Back without creating: the row still waits for its name and is not selected.
+        // Back without creating: the card still waits for its name ("Name fehlt", "Benennen …").
         back()
-        // pacing: kept, the check below says the row is not selected, and it looks after the old
+        // pacing: kept, the check below says the card is untouched, and it looks after the old
         // second (a wait for the list would look sooner).
         sleep(1)
-        let list = app.navigationBars["Vorschläge"].waitForExistence(timeout: 5)
+        let list = UITestWait.holds(timeout: 5) { !UITestScreens.SuggestionPage.isShown(app) }
         print(list ? "UI_STEP_OK back to suggestions without creating" : "UI_STEP_MISSING back to suggestions without creating")
         XCTAssertTrue(list, "Back from the personal place did not return to the list")
         func rowSays(_ text: String) -> Bool {
             row.label.contains(text)
                 || row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
         }
-        let untouched = row.waitForExistence(timeout: 5) && rowSays("Name fehlt") && !rowSays("Ausgewählt")
+        let untouched = row.waitForExistence(timeout: 5) && rowSays("Name fehlt")
+            && UITestScreens.Cards.button(UITestScreens.Cards.action(of: row), says: "benennen")
         print(untouched ? "UI_STEP_OK personal place untouched" : "UI_STEP_MISSING personal place untouched")
-        XCTAssertTrue(untouched, "Going back from the named place stored the name or selected the suggestion")
+        XCTAssertTrue(untouched, "Going back from the named place stored the name (the card no longer says \"Name fehlt\" and \"Benennen …\")")
     }
 
     // MARK: Taking a photo out of a suggestion
@@ -2342,30 +2319,25 @@ final class SortlyFlowUITests: XCTestCase {
     /// Review P3-01 = G3-04 (18.11.): "N aus Vorschlag entfernen" sat in the bottom bar behind
     /// the tab bar (screenshot ui-08a-suggestion-photos), and test1 only selected a photo and
     /// never tapped the button. Here a photo is selected, the button is tapped and confirmed,
-    /// and the suggestion has one photo less: in the title of its photos and in "Alle N Fotos
-    /// ansehen". While selecting, the tab bar is hidden (as in Photos); afterwards it is back.
+    /// and the suggestion has one photo less in the facts line under its name ("16 Fotos ·
+    /// 12. bis 16. Oktober"). Since wave 1 the photos are on the suggestion's page, whose tab
+    /// bar is hidden for good: while selecting, the system's bottom bar holds the button;
+    /// afterwards the page's own bar ("Nicht jetzt" and the filled button) is back, and still
+    /// no tab bar.
     func testRemovePhotoFromSuggestion() {
         continueAfterFailure = true
         completeOnboardingIfCutOff("testRemovePhotoFromSuggestion")
         prepare()
-        guard tap(reviewSuggestionsButton(), "open suggestions to remove a photo", timeout: 30),
-              tap(suggestionRow(), "open a suggestion to remove a photo", timeout: 10),
-              UITestWait.appears(app.navigationBars["Vorschlag"], "suggestion detail", timeout: 5) else { return }
-        let all = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Alle ")).firstMatch
-        guard tap(all, "open all photos of the suggestion", timeout: 5) else { return }
-        let photo = app.buttons["proposalPhotos.photo"].firstMatch
-        guard UITestWait.appears(photo, "photos of the suggestion", timeout: 5) else { return }
-
-        // "31 Fotos": the title of the suggestion's photos is their number.
-        func count() -> Int? {
-            let bar = app.navigationBars.firstMatch
-            let titled = bar.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ Fotos?")).firstMatch
-            let title = bar.identifier.contains("Foto") ? bar.identifier : (titled.exists ? titled.label : "")
-            return title.firstMatch(of: #/([0-9.]+) Fotos?/#).flatMap { Int($0.1.replacingOccurrences(of: ".", with: "")) }
+        guard UITestScreens.StartPage.openList(app, area: "trips", "open suggestions to remove a photo", timeout: 30) else {
+            XCTFail("Missing: the list of suggestions (\"Alle N\" of an area on the start page)")
+            return
         }
+        guard UITestScreens.Cards.open(suggestionRow(), in: app, "open a suggestion to remove a photo"),
+              UITestWait.until("suggestion page", timeout: 5, { UITestScreens.SuggestionPage.isShown(app) }) else { return }
+
         var seen: Int?
         UITestWait.until("number of the suggestion's photos", timeout: 5) {
-            seen = count()
+            seen = UITestScreens.SuggestionPage.photoCount(app)
             return seen != nil
         }
         guard let before = seen else { return }
@@ -2375,35 +2347,38 @@ final class SortlyFlowUITests: XCTestCase {
             return
         }
 
-        guard tap(button("Auswählen"), "select a photo to take out", timeout: 5) else { return }
+        guard tap(UITestScreens.SuggestionPage.selectPhotos(app), "select a photo to take out", timeout: 5) else { return }
+        guard let photo = UITestScreens.SuggestionPage.photoInReach(app) else {
+            print("UI_STEP_MISSING a photo of the suggestion in reach")
+            XCTFail("No photo of the suggestion came clear of the bars to be picked")
+            return
+        }
         photo.tap()
         let remove = app.buttons["proposalPhotos.remove"]
-        // The button names one photo and is not behind the tab bar: the tab bar is hidden.
+        // The button names one photo and is in reach: no tab bar over it (the page hides it).
         let free = UITestWait.until("remove button free to tap", timeout: 5) {
             remove.exists && remove.isEnabled && remove.label.hasPrefix("1 ") && remove.isHittable && !tabBarHittable()
         }
         shot("08e-remove-from-suggestion")
         guard free else { return }
         remove.tap()
-        let confirm = app.buttons["Entfernen"]
-        guard tap(confirm, "confirm taking the photo out", timeout: 5) else { return }
+        guard tap(app.buttons["Entfernen"], "confirm taking the photo out", timeout: 5) else { return }
 
         var after: Int?
         let fewer = UITestWait.until("suggestion has one photo less", timeout: 15) {
-            after = count()
+            after = UITestScreens.SuggestionPage.photoCount(app)
             return after == before - 1
         }
         print("UI_FACT suggestion photos after \(after.map { String($0) } ?? "-")")
         XCTAssertEqual(after, before - 1, "Taking one photo out of the suggestion did not lower its count by one")
         guard fewer else { return }
-        // Selecting ended: the tab bar is back, the bottom bar gone.
-        UITestWait.until("tab bar back after taking the photo out", timeout: 5) { tabBarHittable() && !remove.exists }
+        // Selecting ended: the page's own bar is back and in reach; the tab bar stays hidden.
+        let notNow = app.buttons["proposal.notNow"]
+        let barBack = UITestWait.until("the page's bar back after taking the photo out", timeout: 5) {
+            !remove.exists && notNow.exists && notNow.isHittable && app.buttons["proposal.create"].exists
+        }
+        XCTAssertTrue(barBack, "After taking a photo out, the page's bar (\"Nicht jetzt\" and the filled button) did not come back")
+        XCTAssertFalse(tabBarHittable(), "The tab bar shows on the suggestion's page after taking a photo out (it is hidden there for good)")
         shot("08f-photo-taken-out")
-
-        back()
-        // "Alle 2 Fotos ansehen", or "1 Foto ansehen" when one photo is left (the singular has no "Alle").
-        let detailSays = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
-                                                          "Alle \(before - 1) Foto", "\(before - 1) Foto ")).firstMatch
-        UITestWait.appears(detailSays, "suggestion says \(before - 1) photos", timeout: 5)
     }
 }

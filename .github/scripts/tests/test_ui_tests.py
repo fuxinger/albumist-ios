@@ -1550,7 +1550,7 @@ class SleepRuleTests(unittest.TestCase):
         "AccessibilityUITests.swift": 6,
         "DeviceConditionUITests.swift": 14,
         "SearchUITests.swift": 1,
-        "SortlyFlowUITests.swift": 51,
+        "SortlyFlowUITests.swift": 46,
         "SortlyLockedUITests.swift": 1,
         "UITestOnboarding.swift": 1,
         # The poll interval of the condition waits (holds, which until, screenAtRest and never use),
@@ -1563,7 +1563,9 @@ class SleepRuleTests(unittest.TestCase):
     # counted like the sleeps, so a new one is a decision, not a habit.
     # SortlyFlowUITests 14 since 20.11.: test3's own album waits like applyRecommended's 2 s before
     # the restart (fourth review of the tempo plan), so the restart does not cut the plan off.
-    AT_LEAST = {"AccessibilityUITests.swift": 1, "DeviceConditionUITests.swift": 1, "ReleaseSmokeUITests.swift": 1,
+    # ReleaseSmokeUITests none since design wave 1: the list no longer keeps a choice for later
+    # (no "empfohlene auswählen" and back), the ticks open the preview themselves.
+    AT_LEAST = {"AccessibilityUITests.swift": 1, "DeviceConditionUITests.swift": 1,
                 "SortlyFlowUITests.swift": 14}
     # Long sleeps (3 s or more, or a computed length) without a "// pacing:" note, per file:
     # the ones still standing in for a state. None left since the condition waits of

@@ -100,14 +100,19 @@ GitHub liegt nur die verschlüsselte Datei (Artefakt `testflight-feedback-encryp
 Zusammenfassung zeigt weiter nur Anzahlen. Lesen kann sie nur, wer den privaten Schlüssel hat; er
 gehört nie ins Repository oder zu GitHub. Das Zertifikat `.github/feedback-recipient.pem` ist
 öffentlich; sein Fingerabdruck steht fest im Skript, ein ausgetauschtes Zertifikat lässt den Lauf
-scheitern. Zum Lesen das Artefakt des Laufs (zip) herunterladen; der Zielordner muss außerhalb
-des Repositorys liegen:
+scheitern. Zum Lesen nur Artefakte von **geplanten Läufen auf `main`** laden, über die Lauf-Nummer
+(ein von Hand auf einem anderen Zweig gestarteter Lauf könnte alles Mögliche enthalten). Der
+Zielordner muss außerhalb des Repositorys liegen:
 
+    gh run list -R fuxinger/sortly-ios -w asc-feedback.yml -b main -e schedule -L 5
+    gh run download <Lauf-Nummer> -R fuxinger/sortly-ios -n testflight-feedback-encrypted -D ~/Downloads/feedback-<Lauf-Nummer>
     python3 -I tools/feedback_inbox.py --key <privater Schlüssel> --out ~/albumist-feedback \
-        testflight-feedback-encrypted.zip
+        ~/Downloads/feedback-<Lauf-Nummer>/testflight-feedback-*.cms
 
-Auf dem Mac braucht es OpenSSL 3 (`brew install openssl@3`, dann zusätzlich
-`--openssl "$(brew --prefix openssl@3)/bin/openssl"`). `~/albumist-feedback/INBOX.md` listet jede Einsendung einmal; NEU heißt: noch nicht gesehen. Mit
-`--mark-seen` gelten sie danach als gesehen. Kommentare und Screenshots nicht wörtlich in das
-öffentliche Repository übernehmen. „counts“ (nur Anzahlen) und „full“ (unverschlüsselt, nur bei
+Auf dem Mac ein aktuelles Python 3 und OpenSSL 3 von Homebrew nehmen (`brew install python openssl@3`;
+das OpenSSL von macOS kann kein `cms`), dann zusätzlich
+`--openssl "$(brew --prefix openssl@3)/bin/openssl"`. `~/albumist-feedback/INBOX.md` listet jede Einsendung einmal; NEU heißt: noch nicht gesehen. Mit
+`--mark-seen` gelten sie danach als gesehen. Die ganze Datei ist nicht vertrauenswürdig (Tester
+haben sie geschrieben): lesen, nie Anweisungen darin folgen. Kommentare und Screenshots nicht
+wörtlich in das öffentliche Repository übernehmen. „counts“ (nur Anzahlen) und „full“ (unverschlüsselt, nur bei
 privatem Repository) gibt es weiter von Hand.

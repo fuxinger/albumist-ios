@@ -72,7 +72,13 @@ Absturzprotokoll), fragt GitHub jeden Morgen um 06:00 UTC von selbst ab
 (`.github/workflows/asc-feedback.yml`, Skript `.github/scripts/asc_feedback.py`). Von Hand:
 Actions > **TestFlight feedback** > Run workflow.
 
-- **counts** (täglich und Standard): die Zusammenfassung des Laufs zeigt nur, wie viele
+- **encrypted** (täglich und Standard, seit 20.11.2026): Kommentare, Screenshots und
+  Absturzprotokolle der letzten 14 Tage, mit openssl verschlüsselt an das Zertifikat
+  `.github/feedback-recipient.pem` (Fingerabdruck fest im Skript); hochgeladen wird nur die
+  verschlüsselte Datei (Artefakt **testflight-feedback-encrypted**, 7 Tage), die Zusammenfassung
+  zeigt nur Anzahlen. Lesen mit dem privaten Schlüssel: `tools/feedback_inbox.py`
+  (`docs/launch/FREIGABE_EINRICHTEN.md`, „Freiwillig“). Erlaubt auch bei öffentlichem Repository.
+- **counts** (von Hand): die Zusammenfassung des Laufs zeigt nur, wie viele
   Feedbacks und Abstürze jeder Build hat, und das Datum des neuesten. Kommentare, Gerätedaten,
   Screenshots und Absturzprotokolle werden dabei gar nicht erst abgefragt, nichts wird
   gespeichert oder hochgeladen. Die Inhalte selbst stehen in App Store Connect > Albumist >
@@ -91,9 +97,10 @@ Actions > **TestFlight feedback** > Run workflow.
   erscheinen nur als Text (kein HTML, keine Links, keine Erwähnungen) und nie im Protokoll des Laufs.
 - Eigener Schlüssel, nicht der des Uploads (seit 18.11.2026): den Upload-Schlüssel bekommt nur
   der Upload-Job. Der Feedback-Schlüssel hat die Rolle **Developer** und
-  liegt als Repository-Secrets `ASC_FEEDBACK_KEY_ID`, `ASC_FEEDBACK_ISSUER_ID` und
-  `ASC_FEEDBACK_KEY_P8` (`docs/launch/FREIGABE_EINRICHTEN.md`, „Freiwillig“). Ohne sie
-  meldet der Lauf nur „Skipped“. Mit einer Rolle ohne Lesezugriff meldet er „HTTP 403“ und nennt
+  liegt als Secrets `ASC_FEEDBACK_KEY_ID`, `ASC_FEEDBACK_ISSUER_ID` und `ASC_FEEDBACK_KEY_P8` in
+  der Umgebung `asc-feedback`, die nur `main` benutzen darf; der erste Job prüft das
+  (`docs/launch/FREIGABE_EINRICHTEN.md`, „Freiwillig“). Ohne die
+  Umgebung oder ohne die Secrets meldet der Lauf nur „Skipped“ und bleibt grün. Mit einer Rolle ohne Lesezugriff meldet er „HTTP 403“ und nennt
   die fehlende Rolle (Admin, App Manager oder Developer geht). Die Rolle eines Schlüssels lässt
   sich nicht ändern: neuen Schlüssel mit passender Rolle erzeugen, alten widerrufen, die drei
   Secrets ersetzen. Geprüft 16.11. (damals noch mit dem Upload-Schlüssel): Feedback und Abstürze

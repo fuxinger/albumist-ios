@@ -336,7 +336,7 @@ struct PlanReviewView: View {
             }
             Task { await model.execute(plan) }
         } label: {
-            applyTitle(facts.summary)
+            applyTitle(plan, facts.summary)
         }
         .buttonStyle(PrimaryButtonStyle())
         // Not while a change in "Dein Zuhause" makes the suggestions again (the plan would
@@ -401,12 +401,15 @@ struct PlanReviewView: View {
         return { Task { await model.keepFirstAccepted(free) } }
     }
 
-    /// The button says what it does (design review W2: "Jetzt umsetzen" was the fourth name
-    /// for this step).
-    private func applyTitle(_ summary: PlanSummary) -> Text {
-        if summary.newAlbums > 0 { return Text("Alben jetzt anlegen") }
-        if summary.removedMemberships == 0 && summary.deletedContainers == 0 { return Text("Fotos jetzt einsortieren") }
-        return Text("Änderungen jetzt ausführen")
+    /// The button says what it does, one verb after "Jetzt" (design W1, Punkt 2; design review
+    /// W2: "Jetzt umsetzen" was the fourth name for this step).
+    private func applyTitle(_ plan: ChangePlan, _ summary: PlanSummary) -> Text {
+        switch PreviewButtonWord(summary, kind: PlanReceipt.Kind(plan)) {
+        case .create: Text("Jetzt anlegen")
+        case .extend: Text("Jetzt ergänzen")
+        case .remove: Text("Jetzt entfernen")
+        case .change: Text("Jetzt ändern")
+        }
     }
 
     private func guarantee(_ text: Text) -> some View {

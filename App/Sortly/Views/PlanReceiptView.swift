@@ -2,8 +2,8 @@ import SwiftUI
 import SortlyCore
 
 /// The change receipt of one executed plan (I01): what Albumist really changed, album by
-/// album, read from the execution journal, and what it did not touch. Opened from
-/// Einstellungen › Verlauf and from the result after "Alben jetzt anlegen".
+/// album, read from the execution journal, and what it did not touch. Opened from "Verlauf"
+/// (tab "Alben") and from the result after "Jetzt anlegen".
 struct PlanReceiptView: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan

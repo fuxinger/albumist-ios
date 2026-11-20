@@ -1361,6 +1361,46 @@
         }
       }
     },
+    "Jetzt anlegen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create Now"
+          }
+        }
+      }
+    },
+    "Jetzt entfernen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Now"
+          }
+        }
+      }
+    },
+    "Jetzt ergänzen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Now"
+          }
+        }
+      }
+    },
+    "Jetzt ändern" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change Now"
+          }
+        }
+      }
+    },
     "Legt die %lld Alben mit denselben Fotos wieder an." : {
       "localizations" : {
         "de" : {
@@ -9927,36 +9967,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Creating albums was interrupted earlier. Decide on the overview how to go on. Then you can continue here, and nothing is created twice."
-          }
-        }
-      }
-    },
-    "Alben jetzt anlegen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Create Albums Now"
-          }
-        }
-      }
-    },
-    "Fotos jetzt einsortieren" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sort Photos Now"
-          }
-        }
-      }
-    },
-    "Änderungen jetzt ausführen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Make Changes Now"
           }
         }
       }

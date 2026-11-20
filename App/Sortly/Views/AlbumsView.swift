@@ -8,7 +8,8 @@ import SortlyEngine
 /// and "Ähnliche Alben", then the user's other albums and folders as Photos shows them ("Deine
 /// Alben"). Every album and folder stands once (`AlbumTabSections`). Albums are photo tiles
 /// (covers at least half the screen wide, design rule 6); a long press on one of Albumist's has
-/// "Rückgängig machen", which undoes only that album (`albumUndo`).
+/// "Rückgängig machen", which undoes only that album (`albumUndo`), as a note under the shelf
+/// says.
 ///
 /// Everything here is pushed by value (`AppScreen`): an album, a folder, the list of all of
 /// Albumist's albums, the history, the similar albums, and the preview of an undo.
@@ -17,6 +18,7 @@ struct AlbumsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(Navigator.self) private var navigator: Navigator?
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var viewing: PhotoViewer.Start?
     @State private var undoing: ManagedAlbumState?
 
@@ -24,25 +26,35 @@ struct AlbumsView: View {
         let sections = AlbumTabSections(inventory: model.inventory, managed: model.managedAlbums, history: model.history,
                                         undone: model.undonePlans, moreHistory: model.historyHasMore,
                                         interrupted: model.interruptedPlan != nil, similar: model.mergeSuggestions.count)
+        // Two covers side by side on the iPhone, the third peeking in; four on the iPad. At the
+        // accessibility text sizes the shelf is a column across the screen: three tiles at most,
+        // so "Verlauf und Rückgängig" stays near (second review of wave 1). "Alle N" stands when
+        // there are more than the shelf shows at once.
+        let column = typeSize.isAccessibilitySize
+        let side = sizeClass == .regular ? 4 : 2
+        let shelf = sections.shelf(limit: column ? AlbumTabSections.columnLimit : AlbumTabSections.shelfLimit)
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if !sections.albumistAlbums.isEmpty {
+                if !shelf.isEmpty {
                     AlbumSectionHeader(Text("Von Albumist"), subtitle: Text("angelegt oder ergänzt")) {
-                        if sections.showsAll { allButton(count: sections.albumistAlbums.count) }
+                        if sections.showsAll(visible: column ? AlbumTabSections.columnLimit : side) {
+                            allButton(count: sections.albumistAlbums.count)
+                        }
                     }
                     .padding(.top, Theme.Spacing.s)
-                    // Two covers side by side on the iPhone, the third peeking in; four on the iPad.
-                    CardShelf(count: sizeClass == .regular ? 4 : 2) {
-                        ForEach(sections.shelf) { album in
+                    CardShelf(count: side) {
+                        ForEach(shelf) { album in
                             AlbumTile(album: album.collection, managed: album.state,
                                       viewPhotos: { viewing = $0 }, undo: { undoing = $0 })
                         }
                     }
                     .padding(.top, Theme.Spacing.m)
+                    undoNote
+                        .padding(.top, Theme.Spacing.s)
                 }
 
                 AlbumRowsCard(rows: sections.rows)
-                    .padding(.top, sections.albumistAlbums.isEmpty ? Theme.Spacing.s : Theme.Spacing.xl)
+                    .padding(.top, shelf.isEmpty ? Theme.Spacing.s : Theme.Spacing.m)
 
                 // Left out while every album is Albumist's: "Noch keine Alben" under the shelf read
                 // as wrong (UI run 44570945716). With limited access it always explains why.
@@ -96,6 +108,16 @@ struct AlbumsView: View {
         }
         .accessibilityLabel(Text("Alle \(count) Alben anzeigen"))
         .accessibilityIdentifier("albums.managed")
+    }
+
+    /// Under the shelf, how to undo one of the albums, and in "Mehr erfahren" where they are in
+    /// Photos: "Alle N" leads to the same words only from three albums on (second review of
+    /// wave 1).
+    private var undoNote: some View {
+        LearnMore(short: Text("Halte ein Album gedrückt oder tippe im Album auf „…“, um es rückgängig zu machen."),
+                  full: Text("\(ManagedAlbumsView.howToUndo) \(ManagedAlbumsView.place(root: model.settings.rootFolderTitle))"),
+                  title: Text("Alben von Albumist"))
+            .padding(.horizontal, Theme.Spacing.l)
     }
 
     /// iOS shows an app no albums at all while only some photos are shared.
@@ -221,7 +243,7 @@ struct FolderScreen: View {
     var body: some View {
         Group {
             if let folder = model.inventory[id] {
-                let children = AlbumTabSections.children(of: folder, in: model.inventory)
+                let children = AlbumTabCache.shared.children(of: folder, model: model)
                 // The first record of an album, as the undo reads it (`AlbumTabSections`).
                 let managed = Dictionary(model.managedAlbums.map { ($0.albumID, $0) }, uniquingKeysWith: { first, _ in first })
                 ScrollView {
@@ -287,7 +309,7 @@ struct AlbumScreen: View {
             if let state = undoable {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        AlbumUndoMenuItem(deletes: model.removalDeletesAlbum(state)) { undoing = state }
+                        AlbumUndoMenuItem(state: state, album: model.inventory[id]) { undoing = state }
                     } label: {
                         Label("Weitere Aktionen", systemImage: "ellipsis")
                     }
@@ -315,7 +337,8 @@ struct AlbumScreen: View {
     }
 
     private func photos(_ album: CollectionSnapshot) -> some View {
-        let ids = PreviewPicker.chronological(album.assetIDs, dates: model.creationDates)
+        // Sorted once per album and album list (`AlbumTabCache`), not each time the screen is drawn.
+        let ids = AlbumTabCache.shared.photos(of: album, model: model)
         let managed = model.managedAlbums.first { $0.albumID == album.id }
         return ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {

@@ -70,13 +70,18 @@ struct AlbumTabDesignTests {
         #expect(sections.albumistAlbums.allSatisfy { $0.mark != .new })
     }
 
-    /// The user took every added photo out again: no "+0", no "Neu" either.
+    /// The user took every added photo out again: no "+0", no "Neu" either, and nothing left to
+    /// undo. The album is the user's again: it leaves "Von Albumist" and stands under "Deine
+    /// Alben" (second review of wave 1).
     @Test func anAlbumOfTheUsersWithoutAlbumistsPhotosHasNoMark() {
         let garten = CollectionSnapshot(id: "u1", title: "Garten", assetIDs: Self.photos(3))
-        let sections = AlbumTabSections(inventory: CollectionInventory([garten]),
-                                        managed: [Self.state(garten, created: false, added: [])])
-        #expect(sections.albumistAlbums.count == 1)
-        #expect(sections.albumistAlbums[0].mark == nil)
+        let state = Self.state(garten, created: false, added: [])
+        let sections = AlbumTabSections(inventory: CollectionInventory([garten]), managed: [state])
+        #expect(AlbumTabSections.mark(state) == nil)
+        #expect(sections.albumistAlbums.isEmpty)
+        #expect(sections.yours.map(\.id) == ["u1"])
+        #expect(!sections.saysNoAlbums)
+        #expect(Self.listedOnce(sections))
     }
 
     /// Created and later extended by another run: still Albumist's own album, "Neu".
@@ -125,14 +130,33 @@ struct AlbumTabDesignTests {
         #expect(sections.albumistAlbums.map(\.id) == ["y", "x"])
     }
 
-    @Test(arguments: [(0, false), (1, false), (2, false), (3, true), (12, true), (30, true)])
-    func allNStandsOnceTheShelfScrolls(_ count: Int, _ showsAll: Bool) {
+    /// One run made several albums: they changed at the same moment and stand by title, before
+    /// the albums without a known change.
+    @Test func albumsChangedAtTheSameMomentStandByTitle() {
+        let berlin = CollectionSnapshot(id: "b", title: "Berlin", assetIDs: Self.photos(2, "b"))
+        let amsterdam = CollectionSnapshot(id: "a", title: "Amsterdam", assetIDs: Self.photos(2, "a"))
+        let older = CollectionSnapshot(id: "c", title: "Aachen", assetIDs: Self.photos(2, "c"))
+        let sections = AlbumTabSections(inventory: CollectionInventory([berlin, amsterdam, older]),
+                                        managed: [Self.state(berlin), Self.state(older), Self.state(amsterdam)],
+                                        history: [Self.run("r", day: 4, made: ["b", "a"])])
+        #expect(sections.albumistAlbums.map(\.id) == ["a", "b", "c"])
+    }
+
+    /// "Alle N" stands once more albums are there than the shelf shows at once: two side by side
+    /// on the iPhone, four on the iPad, the column of three at the accessibility text sizes
+    /// (second review of wave 1: not "Alle 3" beside four tiles that fit).
+    @Test(arguments: [(0, 2, false), (2, 2, false), (3, 2, true), (4, 4, false), (5, 4, true),
+                      (3, 3, false), (4, 3, true), (12, 2, true), (30, 4, true)])
+    func allNStandsOnceMoreAlbumsAreThereThanShow(_ count: Int, _ visible: Int, _ showsAll: Bool) {
         let albums = (0..<count).map { CollectionSnapshot(id: CollectionID("a\($0)"), title: "Reise \($0)", assetIDs: Self.photos(2, "r\($0)-")) }
         let sections = AlbumTabSections(inventory: CollectionInventory(albums), managed: albums.map { Self.state($0) })
-        #expect(sections.showsAll == showsAll)
+        #expect(sections.showsAll(visible: visible) == showsAll)
         #expect(sections.albumistAlbums.count == count)
-        #expect(sections.shelf.count == min(count, AlbumTabSections.shelfLimit))
-        #expect(sections.shelf.map(\.id) == Array(sections.albumistAlbums.prefix(AlbumTabSections.shelfLimit)).map(\.id))
+        #expect(sections.shelf().count == min(count, AlbumTabSections.shelfLimit))
+        #expect(sections.shelf().map(\.id) == Array(sections.albumistAlbums.prefix(AlbumTabSections.shelfLimit)).map(\.id))
+        // The column at the accessibility text sizes: the first three, the rest behind "Alle N".
+        #expect(sections.shelf(limit: AlbumTabSections.columnLimit).map(\.id)
+                == Array(sections.albumistAlbums.prefix(3)).map(\.id))
     }
 
     // MARK: - Rows
@@ -179,10 +203,72 @@ struct AlbumTabDesignTests {
         let spain = CollectionSnapshot(id: "a2", title: "Spanien", parentID: "f2", assetIDs: Self.photos(2, "s"))
         let mine = CollectionSnapshot(id: "u1", title: "Garten", assetIDs: Self.photos(1, "g"))
         let sections = AlbumTabSections(inventory: CollectionInventory([root, countries, top, italy, spain, mine]),
-                                        managed: [Self.state(italy), Self.state(top)])
+                                        managed: [Self.state(italy), Self.state(top), Self.state(spain)])
         #expect(sections.rows.first == .folder(root, albums: 3))
         #expect(sections.yours.map(\.id) == ["u1"])
         #expect(Self.listedOnce(sections))
+    }
+
+    /// A folder of the user's with many albums of the user's and one Albumist made in it stays
+    /// the user's (second review of wave 1): no row, it stands under "Deine Alben", and the album
+    /// Albumist made is on the shelf.
+    @Test func aFolderOfTheUsersWithOneAlbumOfAlbumistsStaysUnderYourAlbums() {
+        let trips = CollectionSnapshot(id: "f", title: "Reisen", kind: .folder, childIDs: ["u1", "u2", "a1", "u3"])
+        let own = (1...3).map { CollectionSnapshot(id: CollectionID("u\($0)"), title: "Urlaub \($0)", parentID: "f",
+                                                   assetIDs: Self.photos(2, "u\($0)-")) }
+        let kyoto = CollectionSnapshot(id: "a1", title: "Kyoto", parentID: "f", assetIDs: Self.photos(2, "k"))
+        let sections = AlbumTabSections(inventory: CollectionInventory([trips, kyoto] + own), managed: [Self.state(kyoto)])
+        #expect(sections.rows == [.history(changes: 0, more: false, interrupted: false)])
+        #expect(sections.yours.map(\.id) == ["f"])
+        #expect(sections.albumistAlbums.map(\.id) == ["a1"])
+        #expect(Self.listedOnce(sections))
+    }
+
+    /// A folder row counts what the folder's tile and screen show: the folder's list of albums,
+    /// walked down (`albums(in:inventory:)`). While Photos syncs, an album may name a folder that
+    /// does not list it yet, or the other way round; row and tile still agree.
+    @Test func aFolderRowCountsWhatItsTileShows() {
+        let trips = CollectionSnapshot(id: "f", title: "Reisen", kind: .folder, childIDs: ["a1", "a2"])
+        let listed = CollectionSnapshot(id: "a1", title: "Kyoto", parentID: "f", assetIDs: Self.photos(2, "k"))
+        let movedAway = CollectionSnapshot(id: "a2", title: "Rom", parentID: nil, assetIDs: Self.photos(2, "r"))
+        let notListedYet = CollectionSnapshot(id: "a3", title: "Paris", parentID: "f", assetIDs: Self.photos(2, "p"))
+        let inventory = CollectionInventory([trips, listed, movedAway, notListedYet])
+        let sections = AlbumTabSections(inventory: inventory,
+                                        managed: [Self.state(listed), Self.state(movedAway), Self.state(notListedYet)])
+        let tile = AlbumTabSections.albums(in: trips, inventory: inventory)
+        #expect(sections.rows.first == .folder(trips, albums: tile.count))
+        #expect(tile.map(\.id) == ["a1", "a2"])
+        #expect(Self.listedOnce(sections))
+    }
+
+    /// An album Albumist remembers that is not in the list (deleted in Photos, or not synced yet)
+    /// is neither on the shelf nor counted, also when its folder still lists it.
+    @Test func aRememberedAlbumMissingFromTheListIsNeitherShownNorCounted() {
+        let trips = CollectionSnapshot(id: "f", title: "Reisen", kind: .folder, childIDs: ["a1", "a9"])
+        let kyoto = CollectionSnapshot(id: "a1", title: "Kyoto", parentID: "f", assetIDs: Self.photos(2, "k"))
+        let gone = CollectionSnapshot(id: "a9", title: "Weg", parentID: "f", assetIDs: Self.photos(2, "w"))
+        let sections = AlbumTabSections(inventory: CollectionInventory([trips, kyoto]),
+                                        managed: [Self.state(gone), Self.state(kyoto)])
+        #expect(sections.albumistAlbums.map(\.id) == ["a1"])
+        #expect(sections.rows.first == .folder(trips, albums: 1))
+        #expect(Self.listedOnce(sections))
+    }
+
+    /// An album remembered twice stands by its first record, the one the undo reads: without
+    /// anything of Albumist's left there, it is the user's again, whatever a later record says;
+    /// with it, it stands once.
+    @Test func anAlbumRememberedTwiceGoesByItsFirstRecord() {
+        let garden = CollectionSnapshot(id: "u1", title: "Garten", assetIDs: Self.photos(3))
+        let empty = Self.state(garden, created: false, added: [])
+        var later = Self.state(garden, created: false, added: Set(Self.photos(3).sorted().prefix(1)))
+        later.sourceID = SortlyID("later")
+        let emptyFirst = AlbumTabSections(inventory: CollectionInventory([garden]), managed: [empty, later])
+        #expect(emptyFirst.albumistAlbums.isEmpty)
+        #expect(emptyFirst.yours.map(\.id) == ["u1"])
+        let markedFirst = AlbumTabSections(inventory: CollectionInventory([garden]), managed: [later, empty])
+        #expect(markedFirst.albumistAlbums.map(\.id) == ["u1"])
+        #expect(markedFirst.albumistAlbums.map(\.mark) == [.added(1)])
+        #expect(markedFirst.yours.isEmpty)
     }
 
     /// A folder of the user's with an album Albumist only extended stays the user's: no row.
@@ -246,9 +332,46 @@ struct AlbumTabDesignTests {
         #expect(AlbumTabSections.albums(in: trips, inventory: inventory).map(\.id) == ["rom", "lissabon", "kyoto"])
         #expect(AlbumTabSections.albums(in: y24, inventory: inventory).map(\.id) == ["kyoto", "rom", "lissabon"])
         // The count of the tile is the count of the row.
-        let sections = AlbumTabSections(inventory: inventory, managed: [Self.state(rome)])
+        let sections = AlbumTabSections(inventory: inventory, managed: [rome, kyoto, lisbon].map { Self.state($0) })
         #expect(sections.rows.first == .folder(trips, albums: 3))
         #expect(AlbumTabSections.albums(in: CollectionSnapshot(id: "e", title: "Leer", kind: .folder), inventory: inventory).isEmpty)
+    }
+
+    // MARK: - What the undo of one album does
+
+    /// "Rückgängig machen" on one album, worked out without building the removal (the long
+    /// press's line, the confirmation's button): exactly what `ManagedAlbumTracker` would plan.
+    @Test func theUndoOfOneAlbumIsWhatTheRemovalPlans() {
+        let ours = Self.photos(3, "o")
+        let cases: [(String, CollectionSnapshot?, ManagedAlbumState, AlbumTabSections.UndoEffect)] = {
+            let made = CollectionSnapshot(id: "a1", title: "Kyoto", assetIDs: ours)
+            let filled = CollectionSnapshot(id: "a2", title: "Rom", assetIDs: ours.union(["mine"]))
+            let partly = CollectionSnapshot(id: "a3", title: "Paris", assetIDs: Set(ours.sorted().prefix(1)).union(["mine"]))
+            let extended = CollectionSnapshot(id: "u1", title: "Toskana", assetIDs: ours.union(Self.photos(5, "m")))
+            let emptied = CollectionSnapshot(id: "u2", title: "Garten", assetIDs: Self.photos(2, "m"))
+            let locked = CollectionSnapshot(id: "a4", title: "Geteilt", kind: .restrictedAlbum, assetIDs: ours)
+            let gone = CollectionSnapshot(id: "a5", title: "Weg", assetIDs: ours)
+            return [
+                ("made, only Albumist's photos", made, Self.state(made, added: ours), .init(deletesAlbum: true, photosTakenOut: 0)),
+                ("made, the user's photo too", filled, Self.state(filled, added: ours), .init(deletesAlbum: false, photosTakenOut: 3)),
+                ("made, some taken out by the user", partly, Self.state(partly, added: ours), .init(deletesAlbum: false, photosTakenOut: 1)),
+                ("the user's, extended", extended, Self.state(extended, created: false, added: ours), .init(deletesAlbum: false, photosTakenOut: 3)),
+                ("the user's, all taken out again", emptied, Self.state(emptied, created: false, added: ours), .init(deletesAlbum: false, photosTakenOut: 0)),
+                ("cannot be changed", locked, Self.state(locked, added: ours), .init(deletesAlbum: false, photosTakenOut: 0)),
+                ("not in the list", nil, Self.state(gone, added: ours), .init(deletesAlbum: false, photosTakenOut: 0)),
+            ]
+        }()
+        for (name, album, state, expected) in cases {
+            let effect = AlbumTabSections.undoEffect(state, album: album)
+            #expect(effect == expected, "\(name)")
+            let plan = ManagedAlbumTracker().removalPlan(for: state, current: CollectionInventory(album.map { [$0] } ?? []))
+            #expect(effect.deletesAlbum == plan.deletesCollections, "\(name)")
+            let removed = plan.steps.reduce(0) { count, step in
+                if case .removeAssets(_, let assets) = step.operation { count + assets.count } else { count }
+            }
+            #expect(effect.photosTakenOut == removed, "\(name)")
+            #expect(effect.doesSomething == !plan.steps.isEmpty, "\(name)")
+        }
     }
 
     // MARK: - Large libraries
@@ -256,15 +379,18 @@ struct AlbumTabDesignTests {
     /// 300 albums of Albumist's in 3 folders and 40 of the user's: every one once, the shelf
     /// holds 12, "Alle 300".
     @Test func aLargeLibraryListsEveryAlbumOnce() {
-        let folders = ["Reisen", "Länder", "Orte"].enumerated().map { CollectionSnapshot(id: CollectionID("f\($0.offset)"), title: $0.element, kind: .folder) }
         let made = (0..<300).map { CollectionSnapshot(id: CollectionID("a\($0)"), title: "Album \($0)", parentID: CollectionID("f\($0 % 3)"),
                                                       assetIDs: Self.photos(1, "a\($0)-")) }
+        let folders = ["Reisen", "Länder", "Orte"].enumerated().map { folder in
+            CollectionSnapshot(id: CollectionID("f\(folder.offset)"), title: folder.element, kind: .folder,
+                               childIDs: made.filter { $0.parentID == CollectionID("f\(folder.offset)") }.map(\.id))
+        }
         let mine = (0..<40).map { CollectionSnapshot(id: CollectionID("u\($0)"), title: "Mein Album \($0)", assetIDs: Self.photos(1, "u\($0)-")) }
         let sections = AlbumTabSections(inventory: CollectionInventory(folders + made + mine), managed: made.map { Self.state($0) },
                                         history: [Self.run("r", day: 1, made: ["a7"])])
         #expect(sections.albumistAlbums.count == 300)
         #expect(sections.albumistAlbums.first?.id == "a7")
-        #expect(sections.shelf.count == 12 && sections.showsAll)
+        #expect(sections.shelf().count == 12 && sections.showsAll(visible: 2))
         #expect(sections.rows.compactMap { if case .folder(_, let albums) = $0 { albums } else { nil } } == [100, 100, 100])
         #expect(sections.yours.count == 40)
         #expect(Self.listedOnce(sections))

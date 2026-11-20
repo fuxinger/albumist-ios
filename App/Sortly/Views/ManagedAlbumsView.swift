@@ -46,18 +46,26 @@ struct ManagedAlbumsView: View {
     /// How to undo, and where the albums are in Photos (iOS opens Photos, not one album).
     private var footer: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Halte ein Album gedrückt oder tippe im Album auf „…“, um Albumists Änderungen daran rückgängig zu machen. Fotos, die du selbst hinzugefügt hast, bleiben drin.")
-            let root = model.settings.rootFolderTitle.trimmingCharacters(in: .whitespaces)
-            if root.isEmpty {
-                Text("Neue Alben liegen in Fotos unter Sammlungen › Alben.")
-            } else {
-                Text("Neue Alben liegen in Fotos im Ordner „\(root)“.")
-            }
+            Self.howToUndo
+            Self.place(root: model.settings.rootFolderTitle)
         }
         .font(.footnote)
         .foregroundStyle(.noteText)
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, Theme.Spacing.l)
+    }
+
+    /// How to undo one of Albumist's albums: here, and behind "Mehr erfahren" under the shelf.
+    static var howToUndo: Text {
+        Text("Halte ein Album gedrückt oder tippe im Album auf „…“, um Albumists Änderungen daran rückgängig zu machen. Fotos, die du selbst hinzugefügt hast, bleiben drin.")
+    }
+
+    /// Where Albumist's new albums are in Photos: at the top level, or in the folder set for them
+    /// (`root`, the settings' folder for new albums).
+    static func place(root: String) -> Text {
+        let root = root.trimmingCharacters(in: .whitespaces)
+        return root.isEmpty ? Text("Neue Alben liegen in Fotos unter Sammlungen › Alben.")
+                            : Text("Neue Alben liegen in Fotos im Ordner „\(root)“.")
     }
 }
 
@@ -85,7 +93,7 @@ struct AlbumUndo: ViewModifier {
     @Environment(AppModel.self) private var model
     @Environment(Navigator.self) private var navigator: Navigator?
     /// The album the confirmation asks about, once the photo access is known to be full.
-    @State private var confirming: ManagedAlbumState?
+    @State private var confirming: Confirming?
     /// A removal that was ready while another tab was chosen: shown when this tab shows again.
     @State private var waiting: Ready?
     /// The removal in the preview and the suggestions behind its album.
@@ -103,30 +111,40 @@ struct AlbumUndo: ViewModifier {
         let sources: Set<SortlyID>
     }
 
+    /// The album asked about and what its undo does, worked out at the tap.
+    private struct Confirming {
+        let state: ManagedAlbumState
+        let effect: AlbumTabSections.UndoEffect
+    }
+
     func body(content: Content) -> some View {
         content
             .onChange(of: asked) { _, state in
                 guard let state else { return }
                 asked = nil
-                Task { if await model.changesHaveFullAccess() { confirming = state } }
+                Task { await confirm(state) }
             }
             .confirmationDialog(
-                confirming.map { Text("„\($0.lastKnownTitle)“ rückgängig machen?") } ?? Text(""),
+                confirming.map { Text("„\($0.state.lastKnownTitle)“ rückgängig machen?") } ?? Text(""),
                 isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
                 titleVisibility: .visible,
                 presenting: confirming
-            ) { state in
-                Button(state.createdBySortly ? "Album entfernen" : "Albumists Fotos herausnehmen", role: .destructive) {
-                    prepare(state)
+            ) { question in
+                // The menu's line says the same (`AlbumUndoMenuItem`): an album Albumist created
+                // goes while nothing else is in it; from any other only Albumist's photos come out.
+                Button(question.effect.deletesAlbum ? "Album entfernen" : "Albumists Fotos herausnehmen", role: .destructive) {
+                    prepare(question.state)
                 }
-            } message: { state in
-                if state.createdBySortly {
-                    // Deleted only while it holds nothing but Albumist's photos: then iOS asks after
-                    // the preview, and this says so first (review 18.11., P3-07).
+            } message: { question in
+                if question.effect.deletesAlbum {
+                    // iOS asks after the preview before it deletes, and this says so first (review
+                    // 18.11., P3-07). The removal is made from what Photos holds after the tap: an
+                    // album the user put photos into meanwhile stays with them.
                     DeleteQuestionNote.message(Text("Albumist hat dieses Album angelegt. Es wird gelöscht. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen."),
-                                               deletes: model.removalDeletesAlbum(state))
+                                               deletes: true)
                 } else {
-                    Text("Die \(state.addedBySortly.count) \(state.addedBySortly.count.formatted()) Fotos, die Albumist hinzugefügt hat, werden aus dem Album genommen. Alles andere bleibt, wie es ist.")
+                    let count = question.effect.photosTakenOut
+                    Text("Die \(count) \(count.formatted()) Fotos, die Albumist hinzugefügt hat, werden aus dem Album genommen. Alles andere bleibt, wie es ist.")
                 }
             }
             .alert("Nichts zu tun", isPresented: $nothingToDo) {
@@ -144,6 +162,21 @@ struct AlbumUndo: ViewModifier {
                 removing = nil
                 Task { for source in removed.sources { await model.forgetProposal(source) } }
             }
+    }
+
+    /// Asks for the full photo access, then for the confirmation, which says what the undo does:
+    /// worked out from the album as the list holds it, by the rule the menu's line follows
+    /// (`AlbumTabSections.undoEffect`), so no removal is built for the question. When that
+    /// finds nothing of Albumist's left, Albumist looks in Photos at once (`prepare`): the removal
+    /// shows in the preview if the list was behind, "Nichts zu tun" otherwise.
+    private func confirm(_ state: ManagedAlbumState) async {
+        guard await model.changesHaveFullAccess() else { return }
+        let effect = AlbumTabSections.undoEffect(state, album: model.inventory[state.albumID])
+        if effect.doesSomething {
+            confirming = Confirming(state: state, effect: effect)
+        } else {
+            prepare(state)
+        }
     }
 
     /// Makes the removal from what Photos holds now (`AppModel.removalPlan`, after the check for

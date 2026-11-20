@@ -45,9 +45,15 @@ enum PhotoCardStyle: Sendable {
 ///   `actions` stay buttons of their own ("Anlegen tippen"), so nothing needs to be repeated as
 ///   an accessibility action, and nothing is nested: `onOpen` is the body's own button, behind
 ///   the cover and the texts (they let touches through to it), never a button around the card.
+/// - Long press (`menu:`, optionally `preview:` for what it lifts instead of the card): the menu
+///   sits on the card, so a long press lifts what was pressed, and its buttons are also actions
+///   of the body, because the card around the body is a container that VoiceOver, Switch
+///   Control, Voice Control and Full Keyboard Access do not stop on (second review of wave 1).
+///   A card with a menu still passes its actions first (`{}` when it has none): the first
+///   trailing closure is always `actions`.
 /// - Dark mode: the card colour of the system; Increase Contrast: the card gets an edge (as
 ///   `Card`); the actions' own contrast: `CardActionButtonStyle`.
-struct PhotoCard<Actions: View>: View {
+struct PhotoCard<Actions: View, MenuItems: View, MenuPreview: View>: View {
     private let coverIDs: [AssetID]
     private let title: Text
     private let subtitle: Text?
@@ -59,6 +65,10 @@ struct PhotoCard<Actions: View>: View {
     private let onCoverOutcome: (@MainActor (CoverOutcome) -> Void)?
     private let onOpen: (@MainActor () -> Void)?
     private let actions: Actions
+    /// The long press's menu, also the body's accessibility actions; `EmptyView`: none.
+    private let menuItems: MenuItems
+    /// What the long press lifts; `EmptyView`: the card itself.
+    private let menuPreview: MenuPreview
 
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorSchemeContrast) private var contrast
@@ -67,10 +77,12 @@ struct PhotoCard<Actions: View>: View {
     /// The body's button is held: cover and texts dim, as a plain button's label does.
     @State private var pressed = false
 
+    /// A card with a long-press menu and what the long press lifts (an album's large cover and
+    /// its line, draft E4). The other initializers leave out the menu, the preview, or both.
     init(coverIDs: [AssetID], title: Text, subtitle: Text?, badge: CardBadge? = nil, hidesPreview: Bool = false,
          aspectRatio: CGFloat = 4.0 / 3.0, style: PhotoCardStyle = .compact, placeholderSymbol: String? = nil,
          onCoverOutcome: (@MainActor (CoverOutcome) -> Void)? = nil, onOpen: (@MainActor () -> Void)? = nil,
-         @ViewBuilder actions: () -> Actions) {
+         @ViewBuilder actions: () -> Actions, @ViewBuilder menu: () -> MenuItems, @ViewBuilder preview: () -> MenuPreview) {
         self.coverIDs = coverIDs
         self.title = title
         self.subtitle = subtitle
@@ -82,9 +94,23 @@ struct PhotoCard<Actions: View>: View {
         self.onCoverOutcome = onCoverOutcome
         self.onOpen = onOpen
         self.actions = actions()
+        self.menuItems = menu()
+        self.menuPreview = preview()
     }
 
     var body: some View {
+        if !hasMenu {
+            shaped
+        } else if hasMenuPreview {
+            // On the card, so a long press lifts what was pressed (the body is a clear button
+            // behind cover and texts); assistive technologies get the items on the body.
+            shaped.contextMenu { menuItems } preview: { menuPreview }
+        } else {
+            shaped.contextMenu { menuItems }
+        }
+    }
+
+    @ViewBuilder private var shaped: some View {
         if style == .tile {
             tile
         } else {
@@ -93,6 +119,8 @@ struct PhotoCard<Actions: View>: View {
     }
 
     private var hasActions: Bool { Actions.self != EmptyView.self }
+    private var hasMenu: Bool { MenuItems.self != EmptyView.self }
+    private var hasMenuPreview: Bool { MenuPreview.self != EmptyView.self }
 
     /// "Kyoto, Oktober 2024, 16 Fotos · Neues Album".
     private var spokenTitle: Text {
@@ -177,13 +205,20 @@ struct PhotoCard<Actions: View>: View {
         }
     }
 
+    @ViewBuilder
     private func describedAsBody(_ element: some View) -> some View {
-        element
+        let described = element
             .accessibilityLabel(spokenTitle)
             .accessibilityValue(badge?.spoken ?? Text(verbatim: ""))
             .accessibilityInputLabels([title])
             .accessibilitySortPriority(1)
             .accessibilityIdentifier("photoCard.body")
+        if hasMenu {
+            // The long press's items as the body's own actions (VoiceOver: swipe up or down).
+            described.accessibilityActions { menuItems }
+        } else {
+            described
+        }
     }
 
     /// The drafts: 20 pt bold across the page, 17 pt semibold in a card side by side, 15 pt
@@ -270,14 +305,39 @@ struct PhotoCard<Actions: View>: View {
     }
 }
 
-extension PhotoCard where Actions == EmptyView {
+extension PhotoCard where MenuPreview == EmptyView {
+    /// A card with a long-press menu that lifts the card itself.
+    init(coverIDs: [AssetID], title: Text, subtitle: Text?, badge: CardBadge? = nil, hidesPreview: Bool = false,
+         aspectRatio: CGFloat = 4.0 / 3.0, style: PhotoCardStyle = .compact, placeholderSymbol: String? = nil,
+         onCoverOutcome: (@MainActor (CoverOutcome) -> Void)? = nil, onOpen: (@MainActor () -> Void)? = nil,
+         @ViewBuilder actions: () -> Actions, @ViewBuilder menu: () -> MenuItems) {
+        self.init(coverIDs: coverIDs, title: title, subtitle: subtitle, badge: badge, hidesPreview: hidesPreview,
+                  aspectRatio: aspectRatio, style: style, placeholderSymbol: placeholderSymbol,
+                  onCoverOutcome: onCoverOutcome, onOpen: onOpen, actions: actions, menu: menu, preview: { EmptyView() })
+    }
+}
+
+extension PhotoCard where MenuItems == EmptyView, MenuPreview == EmptyView {
+    /// A card with buttons and no long-press menu.
+    init(coverIDs: [AssetID], title: Text, subtitle: Text?, badge: CardBadge? = nil, hidesPreview: Bool = false,
+         aspectRatio: CGFloat = 4.0 / 3.0, style: PhotoCardStyle = .compact, placeholderSymbol: String? = nil,
+         onCoverOutcome: (@MainActor (CoverOutcome) -> Void)? = nil, onOpen: (@MainActor () -> Void)? = nil,
+         @ViewBuilder actions: () -> Actions) {
+        self.init(coverIDs: coverIDs, title: title, subtitle: subtitle, badge: badge, hidesPreview: hidesPreview,
+                  aspectRatio: aspectRatio, style: style, placeholderSymbol: placeholderSymbol,
+                  onCoverOutcome: onCoverOutcome, onOpen: onOpen, actions: actions, menu: { EmptyView() }, preview: { EmptyView() })
+    }
+}
+
+extension PhotoCard where Actions == EmptyView, MenuItems == EmptyView, MenuPreview == EmptyView {
     /// A card without buttons (an album, a cover to look at).
     init(coverIDs: [AssetID], title: Text, subtitle: Text?, badge: CardBadge? = nil, hidesPreview: Bool = false,
          aspectRatio: CGFloat = 4.0 / 3.0, style: PhotoCardStyle = .compact, placeholderSymbol: String? = nil,
          onCoverOutcome: (@MainActor (CoverOutcome) -> Void)? = nil, onOpen: (@MainActor () -> Void)? = nil) {
         self.init(coverIDs: coverIDs, title: title, subtitle: subtitle, badge: badge, hidesPreview: hidesPreview,
                   aspectRatio: aspectRatio, style: style, placeholderSymbol: placeholderSymbol,
-                  onCoverOutcome: onCoverOutcome, onOpen: onOpen) { EmptyView() }
+                  onCoverOutcome: onCoverOutcome, onOpen: onOpen, actions: { EmptyView() }, menu: { EmptyView() },
+                  preview: { EmptyView() })
     }
 }
 

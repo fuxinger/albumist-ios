@@ -8,14 +8,13 @@ import SortlyCore
 /// newest first as Photos picks an album's cover (`PreviewPicker.coverCandidates`: never a
 /// screenshot, a document or a sensitive document; `CoverPhoto` shows the first one that is
 /// sharp on the device), and whether its preview stays hidden: an album of nothing but sensitive
-/// documents shows "Vorschau ausgeblendet", as every preview of them does.
-struct AlbumCover: Equatable {
+/// documents shows "Vorschau ausgeblendet", as every preview of them does. Views take it from
+/// `AlbumTabCache`, which works it out once per album.
+struct AlbumCover: Equatable, Sendable {
     var ids: [AssetID]
     var hidden: Bool
 
-    @MainActor
-    init(_ album: CollectionSnapshot, model: AppModel, count: Int = 4) {
-        let dates = model.creationDates, ranks = model.previewRanks
+    init(_ album: CollectionSnapshot, dates: [AssetID: Date], ranks: [AssetID: PreviewRank], count: Int = 4) {
         ids = PreviewPicker.coverCandidates(album.assetIDs, cover: nil, dates: dates, ranks: ranks, count: count)
         // `newest` is nil only when every photo is a sensitive document; an album of only
         // screenshots or documents has no candidates either, and shows the calm placeholder.
@@ -41,9 +40,8 @@ extension CardBadge {
 /// Albumist's. A tap opens the album (`AlbumScreen`). A long press shows it large with "Fotos
 /// ansehen" and, for an album of Albumist's, "Rückgängig machen" with the line that says what it
 /// does: the same item as "…" in the album, which is the main way (decision 17.11.). For
-/// assistive technologies the tile is the card's container (`PhotoCard`): one element that
-/// opens the album, nothing repeated as an action; the long press is theirs too (VoiceOver:
-/// double-tap and hold), and both of its items are in the album itself.
+/// assistive technologies the tile is the card's container (`PhotoCard`): its body opens the
+/// album and has the long press's items as its actions (VoiceOver: swipe up or down).
 struct AlbumTile: View {
     @Environment(AppModel.self) private var model
     @Environment(Navigator.self) private var navigator: Navigator?
@@ -66,39 +64,40 @@ struct AlbumTile: View {
     }
 
     var body: some View {
-        let cover = AlbumCover(album, model: model)
+        let cover = AlbumTabCache.shared.cover(of: album, model: model)
         let mark = managed.flatMap { AlbumTabSections.mark($0) }
         // Only an album whose changes are still there can be undone: an album of the user's
         // whose added photos the user took out again has nothing of Albumist's left.
         let undoable = mark == nil ? nil : managed
+        let hasPhotos = !album.assetIDs.isEmpty
         PhotoCard(coverIDs: cover.ids, title: Text(verbatim: album.title), subtitle: Self.photoCount(album),
                   badge: mark.map { CardBadge($0) }, hidesPreview: cover.hidden, aspectRatio: 1, style: .tile,
                   placeholderSymbol: "rectangle.stack",
-                  onOpen: { Navigator.push(.album(album.id), on: navigator) })
-            // Names the card, a container: its body ("Rom, 16 Fotos", "Neu") is the button that
-            // opens the album.
-            .accessibilityIdentifier("album.tile")
-            .contextMenu {
-                if !album.assetIDs.isEmpty {
-                    Button { showPhotos(cover) } label: {
-                        Label("Fotos ansehen", systemImage: "photo")
-                    }
-                    .accessibilityIdentifier("album.viewPhotos")
+                  onOpen: { Navigator.push(.album(album.id), on: navigator) }) {
+            // No buttons: a tap opens the album, the long press has the rest.
+        } menu: {
+            if hasPhotos {
+                Button { showPhotos(cover) } label: {
+                    Label("Fotos ansehen", systemImage: "photo")
                 }
-                if let undoable {
-                    Section {
-                        AlbumUndoMenuItem(deletes: model.removalDeletesAlbum(undoable)) { undo(undoable) }
-                    }
-                }
-            } preview: {
-                AlbumPreview(cover: cover, title: album.title, line: Self.line(album, managed: managed))
+                .accessibilityIdentifier("album.viewPhotos")
             }
+            if let undoable {
+                if hasPhotos { Divider() }
+                AlbumUndoMenuItem(state: undoable, album: album) { undo(undoable) }
+            }
+        } preview: {
+            AlbumPreview(cover: cover, title: album.title, line: Self.line(album, managed: managed))
+        }
+        // Names the card, a container: its body ("Rom, 16 Fotos", "Neu") is the button that opens
+        // the album, with the long press's items as its actions.
+        .accessibilityIdentifier("album.tile")
     }
 
     /// The album's photos in full screen, oldest first as in the album, starting at the photo
     /// the preview showed.
     private func showPhotos(_ cover: AlbumCover) {
-        let ids = PreviewPicker.chronological(album.assetIDs, dates: model.creationDates)
+        let ids = AlbumTabCache.shared.photos(of: album, model: model)
         guard let first = cover.ids.first ?? ids.last else { return }
         viewPhotos(PhotoViewer.Start(id: first, ids: ids))
     }
@@ -124,14 +123,17 @@ struct AlbumTile: View {
 
 /// "Rückgängig machen" for one of Albumist's albums in a menu (the long press on its tile, "…" in
 /// the album), with the line that says what it does (draft E4, right): an album Albumist created
-/// that holds nothing else goes; from any other album only Albumist's photos come out. What the
-/// menu item starts asks once more (`albumUndo`).
+/// that holds nothing else goes; from any other album only Albumist's photos come out. Worked
+/// out when the menu shows it, from the album as the list holds it, by the rule the
+/// confirmation's button follows too (`AlbumTabSections.undoEffect`), so both say the same; no
+/// removal is built for it. What the menu item starts asks once more (`albumUndo`).
 struct AlbumUndoMenuItem: View {
-    /// The undo deletes the album (`AppModel.removalDeletesAlbum`).
-    var deletes: Bool
+    var state: ManagedAlbumState
+    var album: CollectionSnapshot?
     var action: @MainActor () -> Void
 
     var body: some View {
+        let deletes = AlbumTabSections.undoEffect(state, album: album).deletesAlbum
         Button(role: .destructive) {
             action()
         } label: {
@@ -189,8 +191,9 @@ struct FolderTile: View {
     var folder: CollectionSnapshot
 
     var body: some View {
-        let albums = AlbumTabSections.albums(in: folder, inventory: model.inventory)
-        let covers = albums.prefix(4).map { AlbumCover($0, model: model, count: 2) }
+        let cache = AlbumTabCache.shared
+        let albums = cache.albums(in: folder, model: model)
+        let covers = albums.prefix(4).map { cache.cover(of: $0, count: 2, model: model) }
         let count = Text("\(albums.count) Alben")
         Button {
             Navigator.push(.folder(folder.id), on: navigator)
@@ -253,17 +256,20 @@ struct FolderTile: View {
 
 // MARK: - Layout
 
-/// Albums and folders side by side as in Photos: two in a row on the iPhone (172 pt on a 393 pt
-/// screen, draft E4), more on wider screens; one below the other at the accessibility text sizes
-/// (design rule 4).
+/// Albums and folders side by side as in Photos: two in a row on every iPhone (172 pt on a 393 pt
+/// screen, draft E4; 136 pt with Display Zoom on the small one, 320 pt wide), more on wider
+/// screens; one below the other at the accessibility text sizes (design rule 4).
 struct AlbumGrid<Content: View>: View {
+    /// The narrowest column: two fit beside each other in 320 pt less the margins (288 pt).
+    static var minimumColumn: CGFloat { 136 }
+
     @ViewBuilder var content: Content
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let columns = typeSize.isAccessibilitySize
             ? [GridItem(.flexible(), alignment: .top)]
-            : [GridItem(.adaptive(minimum: 150, maximum: 260), spacing: Theme.Spacing.l, alignment: .top)]
+            : [GridItem(.adaptive(minimum: Self.minimumColumn, maximum: 260), spacing: Theme.Spacing.l, alignment: .top)]
         LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
             content
         }

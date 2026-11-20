@@ -6611,6 +6611,16 @@
         }
       }
     },
+    "Halte ein Album gedrückt oder tippe im Album auf „…“, um es rückgängig zu machen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Touch and hold an album, or tap “…” in the album, to undo it."
+          }
+        }
+      }
+    },
     "Änderungen von Albumist rückgängig machen" : {
       "localizations" : {
         "en" : {

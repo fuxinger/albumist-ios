@@ -230,7 +230,11 @@ public actor AnalysisPipeline {
         public var earlyProposalsFailure: String?
         public var pausedBecause: PauseReason?
         public var newOrChanged = 0
+        /// Photos deleted from the store: gone from the library, read with full access.
         public var removed = 0
+        /// Photos set aside because "Ausgewählte Fotos" hides them (review P1-07): kept with
+        /// their analysis, left out of everything until they are read again.
+        public var setAside = 0
         public var placesResolved = 0
         public var placesPendingOnline = 0
         public var onlineRequests = 0
@@ -300,6 +304,10 @@ public actor AnalysisPipeline {
         /// leave it out, so a database put back or rebuilt reads the whole library first.
         static let libraryMark = "analysis.libraryMark"
         static let frequentPlaces = "analysis.frequentPlaces"
+        /// Places of the analysis before whose photos are set aside under "Ausgewählte Fotos"
+        /// and that the selection does not make (review P1-07): kept for their ids, so they come
+        /// back with them (name, "Nicht jetzt", album). Never shown or counted.
+        static let frequentPlacesOutOfView = "analysis.frequentPlacesOutOfView"
         static let groups = "analysis.groups"
         static let tripCorrections = "user.tripCorrections"
         /// The user's answers to "Bist du hier öfter?" (part of the decisions copy in the backup).
@@ -897,7 +905,8 @@ public actor AnalysisPipeline {
     /// again only when anything changed at all. Returns the albums and the number of photos,
     /// or `nil` when the whole library has to be read: no mark (or one that cannot be read, or
     /// of another reader version), another setting for hidden photos, limited access (the
-    /// selection can change without a change in the library), a history that cannot tell or
+    /// selection can change without a change in the library), photos still set aside from
+    /// limited access (review P1-07), a history that cannot tell or
     /// does not answer (too old, another library, an error), many changes, every
     /// `wholeReadEvery`-th time, a week after the last whole read, or a number of photos after
     /// the changes that does not fit the library. Nothing is written before that is known.
@@ -905,7 +914,13 @@ public actor AnalysisPipeline {
     /// read again next time).
     private func readChanges(includeHidden: Bool, control: AnalysisRunControl,
                              report: inout Report) async throws -> (CollectionInventory, Int)? {
-        guard runAccess == .full,
+        // Photos set aside under "Ausgewählte Fotos" are put right by a whole read only (it
+        // takes them back or deletes them); the history knows nothing of the selection. A run
+        // does not leave them with a mark (a whole read removes it first and writes it only when
+        // it read with full access, also when access changed while it read), and the count check
+        // below would send it to a whole read too; kept as the plain rule
+        // (`photosSetAsideAreTakenBackByAWholeRead` seeds that case).
+        guard runAccess == .full, try await store.outOfViewCount() == 0,
               let stored = await storedLibraryMark(),
               stored.readerVersion == Self.currentReaderVersion,
               stored.includeHidden == includeHidden, stored.changeReads < Self.wholeReadEvery,
@@ -1028,11 +1043,24 @@ public actor AnalysisPipeline {
                     return !control.isPaused
                 }
                 report.newOrChanged += try await store.upsertAssets(assets).count
-                report.removed += try await store.removeAssets(notIn: Set(assets.map(\.id)))
+                // A photo missing from a read of "Ausgewählte Fotos" is only out of view: it is
+                // set aside with its analysis, place and text, not deleted. Only full access
+                // shows that a photo is gone (review P1-07: back on "Alle Fotos" every photo
+                // outside the selection was analysed again, hours on a large library).
+                // Asked again after the read: switched to "Ausgewählte Fotos" while it read, it may
+                // have read only the selection (second review of P1-07).
+                let readWithFullAccess = runAccess == .full ? await reader.access() == .full : false
+                if readWithFullAccess {
+                    report.removed += try await store.removeAssets(notIn: Set(assets.map(\.id)))
+                } else {
+                    report.setAside += try await store.setAside(notIn: Set(assets.map(\.id)))
+                }
                 inventory = try await reader.currentInventory()
                 try await store.saveInventory(inventory)
                 libraryCount = assets.count
-                if let mark {
+                // Only after a read with full access: one that set photos aside (access switched
+                // while it read) leaves no mark, so the next run reads the whole library again.
+                if let mark, readWithFullAccess {
                     try await store.setValue(LibraryReadMark(mark: mark, includeHidden: includeHidden, wholeReadAt: now()),
                                              forKey: Key.libraryMark)
                 }
@@ -1492,24 +1520,48 @@ public actor AnalysisPipeline {
             known = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map(TripIdentity.init)
         }
         let trips = TripIdentity.carryOver(detected, from: known)
+        // Photos set aside under "Ausgewählte Fotos" are not deleted: identities bound to them
+        // stay, so trips and places come back with their ids (second review of P1-07).
+        let setAside = try await store.outOfViewAssetIDs()
         // Places keep their IDs by their photos, from the places the last analysis stored (names,
-        // "Nicht jetzt", decisions and albums are bound to them). An unreadable list counts as none.
-        let previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
+        // "Nicht jetzt", decisions and albums are bound to them), and those kept while their
+        // photos are set aside, after them. An unreadable list counts as none.
+        var previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
+        if let away = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlacesOutOfView)) ?? nil, !away.isEmpty {
+            previousPlaces = Self.withPhotosSetAside(previousPlaces ?? [], away)
+        }
         // A place's days: those of the clocks its photos were taken on, where their places are
         // known so far (review P1-15).
         var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: home)
             .detect(in: all, previous: previousPlaces ?? [], zones: try await placeTimeZones(library: all))
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
+        // Each place before keeps its photos set aside for the next run: a place the shared
+        // photos do not make whole, one they make only a part of with its part set aside (a
+        // second selection with the other part keeps the id, third review of P1-07).
+        let made = Set(frequent.map(\.id))
+        let placesOutOfView: [FrequentPlace] = setAside.isEmpty ? [] : (previousPlaces ?? []).compactMap { place in
+            guard !setAside.isDisjoint(with: place.assetIDs) else { return nil }
+            guard made.contains(place.id) else { return place }
+            var part = place
+            part.assetIDs = place.assetIDs.filter(setAside.contains)
+            return part
+        }
         // The last moment to stop: from here on everything is stored, all of it or none.
         try checkPause(.tripsBeforeStoring)
         // Only a run or `resuggest()` stores the home time zone, never a read of the facts: it
         // goes into the safety copy, and a fresh database gets the decisions of a copy only
         // while it holds nothing of its own.
         if clock.store { try await store.setValue(clock.zone.identifier, forKey: Key.homeTimeZone) }
-        try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id))), forKey: Key.tripIdentities)
+        try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id)).union(setAside), setAside: setAside),
+                                 forKey: Key.tripIdentities)
         try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
+        if placesOutOfView.isEmpty {
+            try await store.removeValue(forKey: Key.frequentPlacesOutOfView)
+        } else {
+            try await store.setValue(placesOutOfView, forKey: Key.frequentPlacesOutOfView)
+        }
         try await store.setValue(tripAnalysis.atHome, forKey: Key.home)
         if let home = tripAnalysis.detectedHome {
             try await store.setValue(home, forKey: Key.detectedHome)
@@ -1780,7 +1832,8 @@ public actor AnalysisPipeline {
         guard let map, try await store.value(TitleLanguage.self, forKey: Key.placesLanguage) != language else { return }
         let renamer = map.renamer(to: language)
         var renamed: [AssetID: ResolvedPlace] = [:]
-        for (id, var place) in try await store.places() {
+        // Also the places of photos set aside under "Ausgewählte Fotos": they come back renamed.
+        for (id, var place) in try await store.places(includingOutOfView: true) {
             let components = renamer.renamed(place.components)
             guard components != place.components else { continue }
             place.components = components
@@ -2007,8 +2060,9 @@ public actor AnalysisPipeline {
     private func remaskStoredTexts() async throws {
         let done = try await store.value(Int.self, forKey: Key.textMaskVersion) ?? 1
         guard done < TextMinimizer.maskVersion else { return }
-        let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
-        for (asset, var result) in try await store.results(TextResult.self, kind: "text") {
+        // Also the texts of photos set aside under "Ausgewählte Fotos": they come back masked.
+        let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion, includingOutOfView: true)
+        for (asset, var result) in try await store.results(TextResult.self, kind: "text", includingOutOfView: true) {
             // A big library takes minutes the first time; a cut-off run keeps what it did (masked
             // rows are skipped next time) and the purge below runs when the last row is done.
             try Task.checkCancellation()
@@ -2308,7 +2362,11 @@ public actor AnalysisPipeline {
         let decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
         var held = try await heldSuggestions()
         if let pending { held = HeldSuggestions.adding(pending.before.proposals, to: held, decisions: decisions, new: suggestions) }
-        held = HeldSuggestions.apply(held, decisions: decisions, library: Set(all.map(\.id)), to: &suggestions)
+        // A chosen suggestion keeps its photos set aside under "Ausgewählte Fotos" and shows only
+        // the shared ones (second review of P1-07).
+        let inView = Set(all.map(\.id))
+        held = HeldSuggestions.apply(held, decisions: decisions, library: inView.union(try await store.outOfViewAssetIDs()),
+                                     inView: inView, to: &suggestions)
         // The full set after an early one: a suggestion of the early set the user already
         // decided on stays, even when the full analysis would not make it any more (review
         // minor: a decision must not lose its suggestion).
@@ -2621,11 +2679,41 @@ public actor AnalysisPipeline {
     /// The remembered identities, updated with this run's trips. Identities of trips that are
     /// not detected right now stay while any of their photos is still in the library (a trip
     /// can come back when its photos sync again or a correction is undone).
-    static func mergedIdentities(_ known: [TripIdentity], _ trips: [Trip], library: Set<AssetID>) -> [TripIdentity] {
+    /// `setAside`: photos set aside under "Ausgewählte Fotos". A trip that keeps its id keeps the
+    /// photos of its identity that are set aside too: detected from the shared photos it is only
+    /// a part of itself, and a second selection with the other part must find the id again
+    /// (third review of P1-07). With full access nothing is set aside: the trip's photos.
+    static func mergedIdentities(_ known: [TripIdentity], _ trips: [Trip], library: Set<AssetID>,
+                                 setAside: Set<AssetID> = []) -> [TripIdentity] {
         let current = Set(trips.map(\.id))
-        return trips.map(TripIdentity.init) + known.filter { identity in
+        let before = Dictionary(known.map { ($0.id, $0.members) }, uniquingKeysWith: { first, _ in first })
+        return trips.map { trip in
+            var identity = TripIdentity(trip)
+            if !setAside.isEmpty, let members = before[trip.id] {
+                let mine = Set(identity.members)
+                identity.members += members.filter { setAside.contains($0) && !mine.contains($0) }
+            }
+            return identity
+        } + known.filter { identity in
             !current.contains(identity.id) && identity.members.contains(where: library.contains)
         }
+    }
+
+    /// The places of the analysis before (`stored`) with the photos set aside of each (`away`,
+    /// `Key.frequentPlacesOutOfView`): a place of both keeps its photos and gets the others, a
+    /// place only set aside comes after the stored ones (their order decides ties).
+    static func withPhotosSetAside(_ stored: [FrequentPlace], _ away: [FrequentPlace]) -> [FrequentPlace] {
+        var result = stored
+        let index = Dictionary(stored.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for place in away {
+            if let i = index[place.id] {
+                let have = Set(result[i].assetIDs)
+                result[i].assetIDs += place.assetIDs.filter { !have.contains($0) }
+            } else if !result.contains(where: { $0.id == place.id }) {
+                result.append(place)
+            }
+        }
+        return result
     }
 
     /// Suggestion → the album it was applied to, from the managed-album records. Two albums

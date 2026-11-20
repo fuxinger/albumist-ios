@@ -78,13 +78,17 @@ public actor SortlyStore: PlanJournal {
     /// `PhotoLibraryReading.fetchAssets`) keeps the stored type and RAW flag. When the image
     /// itself changed (edited, new size), its recognized text and content labels are dropped so
     /// they are read again; when its location changed or was removed, so is its place.
+    ///
+    /// A photo set aside (`setAside(notIn:)`) that is read again is in view again, with its
+    /// analysis, place and text; it counts as changed only when its metadata changed.
     public func upsertAssets(_ assets: [AssetSnapshot]) throws -> Set<AssetID> {
         var changed = Set<AssetID>()
+        var backInView = 0
         try db.transaction {
             for incoming in assets {
                 var a = incoming
                 let row = try db.query("""
-                    SELECT fingerprint, subtypes, uti, latitude, longitude, modification_date, pixel_width, pixel_height
+                    SELECT fingerprint, subtypes, uti, latitude, longitude, modification_date, pixel_width, pixel_height, out_of_view
                     FROM assets WHERE id = ?
                     """, [.text(a.id.rawValue)]).first
                 if let row, a.uniformTypeIdentifier == nil, let storedType = row["uti"]?.string {
@@ -93,7 +97,15 @@ public actor SortlyStore: PlanJournal {
                     if stored.contains(.raw) { a.subtypes.insert(.raw) }
                 }
                 let fingerprint = Self.fingerprint(a)
-                if row?["fingerprint"]?.string == fingerprint { continue }
+                let wasOutOfView = row?["out_of_view"]?.int == 1
+                if wasOutOfView { backInView += 1 }
+                if row?["fingerprint"]?.string == fingerprint {
+                    if wasOutOfView {
+                        libraryRowWrites += 1
+                        try db.execute("UPDATE assets SET out_of_view = 0 WHERE id = ?", [.text(a.id.rawValue)])
+                    }
+                    continue
+                }
                 changed.insert(a.id)
                 if let row {
                     let id: SQLValue = .text(a.id.rawValue)
@@ -118,7 +130,7 @@ public actor SortlyStore: PlanJournal {
                         location_accuracy = excluded.location_accuracy, pixel_width = excluded.pixel_width, pixel_height = excluded.pixel_height,
                         duration = excluded.duration, burst_id = excluded.burst_id, is_favorite = excluded.is_favorite,
                         original_filename = COALESCE(excluded.original_filename, assets.original_filename), uti = COALESCE(excluded.uti, assets.uti),
-                        fingerprint = excluded.fingerprint, analysis_version = 0
+                        fingerprint = excluded.fingerprint, analysis_version = 0, out_of_view = 0
                     """, [
                         .text(a.id.rawValue), .text(a.kind.rawValue), .integer(Int64(a.subtypes.rawValue)), Self.date(a.creationDate),
                         Self.date(a.modificationDate), a.location.map { .real($0.latitude) } ?? .null, a.location.map { .real($0.longitude) } ?? .null,
@@ -128,7 +140,7 @@ public actor SortlyStore: PlanJournal {
                     ])
             }
         }
-        if !changed.isEmpty { placesRevision += 1 }
+        if !changed.isEmpty || backInView > 0 { placesRevision += 1 }
         return changed
     }
 
@@ -140,7 +152,9 @@ public actor SortlyStore: PlanJournal {
         ].joined(separator: "|"))
     }
 
-    /// Removes assets that no longer exist in the library (and all their analysis results).
+    /// Removes assets that no longer exist in the library (and all their analysis results),
+    /// those set aside too. Only for a whole read with full access: with "Ausgewählte Fotos" a
+    /// photo missing from the read is only out of view (`setAside(notIn:)`, review P1-07).
     public func removeAssets(notIn existing: Set<AssetID>) throws -> Int {
         let all = try db.query("SELECT id FROM assets").compactMap { $0["id"]?.string }
         let stale = all.filter { !existing.contains(AssetID($0)) }
@@ -151,6 +165,38 @@ public actor SortlyStore: PlanJournal {
         if !stale.isEmpty { placesRevision += 1 }
         return stale.count
     }
+
+    /// With "Ausgewählte Fotos": the stored photos that are not in `visible` (a whole read of the
+    /// selection) are set aside instead of deleted (review P1-07). Their analysis, place and text
+    /// stay; every read of the analysis, the counts and the search leaves them out (`inView`),
+    /// until a read finds them again (`upsertAssets`) or a whole read with full access lacks
+    /// them (`removeAssets(notIn:)`). Returns how many were newly set aside.
+    public func setAside(notIn visible: Set<AssetID>) throws -> Int {
+        let ids = try db.query("SELECT id FROM assets WHERE out_of_view = 0").compactMap { $0["id"]?.string }
+        let away = ids.filter { !visible.contains(AssetID($0)) }
+        guard !away.isEmpty else { return 0 }
+        try db.transaction {
+            for id in away { try db.execute("UPDATE assets SET out_of_view = 1 WHERE id = ?", [.text(id)]) }
+        }
+        libraryRowWrites += away.count
+        placesRevision += 1
+        return away.count
+    }
+
+    /// How many stored photos are set aside (`setAside(notIn:)`).
+    public func outOfViewCount() throws -> Int {
+        try db.query("SELECT COUNT(*) AS n FROM assets WHERE out_of_view = 1").first?["n"]?.int ?? 0
+    }
+
+    /// The stored photos set aside (`setAside(notIn:)`): not deleted, only not shared right now.
+    /// What is bound to photos for good (trip and place identities, chosen suggestions) keeps them.
+    public func outOfViewAssetIDs() throws -> Set<AssetID> {
+        Set(try db.query("SELECT id FROM assets WHERE out_of_view = 1").compactMap { $0["id"]?.string.map { AssetID($0) } })
+    }
+
+    /// SQL for a table with an `asset_id` column: the rows of photos in view (not set aside).
+    /// Through `idx_assets_out_of_view`: with none set aside it costs nothing.
+    private static let inView = "asset_id NOT IN (SELECT id FROM assets WHERE out_of_view = 1)"
 
     /// Removes these assets (deleted from the library, or no longer readable) and all their
     /// analysis results, like `removeAssets(notIn:)`. Returns how many were stored.
@@ -169,7 +215,7 @@ public actor SortlyStore: PlanJournal {
         return removed
     }
 
-    /// Which of these assets are stored.
+    /// Which of these assets are stored (also those set aside: for reading the library).
     public func storedAssets(among ids: Set<AssetID>) throws -> Set<AssetID> {
         Set(try ids.filter { id in
             try db.query("SELECT 1 AS x FROM assets WHERE id = ?", [.text(id.rawValue)]).isEmpty == false
@@ -189,6 +235,7 @@ public actor SortlyStore: PlanJournal {
     /// Assets whose file details (name, type, RAW) are stored, with the modification date they
     /// were read at (`.distantPast` for none). The library reads the details again only for
     /// assets missing here or changed since, so a new or rebuilt database gets all of them.
+    /// Those set aside too: a photo that comes back keeps the details stored.
     public func assetsWithFileDetails() throws -> [AssetID: Date] {
         var out: [AssetID: Date] = [:]
         for r in try db.query("SELECT id, modification_date FROM assets WHERE uti IS NOT NULL") {
@@ -198,17 +245,21 @@ public actor SortlyStore: PlanJournal {
         return out
     }
 
-    public func assetCount() throws -> Int {
-        try db.query("SELECT COUNT(*) AS n FROM assets").first?["n"]?.int ?? 0
+    /// The photos in view (none set aside), as every read below that serves the analysis,
+    /// the counts, the suggestions and the search.
+    /// `includingOutOfView`: also the photos set aside, for whether the database holds any
+    /// photo at all (a selection of none still has the library's analysis).
+    public func assetCount(includingOutOfView: Bool = false) throws -> Int {
+        try db.query("SELECT COUNT(*) AS n FROM assets" + (includingOutOfView ? "" : " WHERE out_of_view = 0")).first?["n"]?.int ?? 0
     }
 
     public func allAssets() throws -> [AssetSnapshot] {
         counted("allAssets")
-        return try db.query("SELECT * FROM assets ORDER BY creation_date, id").map(Self.asset)
+        return try db.query("SELECT * FROM assets WHERE out_of_view = 0 ORDER BY creation_date, id").map(Self.asset)
     }
 
     public func asset(_ id: AssetID) throws -> AssetSnapshot? {
-        try db.query("SELECT * FROM assets WHERE id = ?", [.text(id.rawValue)]).first.map(Self.asset)
+        try db.query("SELECT * FROM assets WHERE id = ? AND out_of_view = 0", [.text(id.rawValue)]).first.map(Self.asset)
     }
 
     /// Assets whose analysis is older than `version` (new, changed or affected by a pipeline upgrade).
@@ -252,7 +303,7 @@ public actor SortlyStore: PlanJournal {
     /// instead).
     public func countNeedingLabelsOnly(version: Int, labelsVersion: Int, within range: Range<Date>? = nil,
                                        excluding excluded: Set<AssetID> = []) throws -> Int {
-        var filter = "analysis_version >= ? AND labels_version < ?"
+        var filter = "out_of_view = 0 AND analysis_version >= ? AND labels_version < ?"
         var values: [SQLValue] = [.integer(Int64(version)), .integer(Int64(labelsVersion))]
         let span = try Self.span(range, excluding: excluded)
         filter += span.filter
@@ -261,8 +312,8 @@ public actor SortlyStore: PlanJournal {
     }
 
     private static func needingAnalysis(version: Int, labelsVersion: Int?) -> (filter: String, values: [SQLValue]) {
-        guard let labelsVersion else { return ("analysis_version < ?", [.integer(Int64(version))]) }
-        return ("(analysis_version < ? OR labels_version < ?)", [.integer(Int64(version)), .integer(Int64(labelsVersion))])
+        guard let labelsVersion else { return ("out_of_view = 0 AND analysis_version < ?", [.integer(Int64(version))]) }
+        return ("out_of_view = 0 AND (analysis_version < ? OR labels_version < ?)", [.integer(Int64(version)), .integer(Int64(labelsVersion))])
     }
 
     /// The part of the library the image step of a trial run over one year works on, as SQL to
@@ -319,7 +370,7 @@ public actor SortlyStore: PlanJournal {
             let marks = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
             let rows = try db.query("""
                 SELECT r.asset_id, r.payload FROM analysis_results r JOIN assets a ON a.id = r.asset_id
-                WHERE r.kind = ? AND a.analysis_version >= ? AND r.asset_id IN (\(marks))
+                WHERE r.kind = ? AND a.analysis_version >= ? AND a.out_of_view = 0 AND r.asset_id IN (\(marks))
                 """, [.text(kind), .integer(Int64(version))] + chunk.map { .text($0.rawValue) })
             for r in rows {
                 if let id = r["asset_id"]?.string, let v = try decode(T.self, r["payload"]) { out[AssetID(id)] = v }
@@ -335,7 +386,7 @@ public actor SortlyStore: PlanJournal {
     /// refresh of the overview, 94 ms for 100,000 photos on the actor the analysis writes through).
     /// A photo given up as unreadable for its labels is marked and not among them.
     public func unlabelledAssets(version: Int, labelsVersion: Int) throws -> Set<AssetID> {
-        Set(try db.query("SELECT id FROM assets WHERE labels_version < ? AND analysis_version >= ?",
+        Set(try db.query("SELECT id FROM assets WHERE labels_version < ? AND analysis_version >= ? AND out_of_view = 0",
                          [.integer(Int64(labelsVersion)), .integer(Int64(version))])
             .compactMap { $0["id"]?.string.map { AssetID($0) } })
     }
@@ -346,7 +397,7 @@ public actor SortlyStore: PlanJournal {
     public func unlabelledAssets(version: Int, labelsVersion: Int, withResult kind: String) throws -> Set<AssetID> {
         Set(try db.query("""
             SELECT a.id FROM analysis_results r JOIN assets a ON a.id = r.asset_id
-            WHERE r.kind = ? AND a.labels_version < ? AND a.analysis_version >= ?
+            WHERE r.kind = ? AND a.labels_version < ? AND a.analysis_version >= ? AND a.out_of_view = 0
             """, [.text(kind), .integer(Int64(labelsVersion)), .integer(Int64(version))])
             .compactMap { $0["id"]?.string.map { AssetID($0) } })
     }
@@ -369,7 +420,7 @@ public actor SortlyStore: PlanJournal {
     /// The labels version of each photo (0: no labels computed). Tests and diagnostics.
     public func labelsVersions() throws -> [AssetID: Int] {
         var out: [AssetID: Int] = [:]
-        for r in try db.query("SELECT id, labels_version FROM assets") {
+        for r in try db.query("SELECT id, labels_version FROM assets WHERE out_of_view = 0") {
             if let id = r["id"]?.string { out[AssetID(id)] = r["labels_version"]?.int ?? 0 }
         }
         return out
@@ -493,10 +544,12 @@ public actor SortlyStore: PlanJournal {
         }
     }
 
-    public func places() throws -> [AssetID: ResolvedPlace] {
+    /// The places of the photos in view. `includingOutOfView`: also of those set aside, for a
+    /// change of all stored places (another language of album names): they come back with it.
+    public func places(includingOutOfView: Bool = false) throws -> [AssetID: ResolvedPlace] {
         counted("places")
         var result: [AssetID: ResolvedPlace] = [:]
-        for r in try db.query("SELECT * FROM asset_places") {
+        for r in try db.query("SELECT * FROM asset_places" + (includingOutOfView ? "" : " WHERE \(Self.inView)")) {
             guard let id = r["asset_id"]?.string, let c = try decode(PlaceComponents.self, r["components"]),
                   let source = PlaceSource(rawValue: r["source"]?.string ?? "") else { continue }
             result[AssetID(id)] = ResolvedPlace(
@@ -516,10 +569,15 @@ public actor SortlyStore: PlanJournal {
         ])
     }
 
-    public func results<T: Decodable>(_ type: T.Type, kind: String, minimumVersion: Int = 0) throws -> [AssetID: T] {
+    /// The results of `kind` of the photos in view. `includingOutOfView`: also of those set
+    /// aside, for a change of all stored results (stricter masks of the texts): they come back
+    /// with it.
+    public func results<T: Decodable>(_ type: T.Type, kind: String, minimumVersion: Int = 0,
+                                      includingOutOfView: Bool = false) throws -> [AssetID: T] {
         counted("results." + kind)
         var out: [AssetID: T] = [:]
-        for r in try db.query("SELECT asset_id, payload FROM analysis_results WHERE kind = ? AND version >= ?", [.text(kind), .integer(Int64(minimumVersion))]) {
+        let sql = "SELECT asset_id, payload FROM analysis_results WHERE kind = ? AND version >= ?" + (includingOutOfView ? "" : " AND \(Self.inView)")
+        for r in try db.query(sql, [.text(kind), .integer(Int64(minimumVersion))]) {
             if let id = r["asset_id"]?.string, let v = try decode(T.self, r["payload"]) { out[AssetID(id)] = v }
         }
         return out
@@ -533,7 +591,7 @@ public actor SortlyStore: PlanJournal {
                                              excluding excluded: Set<AssetID> = []) throws -> [AssetID: T] {
         var sql = """
             SELECT r.asset_id, r.payload FROM analysis_results r JOIN assets a ON a.id = r.asset_id
-            WHERE r.kind = ? AND r.version >= ? AND a.analysis_version < ?
+            WHERE r.kind = ? AND r.version >= ? AND a.analysis_version < ? AND a.out_of_view = 0
             """
         var values: [SQLValue] = [.text(kind), .integer(Int64(version)), .integer(Int64(version))]
         let span = try Self.span(range, excluding: excluded, table: "a")
@@ -560,7 +618,8 @@ public actor SortlyStore: PlanJournal {
             """, [.text(asset.rawValue), .text(text)])
     }
 
-    /// Full-text search over recognized text. Uses FTS5 when available, LIKE otherwise.
+    /// Full-text search over recognized text of the photos in view. Uses FTS5 when available,
+    /// LIKE otherwise.
     public func searchText(_ query: String, limit: Int = 500) throws -> [AssetID] {
         let terms = query.split(whereSeparator: { $0.isWhitespace }).map(String.init).filter { !$0.isEmpty }
         guard !terms.isEmpty else { return [] }
@@ -568,12 +627,12 @@ public actor SortlyStore: PlanJournal {
             let match = terms.map { "\"" + $0.replacingOccurrences(of: "\"", with: "") + "\"*" }.joined(separator: " AND ")
             return try db.query("""
                 SELECT p.asset_id FROM text_fts JOIN text_plain p ON p.id = text_fts.rowid
-                WHERE text_fts MATCH ? LIMIT ?
+                WHERE text_fts MATCH ? AND p.\(Self.inView) LIMIT ?
                 """, [.text(match), .integer(Int64(limit))])
                 .compactMap { $0["asset_id"]?.string.map { AssetID($0) } }
         }
         let clause = terms.map { _ in "content LIKE ?" }.joined(separator: " AND ")
-        return try db.query("SELECT asset_id FROM text_plain WHERE \(clause) LIMIT ?", terms.map { .text("%\($0)%") } + [.integer(Int64(limit))])
+        return try db.query("SELECT asset_id FROM text_plain WHERE \(clause) AND \(Self.inView) LIMIT ?", terms.map { .text("%\($0)%") } + [.integer(Int64(limit))])
             .compactMap { $0["asset_id"]?.string.map { AssetID($0) } }
     }
 

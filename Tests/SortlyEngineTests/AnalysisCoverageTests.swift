@@ -198,7 +198,11 @@ struct AnalysisCoverageTests {
         await reader.set(assets: selection)
         let next = try await p.run()
         #expect(next.isComplete)
-        #expect(next.removed == assets.count - selection.count)
+        // The photos outside the selection are set aside, not deleted (review P1-07): what was
+        // found about them stays for when they are shared again.
+        #expect(next.removed == 0)
+        #expect(next.setAside == assets.count - selection.count)
+        #expect(try await store.outOfViewCount() == assets.count - selection.count)
         #expect(try await store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 0)
     }
 

@@ -23,8 +23,9 @@ enum PhotoCardStyle: Sendable {
     case tile
 }
 
-/// Photo on top, text below (title up to 2 lines, one subtitle line), optional badge on a solid light ground,
-/// actions below the text; stacks at accessibility sizes; one VoiceOver element (caller adds actions).
+/// Photo on top, text below (title up to 2 lines, the subtitle in what is left of 3), optional badge on a
+/// solid light ground, actions below the text; stacks at accessibility sizes; one VoiceOver element
+/// (caller adds actions).
 ///
 /// - No text on the photo: name and count sit below it; the badge has its own white ground.
 /// - The cover is a `CoverPhoto`: sharp from the device or a calm placeholder, "Vorschau
@@ -232,7 +233,10 @@ private struct CardTextLayout: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let sizes = measure(width: proposal.width, subviews: subviews)
         let height = sizes.title.height + (sizes.subtitle.map { spacing + $0.height } ?? 0)
-        return CGSize(width: proposal.width ?? max(sizes.title.width, sizes.subtitle?.width ?? 0), height: height)
+        // The width offered, or the texts' own width when none or no limit is offered.
+        let own = max(sizes.title.width, sizes.subtitle?.width ?? 0)
+        let width = proposal.width.map { $0.isFinite ? $0 : own } ?? own
+        return CGSize(width: width, height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {

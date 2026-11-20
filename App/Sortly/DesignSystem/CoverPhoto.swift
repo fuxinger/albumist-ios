@@ -21,7 +21,8 @@ import SortlyCore
 ///   sharp photo (a suggestion of screenshots or documents has no cover candidates at all,
 ///   `PreviewPicker.coverCandidates`), so the card looks meant that way, not empty.
 /// - `onOutcome`: told once the cover knows whether it shows a sharp photo, for a card that
-///   turns smaller when there is none ("ein anderes Foto oder die kleine Karte").
+///   turns smaller when there is none ("ein anderes Foto oder die kleine Karte"); not while the
+///   preview is hidden (nothing is loaded then).
 /// - Crop ("Bildausschnitt", `CoverLoader.focus`): screenshots keep their top; a photo cut at top
 ///   and bottom keeps its upper part (portraits centred a third down, where faces and heads are,
 ///   landscapes 40 % down); cut at the sides, around the middle. Cheap: no image analysis.
@@ -161,11 +162,15 @@ private struct CoverPlaceholder: View {
                                startPoint: .topLeading, endPoint: .bottomTrailing)
             }
             if let symbol {
-                // Decorative (the card says what it is); the note grey holds 3:1 and more on
-                // these light washes, and its dark-mode grey on the dark ones.
+                // Decorative (the card says what it is), on a disc in the card's colour: a
+                // photo's colours can make the wash as light or as dark as the grey itself
+                // (down to 1.4:1), the disc keeps it at the note grey's 5.9:1 light, 7.5:1 dark
+                // and 6.1:1 in a sheet.
                 Image(systemName: symbol)
-                    .font(.title)
+                    .font(.title2)
                     .foregroundStyle(.noteText)
+                    .padding(Theme.Spacing.m)
+                    .background(Theme.card, in: Circle())
                     .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             }
         }

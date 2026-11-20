@@ -82,8 +82,7 @@ final class DeviceConditionUITests: XCTestCase {
         let bar = app.navigationBars.firstMatch
         var swipes = 0
         while swipes < 8 {
-            let underBar = bar.exists && !bar.frame.contains(element.frame) && element.frame.midY < bar.frame.maxY
-            if underBar { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
+            if UITestWait.underNavigationBar(element, bar) { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
         UITestOnboarding.clock("tap \(step)")
@@ -413,18 +412,32 @@ final class DeviceConditionUITests: XCTestCase {
     /// `relaunchWith`: the test's own launch arguments (nil: a fast start).
     @discardableResult
     private func grantFromHost(relaunchWith extra: [String]? = nil) -> Bool {
-        print("UI_HOST_GRANT_PHOTOS")
-        // iOS ends an app whose photo access changes, so the Mac's grant ends the running app. A
-        // launch before the grant lands loses its new process to it: UI run 44355110562 (test 09)
-        // launched 5 s after the request, the grant took 8 s and ended that launch ("Application
-        // ... does not have a process ID", a failure no later attempt could undo). So the first
-        // launch waits until the grant has ended the app; a grant that changes nothing ends
-        // nothing, hence the limit (two grant attempts of up to 90 s each, ui_tests.py).
-        if app.state != .notRunning {
+        // The Mac writes "granted" or "failed" into this file once its grant is done
+        // (`write_host_answer` in ui_tests.py). A path with a space could not be named in the
+        // line: then the bare request, and the wait below as before.
+        let answer = NSTemporaryDirectory() + "uitest-host-answer-\(UUID().uuidString)"
+        let answered = ProcessInfo.processInfo.environment["SORTLY_HOST_HELPER"] == "1"
+            && !answer.contains(where: \.isWhitespace)
+        print(answered ? "UI_HOST_GRANT_PHOTOS \(answer)" : "UI_HOST_GRANT_PHOTOS")
+        defer { try? FileManager.default.removeItem(atPath: answer) }
+        // A launch before the grant lands loses its new process to it: UI run 44355110562 (test
+        // 09) launched 5 s after the request, the grant took 8 s and ended that launch
+        // ("Application ... does not have a process ID", a failure no later attempt could undo).
+        // So the first launch waits until the Mac says its grant is done. Without that answer
+        // it waits until the grant has ended the app, up to the limit (two grant attempts of up
+        // to 90 s each, ui_tests.py). That end never came: in 9 of 9 requests the app was still
+        // running after 190 s (UI runs 44617747359, 44630953220, job 136352444126), about 9.5
+        // minutes of test09 each run.
+        if answered || app.state != .notRunning {
             let start = Date()
-            // Not asserted: a grant that changes nothing ends nothing (the launches below decide).
-            _ = UITestWait.holds(timeout: 190, interval: 1) { app.state == .notRunning }
-            print("UI_FACT app \(app.state == .notRunning ? "ended" : "still running") \(Int(Date().timeIntervalSince(start))) s after the grant request")
+            // Not asserted: a grant that changes nothing ends nothing, and a failed grant is
+            // answered "failed" (the launches below decide either way).
+            _ = UITestWait.holds(timeout: 190, interval: 1) {
+                (answered && FileManager.default.fileExists(atPath: answer)) || (!answered && app.state == .notRunning)
+            }
+            let reply = answered ? (try? String(contentsOfFile: answer, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+            print("UI_FACT app \(app.state == .notRunning ? "ended" : "still running") \(Int(Date().timeIntervalSince(start))) s after the grant request"
+                  + (answered ? ", the Mac answered '\(reply ?? "nothing")'" : ""))
         }
         for attempt in 1...12 {
             // pacing: the gap between launch attempts; the grant's end of the app is awaited above
@@ -544,6 +557,7 @@ final class DeviceConditionUITests: XCTestCase {
         }
         defer { removeUIInterruptionMonitor(monitor) }
         var grantedBefore = false
+        var deniedWithoutQuestion = false
         _ = UITestWait.holds(timeout: timeout) {
             if photoQuestionAnswered { return true }
             if let answer = [springboard.buttons.matching(predicate).firstMatch, app.alerts.buttons.matching(predicate).firstMatch].first(where: { $0.exists }) {
@@ -556,10 +570,18 @@ final class DeviceConditionUITests: XCTestCase {
                 grantedBefore = true
                 return true
             }
+            // "Einstellungen öffnen": the app has iOS's answer already, "denied", so no question
+            // comes any more (the CI simulator after an access reset). Waiting out the 25 s for it
+            // cost test09 about 20 s at each such step; the result is the same as after them.
+            if toSettings.exists {
+                deniedWithoutQuestion = true
+                return true
+            }
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap()
             return false
         }
         if grantedBefore && !photoQuestionAnswered { return false }
+        if deniedWithoutQuestion && !photoQuestionAnswered { print("UI_FACT photo question: access denied without a question") }
         guard photoQuestionAnswered else {
             print("UI_STEP_MISSING photo question (\(choice))")
             print("UI_FACT springboard shows: \(allLabels(springboard).prefix(400))")
@@ -1378,7 +1400,10 @@ final class DeviceConditionUITests: XCTestCase {
         // Without the iOS question in CI the answer is "denied": given back from the Mac. When
         // that failed (recorded by `grantFromHost`), nothing after it can pass: the test ends
         // here instead of waiting 17 more minutes for an analysis without access (44108052342).
-        if !app.tabBars.firstMatch.waitForExistence(timeout: 10), !grantFromHost() { return }
+        // The overview, or "Einstellungen öffnen" (denied without a question: no overview can
+        // come before the grant, so the 10 s are not waited out).
+        _ = UITestWait.holds(timeout: 10) { app.tabBars.firstMatch.exists || toSettings.exists }
+        if !app.tabBars.firstMatch.exists, !grantFromHost() { return }
         let back = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         print(back ? "UI_STEP_OK overview after access came back" : "UI_STEP_MISSING overview after access came back")
         if !back { shot("x-no-overview-after-access") }

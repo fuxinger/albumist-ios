@@ -52,6 +52,16 @@ struct ProposalDetailTextTests {
         #expect(english[0].countText == "3 photos")
     }
 
+    /// The page groups with the model's facts by id (`AppModel.factsByID`, a `FactsByID` since
+    /// review P4-09 in main), the same way as with a dictionary of them.
+    @Test func theModelsFactsByIDGroupAlike() {
+        let (ids, facts) = Self.kyoto()
+        let byID = FactsByID(ids.compactMap { facts[$0] })
+        let days = PhotoDays.group(ids + ["unknown"], facts: byID, fallback: Self.berlin)
+        #expect(days == PhotoDays.group(ids + ["unknown"], facts: facts, fallback: Self.berlin))
+        #expect(days.last?.ids == ["unknown"])
+    }
+
     /// 23:45 in Kyoto is 16:45 in Berlin the same day, but 23:00 in New York is the next day in
     /// Berlin: each photo counts on its own clock, as in Apple Photos.
     @Test func aPhotosDayIsTheDayOnItsOwnClock() {

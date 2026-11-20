@@ -1771,6 +1771,26 @@
         }
       }
     },
+    "Datum wird vorgeschlagen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggesting a date"
+          }
+        }
+      }
+    },
+    "Jahr wird geladen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading year"
+          }
+        }
+      }
+    },
     "Umstrittenes Gebiet: Zu welchem Land es gehört, ist nicht sicher. Albumist ordnet „%@“ darum keinem Land zu." : {
       "localizations" : {
         "en" : {
@@ -5717,6 +5737,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Merge into one trip?"
+          }
+        }
+      }
+    },
+    "Zuhause wird geladen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading home"
+          }
+        }
+      }
+    },
+    "Zuhause wird geladen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading home …"
           }
         }
       }

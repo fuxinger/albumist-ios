@@ -1784,7 +1784,11 @@ final class SortlyFlowUITests: XCTestCase {
         let album = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label MATCHES %@", "(.*, )?[0-9]+ Fotos?")).firstMatch
         // The tab shows its rows or says it has none.
-        _ = UITestWait.holds(timeout: 10) { empty.exists || album.exists }
+        let shown = UITestWait.holds(timeout: 10) { empty.exists || album.exists }
+        if !shown {
+            print("UI_STEP_MISSING albums tab before the sweep")
+            XCTFail("The albums tab showed neither an album row nor \"Noch keine Alben\" before the sweep")
+        }
         let made = empty.exists
         print("UI_FACT albums tab empty before the sweep \(made)")
         if made, openManualPlan("Testalbum Rundgang"),
@@ -1792,7 +1796,10 @@ final class SortlyFlowUITests: XCTestCase {
             let done = button("Rückgängig machen").waitForExistence(timeout: 900)
             print(done ? "UI_STEP_OK album for the sweep" : "UI_STEP_MISSING album for the sweep")
             XCTAssertTrue(done, "The sweep's album was not created")
-            back()
+            // The plan ran from the "Zu Album hinzufügen" sheet: start the app again, as
+            // applyRecommended does, so no sheet is left over the tab bar.
+            launch()
+            UITestWait.appears(app.tabBars.firstMatch, "tab bar after the sweep's album", timeout: 60)
         }
         tap(tabButton("Übersicht"), "overview before the sweep")
         _ = app.navigationBars["Übersicht"].waitForExistence(timeout: 10)

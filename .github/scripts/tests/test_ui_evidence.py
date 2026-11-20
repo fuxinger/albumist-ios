@@ -640,10 +640,6 @@ class CommandTests(unittest.TestCase):
         self.assertIn("re-run this job", log.getvalue())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class MergeContentTests(unittest.TestCase):
     """The full pass before the merge (decision 20.11.2026): its greens stand for the merge only
     when merging into main keeps the app fingerprint and every group's full test fingerprint."""
@@ -695,3 +691,7 @@ class MergeContentTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()) as log:
                 self.assertEqual(ui_evidence.merge_content("main", cwd=folder), 1)
             self.assertIn("does not merge cleanly", log.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

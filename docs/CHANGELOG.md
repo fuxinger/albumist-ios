@@ -112,7 +112,8 @@
   kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht
   „Animation überspringen“ bei jeder Schriftgröße ohne Scrollen über der Tab-Leiste: Die Bilder der Show werden kleiner,
   wo der Bildschirm nicht reicht, Zahlen und Knopf behalten ihre Größe (auf dem kleinen iPhone lag der Knopf auch bei
-  normaler Schrift unter der Tab-Leiste); quer auf dem iPhone stehen die Zahlen neben Bildern und Knopf. Der Text des
+  normaler Schrift unter der Tab-Leiste); quer auf dem iPhone stehen die Zahlen neben Bildern und Knopf, und Drehen
+  mitten in der Show lässt die Fotos weiterfliegen. Der Text des
   Knopfs wächst bis AX2, so bricht „überspringen“ nicht mehr mitten im Wort.
 - 20.11.: Die Karte der laufenden Analyse zeigt auf einen Blick nur noch, was zählt: was gerade läuft (mit „Pause“),
   die Zahl, eine kurze Zeile („Fertig gegen 23:40“, warum es langsamer geht oder wartet, der Countdown für Apple),

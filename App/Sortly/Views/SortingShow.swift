@@ -23,13 +23,17 @@ struct SortingShow: View {
     }
 
     let albums: [Album]
+    /// The padding the screen puts around the show (above and below it); kept free when the
+    /// show fits itself to the screen (`sceneScale`).
+    let screenPadding: CGFloat
     var onFinish: () -> Void
     /// Distinct photos of all albums, counted once here: the pile asked for it in every
     /// redraw, and the show redraws many times a second (a set over every photo of the plan).
     private let totalPhotos: Int
 
-    init(albums: [Album], onFinish: @escaping () -> Void) {
+    init(albums: [Album], screenPadding: CGFloat, onFinish: @escaping () -> Void) {
         self.albums = albums
+        self.screenPadding = screenPadding
         self.onFinish = onFinish
         totalPhotos = Set(albums.flatMap(\.assets)).count
     }
@@ -55,9 +59,8 @@ struct SortingShow: View {
     @State private var skipHeight: CGFloat = 0
 
     private let sceneHeight: CGFloat = 360
-    /// Padding around the show that is not its own: the screen's content padding above and
-    /// below it (`PlanReviewView`, Theme.Spacing.l) and the show's own top padding.
-    private static let reserve = 2 * Theme.Spacing.l + Theme.Spacing.m
+    /// The show's own padding above its counts.
+    private static let topPadding = Theme.Spacing.m
     private var sideBySide: Bool { verticalSizeClass == .compact }
     /// The scene's own size, 1 where the screen has room for it. It gives way to the counts and
     /// the button, which keep their text size, so "Animation überspringen" stays on screen at
@@ -66,7 +69,7 @@ struct SortingShow: View {
     /// scaled, so the flights keep their paths.
     private var sceneScale: CGFloat {
         guard let room else { return 1 }
-        var free = room - Self.reserve - skipHeight - Theme.Spacing.l
+        var free = room - 2 * screenPadding - Self.topPadding - skipHeight - Theme.Spacing.l
         if !sideBySide { free -= headerHeight + Theme.Spacing.l }
         return min(1, max(0.1, free / sceneHeight))
     }
@@ -83,29 +86,23 @@ struct SortingShow: View {
     ]
 
     var body: some View {
-        Group {
-            if sideBySide {
-                // Turned sideways the screen is too low for counts, scene and button one below
-                // the other: the counts stand beside the scene and its button.
-                HStack(alignment: .top, spacing: Theme.Spacing.l) {
-                    header
-                    VStack(spacing: Theme.Spacing.l) {
-                        scene
-                        skip
-                    }
-                }
-            } else {
-                VStack(spacing: Theme.Spacing.l) {
-                    header
-                    scene
-                    skip
-                }
+        // Turned sideways the screen is too low for counts, scene and button one below the
+        // other: the counts stand beside the scene and its button. One layout that changes its
+        // direction, so turning the iPhone mid-show keeps the scene and its flying photos.
+        let layout = sideBySide
+            ? AnyLayout(HStackLayout(alignment: .top, spacing: Theme.Spacing.l))
+            : AnyLayout(VStackLayout(spacing: Theme.Spacing.l))
+        layout {
+            header
+            VStack(spacing: Theme.Spacing.l) {
+                scene
+                skip
             }
         }
         // iPad: a focused column instead of a small cluster in a wide band.
         .frame(maxWidth: sideBySide ? .infinity : 520)
         .frame(maxWidth: .infinity)
-        .padding(.top, Theme.Spacing.m)
+        .padding(.top, Self.topPadding)
         // How high the screen is: the scroll view's visible height, without its bars.
         .background {
             Color.clear
@@ -169,11 +166,17 @@ struct SortingShow: View {
             Text("von \(albums.count) Alben fertig")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("\(counted) Fotos einsortiert")
-                .font(.subheadline)
-                .foregroundStyle(.noteText)
-                .monospacedDigit()
-                .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(counted)))
+            ZStack {
+                // The widest the line gets, kept hidden: the header keeps its height while the
+                // count runs up (a line that wrapped mid-show would shrink the scene at once).
+                Text("\(totalPhotos) Fotos einsortiert")
+                    .hidden()
+                Text("\(counted) Fotos einsortiert")
+                    .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(counted)))
+            }
+            .font(.subheadline)
+            .foregroundStyle(.noteText)
+            .monospacedDigit()
         }
         // Wrapped lines stay centred under the count. The show lasts a few seconds and its
         // progress is spoken in full below, so the captions stop growing at AX1: beyond that

@@ -40,6 +40,9 @@ struct PlanReviewView: View {
     /// The screen loads once; coming back from another tab keeps the result and its undo.
     @State private var didLoad = false
     private static let top = "plan.top"
+    /// Padding around the screen's content; the sorting show keeps it free when it fits itself
+    /// to the screen (`SortingShow.screenPadding`).
+    private static let contentPadding = Theme.Spacing.l
 
     /// The facts are made again for another plan, or when the albums in Photos changed.
     private struct FactsKey: Equatable {
@@ -63,7 +66,7 @@ struct PlanReviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                     if let show {
-                        SortingShow(albums: show) {
+                        SortingShow(albums: show, screenPadding: Self.contentPadding) {
                             withAnimation(.smooth(duration: 0.45)) { self.show = nil }
                         }
                         .transition(.opacity)
@@ -92,7 +95,7 @@ struct PlanReviewView: View {
                         }
                     }
                 }
-                .padding(Theme.Spacing.l)
+                .padding(Self.contentPadding)
                 .id(Self.top)
             }
             // The button in reach while the plan scrolls under it (review P3-05 = G3-05). In the

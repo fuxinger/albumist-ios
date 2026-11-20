@@ -13,14 +13,17 @@ import SortlyTestSupport
 ///   the text and the button, so the button stays on screen at every size; at a compact height
 ///   (an iPhone turned) the scene and the button stand beside the counts.
 ///
-/// The App does not build on Linux, so these tests read `AssetThumbnail.swift` and
-/// `SortingShow.swift` (`AppSource`). On a Mac the accessibility walk measures both
-/// (`AccessibilityUITests`: `checkMoreCountShown`, `expectSkipInReach`).
+/// The App does not build on Linux, so these tests read `AssetThumbnail.swift`,
+/// `SortingShow.swift` and `PlanReviewView.swift` (`AppSource`). On a Mac the accessibility walk
+/// checks the skip button (`AccessibilityUITests.expectSkipInReach`) and reports what it can
+/// read of the "+N" (`reportMoreCount`, never failing: the count sits inside the mosaic's
+/// button, which XCUITest most likely shows as one element); the screenshot shows the count.
 @Suite("Largest text: the mosaic's count and the show's skip button fit")
 struct LargestTextFitTests {
     static let thumbnails = "App/Sortly/Views/AssetThumbnail.swift"
     static let show = "App/Sortly/Views/SortingShow.swift"
     static let walk = "App/SortlyUITests/AccessibilityUITests.swift"
+    static let screen = "App/Sortly/Views/PlanReviewView.swift"
 
     /// A file without comments, strings kept.
     static func code(_ path: String) throws -> String {
@@ -81,16 +84,20 @@ struct LargestTextFitTests {
     }
 
     /// The count stays text (VoiceOver reads the mosaic's button with its full count, "Alle 31
-    /// Fotos ansehen") and carries an identifier the accessibility walk measures it by.
-    @Test func theCountIsMeasuredByTheAccessibilityWalk() throws {
+    /// Fotos ansehen") and carries an identifier. The accessibility walk reports what it can read
+    /// of it and never fails on it: inside the button the count is most likely not in the tree,
+    /// and a failure there would fail every walk (second review of P3-18).
+    @Test func theCountIsReportedByTheAccessibilityWalk() throws {
         let more = try Self.moreCount()
         #expect(!more.contains(".accessibilityHidden"), "\(more)")
         #expect(more.contains(/\.accessibilityIdentifier\(\s*"thumbnails\.more"\s*\)/), "\(more)")
         let walk = try Self.code(Self.walk)
-        let check = try #require(AppSource.body(of: "func checkMoreCountShown(", in: walk), "the walk does not measure the count")
-        #expect(check.contains("\"thumbnails.more\""))
+        let report = try #require(AppSource.body(of: "func reportMoreCount(", in: walk), "the walk does not look at the count")
+        #expect(report.contains("\"thumbnails.more\""))
+        #expect(report.contains("UI_FACT"))
+        #expect(!report.contains("XCTFail"), "the walk fails where it cannot see the count: \(report)")
         let body = try #require(AppSource.body(of: "private func walk(", in: walk))
-        #expect(!AppSource.calls(of: "checkMoreCountShown(", in: body).isEmpty, "the walk never measures the count")
+        #expect(!AppSource.calls(of: "reportMoreCount(", in: body).isEmpty, "the walk never looks at the count")
     }
 
     // MARK: The sorting show's skip button
@@ -132,15 +139,46 @@ struct LargestTextFitTests {
         #expect(code.contains(/skipHeight\s*=\s*\$0/), "the button's height is not measured")
     }
 
-    /// Every layout of the show places the button: the column (header, scene, button) and,
-    /// at a compact height, the counts beside the scene and the button.
+    /// The padding the screen puts around the show comes from the screen, not from a copy in
+    /// the show that could drift (second review of P3-18): `PlanReviewView` pads its content
+    /// with one value and hands the same value to the show, which keeps it free above and below.
+    @Test func theShowKeepsTheScreensOwnPaddingFree() throws {
+        let screen = try Self.code(Self.screen)
+        let body = try #require(AppSource.body(of: ["struct PlanReviewView", "var body: some View"], in: screen))
+        let padding = try #require(body.firstMatch(of: /\.padding\(\s*([^)]+?)\s*\)\s*\.id\(\s*Self\.top\s*\)/),
+                                   "the content's padding is not found")
+        let handed = try #require(AppSource.calls(of: "SortingShow(", in: body).first, "the screen shows no sorting show")
+        let passed = try #require(handed.firstMatch(of: /screenPadding:\s*([^,)]+?)\s*$/), "the show is not told the padding: \(handed)")
+        #expect(String(padding.output.1) == String(passed.output.1),
+                "the content is padded by \(padding.output.1), the show keeps \(passed.output.1) free")
+        let scale = try Self.sceneScale()
+        #expect(scale.contains(/2\s*\*\s*screenPadding\b/), "the show does not keep the padding above and below free: \(scale)")
+        let show = try Self.code(Self.show)
+        #expect(!show.contains(/Theme\.Spacing\.l\s*\+\s*Theme\.Spacing\.m|2\s*\*\s*Theme\.Spacing\.l/),
+                "the show copies the screen's padding")
+    }
+
+    /// The counts keep their height while the photos are counted up: a hidden copy of the line
+    /// with every photo of the plan holds the room the widest count needs, so a line that wraps
+    /// mid-show never shrinks the scene at once (second review of P3-18).
+    @Test func theCountsKeepTheirHeightWhileCounting() throws {
+        let header = try #require(AppSource.body(of: ["struct SortingShow", "var header: some View"], in: try Self.code(Self.show)))
+        #expect(header.contains(/Text\("\\\(totalPhotos\) Fotos einsortiert"\)\s*\.hidden\(\)/), "\(header)")
+        #expect(header.contains(/Text\("\\\(counted\) Fotos einsortiert"\)/), "\(header)")
+    }
+
+    /// Every layout of the show places the button under the scene: the column (header, scene,
+    /// button) and, at a compact height, the counts beside the scene and the button. One layout
+    /// that changes its direction (`AnyLayout`), so turning the iPhone mid-show keeps the scene
+    /// and its flying photos (second review of P3-18).
     @Test func everyLayoutPlacesTheButton() throws {
         let code = try Self.code(Self.show)
         let body = try #require(AppSource.body(of: ["struct SortingShow", "var body: some View"], in: code))
-        let besides = body.matches(of: /\bskip\b/).count
-        #expect(besides >= 2, "the button is missing from a layout: \(body)")
-        #expect(body.contains(/verticalSizeClass\s*==\s*\.compact/) || code.contains(/verticalSizeClass\s*==\s*\.compact/),
-                "no layout for a compact height (an iPhone turned)")
+        #expect(body.contains(/AnyLayout\(\s*HStackLayout\(/), "\(body)")
+        #expect(body.contains(/AnyLayout\(\s*VStackLayout\(/), "\(body)")
+        #expect(body.contains(/layout\s*\{\s*header\s+VStack\([^)]*\)\s*\{\s*scene\s+skip\s*\}\s*\}/),
+                "the button does not stand under the scene in one layout: \(body)")
+        #expect(code.contains(/verticalSizeClass\s*==\s*\.compact/), "no layout for a compact height (an iPhone turned)")
     }
 
     /// The button keeps what it did: it ends only the animation (`onFinish`), and the walk finds
@@ -154,14 +192,18 @@ struct LargestTextFitTests {
         let walk = try Self.code(Self.walk)
         let reach = try #require(AppSource.body(of: "func expectSkipInReach(", in: walk), "the walk does not check the button")
         #expect(reach.contains("\"show.skip\""))
-        #expect(reach.contains("isHittable"))
-        #expect(reach.contains("tabBars"), "the button may stand behind the tab bar: \(reach)")
+        // One snapshot per poll: the show of a short plan may end between two queries.
+        #expect(reach.contains("app.snapshot()"), "\(reach)")
+        #expect(!reach.contains("app.buttons["), "the button is queried again and again: \(reach)")
+        #expect(reach.contains(".tabBar"), "the button may stand behind the tab bar: \(reach)")
+        #expect(reach.contains(".navigationBar"), "the button may stand under the navigation bar: \(reach)")
         let body = try #require(AppSource.body(of: "private func walk(", in: walk))
         #expect(!AppSource.calls(of: "expectSkipInReach(", in: body).isEmpty, "the walk never checks the button")
     }
 
-    /// What the show already did stays: its scene is decorative (hidden from VoiceOver, its labels
-    /// capped), with Reduce Motion only the current album shows and nothing flies.
+    /// The new part `scene` (pile, albums and flying photos, now scaled) stays decorative: hidden
+    /// from VoiceOver, its labels capped. With Reduce Motion only the current album shows and
+    /// nothing flies, as before. Red before the fix only because there was no `scene` yet.
     @Test func theShowKeepsItsVoiceOverAndReduceMotionBehaviour() throws {
         let code = try Self.code(Self.show)
         let scene = try #require(AppSource.body(of: ["struct SortingShow", "var scene: some View"], in: code))

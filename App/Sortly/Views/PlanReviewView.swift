@@ -82,7 +82,7 @@ struct PlanReviewView: View {
                     if let failure = model.execution.failure {
                         Card {
                             Label("Nicht alles hat geklappt", systemImage: "exclamationmark.triangle").font(.headline)
-                            Text(failure).font(.subheadline).foregroundStyle(.secondaryText)
+                            Text(failure).font(.subheadline).foregroundStyle(.noteText)
                         }
                     }
                 }
@@ -160,7 +160,7 @@ struct PlanReviewView: View {
         if plan.retries != nil {
             // "Fehlendes erneut versuchen" (I16): say that this is not the whole plan again.
             Text("Nur was beim letzten Anlegen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt.")
-                .font(.subheadline).foregroundStyle(.secondaryText)
+                .font(.subheadline).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
         }
         Card {
@@ -194,7 +194,7 @@ struct PlanReviewView: View {
                 warning(Text("\(summary.originalCopiesCreated) Kopien werden angelegt"))
             }
             Text("Fotos werden nur in Alben einsortiert. Die Originale bleiben, wo sie sind, und jede Änderung lässt sich rückgängig machen.")
-                .font(.footnote).foregroundStyle(.secondaryText)
+                .font(.footnote).foregroundStyle(.noteText)
         }
 
         if !facts.conflicts.isEmpty {
@@ -202,7 +202,7 @@ struct PlanReviewView: View {
                 Label("Bitte prüfen", systemImage: "exclamationmark.triangle").font(.headline)
                 ForEach(Array(facts.conflicts.enumerated()), id: \.offset) { _, conflict in
                     Text(ConflictText.text(conflict))
-                        .font(.subheadline).foregroundStyle(.secondaryText)
+                        .font(.subheadline).foregroundStyle(.noteText)
                 }
             }
         }
@@ -221,7 +221,7 @@ struct PlanReviewView: View {
                 Text(isUndo
                      ? LocalizedStringKey("Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt zurückgenommen.")
                      : LocalizedStringKey("Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt."))
-                    .font(.subheadline).foregroundStyle(.secondaryText)
+                    .font(.subheadline).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         } else if !purchases.allows(albums: albums) {
@@ -246,19 +246,19 @@ struct PlanReviewView: View {
             .accessibilityIdentifier("plan.apply")
             if blocking {
                 Text("Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“.")
-                    .font(.footnote).foregroundStyle(.secondaryText)
+                    .font(.footnote).foregroundStyle(.noteText)
             }
             // A removal from "Alben von Albumist", or the retry of one, deletes albums: iOS asks
             // right after this button, and this screen is the confirmation before it (review
             // 18.11., P3-07).
             if summary.deletedContainers > 0 {
                 DeleteQuestionNote.text
-                    .font(.footnote).foregroundStyle(.secondaryText)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !purchases.isUnlocked && !Purchases.unlockedForUITests && albums > 0 && purchases.allows(albums: albums) {
                 Text("Kostenlos. Danach hast du noch \(purchases.remainingFreeAlbums - albums) von \(Purchases.freeAlbumLimit) Gratis-Alben.")
-                    .font(.footnote).foregroundStyle(.secondaryText)
+                    .font(.footnote).foregroundStyle(.noteText)
             }
         }
         if prebuilt == nil && hasSelection {
@@ -316,7 +316,7 @@ struct PlanReviewView: View {
             Text(phase.title).font(.headline)
             ExecutionProgressBar(showsCount: true)
             Text("Du kannst die App dabei offen lassen. Bricht etwas ab, setzt Albumist beim nächsten Start sicher fort.")
-                .font(.footnote).foregroundStyle(.secondaryText)
+                .font(.footnote).foregroundStyle(.noteText)
         }
     }
 }
@@ -337,12 +337,12 @@ struct ExecutionProgressBar: View {
             .tint(Theme.accent)
         if showsCount {
             Text("\(progress.completedSteps) von \(progress.totalSteps) Schritten")
-                .font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
+                .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
         }
         TimelineView(.periodic(from: .now, by: 2)) { _ in
             if PhotoKitLibrary.deadline.slowFor() != nil {
                 Label("Fotos antwortet gerade nicht. Albumist wartet noch.", systemImage: "hourglass")
-                    .font(.footnote).foregroundStyle(.secondaryText)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("execution.photosSlow")
             }
@@ -416,12 +416,12 @@ struct ResultCard: View {
                             Text("\(failed) Schritte konnten nicht ausgeführt werden. Die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
                         }
                     }
-                    .font(.footnote).foregroundStyle(.secondaryText)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .multilineTextAlignment(.center)
                 }
                 if summary.unavailableAssets > 0 && !isUndo {
                     Text("\(summary.unavailableAssets) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
-                        .font(.footnote).foregroundStyle(.secondaryText)
+                        .font(.footnote).foregroundStyle(.noteText)
                         .multilineTextAlignment(.center)
                 }
             }
@@ -439,7 +439,7 @@ struct ResultCard: View {
                 .buttonStyle(PrimaryButtonStyle())
                 if photosDidNotOpen {
                     Text("Die Fotos-App ließ sich nicht öffnen. Öffne sie bitte selbst vom Home-Bildschirm.")
-                        .font(.footnote).foregroundStyle(.secondaryText)
+                        .font(.footnote).foregroundStyle(.noteText)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                 }
@@ -452,7 +452,7 @@ struct ResultCard: View {
                             Text("Deine neuen Alben findest du in Fotos unter Sammlungen › Alben, im Ordner „\(root)“.")
                         }
                     }
-                    .font(.footnote).foregroundStyle(.secondaryText)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
                 }
@@ -483,7 +483,7 @@ struct ResultCard: View {
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(askingUndo)
                 Text("Auch später möglich unter Einstellungen › Verlauf und Rückgängig. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben.")
-                    .font(.footnote).foregroundStyle(.secondaryText)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
             }
@@ -559,9 +559,9 @@ struct FullAccessCard: View {
         Card {
             Label("Voller Zugriff nötig", systemImage: "photo.on.rectangle.angled").font(.headline)
             Text("Albumist kann Alben nur anlegen, wenn du alle Fotos freigibst. Gerade sind nur ausgewählte Fotos freigegeben.")
-                .font(.subheadline).foregroundStyle(.secondaryText)
+                .font(.subheadline).foregroundStyle(.noteText)
             Text("Einstellungen › Apps › Albumist › Fotos › Voller Zugriff")
-                .font(.footnote).foregroundStyle(.secondaryText)
+                .font(.footnote).foregroundStyle(.noteText)
             if let url = URL(string: UIApplication.openSettingsURLString) {
                 Button("Einstellungen öffnen") { openURL(url) }
                     .buttonStyle(PrimaryButtonStyle())
@@ -582,7 +582,7 @@ struct UnlockCard: View {
         Card {
             Label("Albumist freischalten", systemImage: "lock.open").font(.headline)
             Text("Für diese Auswahl brauchst du \(albumsInPlan) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums). Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.")
-                .font(.subheadline).foregroundStyle(.secondaryText)
+                .font(.subheadline).foregroundStyle(.noteText)
             // Without a price: "Preis wird geladen …", not tappable (plugin review W7).
             UnlockButton(prominent: true)
             // Text buttons with a 44 pt tap area (design review W9: the bare text was ~20 pt).
@@ -604,10 +604,10 @@ struct UnlockCard: View {
                 Button("Die ersten \(purchases.remainingFreeAlbums) jetzt kostenlos anlegen", action: onLimit)
                     .buttonStyle(SecondaryButtonStyle())
                 Text("Die übrigen Vorschläge bleiben offen und laufen dir nicht weg.")
-                    .font(.footnote).foregroundStyle(.secondaryText)
+                    .font(.footnote).foregroundStyle(.noteText)
             } else {
                 Text("Tipp: Du kannst auch weniger Vorschläge auf einmal auswählen.")
-                    .font(.footnote).foregroundStyle(.secondaryText)
+                    .font(.footnote).foregroundStyle(.noteText)
             }
             if let error = purchases.lastError {
                 ErrorNote(text: error)
@@ -675,13 +675,13 @@ private struct PlanAlbumRow: View {
                 Text(album.title).font(.body.weight(.medium)).compactLineLimit(2)
                 if !album.folderPath.isEmpty {
                     Text(album.folderPath.joined(separator: " › "))
-                        .font(.footnote).foregroundStyle(.secondaryText).compactLineLimit(2)
+                        .font(.footnote).foregroundStyle(.noteText).compactLineLimit(2)
                 }
             }
             Spacer(minLength: Theme.Spacing.s)
             VStack(alignment: .trailing, spacing: 2) {
                 badge
-                Text("\(album.addedCount) Fotos").font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
+                Text("\(album.addedCount) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
             }
         }
         .accessibilityElement(children: .combine)
@@ -703,7 +703,7 @@ private struct PlanAlbumRow: View {
         if album.isNew {
             Text("Neu").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)
         } else {
-            Text("Ergänzt").font(.caption.weight(.semibold)).foregroundStyle(.secondaryText)
+            Text("Ergänzt").font(.caption.weight(.semibold)).foregroundStyle(.noteText)
         }
     }
 }

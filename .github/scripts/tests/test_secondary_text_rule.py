@@ -1,5 +1,5 @@
 """Unit tests for .github/scripts/secondary_text_rule.py, the rule over the app's views, and the
-contrast of `Theme.secondaryText` on the app's backgrounds (review P3-14: small text in the
+contrast of `Theme.noteText` and `Theme.secondaryText` on the app's backgrounds (review P3-14: small text in the
 system grey is 3.4:1 on a white card, WCAG 1.4.3 asks 4.5:1)."""
 import os
 import pathlib
@@ -45,8 +45,9 @@ class SecondaryTextRuleTests(unittest.TestCase):
         src = 'Text("a")\n    .font(selected ? .subheadline.weight(.semibold) : .subheadline)\n    .foregroundStyle(.secondary)\n'
         self.assertEqual(self.lines(src), [3])
 
-    def test_the_darker_grey_passes(self):
-        self.assertEqual(self.lines('Text("a").font(.footnote).foregroundStyle(.secondaryText)\n'), [])
+    def test_the_theme_greys_pass(self):
+        self.assertEqual(self.lines('Text("a").font(.footnote).foregroundStyle(.noteText)\n'), [])
+        self.assertEqual(self.lines('Text("a").font(.footnote).foregroundStyle(Theme.noteText)\n'), [])
         self.assertEqual(self.lines('Text("a").font(.footnote).foregroundStyle(Theme.secondaryText)\n'), [])
 
     def test_grey_text_in_a_large_font_is_not_this_rules(self):
@@ -76,8 +77,8 @@ class SecondaryTextRuleTests(unittest.TestCase):
     def test_the_shared_style_uses_the_theme_grey(self):
         text = THEME.read_text(encoding="utf-8")
         shared = re.search(r"extension ShapeStyle where Self == Color \{[^}]*"
-                           r"static var secondaryText: Color \{ Theme\.secondaryText \}", text)
-        self.assertIsNotNone(shared, "Theme.swift has no `.secondaryText` style that returns Theme.secondaryText")
+                           r"static var noteText: Color \{ Theme\.noteText \}", text)
+        self.assertIsNotNone(shared, "Theme.swift has no `.noteText` style that returns Theme.noteText")
 
 
 # WCAG 2 contrast (sRGB, alpha composited).
@@ -118,6 +119,7 @@ BACKGROUNDS = {
         "card": _hex("FFFFFF"),
         "grouped background": _hex("EBEBF0"),
         "chip on a card": _over(_FILL, 0.20, _hex("FFFFFF")),
+        "chip on the grouped background": _over(_FILL, 0.20, _hex("EBEBF0")),
     },
     "dark": {
         "card": _hex("1C1C1E"),
@@ -156,8 +158,50 @@ def theme_secondary_text():
     }
 
 
+def theme_note_text():
+    """The four variants of `Theme.noteText`, read from Theme.swift."""
+    text = THEME.read_text(encoding="utf-8")
+    found = re.search(r"static let noteText = adaptive\(\s*light: \(([^)]*)\),\s*dark: \(([^)]*)\),\s*"
+                      r"lightHigh: \(([^)]*)\),\s*darkHigh: \(([^)]*)\)\)", text)
+    if not found:
+        raise AssertionError("Theme.noteText no longer reads as adaptive(light:dark:lightHigh:darkHigh:)")
+    light, dark, light_high, dark_high = (tuple(float(v) for v in group.split(",")) for group in found.groups())
+    return {"light": light, "light, Increase Contrast": light_high,
+            "dark": dark, "dark, Increase Contrast": dark_high}
+
+
 class ContrastTests(unittest.TestCase):
-    def test_the_theme_grey_holds_4_5_to_1_on_every_background(self):
+    def test_the_note_grey_holds_4_5_to_1_on_every_background(self):
+        """Fails when someone lightens `Theme.noteText` below 4.5:1 on any background it is used on."""
+        colours = theme_note_text()
+        for mode, backgrounds in BACKGROUNDS.items():
+            for name, background in backgrounds.items():
+                with self.subTest(mode=mode, background=name):
+                    self.assertGreaterEqual(contrast(colours[mode], background), 4.5)
+
+    def test_the_note_grey_stays_lighter_than_the_wash_grey(self):
+        """The hierarchy: the note grey sits between the system grey and `secondaryText`."""
+        note, wash = theme_note_text(), theme_secondary_text()
+        for mode, backgrounds in BACKGROUNDS.items():
+            for name, background in backgrounds.items():
+                with self.subTest(mode=mode, background=name):
+                    self.assertLess(contrast(note[mode], background), contrast(wash[mode], background))
+
+    def test_increase_contrast_makes_the_note_grey_clearly_stronger(self):
+        note = theme_note_text()
+        for mode, background in (("light", _hex("FFFFFF")), ("dark", _hex("1C1C1E"))):
+            with self.subTest(mode=mode):
+                self.assertGreater(contrast(note[f"{mode}, Increase Contrast"], background),
+                                   contrast(note[mode], background) + 1)
+
+    def test_the_note_grey_is_read_from_the_source(self):
+        note = theme_note_text()
+        self.assertEqual(note["light"], (0.39, 0.39, 0.42))
+        self.assertEqual(note["dark"], (0.67, 0.67, 0.70))
+        self.assertAlmostEqual(contrast(note["light"], _hex("FFFFFF")), 5.92, delta=0.01)
+        self.assertAlmostEqual(contrast(note["dark"], _hex("1C1C1E")), 7.45, delta=0.01)
+
+    def test_the_wash_grey_holds_4_5_to_1_on_every_background(self):
         colours = theme_secondary_text()
         self.assertEqual(len(colours), 4)
         for mode, backgrounds in BACKGROUNDS.items():
@@ -165,7 +209,7 @@ class ContrastTests(unittest.TestCase):
                 with self.subTest(mode=mode, background=name):
                     self.assertGreaterEqual(contrast(colours[mode], background), 4.5)
 
-    def test_the_theme_grey_is_read_from_the_source(self):
+    def test_the_wash_grey_is_read_from_the_source(self):
         colours = theme_secondary_text()
         self.assertEqual(colours["light"], (0.27, 0.27, 0.30))
         self.assertEqual(colours["dark"], (0.78, 0.78, 0.81))

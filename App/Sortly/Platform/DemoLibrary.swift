@@ -349,14 +349,14 @@ struct DemoLibraryCard: View {
         Card {
             Label("Demo", systemImage: "wand.and.stars").font(.headline)
             if demo.isDone {
-                Text("Beispiel-Mediathek ist angelegt.").font(.subheadline).foregroundStyle(.secondaryText)
+                Text("Beispiel-Mediathek ist angelegt.").font(.subheadline).foregroundStyle(.noteText)
             } else if demo.isSeeding {
                 ProgressView(value: Double(demo.created), total: Double(max(demo.total, 1)))
                 Text("Beispielfotos werden angelegt: \(demo.created) von \(demo.total)")
-                    .font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit()
+                    .font(.subheadline).foregroundStyle(.noteText).monospacedDigit()
             } else {
                 Text("Legt etwa \(demo.expectedCount) Beispielfotos mit Reisen, Screenshots und Dokumenten an. Nur im Simulator.")
-                    .font(.subheadline).foregroundStyle(.secondaryText)
+                    .font(.subheadline).foregroundStyle(.noteText)
                 Button("Beispiel-Mediathek anlegen") {
                     Task { await demo.seed(then: model) }
                 }

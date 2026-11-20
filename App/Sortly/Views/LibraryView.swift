@@ -40,7 +40,7 @@ struct LibraryView: View {
                         Text("Fotos werden zusammengestellt …")
                     }
                     .font(.footnote)
-                    .foregroundStyle(.secondaryText)
+                    .foregroundStyle(.noteText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("library.preparing")
@@ -95,10 +95,10 @@ struct LibraryView: View {
         if bucket == .suggestions {
             // Numbers as plural strings (design review W5: "1 Fotos und Videos").
             Text("\(model.openProposals.count) Vorschläge für \(members.count) Fotos und Videos")
-                .font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
+                .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
         } else {
             Text("\(members.count) Fotos und Videos")
-                .font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
+                .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
         }
 
         if bucket == .suggestions {

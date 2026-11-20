@@ -389,7 +389,7 @@ struct ThumbnailGrid: View {
             Text("Vorschau ausgeblendet").font(.subheadline)
                 .multilineTextAlignment(.center)
         }
-        .foregroundStyle(.secondaryText)
+        .foregroundStyle(.noteText)
         .frame(maxWidth: .infinity, minHeight: 120)
         .padding(Theme.Spacing.m)
         .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))

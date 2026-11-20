@@ -133,15 +133,15 @@ struct PlanReceiptView: View {
                 .font(.headline)
                 if let undo, !receipt.isUndo {
                     Text("Umgesetzt am \(receipt.startedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.subheadline).foregroundStyle(.secondaryText)
+                        .font(.subheadline).foregroundStyle(.noteText)
                     Text("Zurückgenommen am \(undo.startedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.subheadline).foregroundStyle(.secondaryText)
+                        .font(.subheadline).foregroundStyle(.noteText)
                 } else {
                     Text(receipt.startedAt.formatted(date: .long, time: .shortened))
-                        .font(.subheadline).foregroundStyle(.secondaryText)
+                        .font(.subheadline).foregroundStyle(.noteText)
                 }
                 Text("Alle Zahlen hat Albumist danach in deiner Mediathek nachgeprüft.")
-                    .font(.footnote).foregroundStyle(.secondaryText)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.vertical, Theme.Spacing.xs)
@@ -206,11 +206,11 @@ struct PlanReceiptView: View {
             }
             ForEach(StepProblemText.texts(receipt.problems), id: \.self) { text in
                 Label(text, systemImage: "exclamationmark.triangle")
-                    .font(.subheadline).foregroundStyle(.secondaryText)
+                    .font(.subheadline).foregroundStyle(.noteText)
             }
             if receipt.unconfirmedSteps > 0 {
                 Text("\(receipt.unconfirmedSteps) Schritte konnte Albumist in der Mediathek nicht nachprüfen. Sie zählen hier nicht mit.")
-                    .font(.subheadline).foregroundStyle(.secondaryText)
+                    .font(.subheadline).foregroundStyle(.noteText)
             }
             if canRepair(receipt) {
                 Button {
@@ -327,11 +327,11 @@ struct PlanReceiptView: View {
                 if removed > 0 { row("minus.rectangle", "Aus Alben genommen", removed) }
                 if partlyUndone {
                     Text("Nicht alles ließ sich zurücknehmen. Du kannst es noch einmal versuchen oder es so lassen.")
-                        .font(.subheadline).foregroundStyle(.secondaryText)
+                        .font(.subheadline).foregroundStyle(.noteText)
                     // Why, in words the user can act on (first iPhone test, 15.11.).
                     ForEach(StepProblemText.texts(undo.problems), id: \.self) { text in
                         Label(text, systemImage: "exclamationmark.triangle")
-                            .font(.subheadline).foregroundStyle(.secondaryText)
+                            .font(.subheadline).foregroundStyle(.noteText)
                     }
                     Button(role: .destructive) { askUndo() } label: {
                         Text("Rest rückgängig machen").checkingBeside(askingUndo)
@@ -340,7 +340,7 @@ struct PlanReceiptView: View {
                         .accessibilityIdentifier("receipt.undoRest")
                 } else if !undo.isComplete {
                     Text("Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist.")
-                        .font(.footnote).foregroundStyle(.secondaryText)
+                        .font(.footnote).foregroundStyle(.noteText)
                 }
             } header: {
                 Text("Rückgängig gemacht")
@@ -423,22 +423,22 @@ private struct ReceiptAlbumRow: View {
                 Text(title).font(.body.weight(.medium)).compactLineLimit(2)
                 if !album.folderPath.isEmpty {
                     Text(album.folderPath.joined(separator: " › "))
-                        .font(.footnote).foregroundStyle(.secondaryText).compactLineLimit(2)
+                        .font(.footnote).foregroundStyle(.noteText).compactLineLimit(2)
                 }
                 if album.failed {
                     Text("Nicht vollständig umgesetzt").font(.footnote).foregroundStyle(Theme.tint(for: .documents))
                 } else if album.unconfirmed {
-                    Text("Nicht nachgeprüft").font(.footnote).foregroundStyle(.secondaryText)
+                    Text("Nicht nachgeprüft").font(.footnote).foregroundStyle(.noteText)
                 }
             }
             Spacer(minLength: Theme.Spacing.s)
             VStack(alignment: .trailing, spacing: 2) {
                 badge
                 if album.added > 0 {
-                    Text("+\(album.added) Fotos").font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
+                    Text("+\(album.added) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
                 }
                 if album.removed > 0 {
-                    Text("−\(album.removed) Fotos").font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
+                    Text("−\(album.removed) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
                 }
             }
         }
@@ -466,13 +466,13 @@ private struct ReceiptAlbumRow: View {
         case .created:
             Text("Neu").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)
         case .adopted:
-            Text("Übernommen").font(.caption.weight(.semibold)).foregroundStyle(.secondaryText)
+            Text("Übernommen").font(.caption.weight(.semibold)).foregroundStyle(.noteText)
         case .extended:
-            Text("Ergänzt").font(.caption.weight(.semibold)).foregroundStyle(.secondaryText)
+            Text("Ergänzt").font(.caption.weight(.semibold)).foregroundStyle(.noteText)
         case .reduced:
-            Text("Fotos herausgenommen").font(.caption.weight(.semibold)).foregroundStyle(.secondaryText)
+            Text("Fotos herausgenommen").font(.caption.weight(.semibold)).foregroundStyle(.noteText)
         case .deleted:
-            Text("Entfernt").font(.caption.weight(.semibold)).foregroundStyle(.secondaryText)
+            Text("Entfernt").font(.caption.weight(.semibold)).foregroundStyle(.noteText)
         }
     }
 }

@@ -2,9 +2,11 @@
 
 The system grey (`.secondary`, `secondaryLabel`) reaches 3.4:1 on a white card and 3.1:1 on
 the grouped background in light mode; WCAG 1.4.3 asks 4.5:1 for text below 18 pt, and the
-small styles are all below it. `Theme.secondaryText` (`.foregroundStyle(.secondaryText)`)
-holds 8.5:1 or more on every card and background of the app, in light and dark mode
-(`tests/test_secondary_text_rule.py` computes it from the colours in Theme.swift).
+small styles are all below it. `Theme.noteText` (`.foregroundStyle(.noteText)`) holds 4.6:1 or
+more on every card, list row, grouped background and grey fill chip, in light and dark mode and
+with Increase Contrast, and stays lighter than the primary text (`tests/test_secondary_text_rule.py`
+computes it from the colours in Theme.swift). On the photo colour wash the darker
+`Theme.secondaryText` is used instead.
 
 The rule reads every `.foregroundStyle(…)` / `.foregroundColor(…)` that uses `.secondary`,
 `Color.secondary` or `secondaryLabel`, together with its modifier chain (the line it stands on,
@@ -20,7 +22,7 @@ import re
 import sys
 
 FOREGROUND = re.compile(r"\.foreground(?:Style|Color)\(")
-# `.secondary`, `Color.secondary`, `.secondaryLabel`; not `.secondaryText` or `.secondarySystemFill`.
+# `.secondary`, `Color.secondary`, `.secondaryLabel`; not `.secondaryText`, `.noteText` or `.secondarySystemFill`.
 SYSTEM_GREY = re.compile(r"(?<![\w])(?:Color)?\.secondary(?:Label)?\b")
 # Also `.font(selected ? .subheadline.weight(.semibold) : .subheadline)`.
 SMALL_FONT = re.compile(r"\.font\([^)]*?(?<![\w])\.(?:footnote|caption2?|subheadline)\b")
@@ -87,7 +89,7 @@ def main(argv):
     root = argv[1] if len(argv) > 1 else "."
     found = offenders(root)
     for path, line, code in found:
-        print(f"SMALL_SYSTEM_GREY {path}:{line} | {code} | use .foregroundStyle(.secondaryText)")
+        print(f"SMALL_SYSTEM_GREY {path}:{line} | {code} | use .foregroundStyle(.noteText)")
     print(f"SECONDARY_TEXT_RULE {len(found)} small texts in the system grey")
     return 1 if found else 0
 

@@ -9,10 +9,14 @@ import SortlyCore
 ///   promise). With "iPhone-Speicher optimieren" Photos often keeps only a small preview of an
 ///   older photo; stretched over a card it would be a big blurry picture (design rule 7).
 /// - Sharp enough: the image brings at least 70 % of the pixels it fills, per side, at the size
-///   the cover is drawn (`ThumbnailRequest.isSharp`).
+///   the cover is drawn (`ThumbnailRequest.isSharp`). Only sharp covers are kept, in a store of
+///   their own apart from the grids' thumbnails (`ThumbnailCache.keepCover`).
 /// - At most `CoverLoader.attempts` ids are tried, one after the other, each asked for at the
 ///   drawn size; Photos is asked off the main thread (`ThumbnailRequest`), the asset lookups go
 ///   through the cache's batched lookup, and leaving the screen cancels what is still asked.
+/// - Photos does not answer (busy, as right after "Anlegen"): nothing is known, so nothing is
+///   told or counted; the cover asks again after a second or two, a few times
+///   (`CoverLoader.retryDelays`), and once more whenever it is shown again.
 /// - None sharp: a calm surface in the colours of the first small preview there was (four
 ///   colours, never the picture), or a soft accent tint when there was none; the same tint while
 ///   a photo loads, never an empty grey. Counted for the diagnostic report (`CoverStats`).
@@ -20,9 +24,13 @@ import SortlyCore
 /// - `placeholderSymbol`: an SF Symbol on the calm placeholder once it is clear there is no
 ///   sharp photo (a suggestion of screenshots or documents has no cover candidates at all,
 ///   `PreviewPicker.coverCandidates`), so the card looks meant that way, not empty.
-/// - `onOutcome`: told once the cover knows whether it shows a sharp photo, for a card that
-///   turns smaller when there is none ("ein anderes Foto oder die kleine Karte"); not while the
-///   preview is hidden (nothing is loaded then).
+/// - `onOutcome`: told once per `ids` whether the cover found a sharp photo, for a card that
+///   turns smaller when there is none ("ein anderes Foto oder die kleine Karte"). Only the first
+///   answer counts (`CoverOutcomeLatch`): the smaller card draws its cover at another size,
+///   where the same photo may count as sharp, and it is not told again then, nor when it comes
+///   back into view; a cover made anew (a lazy row scrolled far away and back) tells it again,
+///   so the card keeps its decision in its own state. Not told while the preview is hidden or
+///   while Photos does not answer.
 /// - Crop ("Bildausschnitt", `CoverLoader.focus`): screenshots keep their top; a photo cut at top
 ///   and bottom keeps its upper part (portraits centred a third down, where faces and heads are,
 ///   landscapes 40 % down); cut at the sides, around the middle. Cheap: no image analysis.
@@ -39,6 +47,7 @@ struct CoverPhoto: View {
     @Environment(\.displayScale) private var displayScale
     @State private var width: CGFloat = 0
     @State private var loaded: CoverLoader.Loaded?
+    @State private var latch = CoverOutcomeLatch()
 
     init(ids: [AssetID], aspectRatio: CGFloat = 4.0 / 3.0, cornerRadius: CGFloat = Theme.Radius.card, hidesPreview: Bool = false,
          placeholderSymbol: String? = nil, onOutcome: (@MainActor (CoverOutcome) -> Void)? = nil) {
@@ -78,46 +87,82 @@ struct CoverPhoto: View {
             .task(id: request) {
                 guard let request else {
                     // No photo to try at all (only screenshots or documents): known at once.
-                    if !hidesPreview && candidates.isEmpty { onOutcome?(.noSharpPhoto) }
+                    if !hidesPreview && candidates.isEmpty { tell(.noSharpPhoto, for: []) }
                     return
                 }
                 let started = ContinuousClock.now
-                let result = await CoverLoader.load(request)
-                guard !Task.isCancelled else { return }
-                // A cover from the cache is there at once; one that took a moment fades in
-                // (a cross-fade, calm with Reduce Motion too).
-                if ContinuousClock.now - started > .milliseconds(60) {
-                    withAnimation(.easeOut(duration: 0.2)) { loaded = result }
-                } else {
-                    loaded = result
+                var waits = CoverLoader.retryDelays[...]
+                while true {
+                    let result = await CoverLoader.load(request)
+                    guard !Task.isCancelled else { return }
+                    show(result, since: started)
+                    if let counted = result.counted, let outcome = result.outcome {
+                        CoverStats.note(counted, for: request)
+                        tell(outcome, for: request.ids)
+                        return
+                    }
+                    // Photos did not answer: asked again a little later, a few times.
+                    guard let wait = waits.popFirst() else { return }
+                    try? await Task.sleep(for: wait)
+                    guard !Task.isCancelled else { return }
                 }
-                onOutcome?(result.outcome)
             }
             .accessibilityHidden(true)
     }
 
+    /// A cover from the cache is there at once; one that took a moment fades in (a cross-fade,
+    /// calm with Reduce Motion too).
+    private func show(_ result: CoverLoader.Loaded, since started: ContinuousClock.Instant) {
+        if ContinuousClock.now - started > .milliseconds(60) {
+            withAnimation(.easeOut(duration: 0.2)) { loaded = result }
+        } else {
+            loaded = result
+        }
+    }
+
+    /// Tells the card, once per ids (`CoverOutcomeLatch`).
+    private func tell(_ outcome: CoverOutcome, for ids: [AssetID]) {
+        guard let told = latch.take(outcome, for: ids) else { return }
+        onOutcome?(told)
+    }
+
     /// The loaded result, when it belongs to these ids (a reused view that got another
     /// suggestion's ids does not show the old photo while the new one loads).
-    private var current: CoverLoader.Shown? {
+    private var current: CoverLoader.Loaded? {
         guard let loaded, loaded.ids == candidates else { return nil }
-        return loaded.shown
+        return loaded
     }
 
     @ViewBuilder private var content: some View {
         if hidesPreview {
             HiddenCoverPreview()
-        } else if case .photo(let image, let focus)? = current {
+        } else if let current, case .photo(let image, let focus) = current.shown {
             GeometryReader { proxy in
                 CroppedCover(image: image, focus: focus, size: proxy.size)
             }
             .transition(.opacity)
-        } else if case .placeholder(let colors)? = current {
-            CoverPlaceholder(colors: colors, symbol: placeholderSymbol)
+        } else if let current, case .placeholder(let colors) = current.shown {
+            // The symbol only once it is clear that no photo comes (not while Photos is silent).
+            CoverPlaceholder(colors: colors, symbol: current.outcome == nil ? nil : placeholderSymbol)
         } else {
             // Loading, or nothing to load: the same calm surface, the symbol only once it is
             // clear that no photo comes (no flash of it while a photo loads).
             CoverPlaceholder(colors: [], symbol: candidates.isEmpty ? placeholderSymbol : nil)
         }
+    }
+}
+
+/// Tells a card its cover's outcome once per ids (`CoverPhoto`'s `onOutcome`): a card that turns
+/// smaller when no photo is sharp would otherwise be told again at its new size, perhaps the
+/// other way round, and back and forth.
+struct CoverOutcomeLatch {
+    private var told: [AssetID]?
+
+    /// `outcome` when nothing was told for `ids` yet, otherwise nil.
+    mutating func take(_ outcome: CoverOutcome, for ids: [AssetID]) -> CoverOutcome? {
+        guard told != ids else { return nil }
+        told = ids
+        return outcome
     }
 }
 
@@ -208,12 +253,29 @@ enum CoverOutcome: Equatable, Sendable {
     case noSharpPhoto
 }
 
+/// Where `CoverLoader` gets its photos: `ThumbnailCache` (Photos, on the device only); the tests
+/// give their own.
+@MainActor
+protocol CoverSource {
+    func cover(for id: AssetID, pixels: CGSize) async -> CoverFetch
+    /// Looks the ids up in one batch before they are asked for one by one.
+    func lookUp(_ ids: [AssetID]) async
+}
+
+extension ThumbnailCache: CoverSource {}
+
 /// Loads covers for `CoverPhoto`: the first of the candidates that is sharp at the drawn size.
 @MainActor
 enum CoverLoader {
     /// How many ids a cover tries at most: each one is a request to Photos, and a suggestion whose
     /// first photos are all only in iCloud has little chance with its next ones.
     static let attempts = 4
+
+    /// The waits before a cover asks again when Photos did not answer: three more tries, the
+    /// first after a second (each try waits for Photos up to its own limit,
+    /// `PhotoKitLibrary.imageFetchLimit`). Then the cover keeps its calm surface until it is
+    /// shown again.
+    static let retryDelays: [Duration] = [.seconds(1), .seconds(2), .seconds(2)]
 
     struct Request: Equatable, Sendable {
         var ids: [AssetID]
@@ -224,42 +286,56 @@ enum CoverLoader {
     struct Loaded {
         var ids: [AssetID]
         var shown: Shown
+        /// What the diagnostic report counts (`CoverStats`); nil while Photos did not answer
+        /// for a photo: nothing is known then, and the cover asks again.
+        var counted: CoverStats.Outcome?
 
-        var outcome: CoverOutcome {
-            if case .photo = shown { return .sharp }
-            return .noSharpPhoto
+        /// What the card is told; nil while nothing is known.
+        var outcome: CoverOutcome? {
+            switch counted {
+            case .sharp?, .sharpLater?: .sharp
+            case .onlyBlurry?, .nothing?: .noSharpPhoto
+            case nil: nil
+            }
         }
     }
 
     enum Shown {
         /// A sharp photo and where its crop is centred.
         case photo(UIImage, focus: UnitPoint)
-        /// No sharp photo: the placeholder, in the four colours of the first small preview there
-        /// was (the cover's own, when it had one).
+        /// No sharp photo (yet): the placeholder, in the four colours of the first small preview
+        /// there was (the cover's own, when it had one).
         case placeholder([Color])
     }
 
-    static func load(_ request: Request) async -> Loaded {
+    static func load(_ request: Request, from source: any CoverSource = ThumbnailCache.shared) async -> Loaded {
         var blurry: UIImage?
-        for (index, id) in request.ids.enumerated() {
+        var unanswered = false
+        candidates: for (index, id) in request.ids.enumerated() {
             guard !Task.isCancelled else { break }
             // The first one was not sharp (or not there): the others are looked up together,
             // one wait for Photos instead of one for each.
-            if index == 1, request.ids.count > 2 { await ThumbnailCache.shared.lookUp(Array(request.ids.dropFirst())) }
-            guard let cover = await ThumbnailCache.shared.cover(for: id, pixels: request.pixels) else { continue }
-            if Task.isCancelled { return Loaded(ids: request.ids, shown: .placeholder([])) }
-            if ThumbnailRequest.isSharp(cover.image, for: request.pixels) {
-                CoverStats.note(index == 0 ? .sharp : .sharpLater, for: request)
-                let crop = Self.focus(imageSize: cover.image.size, screenshot: cover.screenshot, target: request.pixels)
-                return Loaded(ids: request.ids, shown: .photo(cover.image, focus: crop))
+            if index == 1, request.ids.count > 2 { await source.lookUp(Array(request.ids.dropFirst())) }
+            switch await source.cover(for: id, pixels: request.pixels) {
+            case .image(let image, let screenshot):
+                if Task.isCancelled { break candidates }
+                if ThumbnailRequest.isSharp(image, for: request.pixels) {
+                    let crop = Self.focus(imageSize: image.size, screenshot: screenshot, target: request.pixels)
+                    return Loaded(ids: request.ids, shown: .photo(image, focus: crop), counted: index == 0 ? .sharp : .sharpLater)
+                }
+                if blurry == nil { blurry = image }
+            case .missing:
+                continue candidates
+            case .noAnswer:
+                // Photos is busy: the next ones would only wait for it too.
+                unanswered = true
+                break candidates
             }
-            if blurry == nil { blurry = cover.image }
         }
-        guard !Task.isCancelled else { return Loaded(ids: request.ids, shown: .placeholder([])) }
-        CoverStats.note(blurry == nil ? .nothing : .onlyBlurry, for: request)
         var colors: [Color] = []
-        if let blurry { colors = await palette(of: blurry) }
-        return Loaded(ids: request.ids, shown: .placeholder(colors))
+        if let blurry, !Task.isCancelled { colors = await palette(of: blurry) }
+        guard !unanswered, !Task.isCancelled else { return Loaded(ids: request.ids, shown: .placeholder(colors), counted: nil) }
+        return Loaded(ids: request.ids, shown: .placeholder(colors), counted: blurry == nil ? .nothing : .onlyBlurry)
     }
 
     /// Where the crop of a cover is centred, as a share of the image ("Bildausschnitt"; faces and

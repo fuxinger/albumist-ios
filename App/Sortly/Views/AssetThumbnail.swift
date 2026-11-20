@@ -11,23 +11,33 @@ final class ThumbnailCache {
     static let shared = ThumbnailCache()
     private let manager = ThumbnailRequest.Manager(PHCachingImageManager())
     private let cache = NSCache<NSString, UIImage>()
+    /// The covers of the photo cards (`CoverPhoto`), apart from the thumbnails: a cover across
+    /// the page is about 3 MB at 3x, and twenty of them in the thumbnails' store would push out
+    /// hundreds of the grids' thumbnails. Only sharp covers are kept (`keepCover`).
+    private let covers = NSCache<NSString, CachedCover>()
     private let assets = NSCache<NSString, PHAsset>()
 
+    static let thumbnailCostLimit = 80 * 1024 * 1024
+    static let coverCostLimit = 24 * 1024 * 1024
+
     init() {
-        cache.totalCostLimit = 80 * 1024 * 1024
+        cache.totalCostLimit = Self.thumbnailCostLimit
         cache.countLimit = 2000
+        covers.totalCostLimit = Self.coverCostLimit
+        covers.countLimit = 120
         assets.countLimit = 6000
-        // On a memory warning the thumbnails go at once (P4-06), and what the image manager
-        // keeps; each comes again from Photos when it is shown.
+        // On a memory warning the thumbnails and covers go at once (P4-06), and what the image
+        // manager keeps; each comes again from Photos when it is shown.
         MemoryPressure.shared.register("thumbnails", owner: self) {
             $0.cache.removeAllObjects()
+            $0.covers.removeAllObjects()
             $0.assets.removeAllObjects()
             $0.manager.value.stopCachingImagesForAllAssets()
         }
     }
 
     func image(for id: AssetID, side: CGFloat) async -> UIImage? {
-        let key = "\(id.rawValue)#\(Int(side))" as NSString
+        let key = Self.thumbnailKey(id, side)
         if let cached = cache.object(forKey: key) { return cached }
         guard let asset = await photoAsset(for: id) else { return nil }
         let scale = UITraitCollection.current.displayScale
@@ -38,15 +48,62 @@ final class ThumbnailCache {
     /// A cover (`CoverPhoto`): the photo at `pixels` (filled, cropped later), only from what is
     /// on the device, and whether it is a screenshot (a cropped one keeps its top). The image can
     /// be only the small preview Photos keeps of a photo whose original is in iCloud:
-    /// `ThumbnailRequest.isSharp` says whether it is sharp at that size. `nil` when Photos does
-    /// not know the photo (deleted) or has nothing of it on the device.
-    func cover(for id: AssetID, pixels: CGSize) async -> (image: UIImage, screenshot: Bool)? {
-        guard pixels.width >= 1, pixels.height >= 1, let asset = await photoAsset(for: id) else { return nil }
+    /// `ThumbnailRequest.isSharp` says whether it is sharp at that size, and only a sharp one is
+    /// kept. `.missing` when Photos does not know the photo (deleted) or has nothing of it on the
+    /// device; `.noAnswer` when Photos did not answer in time (it is busy, as right after
+    /// "Anlegen"): nothing is known then, and the cover asks again a little later.
+    func cover(for id: AssetID, pixels: CGSize) async -> CoverFetch {
+        guard pixels.width >= 1, pixels.height >= 1 else { return .missing }
+        // A kept cover needs no word from Photos: it shows even while Photos is busy.
+        if let kept = cachedCover(for: id, pixels: pixels) { return .image(kept.image, screenshot: kept.screenshot) }
+        let asset: ThumbnailRequest.Asset
+        switch await lookUpAsset(id) {
+        case .found(let found): asset = found
+        case .unknown: return .missing
+        case .noAnswer: return .noAnswer
+        }
         let screenshot = asset.value.mediaSubtypes.contains(.photoScreenshot)
-        let key = "\(id.rawValue)#\(Int(pixels.width))x\(Int(pixels.height))" as NSString
-        if let cached = cache.object(forKey: key) { return (cached, screenshot) }
-        guard let image = await load(asset, pixels: pixels, key: key) else { return nil }
-        return (image, screenshot)
+        guard let image = await ThumbnailRequest.load(asset, size: pixels, manager: manager) else {
+            return Task.isCancelled ? .noAnswer : .missing
+        }
+        // A cancelled request is not kept: what came back may not be the prepared image.
+        if !Task.isCancelled { keepCover(image, screenshot: screenshot, for: id, pixels: pixels) }
+        return .image(image, screenshot: screenshot)
+    }
+
+    /// Keeps a cover for its id and size, in the covers' own store, only when it is sharp there:
+    /// a blurry preview is asked for again the next time (the photo may be on the device by
+    /// then, and the cover then shows it). Returns whether it was kept.
+    @discardableResult
+    func keepCover(_ image: UIImage, screenshot: Bool, for id: AssetID, pixels: CGSize) -> Bool {
+        guard ThumbnailRequest.isSharp(image, for: pixels) else { return false }
+        let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
+        covers.setObject(CachedCover(image: image, screenshot: screenshot), forKey: Self.coverKey(id, pixels), cost: cost)
+        return true
+    }
+
+    /// The kept cover of `id` at `pixels`, if there is one.
+    func cachedCover(for id: AssetID, pixels: CGSize) -> CachedCover? {
+        covers.object(forKey: Self.coverKey(id, pixels))
+    }
+
+    /// The kept thumbnail of `id` at `side` points, if there is one (for the tests: covers never
+    /// land here).
+    func cachedThumbnail(for id: AssetID, side: CGFloat) -> UIImage? {
+        cache.object(forKey: Self.thumbnailKey(id, side))
+    }
+
+    /// Keeps a thumbnail as `image(for:side:)` does (for the tests).
+    func keepThumbnail(_ image: UIImage, for id: AssetID, side: CGFloat) {
+        keep(image, key: Self.thumbnailKey(id, side))
+    }
+
+    private static func thumbnailKey(_ id: AssetID, _ side: CGFloat) -> NSString {
+        "\(id.rawValue)#\(Int(side))" as NSString
+    }
+
+    private static func coverKey(_ id: AssetID, _ pixels: CGSize) -> NSString {
+        "\(id.rawValue)#\(Int(pixels.width))x\(Int(pixels.height))" as NSString
     }
 
     /// Looks the ids up in one batch (`photoAsset`), so a cover whose first photo was not sharp
@@ -62,11 +119,13 @@ final class ThumbnailCache {
     private func load(_ asset: ThumbnailRequest.Asset, pixels: CGSize, key: NSString) async -> UIImage? {
         let image = await ThumbnailRequest.load(asset, size: pixels, manager: manager)
         // A cancelled request is not kept: what came back may not be the prepared thumbnail.
-        if let image, !Task.isCancelled {
-            let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
-            cache.setObject(image, forKey: key, cost: cost)
-        }
+        if let image, !Task.isCancelled { keep(image, key: key) }
         return image
+    }
+
+    private func keep(_ image: UIImage, key: NSString) {
+        let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
+        cache.setObject(image, forKey: key, cost: cost)
     }
 
     /// A large version for the full-screen viewer: not kept in the cache (a few of them would
@@ -90,11 +149,25 @@ final class ThumbnailCache {
     /// few seconds (a deleted photo stays deleted, and a cell that asks again soon gets the
     /// same answer).
     private func photoAsset(for id: AssetID) async -> ThumbnailRequest.Asset? {
+        if case .found(let asset) = await lookUpAsset(id) { return asset }
+        return nil
+    }
+
+    /// What a lookup found: the asset, no such photo (Photos answered), or no answer in time
+    /// (Photos is busy; nothing is remembered, the next lookup asks again).
+    private enum AssetLookup: Sendable {
+        case found(ThumbnailRequest.Asset)
+        case unknown
+        case noAnswer
+    }
+
+    /// `photoAsset`, telling "Photos does not know it" from "Photos did not answer".
+    private func lookUpAsset(_ id: AssetID) async -> AssetLookup {
         let key = id.rawValue
         // The empty id is the placeholder of cards that have no photo yet.
-        guard !key.isEmpty else { return nil }
-        if let known = assets.object(forKey: key as NSString) { return ThumbnailRequest.Asset(known) }
-        if let since = missing[key], ContinuousClock.now - since < Self.missingKept { return nil }
+        guard !key.isEmpty else { return .unknown }
+        if let known = assets.object(forKey: key as NSString) { return .found(ThumbnailRequest.Asset(known)) }
+        if let since = missing[key], ContinuousClock.now - since < Self.missingKept { return .unknown }
         nextToken &+= 1
         let token = nextToken
         return await withTaskCancellationHandler {
@@ -108,7 +181,7 @@ final class ThumbnailCache {
 
     private struct Waiter {
         let token: UInt64
-        let continuation: CheckedContinuation<ThumbnailRequest.Asset?, Never>
+        let continuation: CheckedContinuation<AssetLookup, Never>
     }
     /// Cells waiting for an asset, by id; every waiter is resumed exactly once, always here
     /// on the main actor and after leaving this list.
@@ -122,9 +195,9 @@ final class ThumbnailCache {
     /// One fetch reads at most this many ids, so a long wait for Photos stays one wait.
     private static let batchLimit = 400
 
-    private func enqueue(_ key: String, token: UInt64, _ continuation: CheckedContinuation<ThumbnailRequest.Asset?, Never>) {
+    private func enqueue(_ key: String, token: UInt64, _ continuation: CheckedContinuation<AssetLookup, Never>) {
         if Task.isCancelled {
-            continuation.resume(returning: nil)
+            continuation.resume(returning: .noAnswer)
             return
         }
         if waiting[key] == nil { queued.append(key) }
@@ -138,7 +211,7 @@ final class ThumbnailCache {
         guard var waiters = waiting[key], let index = waiters.firstIndex(where: { $0.token == token }) else { return }
         let waiter = waiters.remove(at: index)
         waiting[key] = waiters.isEmpty ? nil : waiters
-        waiter.continuation.resume(returning: nil)
+        waiter.continuation.resume(returning: .noAnswer)
     }
 
     private func lookUpWaiting() async {
@@ -152,7 +225,7 @@ final class ThumbnailCache {
                 // Photos did not answer: these cells show no picture for now, and are not
                 // remembered as missing (they are asked again when they come into view).
                 for id in ids {
-                    for waiter in waiting.removeValue(forKey: id) ?? [] { waiter.continuation.resume(returning: nil) }
+                    for waiter in waiting.removeValue(forKey: id) ?? [] { waiter.continuation.resume(returning: .noAnswer) }
                 }
                 continue
             }
@@ -166,10 +239,33 @@ final class ThumbnailCache {
                 } else {
                     missing[id] = now
                 }
-                for waiter in waiting.removeValue(forKey: id) ?? [] { waiter.continuation.resume(returning: asset) }
+                let answer: AssetLookup = asset.map { .found($0) } ?? .unknown
+                for waiter in waiting.removeValue(forKey: id) ?? [] { waiter.continuation.resume(returning: answer) }
             }
         }
         lookingUp = false
+    }
+}
+
+/// What `ThumbnailCache.cover` found for one photo of a photo card.
+enum CoverFetch {
+    /// The photo at the asked size, or only the small preview Photos keeps of it
+    /// (`ThumbnailRequest.isSharp` tells them apart).
+    case image(UIImage, screenshot: Bool)
+    /// Photos answered: it does not know the photo (deleted), or has nothing of it on the device.
+    case missing
+    /// Photos did not answer in time (it is busy), or the request was cancelled: nothing is known.
+    case noAnswer
+}
+
+/// A kept cover (`ThumbnailCache.keepCover`) and whether it is a screenshot (its crop keeps the top).
+final class CachedCover {
+    let image: UIImage
+    let screenshot: Bool
+
+    init(image: UIImage, screenshot: Bool) {
+        self.image = image
+        self.screenshot = screenshot
     }
 }
 

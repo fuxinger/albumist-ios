@@ -1320,7 +1320,9 @@ class HostTerminateTests(unittest.TestCase):
             wait = source.read()
         body = wait[wait.index("static func toBackground("):wait.index("static func testID(")]
         self.assertEqual(len(re.findall(r"\.press\(\.home\)", body)), 1)  # in the loop of ways
-        self.assertIn('("Home press", min(timeout, 20)), ("second Home press", 15), ("Settings app in front", 30)', body)
+        # The first press 8 s (20 s until 20.11.: it never had an effect on the CI simulator, in
+        # 13 of 13 presses, and the second one did within 1.4 s each time).
+        self.assertIn('("Home press", min(timeout, 8)), ("second Home press", 15), ("Settings app in front", 30)', body)
         # The time in the background counts from when iOS reported it, not from the first press:
         # after a late way the app stayed there 1 s only (second review of 5d730ac, 6d6baf1), and
         # SortlyFlowUITests says "at least the old 8 s, counted once iOS has it there".

@@ -307,6 +307,7 @@ final class AccessibilityUITests: XCTestCase {
             if planShown {
                 sleep(2)
                 check("\(tag) plan", english: english)
+                expectApplyInReach("\(tag) plan", required: applyStarter)
                 if !short {
                     app.swipeUp(); app.swipeUp(); sleep(1)
                     check("\(tag) plan lower", english: english)
@@ -963,6 +964,27 @@ final class AccessibilityUITests: XCTestCase {
         UITestOnboarding.clock("tap \(step)")
         origin.withOffset(CGVector(dx: element.frame.midX, dy: (clear.top + clear.bottom) / 2)).tap()
         return true
+    }
+
+    /// "Alben jetzt anlegen" is in reach as the plan opens, without scrolling and clear of the tab
+    /// bar, at this walk's text size and orientation (review P3-05 = G3-05: it stood at the end
+    /// of the plan, below the fold). Content under the tab bar counts as hittable for XCUITest,
+    /// so the frame is read too. `required`: the walk applies the plan next, so the button has to
+    /// be there; otherwise a plan that something stops (no button) is only reported.
+    private func expectApplyInReach(_ step: String, required: Bool) {
+        let apply = app.buttons["plan.apply"]
+        guard required || apply.waitForExistence(timeout: 5) else {
+            print("UI_FACT \(step): no \"plan.apply\" (something stops the plan), its reach not checked")
+            return
+        }
+        let tabs = app.tabBars.firstMatch
+        let reached = UITestWait.until("\(step): button in reach without scrolling", timeout: 10) {
+            apply.exists && apply.isHittable && app.frame.contains(apply.frame)
+                && (!tabs.exists || apply.frame.maxY <= tabs.frame.minY + 1)
+        }
+        if !reached {
+            print("UI_FACT \(step): button \(apply.exists ? "\(apply.frame)" : "missing"), tab bar \(tabs.exists ? "\(tabs.frame)" : "missing")")
+        }
     }
 
     @discardableResult

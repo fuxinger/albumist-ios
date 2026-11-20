@@ -99,6 +99,29 @@ final class SortlyFlowUITests: XCTestCase {
         return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
     }
 
+    /// The preview's next step is in reach as it opens, without scrolling and clear of the tab
+    /// bar: "Alben jetzt anlegen" in the bar at the bottom, or the unlock card at the top of the
+    /// plan in its place (review P3-05 = G3-05: both stood at the end of the plan, below the
+    /// fold). Content under the tab bar counts as hittable for XCUITest, so the frame is read too.
+    @discardableResult
+    private func expectPlanStartInReach(_ step: String) -> Bool {
+        let tabs = app.tabBars.firstMatch
+        func inReach(_ element: XCUIElement) -> Bool {
+            guard element.exists, element.isHittable else { return false }
+            let frame = element.frame
+            return app.frame.contains(frame) && (!tabs.exists || frame.maxY <= tabs.frame.minY + 1)
+        }
+        let apply = app.buttons["plan.apply"]
+        let unlock = app.staticTexts["Albumist freischalten"]
+        let reached = UITestWait.until("\(step): start in reach without scrolling", timeout: 30) {
+            inReach(apply) || inReach(unlock)
+        }
+        if !reached {
+            print("UI_FACT \(step): button \(apply.exists ? "\(apply.frame)" : "missing"), tab bar \(tabs.exists ? "\(tabs.frame)" : "missing")")
+        }
+        return reached
+    }
+
     private func back() {
         let bar = app.navigationBars.firstMatch
         if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
@@ -472,7 +495,9 @@ final class SortlyFlowUITests: XCTestCase {
             tap(starter, "open starter set")
             let preview = app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
             print(preview ? "UI_STEP_OK starter preview opened" : "UI_STEP_MISSING starter preview opened")
-            sleep(2); shot("06c-starter-plan")
+            sleep(2)
+            if preview { expectPlanStartInReach("starter preview") }
+            shot("06c-starter-plan")
             back(); sleep(2)
             let leftover = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "ausgewählte")).firstMatch.exists
             print(leftover ? "UI_STEP_MISSING nothing selected after starter preview" : "UI_STEP_OK nothing selected after starter preview")
@@ -559,6 +584,7 @@ final class SortlyFlowUITests: XCTestCase {
                 app.buttons["plan.apply"].exists || app.staticTexts["Albumist freischalten"].exists || list.exists
             }
             UITestWait.atLeast(3, since: shownAt)
+            expectPlanStartInReach("plan")
             shot("10-plan"); audit("plan")
             print(list.waitForExistence(timeout: 5) ? "UI_STEP_OK plan lists albums" : "UI_STEP_MISSING plan lists albums")
             if list.exists {

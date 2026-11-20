@@ -8363,22 +8363,12 @@
         }
       }
     },
-    "Kein Original wird gelöscht" : {
+    "Kein Original wird gelöscht oder kopiert." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No originals are deleted"
-          }
-        }
-      }
-    },
-    "Es werden keine Kopien angelegt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No copies are made"
+            "value" : "No originals are deleted or copied."
           }
         }
       }

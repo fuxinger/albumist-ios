@@ -62,11 +62,13 @@ public struct IgnoreChange: Sendable {
     }
 
     /// A photo's state once it is ignored: every area "ignored", an excluded photo stays
-    /// excluded (`OrganizationStatusResolver.areaStatus`: excluded comes first).
+    /// excluded (`OrganizationStatusResolver.areaStatus`: excluded comes first). Marked ignored
+    /// also without any area (every area off), as the recount marks it (finding N-01).
     public static func ignoredState(_ state: AssetOrganizationState) -> AssetOrganizationState {
-        guard !state.areas.values.contains(.excluded) else { return state }
+        guard !OrganizationStatusResolver.isExcluded(state) else { return state }
         var result = state
         for area in state.areas.keys { result.areas[area] = .ignored }
+        result.isIgnored = true
         return result
     }
 
@@ -105,7 +107,7 @@ public struct IgnoreChange: Sendable {
             if step.ignore {
                 // Already ignored: nothing changes (the store adds no second override either).
                 guard shown.ignored.insert(id).inserted else { continue }
-                guard let state = shown.states[id], !state.areas.values.contains(.excluded) else { continue }
+                guard let state = shown.states[id], !OrganizationStatusResolver.isExcluded(state) else { continue }
                 shown.ifNotIgnored[id] = state
                 shown.states[id] = ignoredState(state)
             } else {

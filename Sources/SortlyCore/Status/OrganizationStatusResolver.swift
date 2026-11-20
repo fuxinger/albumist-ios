@@ -5,11 +5,20 @@ public struct AssetOrganizationState: Hashable, Sendable, Codable {
     public var assetID: AssetID
     public var areas: [OrganizationArea: AreaStatus]
     public var isUncertain: Bool
+    /// The user ignored the photo (and did not exclude it). Every area of it says `.ignored` too;
+    /// kept here as well because with every area turned off it has no area to say it in, and
+    /// the photo still belongs in "Ignoriert" (finding N-01).
+    public var isIgnored: Bool
+    /// Excluded from the analysis; as `isIgnored`, also without any area.
+    public var isExcluded: Bool
 
-    public init(assetID: AssetID, areas: [OrganizationArea: AreaStatus] = [:], isUncertain: Bool = false) {
+    public init(assetID: AssetID, areas: [OrganizationArea: AreaStatus] = [:], isUncertain: Bool = false,
+                isIgnored: Bool = false, isExcluded: Bool = false) {
         self.assetID = assetID
         self.areas = areas
         self.isUncertain = isUncertain
+        self.isIgnored = isIgnored
+        self.isExcluded = isExcluded
     }
 }
 
@@ -87,24 +96,49 @@ public struct OrganizationStatusResolver: Sendable {
             areas[area] = areaStatus(f, ignored: ignored, excluded: excluded)
             if f.uncertain && f.applicable && primaryAreas.contains(area) { uncertain = true }
         }
-        return AssetOrganizationState(assetID: assetID, areas: areas, isUncertain: uncertain)
+        // As the areas say it: excluded comes first.
+        return AssetOrganizationState(assetID: assetID, areas: areas, isUncertain: uncertain,
+                                      isIgnored: ignored && !excluded, isExcluded: excluded)
     }
 
-    /// No main area applies to this photo, and the user did not ignore or exclude it.
+    /// The photo is excluded from the analysis. Read from the state and from every area, not only
+    /// the main ones: the user's choice holds whatever counts, also with no main area counted or
+    /// every area off (finding N-01).
+    public static func isExcluded(_ state: AssetOrganizationState) -> Bool {
+        state.isExcluded || state.areas.values.contains(.excluded)
+    }
+
+    /// The user ignored the photo (as `isExcluded`, whatever counts).
+    public static func isIgnored(_ state: AssetOrganizationState) -> Bool {
+        state.isIgnored || state.areas.values.contains(.ignored)
+    }
+
+    /// The statuses of the main areas the state has. A state has only the areas that are on
+    /// (`LibraryStatus`), so these are the counted main areas (`SortedCountCard.countedAreas`).
+    private func mainStatuses(_ state: AssetOrganizationState) -> [AreaStatus] {
+        state.areas.filter { primaryAreas.contains($0.key) }.map(\.value)
+    }
+
+    /// No main area applies to this photo, and the user did not ignore or exclude it. Also when
+    /// no main area counts at all (none chosen, or the chosen ones turned off): there is nothing
+    /// to sort towards, so no photo is open (finding N-01; the overview says "Kein Bereich zählt
+    /// als sortiert"). Before, such a photo was "Nicht sortiert" in the lists and the photo info.
     public func isOutsideMainAreas(_ state: AssetOrganizationState) -> Bool {
-        let statuses = state.areas.filter { primaryAreas.contains($0.key) }.map(\.value)
-        guard !statuses.isEmpty, !statuses.contains(.excluded), !statuses.contains(.ignored) else { return false }
-        return statuses.allSatisfy { $0 == .notApplicable || $0 == .analysisImpossible }
+        guard !Self.isExcluded(state), !Self.isIgnored(state) else { return false }
+        return mainStatuses(state).allSatisfy { $0 == .notApplicable || $0 == .analysisImpossible }
     }
 
     public func overall(_ state: AssetOrganizationState) -> OverallStatus {
-        let statuses = state.areas.filter { primaryAreas.contains($0.key) }.map(\.value)
-        if statuses.contains(.excluded) { return .excluded }
-        if statuses.contains(.ignored) { return .ignored }
+        if Self.isExcluded(state) { return .excluded }
+        if Self.isIgnored(state) { return .ignored }
+        let statuses = mainStatuses(state)
         let relevant = statuses.filter { $0 != .notApplicable && $0 != .analysisImpossible }
         if relevant.isEmpty {
             // Nothing the user cares about applies – counts as organized, never as an open task.
-            return statuses.isEmpty ? .unorganized : .fullyOrganized
+            // Also with no main area counted (none chosen or none on): it was `.unorganized`
+            // then, and every photo, ignored ones too, showed as "Nicht sortiert" next to "Kein
+            // Bereich zählt als sortiert" (finding N-01). `ringPart` says `.outsideMainAreas`.
+            return .fullyOrganized
         }
         let done = relevant.filter { $0 == .organized || $0 == .preExisting }.count
         if relevant.contains(.analysisPending) && done == 0 { return .pending }
@@ -131,7 +165,8 @@ public struct OrganizationStatusResolver: Sendable {
         case ignored
         /// Excluded from the analysis: not counted either.
         case excluded
-        /// No main area applies (a photo from home when only places and trips count).
+        /// No main area applies (a photo from home when only places and trips count), or no
+        /// main area counts at all (finding N-01).
         case outsideMainAreas
         /// Not in the part of the library the user chose ("Nur 2026").
         case outsideScope
@@ -199,7 +234,8 @@ public struct OrganizationStatusResolver: Sendable {
         public var excluded = 0
         /// Photos none of the main areas applies to (a screenshot without a place when only
         /// places and trips count). Not part of `total`: "13 von 246 sortiert" before anything
-        /// was done confused testers (Fuchs, 14.11.).
+        /// was done confused testers (Fuchs, 14.11.). With no main area counted, every photo
+        /// neither ignored nor excluded (finding N-01), so `total` is 0 then.
         public var outsideMainAreas = 0
         /// Every photo the app sees.
         public var allPhotos: Int { total + outsideMainAreas + ignored + excluded }

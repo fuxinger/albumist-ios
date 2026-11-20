@@ -30,7 +30,10 @@ import SortlyCore
 ///   analysis does not work. The hold ends only with new suggestions or a run that went through
 ///   (`RecountState.next`), so a Pause kept the spinner turning for as long as it lasted.
 /// - `noMainAreaChosen`: no main area counts (none chosen in the settings, or the chosen ones
-///   turned off, which the start allows): every photo stayed open for good ("0 von 300").
+///   turned off, which the start allows): every photo stayed open for good ("0 von 300"). The
+///   count behind it has no photo in the ring then (`Progress.total` 0): each is outside the main
+///   areas, ignored or excluded, and the library's lists, the search and the photo info say the
+///   same, never "Nicht sortiert" (finding N-01).
 /// - `nothingToSort` ("Nichts zu sortieren"): counted, and every photo is left out, for example
 ///   every photo the ring would count is ignored (question to Fuchs, 18.11.: text or "0 von 0").
 /// - `ring`: "82 von 176 sortiert".
@@ -191,7 +194,8 @@ public enum SortedCountCard: Equatable, Sendable {
 
     public static func make(_ input: Input) -> SortedCountCard {
         let counted = countedAreas(input.settings)
-        // Nothing can ever be sorted: no ring that stays at 0 % and no count to hold.
+        // Nothing can ever be sorted: no ring that stays at 0 % and no count to hold. First, so
+        // its empty ring (finding N-01) never reads as "Nichts zu sortieren".
         if counted.isEmpty { return .noMainAreaChosen }
         // A spinner only while the analysis works, for a held count too.
         if let held = input.recount { return input.analysisWorks ? .recounting(held) : .recountWaiting(held) }

@@ -177,7 +177,7 @@ class HTTPTests(unittest.TestCase):
         fake = FakeAPI([(API, [(401, {"errors": [{"code": "NOT_AUTHORIZED"}]})])])
         with self.assertRaises(asc_feedback.AccessError) as caught:
             client(fake).get("/v1/apps")
-        self.assertIn("ASC_KEY_ID", str(caught.exception))
+        self.assertIn("ASC_FEEDBACK_KEY_ID", str(caught.exception))
         self.assertNotIn("TOKEN", str(caught.exception))
 
     def test_rate_limit_waits_for_retry_after_then_succeeds(self):

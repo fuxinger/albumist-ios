@@ -19,11 +19,12 @@ transport, AES-256-CBC content) to the certificate --recipient. Its SHA-256 fing
 equal RECIPIENT_SHA256 below, checked before anything is fetched (exit 5): a swapped certificate
 in a pull request fails loudly instead of sending the feedback to someone else. The plaintext
 folder and the tar are overwritten and deleted before the script ends, also on errors; only
---encrypted-out/testflight-feedback-<time>.cms remains. tools/feedback_inbox.py decrypts it
+--encrypted-out/testflight-feedback-<time>.cms remains (artifact kept 7 days). tools/feedback_inbox.py decrypts it
 with the private key, which is never in the repository or on a runner.
 
-Uses the App Store Connect API with the same team key as the TestFlight upload: KEY_ID,
-ISSUER_ID and KEY_PATH (the .p8 file) in the environment. The JWT is signed with the openssl
+Uses the App Store Connect API with its own team key (role Developer; never the upload's Admin
+key), the secrets ASC_FEEDBACK_KEY_ID, ASC_FEEDBACK_ISSUER_ID and ASC_FEEDBACK_KEY_P8, given to
+the script as KEY_ID, ISSUER_ID and KEY_PATH (the .p8 file) in the environment. The JWT is signed with the openssl
 command line tool like testflight_notes.py, so no Python packages are needed.
 
 Endpoints (App Store Connect API 4.0, checked against Apple's documentation 16.11.2026):
@@ -81,7 +82,8 @@ ROLES = "Admin, App Manager or Developer"
 ROLE_FIX = ("App Store Connect > Users and Access > Integrations > App Store Connect API > "
             "Team Keys: the key's Access column must be Admin, App Manager or Developer "
             "(a key's role cannot be changed; revoke it and generate a new one with the right "
-            "role, then update the GitHub secrets ASC_KEY_ID and ASC_KEY_P8).")
+            "role, then update the GitHub secrets ASC_FEEDBACK_KEY_ID, ASC_FEEDBACK_ISSUER_ID and "
+            "ASC_FEEDBACK_KEY_P8 in the environment asc-feedback).")
 SCREENSHOT_FIELDS = ("createdDate,comment,deviceModel,deviceFamily,osVersion,appPlatform,locale,"
                      "connectionType,batteryPercentage,appUptimeInMilliseconds,screenshots,build")
 CRASH_FIELDS = ("createdDate,comment,deviceModel,deviceFamily,osVersion,appPlatform,locale,"
@@ -171,8 +173,13 @@ def apple_error(body):
     return one_line("; ".join(parts), 300)
 
 
+def no_surrogates(text):
+    """The text without lone surrogates (JSON may carry "\\ud800"), which UTF-8 cannot write."""
+    return str(text).encode("utf-8", "replace").decode("utf-8")
+
+
 def one_line(text, limit):
-    text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(text)).strip()
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", no_surrogates(text)).strip()
     return text[:limit]
 
 
@@ -226,7 +233,7 @@ class Client:
             if status == 401:
                 raise AccessError(
                     f"{what}: HTTP 401, App Store Connect does not accept the key ({apple_error(body)}). "
-                    "Check that ASC_KEY_ID, ASC_ISSUER_ID and ASC_KEY_P8 belong to the same team key and that "
+                    "Check that ASC_FEEDBACK_KEY_ID, ASC_FEEDBACK_ISSUER_ID and ASC_FEEDBACK_KEY_P8 belong to the same team key and that "
                     "the key is not revoked (App Store Connect > Users and Access > Integrations).")
             if status == 403:
                 raise AccessError(
@@ -365,13 +372,14 @@ def ips_frames(data, count):
 
 # ---------------------------------------------------------------- Markdown
 
+BIDI_AND_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\u202a-\u202e\u2066-\u2069]")
 MD_SPECIAL = re.compile(r"([\\`*_{}\[\]()#+\-.!|~>:])")
 
 
 def md_text(value, limit=4000):
     """Untrusted text as inert Markdown: no HTML, no links, images, mentions or table breaks."""
-    text = str(value or "")
-    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f‪-‮⁦-⁩]", "", text)
+    text = no_surrogates(value or "")
+    text = re.sub(BIDI_AND_CONTROL, "", text)
     if len(text) > limit:
         text = text[:limit] + "…"
     text = html.escape(text, quote=False)       # < > & -> entities, so no raw HTML
@@ -390,7 +398,7 @@ def md_quote(value):
 
 
 def code_block(text):
-    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text or "")
+    text = BIDI_AND_CONTROL.sub("", no_surrogates(text or ""))
     longest = max([len(run) for run in re.findall(r"`+|~+", text)] + [2])
     fence = "`" * (longest + 1)
     return f"{fence}text\n{text}\n{fence}"
@@ -473,7 +481,7 @@ def render_counts(app, screenshots, crashes, errors, generated, totals=None, max
         out.append("")
     if details == "encrypted":
         out += [f"Details verschlüsselt im Artefakt **{ENCRYPTED_ARTIFACT}** (`report.md`, Screenshots, "
-                "Absturzprotokolle; 14 Tage). Lesbar nur mit dem privaten Schlüssel: "
+                "Absturzprotokolle; 7 Tage). Lesbar nur mit dem privaten Schlüssel: "
                 "`tools/feedback_inbox.py`.", ""]
     elif details:
         out += ["Details im Artefakt **testflight-feedback** (`report.md`, Screenshots, Absturzprotokolle; "
@@ -604,7 +612,7 @@ def wipe(path):
 def submissions_index(app, screenshots, crashes, generated, days):
     """submissions.json: what tools/feedback_inbox.py reads (tester text raw: it is untrusted there too)."""
     def text(value):
-        return "" if value is None else str(value)
+        return "" if value is None else no_surrogates(value)
 
     def common(entry, kind):
         item = entry["item"]
@@ -634,9 +642,33 @@ def pack(content_dir, tar_path):
                         filter=anonymous)
 
 
+# DER encodings (tag 06, length, value) of the object identifiers the encrypted file must name in
+# its first bytes (recipient info, then the content algorithm), and the one it must not.
+OID_RSAES_OAEP = bytes.fromhex("06092a864886f70d010107")      # 1.2.840.113549.1.1.7
+OID_SHA256 = bytes.fromhex("0609608648016503040201")          # 2.16.840.1.101.3.4.2.1
+OID_AES_256_CBC = bytes.fromhex("060960864801650304012a")     # 2.16.840.1.101.3.4.1.42
+OID_SHA1 = bytes.fromhex("06052b0e03021a")                    # 1.3.14.3.2.26
+HEAD_BYTES = 4096
+
+
+def check_sealed(head):
+    """Whether the start of a DER CMS file says RSA-OAEP with SHA-256 (no SHA-1) and AES-256-CBC.
+    Only the first HEAD_BYTES are read: the algorithms come before the encrypted content."""
+    problems = []
+    if not head.startswith(b"\x30"):
+        problems.append("not a DER file")
+    if OID_RSAES_OAEP not in head:
+        problems.append("no RSA-OAEP")
+    if OID_SHA256 not in head or OID_SHA1 in head:
+        problems.append("OAEP without SHA-256")
+    if OID_AES_256_CBC not in head:
+        problems.append("no AES-256-CBC")
+    return problems
+
+
 def encrypt(tar_path, cert_der, out_path, work_dir, openssl="openssl"):
     """openssl cms: RSA-OAEP (SHA-256, MGF1 SHA-256) for the key, AES-256-CBC for the content,
-    DER output. Checks the result really uses OAEP; removes a partial output on failure."""
+    DER output. Checks the result really names those algorithms; removes a partial output on failure."""
     cert_path = os.path.join(work_dir, "recipient.pem")
     with open(cert_path, "w", encoding="ascii") as handle:
         handle.write(certificate_pem(cert_der))
@@ -649,13 +681,9 @@ def encrypt(tar_path, cert_der, out_path, work_dir, openssl="openssl"):
             raise EncryptError(f"openssl cms -encrypt: exit {result.returncode} "
                                f"({one_line(result.stderr.decode('utf-8', 'replace'), 300)})")
         with open(out_path, "rb") as handle:
-            if handle.read(1) != b"\x30":
-                raise EncryptError("openssl cms -encrypt wrote no DER file")
-        shown = subprocess.run([openssl, "cms", "-cmsout", "-print", "-inform", "DER", "-in", out_path],
-                               capture_output=True, timeout=120)
-        printed = shown.stdout.decode("utf-8", "replace")
-        if shown.returncode != 0 or "rsaesOaep" not in printed or "aes-256-cbc" not in printed:
-            raise EncryptError("the encrypted file does not use RSA-OAEP with AES-256-CBC")
+            problems = check_sealed(handle.read(HEAD_BYTES))
+        if problems:
+            raise EncryptError("the encrypted file is not what was asked for: " + ", ".join(problems))
     except (EncryptError, OSError, subprocess.SubprocessError) as error:
         try:
             os.remove(out_path)
@@ -759,7 +787,8 @@ def fetch(client, bundle_id, out_dir, max_items, download_fn=download, full=Fals
                                      "/crashLog", {"fields[betaCrashLogs]": "logText"}, "crashLog")
                     text = ((log.get("data") or {}).get("attributes") or {}).get("logText") or ""
                     entry["file"] = f"crashlogs/{safe_id(item.get('id'))}.txt"
-                    with open(os.path.join(out_dir, entry["file"]), "w", encoding="utf-8") as handle:
+                    with open(os.path.join(out_dir, entry["file"]), "w", encoding="utf-8",
+                              errors="replace") as handle:
                         handle.write(text)
                     entry["excerpt"] = top_frames(text)
                 except AccessError:
@@ -859,13 +888,13 @@ def run(args, out_dir, work, cert_der):
             report = (render_counts(app, screenshots, crashes, errors, generated, totals, args.max_items)
                       + f"\n\n**Fehler:** Bericht nicht erstellt ({md_inline(error, 300)}).\n")
             errors.append(f"report.md: {one_line(error, 300)}")
-        with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as handle:
+        with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8", errors="replace") as handle:
             handle.write(report)
     sealed = ""
     if encrypted:
         with open(os.path.join(out_dir, "submissions.json"), "w", encoding="utf-8") as handle:
             json.dump(submissions_index(app, screenshots, crashes, generated, args.days), handle,
-                      ensure_ascii=False, indent=1)
+                      ensure_ascii=True, indent=1)
         name = f"testflight-feedback-{time.strftime('%Y%m%d-%H%M%S', time.gmtime(now))}.cms"
         try:
             os.makedirs(args.encrypted_out, exist_ok=True)
@@ -885,7 +914,7 @@ def run(args, out_dir, work, cert_der):
         summary = render_counts(app, screenshots, crashes, errors, generated, totals, args.max_items,
                                 details="full" if full else None)
     if args.summary:
-        with open(args.summary, "a", encoding="utf-8") as handle:
+        with open(args.summary, "a", encoding="utf-8", errors="replace") as handle:
             handle.write(summary[:SUMMARY_LIMIT] + "\n")
     # The only signal that lets the workflow upload an artifact: full (private repository), or
     # encrypted once the file is written and checked.

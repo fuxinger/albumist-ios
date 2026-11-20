@@ -17,7 +17,7 @@ name: TestFlight feedback
 # the value pinned in asc_feedback.py (RECIPIENT_SHA256), so a swapped certificate in a pull
 # request fails instead of sending the feedback to someone else. The plaintext is overwritten and
 # deleted by the script before this step ends (and removed again below if the step was killed);
-# only the .cms file is uploaded (artifact testflight-feedback-encrypted, 14 days), so this mode
+# only the .cms file is uploaded (artifact testflight-feedback-encrypted, 7 days), so this mode
 # is allowed while the repository is public. Its private key is never in the repository or on a
 # runner; tools/feedback_inbox.py decrypts a downloaded artifact locally into a Markdown inbox
 # and de-duplicates by submission id (every run sends the whole 14 days again).
@@ -113,7 +113,7 @@ jobs:
         with:
           name: testflight-feedback-encrypted
           path: ${{ runner.temp }}/feedback-encrypted/*.cms
-          retention-days: 14
+          retention-days: 7
           if-no-files-found: error
           overwrite: true
       - name: Keep report, screenshots and crash logs

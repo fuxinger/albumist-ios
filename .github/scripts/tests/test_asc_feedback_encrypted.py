@@ -149,6 +149,27 @@ class EncryptTests(Identity):
                 self.assertEqual(tar.extractfile(name).read(), data)
             self.assertTrue(all(m.uname == "" and m.uid == 0 for m in tar.getmembers()))
 
+    def test_the_algorithm_check_reads_only_the_head_and_refuses_sha1_or_pkcs1(self):
+        tar_path = os.path.join(self.work, "bundle.tar")
+        with open(tar_path, "wb") as handle:
+            handle.write(b"x" * 100_000)
+        for name, options, problem in (
+                ("sha1", ["-keyopt", "rsa_padding_mode:oaep"], "OAEP without SHA-256"),
+                ("pkcs1", [], "no RSA-OAEP"),
+                ("aes128", ["-keyopt", "rsa_padding_mode:oaep", "-keyopt", "rsa_oaep_md:sha256"], "no AES-256-CBC")):
+            cms = os.path.join(self.work, f"{name}.cms")
+            cipher = "-aes-128-cbc" if name == "aes128" else "-aes-256-cbc"
+            subprocess.run(["openssl", "cms", "-encrypt", "-binary", cipher, "-in", tar_path, "-outform", "DER",
+                            "-out", cms, "-recip", self.cert] + options, check=True, capture_output=True)
+            with open(cms, "rb") as handle:
+                with self.subTest(name):
+                    self.assertIn(problem, asc_feedback.check_sealed(handle.read(asc_feedback.HEAD_BYTES)))
+        self.assertIn("not a DER file", asc_feedback.check_sealed(b"-----BEGIN CMS-----"))
+        good = os.path.join(self.work, "good.cms")
+        asc_feedback.encrypt(tar_path, asc_feedback.read_recipient(self.cert, pin=self.pin), good, self.work)
+        with open(good, "rb") as handle:
+            self.assertEqual(asc_feedback.check_sealed(handle.read(asc_feedback.HEAD_BYTES)), [])
+
     def test_a_failing_openssl_leaves_no_output(self):
         tar_path, cms = os.path.join(self.work, "bundle.tar"), os.path.join(self.work, "out.cms")
         with open(tar_path, "wb") as handle:
@@ -329,6 +350,28 @@ class MainEncryptedTests(Identity):
         self.assertEqual((rows["s1"]["build"], rows["s1"]["device_model"], rows["s1"]["os_version"]),
                          ("42", "iPhone16,2", "26.1"))
 
+    def test_lone_surrogates_and_bidi_marks_from_testers_do_not_break_the_run(self):
+        def odd_fetch(client, bundle_id, out_dir, max_items, full=False, since=None, **_):
+            result = self.fake_fetch(client, bundle_id, out_dir, max_items, full=full, since=since)
+            result[1][0]["item"]["attributes"]["comment"] = "kaputt \ud800 \u202eabc"
+            result[1][0]["item"]["attributes"]["deviceModel"] = "iPhone\udfff"
+            result[2][0]["excerpt"] = "Thread 0 \ud83d Crashed \u2066x"
+            return result
+        self.assertEqual(self.run_main(["--mode", "encrypted"], fetch=odd_fetch), 0, self.log)
+        sealed = os.path.join(self.sealed_dir, os.listdir(self.sealed_dir)[0])
+        back = os.path.join(self.base, "back.tar")
+        decrypt(sealed, self.key, back)
+        with tarfile.open(back) as tar:
+            report = tar.extractfile("report.md").read().decode("utf-8")      # strict UTF-8
+            index = json.loads(tar.extractfile("submissions.json").read().decode("ascii"))
+        rows = {row["id"]: row for row in index["submissions"]}
+        self.assertEqual(rows["s1"]["comment"], "kaputt ? \u202eabc")
+        self.assertEqual(rows["s1"]["device_model"], "iPhone?")
+        self.assertIn("kaputt ? abc", report)                                  # bidi marks gone
+        self.assertNotIn("\u2066", report)
+        self.assertNotIn("\u202e", report)
+        self.assertNotIn("\u2066", asc_feedback.code_block("a\u2066b\u202ec"))
+
     def test_a_swapped_certificate_stops_before_anything_is_fetched(self):
         code = self.run_main(["--mode", "encrypted"], pin="00" * 32)
         self.assertEqual(code, 5)
@@ -405,7 +448,7 @@ class WorkflowEncryptedTests(unittest.TestCase):
         sealed = self.steps["Keep the encrypted report"]
         self.assertIn("if: always() && steps.fetch.outputs.mode == 'encrypted'", sealed)
         self.assertIn("path: ${{ runner.temp }}/feedback-encrypted/*.cms\n", sealed)
-        self.assertIn("retention-days: 14", sealed)
+        self.assertIn("retention-days: 7\n", sealed)
         self.assertIn("name: testflight-feedback-encrypted", sealed)
         plain = self.steps["Keep report, screenshots and crash logs"]
         self.assertIn("if: always() && steps.fetch.outputs.mode == 'full'", plain)

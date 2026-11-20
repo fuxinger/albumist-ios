@@ -25,6 +25,14 @@ Danke fürs Testen! Dieser Build bringt weitere Korrekturen aus der großen Prü
 - Vorschau vor dem Anlegen: Der Titel sagt jetzt, was gerade passiert („Alben werden angelegt“, „Ergebnis“). Gibt es schon ein Album mit demselben Namen, sagt der Hinweis ehrlich, dass du danach zwei Alben mit diesem Namen hast.
 - Suche: Während die Suche neu aufgebaut wird, findet sie gleich die neuen Treffer.
 - Viele Apps offen: Wenn der Speicher knapp wird, gibt Albumist Platz frei und lädt das Nötige später neu. Bitte melde, wenn etwas leer bleibt.
+- Analyse-Karte: Sie zeigt jetzt nur noch das Wichtigste. Schritt, Hintergrund und „Gerade angesehen“ findest du unter „Details“. Fehlt dir dort etwas?
+- Vorschau: „Alben jetzt anlegen“ steht unten in einer Leiste und ist ohne Scrollen erreichbar.
+- Vorschläge: Unten stehen zwei Knöpfe, alles Weitere oben rechts unter „…“.
+- Übersicht: Die Zahlen zu „sortiert“ passen jetzt zur Analyse-Karte, und „0 von 0 sortiert“ kommt nicht mehr vor.
+- Auswählen in Listen: Die Tab-Leiste blendet sich aus, die Aktionen stehen unten wie in Apple Fotos.
+- Nur ausgewählte Fotos freigegeben: Die Analyse bleibt erhalten, wenn du die Auswahl änderst. Rückgängig und Anlegen fragen nach vollem Zugriff.
+- Rückgängig und Entfernen sagen vorher, dass iOS gleich nach dem Löschen der Alben fragt.
+- Weniger warten: Ein neuer Analyse-Lauf liest nur die Fotos neu, die sich geändert haben.
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
 <!-- testflight:end -->

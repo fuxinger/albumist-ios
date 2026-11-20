@@ -89,6 +89,18 @@ public struct ProposalWords: Equatable, Sendable {
             : t("Schon in deinem Album \(quoted(album))", "Already in your album \(quoted(album))")
     }
 
+    /// "Benennt dein Album „Sommer“ um": the album gets the name the card shows.
+    func renames(album: String) -> String {
+        album.isEmpty ? t("Benennt dein Album um", "Renames your album")
+            : t("Benennt dein Album \(quoted(album)) um", "Renames your album \(quoted(album))")
+    }
+
+    /// "Verschiebt dein Album „Garten“": the album goes into another folder.
+    func moves(album: String) -> String {
+        album.isEmpty ? t("Verschiebt dein Album", "Moves your album")
+            : t("Verschiebt dein Album \(quoted(album))", "Moves your album \(quoted(album))")
+    }
+
     // MARK: The open suggestion
 
     /// The folder where a new album goes, as Photos shows the way there: "Reisen › 2024".
@@ -103,11 +115,28 @@ public struct ProposalWords: Equatable, Sendable {
 
     var severalAlbums: String { t("Mehrere deiner Alben passen", "Several of your albums fit") }
 
+    /// "Dein Album „Sommer“ heißt dann „Gardasee“".
+    func renamed(album: String, to title: String) -> String {
+        album.isEmpty ? t("Dein Album heißt dann \(quoted(title))", "Your album will be called \(quoted(title))")
+            : t("Dein Album \(quoted(album)) heißt dann \(quoted(title))", "Your album \(quoted(album)) will be called \(quoted(title))")
+    }
+
+    /// "Dein Album „Garten“ kommt in „Zuhause“"; to the top of the albums: "Dein Album „Garten“
+    /// kommt aus seinem Ordner zu deinen Alben".
+    func moved(album: String, to path: [String]) -> String {
+        let german = album.isEmpty ? "Dein Album" : "Dein Album \(quoted(album))"
+        let english = album.isEmpty ? "Your album" : "Your album \(quoted(album))"
+        return path.isEmpty ? t("\(german) kommt aus seinem Ordner zu deinen Alben", "\(english) moves out of its folder to your albums")
+            : t("\(german) kommt in \(quoted(folder(path)))", "\(english) moves to \(quoted(folder(path)))")
+    }
+
     /// The sign under the cover: it is a suggestion, nothing of it is in Photos yet (E2).
     var notInPhotosYet: String { t("Vorschlag · noch nicht in Fotos", "Suggestion · not in Photos yet") }
     /// The album is the user's own and exists: its photos are not in it yet.
     var notAddedYet: String { t("Vorschlag · noch nicht ergänzt", "Suggestion · not added yet") }
     var alreadyInPhotos: String { t("Schon in Fotos", "Already in Photos") }
+    /// The user's album gets a new name or another folder: that is not done yet.
+    var notChangedYet: String { t("Vorschlag · noch nicht geändert", "Suggestion · not changed yet") }
 
     var noDate: String { t("Ohne Datum", "No date") }
 
@@ -185,14 +214,26 @@ struct CalendarDay: Equatable, Sendable {
     /// 1 is Sunday.
     let weekday: Int
 
+    /// The calendar the days are read with: Gregorian in UTC, as wall clocks are kept. One for
+    /// every day: making a calendar is slow, and the photos of a suggestion are grouped again
+    /// whenever their page changes (second review of design wave 1).
+    private static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = LocalTime.utc
+        return calendar
+    }()
+
     /// The day of a wall clock (`LocalTime.wallClock`), read in UTC.
     init(wallClock: Date) {
-        number = LocalTime.day(wallClock)
+        self.init(number: LocalTime.day(wallClock))
+    }
+
+    /// The day with this number (`LocalTime.day`).
+    init(number: Int) {
+        self.number = number
         // Midnight of that day, so a wall clock of 23:59 and one of 00:00 read the same day.
         let midnight = Date(timeIntervalSinceReferenceDate: Double(number) * 86_400)
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let c = calendar.dateComponents([.year, .month, .day, .weekday], from: midnight)
+        let c = Self.calendar.dateComponents([.year, .month, .day, .weekday], from: midnight)
         year = c.year ?? 0
         month = c.month ?? 0
         day = c.day ?? 0

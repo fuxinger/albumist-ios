@@ -30,6 +30,7 @@ EXTRA_BUTTONS = {
     "Album so lassen", "%lld %@ Fotos ergänzen", "Album ergänzen", "Album anlegen",
     "Namen eingeben", "Album auswählen", "Auswählen", "Namen vorschlagen",
     "Anlegen", "Ergänzen …", "Benennen …", "Ansehen …",
+    "Album umbenennen", "Album verschieben",
 }
 
 # Words that stay lowercase inside a title (Apple Style Guide: articles, coordinating

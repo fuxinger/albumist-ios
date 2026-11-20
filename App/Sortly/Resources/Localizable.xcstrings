@@ -2981,6 +2981,86 @@
         }
       }
     },
+    "„%@“ anlegen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create “%@”"
+          }
+        }
+      }
+    },
+    "„%@“ ergänzen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add to “%@”"
+          }
+        }
+      }
+    },
+    "„%@“ benennen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name “%@”"
+          }
+        }
+      }
+    },
+    "„%@“ ansehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View “%@”"
+          }
+        }
+      }
+    },
+    "„%@“ auswählen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select “%@”"
+          }
+        }
+      }
+    },
+    "%@%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@%2$@"
+          }
+        }
+      }
+    },
+    "Album umbenennen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rename Album"
+          }
+        }
+      }
+    },
+    "Album verschieben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move Album"
+          }
+        }
+      }
+    },
     "Anpassen" : {
       "localizations" : {
         "en" : {
@@ -15487,46 +15567,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "All Suggestions"
-          }
-        }
-      }
-    },
-    "„%@“ anlegen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Create “%@”"
-          }
-        }
-      }
-    },
-    "„%@“ ergänzen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Add to “%@”"
-          }
-        }
-      }
-    },
-    "„%@“ benennen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Name “%@”"
-          }
-        }
-      }
-    },
-    "„%@“ ansehen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "View “%@”"
           }
         }
       }

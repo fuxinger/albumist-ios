@@ -150,6 +150,39 @@ struct ProposalDetailTextTests {
         #expect(Self.detail(Self.trip(1, title: "Kyoto"), words: .english).facts == "1 photo · October 12, 2024")
     }
 
+    /// The title names the year only as a word of its own: "Haus 20245" or "Kyoto2024" do not.
+    @Test(arguments: [("Haus 20245", true), ("Zimmer 12024", true), ("Kyoto2024", true), ("Kyoto 2024", false),
+                      ("Kyoto (2024)", false), ("2024: Kyoto", false), ("Kyoto, 2024–2025", false), ("Sommer 2023", true)])
+    func theYearIsAWordOfTheTitle(_ example: (title: String, saysYear: Bool)) {
+        let facts = Self.detail(Self.trip(16, title: example.title)).facts
+        #expect(facts == (example.saysYear ? "16 Fotos · 12. bis 16. Oktober 2024" : "16 Fotos · 12. bis 16. Oktober"), "\(example.title)")
+    }
+
+    /// The user's album gets a new name or another folder: the sign says nothing is changed yet,
+    /// the line says what changes.
+    @Test func aRenameOrAMoveSaysWhatChanges() {
+        let proposal = Self.trip(16)
+        let folder = CollectionSnapshot(id: "reisen", title: "Reisen", kind: .folder, childIDs: ["japan"])
+        let album = CollectionSnapshot(id: "japan", title: "Japan", parentID: "reisen", assetIDs: proposal.assetIDs)
+        let inventory = CollectionInventory([folder, album])
+        let rename = ProposalDecision.renameExisting("japan", newTitle: "Kyoto", extend: false)
+        let renamed = Self.detail(proposal, decision: rename, inventory: inventory)
+        #expect(renamed.pill == "Vorschlag · noch nicht geändert")
+        #expect(renamed.destination == "Dein Album „Japan“ heißt dann „Kyoto“")
+        let english = Self.detail(proposal, decision: rename, inventory: inventory, words: .english)
+        #expect(english.pill == "Suggestion · not changed yet")
+        #expect(english.destination == "Your album “Japan” will be called “Kyoto”")
+        let move = ProposalDecision.moveExisting("japan", folderPath: ["Asien"], extend: false)
+        #expect(Self.detail(proposal, decision: move, inventory: inventory).pill == "Vorschlag · noch nicht geändert")
+        #expect(Self.detail(proposal, decision: move, inventory: inventory).destination == "Dein Album „Japan“ kommt in „Asien“")
+        #expect(Self.detail(proposal, decision: .moveExisting("japan", folderPath: ["Asien", "2024"], extend: false),
+                            inventory: inventory, words: .english).destination == "Your album “Japan” moves to “Asien › 2024”")
+        let top = ProposalDecision.moveExisting("japan", folderPath: [], extend: false)
+        #expect(Self.detail(proposal, decision: top, inventory: inventory).destination == "Dein Album „Japan“ kommt aus seinem Ordner zu deinen Alben")
+        #expect(Self.detail(proposal, decision: top, inventory: inventory, words: .english).destination
+                == "Your album “Japan” moves out of its folder to your albums")
+    }
+
     @Test func theUsersAlbumIsNamed() {
         let proposal = Self.trip(16, title: "Florenz, Mai 2023")
         let album = CollectionSnapshot(id: "toskana", title: "Toskana", assetIDs: ["k0", "k1"])
@@ -189,6 +222,23 @@ struct ProposalDetailTextTests {
     // MARK: Spans
 
     static func day(_ iso: String) -> CalendarDay { CalendarDay(wallClock: date(iso + "T12:00:00Z")) }
+
+    /// A day made from its number is the day of every clock on it (`PhotoDays` makes one per day,
+    /// not one per photo), over leap days and the turn of years.
+    @Test func aDayFromItsNumberIsTheDayOfItsClocks() {
+        for iso in ["2024-02-28", "2024-02-29", "2024-03-01", "2023-12-31", "2024-01-01", "2000-02-29", "1970-01-01", "2038-01-19"] {
+            for time in ["T00:00:00Z", "T12:00:00Z", "T23:59:59Z"] {
+                let day = CalendarDay(wallClock: Self.date(iso + time))
+                #expect(CalendarDay(number: day.number) == day, "\(iso)\(time)")
+                #expect(day == Self.day(iso), "\(iso)\(time)")
+            }
+        }
+        let leap = Self.day("2024-02-29")
+        #expect(leap.year == 2024)
+        #expect(leap.month == 2)
+        #expect(leap.day == 29)
+        #expect(leap.weekday == 5, "a Thursday")
+    }
 
     @Test(arguments: [
         ("2024-10-12", "2024-10-12", "12. Oktober", "12. Oktober 2024", "October 12", "October 12, 2024"),

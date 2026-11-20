@@ -16,11 +16,21 @@ extension AppModel {
     /// out of it, the folder for new albums. `typedTitle`: a name typed in the open suggestion
     /// that is not stored yet (blank is no name).
     func proposalCard(for proposal: AlbumProposal, typedTitle: String? = nil) -> ProposalCardText {
-        ProposalCardText(proposal: proposal, decision: decisions[proposal.id],
+        ProposalCardText(proposal: proposal, decision: shownDecision(for: proposal, typedTitle: typedTitle),
                          userTitle: typedTitle ?? userTitles[proposal.id], match: match(for: proposal),
                          inventory: inventory, removed: removedFromProposals[proposal.id] ?? [],
                          hidesPreview: previewHidden(for: proposal),
                          rootFolderTitle: settings.rootFolderTitle, words: proposalWords)
+    }
+
+    /// The user's decision as the card shows it. A name typed in the open suggestion is the new
+    /// album's name, also over one chosen before under "Anpassen" ("Neues Album wählen" stores it
+    /// with the decision, where it would win over the field: second review of design wave 1);
+    /// with the field blank there is no name yet.
+    private func shownDecision(for proposal: AlbumProposal, typedTitle: String?) -> ProposalDecision? {
+        let decision = decisions[proposal.id]
+        guard let typedTitle, case .createNew(_, let folderPath)? = decision else { return decision }
+        return UserTitle.stored(typedTitle) == nil ? nil : .createNew(title: nil, folderPath: folderPath)
     }
 
     /// The photos a cover of `proposal` tries, best first (`PreviewPicker.coverCandidates`): its

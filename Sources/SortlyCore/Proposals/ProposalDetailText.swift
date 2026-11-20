@@ -5,8 +5,9 @@ import Foundation
 /// als neues Album in „Reisen“").
 public struct ProposalDetailText: Equatable, Sendable {
     /// "Vorschlag · noch nicht in Fotos"; for the user's own album "Vorschlag · noch nicht
-    /// ergänzt"; with everything in it already "Schon in Fotos". It stays until the album is
-    /// created (test cases of the design report, slice 2).
+    /// ergänzt", or "Vorschlag · noch nicht geändert" when it gets a new name or folder; with
+    /// everything in it already "Schon in Fotos". It stays until the album is created (test
+    /// cases of the design report, slice 2).
     public let pill: String
     /// "16 Fotos · 12. bis 16. Oktober": the year only where the title does not name it.
     public let facts: String
@@ -17,6 +18,7 @@ public struct ProposalDetailText: Equatable, Sendable {
         switch card.outcome {
         case .addsTo: pill = words.notAddedYet
         case .alreadyIn: pill = words.alreadyInPhotos
+        case .renames, .moves: pill = words.notChangedYet
         case .newAlbum, .needsName, .chooseAlbum: pill = words.notInPhotosYet
         }
 
@@ -25,8 +27,8 @@ public struct ProposalDetailText: Equatable, Sendable {
         if let first = dated.min(), let last = dated.max() {
             let a = CalendarDay(wallClock: Date(timeIntervalSinceReferenceDate: Double(first) * 86_400))
             let b = CalendarDay(wallClock: Date(timeIntervalSinceReferenceDate: Double(last) * 86_400))
-            // "Kyoto, Oktober 2024" names its year; "Lissabon" does not.
-            let named = a.year == b.year && card.title.contains(String(a.year))
+            // "Kyoto, Oktober 2024" names its year; "Lissabon" and "Haus 20245" do not.
+            let named = a.year == b.year && Self.names(a.year, in: card.title)
             facts.append(words.span(from: a, to: b, withYear: !named))
         }
         self.facts = facts.joined(separator: " · ")
@@ -35,8 +37,17 @@ public struct ProposalDetailText: Equatable, Sendable {
         case .newAlbum(_, let path), .needsName(let path): destination = words.newAlbum(in: path)
         case .addsTo(_, let title, _): destination = words.addsTo(album: title)
         case .alreadyIn(_, let title): destination = words.alreadyIn(album: title)
+        case .renames(_, let from, let to): destination = words.renamed(album: from, to: to)
+        case .moves(_, let title, let path): destination = words.moved(album: title, to: path)
         case .chooseAlbum: destination = words.severalAlbums
         }
+    }
+
+    /// Whether `title` names `year` as a word of its own ("Kyoto, 2024", "2024: Kyoto"), not
+    /// inside a longer one ("Haus 20245", "Kyoto2024").
+    static func names(_ year: Int, in title: String) -> Bool {
+        let word = String(year)
+        return title.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains { $0 == word }
     }
 }
 
@@ -64,22 +75,20 @@ public enum PhotoDays {
     public static func group(_ ids: [AssetID], facts: [AssetID: AssetFacts], fallback: TimeZone,
                              words: ProposalWords = .german) -> [PhotoDay] {
         var byDay: [Int: [AssetID]] = [:]
-        var calendarDays: [Int: CalendarDay] = [:]
         var undated: [AssetID] = []
         for id in ids {
             guard let wall = facts[id]?.wallClock(or: fallback) else {
                 undated.append(id)
                 continue
             }
-            let day = CalendarDay(wallClock: wall)
-            byDay[day.number, default: []].append(id)
-            if calendarDays[day.number] == nil { calendarDays[day.number] = day }
+            byDay[LocalTime.day(wall), default: []].append(id)
         }
-        let numbers = byDay.keys.sorted()
-        let years = Set(calendarDays.values.map(\.year))
-        var result = numbers.compactMap { number -> PhotoDay? in
-            guard let members = byDay[number], let day = calendarDays[number] else { return nil }
-            return PhotoDay(day: number, title: words.dayTitle(day, withYear: years.count > 1),
+        // The date of each day once, not of each photo.
+        let calendarDays = byDay.keys.sorted().map(CalendarDay.init(number:))
+        let years = Set(calendarDays.map(\.year))
+        var result = calendarDays.compactMap { day -> PhotoDay? in
+            guard let members = byDay[day.number] else { return nil }
+            return PhotoDay(day: day.number, title: words.dayTitle(day, withYear: years.count > 1),
                             countText: words.photos(members.count), ids: members)
         }
         if !undated.isEmpty {

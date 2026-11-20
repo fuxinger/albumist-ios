@@ -28,9 +28,12 @@ public enum HeldSuggestions {
     /// iPhone) leave a held suggestion; one with none of its photos left is let go.
     /// `inView`: the photos that may be shown, when fewer than `library` (under "Ausgewählte
     /// Fotos" the others are set aside, review P1-07): the suggestion keeps them and is shown
-    /// with the shared ones only, or not at all with none shared.
+    /// with the shared ones only, or not at all with none shared. It is not let go meanwhile:
+    /// made from the shared photos, the suggestions may equal it only because the photos that
+    /// differ are not shared (third review of P1-07).
     public static func apply(_ held: [AlbumProposal], decisions: [SortlyID: ProposalDecision], library: Set<AssetID>,
                              inView: Set<AssetID>? = nil, to suggestions: inout Suggestions) -> [AlbumProposal] {
+        let partial = inView.map { !library.isSubset(of: $0) } ?? false
         var still: [AlbumProposal] = []
         for var p in held where decisions[p.id]?.isAccepted == true {
             p.assetIDs.formIntersection(library)
@@ -44,7 +47,7 @@ public enum HeldSuggestions {
                 shown.coverAssetID = cover(of: shown)
             }
             if let i = suggestions.open.firstIndex(where: { $0.id == p.id }) {
-                if suggestions.open[i] == p { continue }
+                if suggestions.open[i] == p && !partial { continue }
                 if shown.assetIDs.isEmpty { suggestions.open.remove(at: i) } else { suggestions.open[i] = shown }
             } else {
                 suggestions.dismissed.removeAll { $0.id == p.id }

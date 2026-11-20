@@ -92,7 +92,8 @@
 - 20.11.: „Ausgewählte Fotos“ und zurück auf „Alle Fotos“: Albumist analysiert nicht mehr alles von vorn (P1-07).
   Fotos außerhalb der Auswahl werden beiseitegelegt statt gelöscht und zählen, suchen und planen nicht mit;
   zurück kommen sie mit Analyse, Ort und Text. Endgültig gelöscht wird ein Foto erst, wenn es bei vollem Zugriff fehlt
-  (Datenbank Version 6). Reisen, häufige Orte und gewählte Vorschläge behalten dabei ihre Kennung und ihre Fotos.
+  (Datenbank Version 6). Reisen, häufige Orte und gewählte Vorschläge behalten dabei ihre Kennung und ihre Fotos,
+  auch über mehrere Auswahlen hintereinander (nicht bei einer Änderung von „Dein Zuhause“ während der Auswahl, siehe KNOWN_LIMITATIONS).
 - 19.11.: Vorschau vor dem Anlegen: Der Hinweis bei einem schon vorhandenen Albumnamen sagt jetzt, dass danach zwei
   Alben mit diesem Namen da sind (Albumist hängt keinen Zusatz an, P2-02). Der Titel folgt dem Schritt: „Vorschau“,
   „Alben werden angelegt“, „Alben werden geändert“ (Rückgängig), „Ergebnis“ (P3-15, `PlanReviewPhase`).

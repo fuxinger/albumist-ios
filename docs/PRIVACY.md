@@ -33,6 +33,9 @@ Eine kleine Kopie nur der Entscheidungen liegt in *Application Support/Albumist 
 Einstellungen, eigene Namen, Reise-Kennungen, die von Albumist angelegten Alben und der Verlauf
 (Album- und Foto-Kennungen, Albumtitel). Kein erkannter Text, keine Analyseergebnisse (Orte,
 Koordinaten, Bildinhalte), keine Bilder. Sie verlässt das Gerät nur mit dem Backup des Nutzers.
+Die Foto-Kennungen darin (Reise-Kennungen `user.tripIdentities`, gewählte Vorschläge
+`user.heldSuggestions`) schließen bei „Ausgewählte Fotos“ auch die gerade nicht freigegebenen
+Fotos ein, bis Albumist wieder alle Fotos sieht.
 Es werden **keine Bildkopien** gespeichert. Wenige Werte liegen in `UserDefaults`
 (Onboarding erledigt, Zahl der verbrauchten Gratis-Alben mit den Kennungen der bekannten
 Kauf-Transaktionen, Stand einer unterbrochenen Analyse, Stand der Bewertungsfrage,

@@ -429,10 +429,15 @@ struct SelectedPhotosTests {
         let run = try await w.pipeline.run()
         #expect(run.removed == 0, "\(run.removed) photos deleted when access became limited during the read")
         #expect(try await w.store.outOfViewCount() == lib.assets.count - selection.count)
+        // No mark of the change history with photos set aside: the next run reads the whole
+        // library (the mark was taken with full access, before the read).
+        #expect(try await w.store.value(AnalysisPipeline.LibraryReadMark.self, forKey: AnalysisPipeline.Key.libraryMark) == nil)
         await w.reader.set(access: .full)
         let back = try await w.pipeline.run()
         #expect(back.isComplete)
         #expect(back.contentAnalyzed == 0 && back.placesResolved == 0)
+        #expect(try await w.store.outOfViewCount() == 0)
+        #expect(try await w.store.assetCount() == lib.assets.count)
     }
 
     /// Photos set aside while the library's change history has a mark (cannot happen through a
@@ -450,5 +455,125 @@ struct SelectedPhotosTests {
         #expect(await w.reader.wholeReads == wholeReads + 1)
         #expect(try await w.store.outOfViewCount() == 0)
         #expect(run.contentAnalyzed == 0)
+    }
+
+    // MARK: Third review: two selections one after the other, held suggestions
+
+    /// Two different selections, each with a part of the trip: the trip keeps its id through
+    /// both and back (each carry-over kept only the shared part of the trip before, and the
+    /// second selection's part was a trip of its own). Reviewer's test.
+    @Test func tripIdAcrossTwoDisjointSelections() async throws {
+        let lib = Self.library()
+        let w = try Self.world(lib.assets)
+        #expect(try await w.pipeline.run().isComplete)
+        func rome() async throws -> Trip? {
+            (try await w.store.value([Trip].self, forKey: AnalysisPipeline.Key.trips) ?? []).first { !Set($0.geotaggedAssetIDs).isDisjoint(with: Set(lib.rome)) }
+        }
+        let t0 = try #require(try await rome()).id
+        await w.reader.set(access: .limited)
+        await w.reader.set(selection: Set(lib.home + lib.rome.prefix(12)))
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await rome()?.id == t0)
+        await w.reader.set(selection: Set(lib.home + lib.rome.suffix(20)))
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await rome()?.id == t0, "the second selection's part of the trip got another id")
+        await w.reader.set(access: .full)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await rome()?.id == t0, "trip id changed after two selections")
+        // With full access the identity is the trip's photos again.
+        let identities = try await w.store.value([TripIdentity].self, forKey: AnalysisPipeline.Key.tripIdentities) ?? []
+        #expect(Set(identities.first { $0.id == t0 }?.members ?? []) == Set(lib.rome))
+    }
+
+    /// The same for a place the user named: two selections of its photos, then all again.
+    /// Reviewer's test.
+    @Test func placeIdAcrossTwoDisjointSelections() async throws {
+        let lib = Self.library()
+        let w = try Self.world(lib.assets)
+        #expect(try await w.pipeline.run().isComplete)
+        let key = AnalysisPipeline.Key.frequentPlaces
+        func munich() async throws -> FrequentPlace? {
+            (try await w.store.value([FrequentPlace].self, forKey: key) ?? []).first { !Set($0.assetIDs).isDisjoint(with: Set(lib.home)) }
+        }
+        let m0 = try #require(try await munich()).id
+        var named = await w.pipeline.settings
+        named.frequentPlaces.names[m0] = "Büro"
+        await w.pipeline.update(settings: named)
+        await w.reader.set(access: .limited)
+        await w.reader.set(selection: Set(lib.home.prefix(60)))
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await munich()?.id == m0)
+        await w.reader.set(selection: Set(lib.home.suffix(lib.home.count - 60)))
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await munich()?.id == m0, "the second selection's part of the place got another id")
+        #expect(try await munich()?.userName == "Büro")
+        await w.reader.set(access: .full)
+        #expect(try await w.pipeline.run().isComplete)
+        let back = try await munich()
+        #expect(back?.id == m0, "place id changed after two selections")
+        #expect(back?.userName == "Büro")
+        #expect(Set(back?.assetIDs ?? []) == Set(lib.home))
+        #expect(try await w.store.value([FrequentPlace].self, forKey: AnalysisPipeline.Key.frequentPlacesOutOfView) == nil)
+    }
+
+    /// A held suggestion is not let go while photos are set aside: the suggestions made from the
+    /// shared photos may equal it only because the photos that differ are not shared. The user
+    /// chose "Rom" with 32 photos; two photos added later would make it 34, so it is held. Only
+    /// the 32 shared: made == held, but back with full access the 34 must not take its place.
+    @Test func aHeldSuggestionIsNotLetGoWhilePhotosAreSetAside() async throws {
+        let lib = Self.library()
+        let w = try Self.world(lib.assets)
+        #expect(try await w.pipeline.run().isComplete)
+        let chosen = try #require(try await w.pipeline.latestProposals()?.proposals.first { $0.assetIDs == Set(lib.rome) })
+        try await w.store.setValue([chosen], forKey: AnalysisPipeline.Key.heldSuggestions)
+        try await w.store.setValue([chosen.id: ProposalDecision.createNew(title: nil, folderPath: nil)], forKey: AnalysisPipeline.Key.decisions)
+        // Two more photos of the trip (synced later).
+        let extra = try (1...2).map { n -> AssetSnapshot in
+            var photo = try #require(lib.assets.first { $0.id == lib.rome[n] })
+            photo.id = AssetID("rome-extra-\(n)")
+            photo.creationDate = photo.creationDate?.addingTimeInterval(1_800)
+            return photo
+        }
+        await w.reader.set(assets: lib.assets + extra)
+        #expect(try await w.pipeline.run().isComplete)
+        func shown() async throws -> AlbumProposal? { try await w.pipeline.latestProposals()?.proposals.first { $0.id == chosen.id } }
+        #expect(try await shown()?.assetIDs == chosen.assetIDs, "precondition: held")
+        #expect(try await w.pipeline.heldSuggestions().map(\.id) == [chosen.id])
+
+        await w.reader.set(selection: Set(lib.assets.map(\.id)))
+        await w.reader.set(access: .limited)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await shown()?.assetIDs == chosen.assetIDs)
+        #expect(try await w.pipeline.heldSuggestions().map(\.id) == [chosen.id], "let go while two photos were set aside")
+        await w.reader.set(access: .full)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await shown()?.assetIDs == chosen.assetIDs, "the 34-photo version took the user's choice")
+        #expect(try await w.pipeline.heldSuggestions().map(\.id) == [chosen.id])
+    }
+
+    /// `HeldSuggestions.apply` with photos set aside: shown with the shared photos only and a
+    /// cover among them; with none shared it is not shown at all (also not the version the
+    /// suggestions make now), and it is kept whole either way.
+    @Test func heldSuggestionShownWithTheSharedPhotosOnly() {
+        let all: Set<AssetID> = ["a", "b", "c", "d"]
+        var held = AlbumProposal(id: SortlyID("trip-x"), kind: .trip, title: "Rom, wie gewählt", assetIDs: all)
+        held.coverAssetID = "d"
+        let decisions: [SortlyID: ProposalDecision] = [held.id: .createNew(title: nil, folderPath: nil)]
+        let fresh = AlbumProposal(id: SortlyID("trip-x"), kind: .trip, title: "Rom", assetIDs: ["a", "b"])
+        var suggestions = Suggestions(open: [fresh])
+        let kept = HeldSuggestions.apply([held], decisions: decisions, library: all, inView: ["a", "b"], to: &suggestions)
+        #expect(kept == [held])
+        let shown = try? #require(suggestions.open.first { $0.id == held.id })
+        #expect(shown?.assetIDs == ["a", "b"])
+        #expect(shown?.title == held.title)
+        #expect(shown?.coverAssetID.map { ["a", "b"].contains($0) } == true, "cover among the shared photos")
+
+        var none = Suggestions(open: [fresh], dismissed: [])
+        let stillKept = HeldSuggestions.apply([held], decisions: decisions, library: all, inView: ["x"], to: &none)
+        #expect(stillKept == [held])
+        #expect(none.open.isEmpty, "no shared photo: not shown")
+        var dismissed = Suggestions(open: [], dismissed: [fresh])
+        _ = HeldSuggestions.apply([held], decisions: decisions, library: all, inView: [], to: &dismissed)
+        #expect(dismissed.open.isEmpty && dismissed.dismissed.isEmpty)
     }
 }

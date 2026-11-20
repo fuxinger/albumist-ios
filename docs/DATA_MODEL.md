@@ -59,5 +59,8 @@ Idempotenzschlüssel (Plan-ID + Index + Inhalts-Hash).
   Was für immer an Fotos hängt, behält die beiseitegelegten: Reise-Kennungen
   (`user.tripIdentities`), gewählte Vorschläge (`user.heldSuggestions`, gezeigt nur mit den
   freigegebenen Fotos) und häufige Orte, die die Auswahl nicht ergibt
-  (`analysis.frequentPlacesOutOfView`, nur für ihre Kennung, nie gezeigt).
+  (`analysis.frequentPlacesOutOfView`, nur für ihre Kennung, nie gezeigt). Behält eine Reise
+  oder ein Ort die Kennung mit nur einem Teil der Fotos, behält die Kennung auch die
+  beiseitegelegten (Reise: in der Identität; Ort: als Eintrag mit derselben Kennung in
+  `analysis.frequentPlacesOutOfView`).
 Migrationen laufen nur vorwärts, jede in einer Transaktion.

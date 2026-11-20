@@ -916,8 +916,9 @@ public actor AnalysisPipeline {
                              report: inout Report) async throws -> (CollectionInventory, Int)? {
         // Photos set aside under "Ausgewählte Fotos" are put right by a whole read only (it
         // takes them back or deletes them); the history knows nothing of the selection. A run
-        // cannot leave them with a mark (a read with limited access removes it first), and the
-        // count check below would send it to a whole read too; kept as the plain rule
+        // does not leave them with a mark (a whole read removes it first and writes it only when
+        // it read with full access, also when access changed while it read), and the count check
+        // below would send it to a whole read too; kept as the plain rule
         // (`photosSetAsideAreTakenBackByAWholeRead` seeds that case).
         guard runAccess == .full, try await store.outOfViewCount() == 0,
               let stored = await storedLibraryMark(),
@@ -1048,7 +1049,8 @@ public actor AnalysisPipeline {
                 // outside the selection was analysed again, hours on a large library).
                 // Asked again after the read: switched to "Ausgewählte Fotos" while it read, it may
                 // have read only the selection (second review of P1-07).
-                if runAccess == .full, await reader.access() == .full {
+                let readWithFullAccess = runAccess == .full ? await reader.access() == .full : false
+                if readWithFullAccess {
                     report.removed += try await store.removeAssets(notIn: Set(assets.map(\.id)))
                 } else {
                     report.setAside += try await store.setAside(notIn: Set(assets.map(\.id)))
@@ -1056,7 +1058,9 @@ public actor AnalysisPipeline {
                 inventory = try await reader.currentInventory()
                 try await store.saveInventory(inventory)
                 libraryCount = assets.count
-                if let mark {
+                // Only after a read with full access: one that set photos aside (access switched
+                // while it read) leaves no mark, so the next run reads the whole library again.
+                if let mark, readWithFullAccess {
                     try await store.setValue(LibraryReadMark(mark: mark, includeHidden: includeHidden, wholeReadAt: now()),
                                              forKey: Key.libraryMark)
                 }
@@ -1524,17 +1528,23 @@ public actor AnalysisPipeline {
         // photos are set aside, after them. An unreadable list counts as none.
         var previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
         if let away = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlacesOutOfView)) ?? nil, !away.isEmpty {
-            let stored = Set((previousPlaces ?? []).map(\.id))
-            previousPlaces = (previousPlaces ?? []) + away.filter { !stored.contains($0.id) }
+            previousPlaces = Self.withPhotosSetAside(previousPlaces ?? [], away)
         }
         // A place's days: those of the clocks its photos were taken on, where their places are
         // known so far (review P1-15).
         var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: home)
             .detect(in: all, previous: previousPlaces ?? [], zones: try await placeTimeZones(library: all))
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
+        // Each place before keeps its photos set aside for the next run: a place the shared
+        // photos do not make whole, one they make only a part of with its part set aside (a
+        // second selection with the other part keeps the id, third review of P1-07).
         let made = Set(frequent.map(\.id))
-        let placesOutOfView = setAside.isEmpty ? [] : (previousPlaces ?? []).filter {
-            !made.contains($0.id) && !setAside.isDisjoint(with: $0.assetIDs)
+        let placesOutOfView: [FrequentPlace] = setAside.isEmpty ? [] : (previousPlaces ?? []).compactMap { place in
+            guard !setAside.isDisjoint(with: place.assetIDs) else { return nil }
+            guard made.contains(place.id) else { return place }
+            var part = place
+            part.assetIDs = place.assetIDs.filter(setAside.contains)
+            return part
         }
         // The last moment to stop: from here on everything is stored, all of it or none.
         try checkPause(.tripsBeforeStoring)
@@ -1542,7 +1552,8 @@ public actor AnalysisPipeline {
         // goes into the safety copy, and a fresh database gets the decisions of a copy only
         // while it holds nothing of its own.
         if clock.store { try await store.setValue(clock.zone.identifier, forKey: Key.homeTimeZone) }
-        try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id)).union(setAside)), forKey: Key.tripIdentities)
+        try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id)).union(setAside), setAside: setAside),
+                                 forKey: Key.tripIdentities)
         try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
@@ -2668,11 +2679,41 @@ public actor AnalysisPipeline {
     /// The remembered identities, updated with this run's trips. Identities of trips that are
     /// not detected right now stay while any of their photos is still in the library (a trip
     /// can come back when its photos sync again or a correction is undone).
-    static func mergedIdentities(_ known: [TripIdentity], _ trips: [Trip], library: Set<AssetID>) -> [TripIdentity] {
+    /// `setAside`: photos set aside under "Ausgewählte Fotos". A trip that keeps its id keeps the
+    /// photos of its identity that are set aside too: detected from the shared photos it is only
+    /// a part of itself, and a second selection with the other part must find the id again
+    /// (third review of P1-07). With full access nothing is set aside: the trip's photos.
+    static func mergedIdentities(_ known: [TripIdentity], _ trips: [Trip], library: Set<AssetID>,
+                                 setAside: Set<AssetID> = []) -> [TripIdentity] {
         let current = Set(trips.map(\.id))
-        return trips.map(TripIdentity.init) + known.filter { identity in
+        let before = Dictionary(known.map { ($0.id, $0.members) }, uniquingKeysWith: { first, _ in first })
+        return trips.map { trip in
+            var identity = TripIdentity(trip)
+            if !setAside.isEmpty, let members = before[trip.id] {
+                let mine = Set(identity.members)
+                identity.members += members.filter { setAside.contains($0) && !mine.contains($0) }
+            }
+            return identity
+        } + known.filter { identity in
             !current.contains(identity.id) && identity.members.contains(where: library.contains)
         }
+    }
+
+    /// The places of the analysis before (`stored`) with the photos set aside of each (`away`,
+    /// `Key.frequentPlacesOutOfView`): a place of both keeps its photos and gets the others, a
+    /// place only set aside comes after the stored ones (their order decides ties).
+    static func withPhotosSetAside(_ stored: [FrequentPlace], _ away: [FrequentPlace]) -> [FrequentPlace] {
+        var result = stored
+        let index = Dictionary(stored.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for place in away {
+            if let i = index[place.id] {
+                let have = Set(result[i].assetIDs)
+                result[i].assetIDs += place.assetIDs.filter { !have.contains($0) }
+            } else if !result.contains(where: { $0.id == place.id }) {
+                result.append(place)
+            }
+        }
+        return result
     }
 
     /// Suggestion → the album it was applied to, from the managed-album records. Two albums

@@ -15,7 +15,12 @@
   Fotos sieht. Der erste Lauf danach liest die Mediathek einmal ganz. Bis dahin bleiben auch
   die gespeicherten Orte und der (maskierte) erkannte Text der nicht freigegebenen Fotos in der
   Datenbank (`docs/PRIVACY.md`); „Analyse neu aufbauen“ löscht sie. Reisen, häufige Orte und
-  gewählte Vorschläge behalten ihre Kennung und ihre beiseitegelegten Fotos.
+  gewählte Vorschläge behalten ihre Kennung und ihre beiseitegelegten Fotos, auch über mehrere
+  Auswahlen hintereinander. Ein gewählter Vorschlag, den Albumist hält, wird dabei nicht
+  losgelassen. Ausnahme: Wird „Dein Zuhause“ geändert, während nur ausgewählte Fotos freigegeben
+  sind, und Albumist hält deshalb einen gewählten Vorschlag zum ersten Mal, hält es ihn mit den
+  freigegebenen Fotos (die übrigen sind dem Vorschlag dann nicht bekannt); mit vollem Zugriff
+  bleibt er so, bis der Nutzer ihn anlegt oder abwählt.
 - Ortsnamen über `CLGeocoder` sind von Apple begrenzt (Drosselung, gelegentliche Fehler);
   Länder und Regionen kommen immer aus der Offline-Karte. Ein Lauf in der App fragt höchstens
   40 Ortsnamen pro Minute und wartet nie darauf; was fehlt, kommt mit einem späteren Lauf

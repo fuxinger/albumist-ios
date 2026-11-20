@@ -24,8 +24,9 @@ import UIKit
 ///   or year broken mid-word, review P3-11, `checkAtlasRows`), and the folder label in the
 ///   settings cut on one line at any size (P3-17, `checkFullyShown`)
 /// - "Animation überspringen" off screen or behind the tab bar while the sorting show runs
-///   (P3-18, `expectSkipInReach`); the mosaic's "+N" (P3-18) is only reported
-///   (`reportMoreCount`, `UI_FACT`): it sits inside a button XCUITest shows as one element
+///   (P3-18, `expectSkipInReach`), and the mosaic's "+N" cut even at half its size where the
+///   tree lists it (P3-18, `reportMoreCount`; inside its button it is most likely not listed,
+///   then it is only reported)
 ///
 /// Also failing: an audit that does not complete in two attempts ("Audit failed to complete in
 /// time", each attempt printed as `A11Y_AUDIT_ERROR`): the screen would otherwise pass unchecked.
@@ -955,27 +956,29 @@ final class AccessibilityUITests: XCTestCase {
     }
 
     /// What the walk can read of the mosaic's "+N" (review P3-18, `ui-a11y-xxxl-suggestion-
-    /// detail`: "+…" instead of "+24" at the largest text). Evidence only, never a failure: the
-    /// count sits inside the mosaic's button, which VoiceOver reads by its own label ("Alle 31
-    /// Fotos ansehen") and which XCUITest most likely shows as one element without the count.
-    /// The fix is held by `LargestTextFitTests` and seen in the screenshot. Printed: the button's
-    /// label and frame and, when the tree does list the count (`thumbnails.more`), its text,
-    /// frame and whether its width holds the whole count in the size its height shows.
+    /// detail`: "+…" instead of "+24" at the largest text). The count sits inside the mosaic's
+    /// button, which VoiceOver reads by its own label ("Alle 31 Fotos ansehen") and which
+    /// XCUITest most likely shows as one element without the count: then this only reports the
+    /// button (`UI_FACT`); the fix is held by `LargestTextFitTests` and seen in the screenshot.
+    /// Where the tree does list the count among the button's texts (never the button itself,
+    /// whose own label a hoisted identifier could carry), it fails on conservative evidence
+    /// only: its width does not hold the whole count even at half the size its one line's height
+    /// shows, the smallest it may shrink to (`minimumScaleFactor(0.5)`).
     private func reportMoreCount(_ screen: String, _ w: Words) {
         let grid = app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.allPhotos)).firstMatch
         guard let button = try? grid.snapshot() else {
             print("UI_FACT \(screen) \"+N\": no mosaic button found")
             return
         }
-        // One snapshot of the button: the count, if the tree lists it as its own element.
+        // One snapshot of the button: the count, if the tree lists it as a text inside it.
         var count: (label: String, frame: CGRect)?
-        var stack = [button]
+        var stack = Array(button.children.reversed())
         while let node = stack.popLast() {
-            if node.identifier == "thumbnails.more" || node.label.hasPrefix("+") {
+            if node.elementType == .staticText, node.identifier == "thumbnails.more" || node.label.hasPrefix("+") {
                 count = (node.label, node.frame)
                 break
             }
-            stack.append(contentsOf: node.children)
+            stack.append(contentsOf: node.children.reversed())
         }
         guard let count, count.frame.height >= 1 else {
             print("UI_FACT \(screen) \"+N\": button '\(button.label)' \(button.frame), the count is not in the tree (see the screenshot)")
@@ -983,10 +986,16 @@ final class AccessibilityUITests: XCTestCase {
         }
         let unit = UIFont.systemFont(ofSize: 100, weight: .semibold)
         let size = count.frame.height / unit.lineHeight * 100
-        let needed = (count.label as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: size, weight: .semibold)]).width
-        let whole = count.frame.width + 3 >= needed
-        print("UI_FACT \(screen) \"+N\": button '\(button.label)', count '\(count.label)' \(Int(count.frame.width))x\(Int(count.frame.height)), "
-              + "needs \(Int(needed)) pt at \(Int(size)) pt: \(whole ? "shown in full" : "looks cut")")
+        let smallest = size * 0.5
+        let needed = (count.label as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: smallest, weight: .semibold)]).width
+        let facts = "button '\(button.label)', count '\(count.label)' \(Int(count.frame.width))x\(Int(count.frame.height)), "
+            + "needs \(Int(needed)) pt at \(Int(smallest)) pt (half of \(Int(size)) pt)"
+        if count.frame.width + 3 >= needed {
+            print("UI_FACT \(screen) \"+N\": \(facts): not cut")
+        } else {
+            print("A11Y_FAIL \(screen) | count cut | \(facts)")
+            XCTFail("\(screen): the mosaic's \"\(count.label)\" is cut: \(facts)")
+        }
     }
 
     /// "Animation überspringen" is on screen while the sorting show runs, without scrolling,
@@ -994,45 +1003,58 @@ final class AccessibilityUITests: XCTestCase {
     /// show-1`: at the largest text it lay below the visible part of the screen). Content under
     /// the tab bar counts as hittable for XCUITest, so frames are compared, as for the plan's
     /// button (`expectApplyInReach`). Each poll reads one snapshot of the app and takes button,
-    /// bars and show from it: the show of a short plan may end at any moment, and a query on an
-    /// element that has just gone records "No matches found". A show that ends while this
-    /// waits is said, not failed: the result has replaced it, its button is gone with it.
+    /// bars (the first of each in the tree's order, as `firstMatch`) and show from it: the show
+    /// of a short plan may end at any moment, and a query on an element that has just gone
+    /// records "No matches found". The show ends by itself after a few seconds, so its end is
+    /// harmless only when no poll saw it (it had ended before the check began); a show seen with
+    /// its button out of reach that then ends fails, with the last frames seen.
     private func expectSkipInReach(_ step: String, _ w: Words) {
-        var skip: CGRect?
-        var bar: CGRect?
-        var tabs: CGRect?
+        var lastSkip: CGRect?
+        var lastBar: CGRect?
+        var lastTabs: CGRect?
+        var pollsWithShow = 0
         var ended = false
         let start = Date()
         let settled = UITestWait.holds(timeout: 10) {
             guard let root = try? app.snapshot() else { return false }
             var show = false
-            skip = nil; bar = nil; tabs = nil
-            var stack = [root]
+            var skip: CGRect?
+            var bar: CGRect?
+            var tabs: CGRect?
+            var stack: [any XCUIElementSnapshot] = [root]
             while let node = stack.popLast() {
-                if node.identifier == "show.skip" { skip = node.frame }
+                if node.identifier == "show.skip", skip == nil { skip = node.frame }
                 if node.elementType == .navigationBar, bar == nil { bar = node.frame }
                 if node.elementType == .tabBar, tabs == nil { tabs = node.frame }
                 if node.label == w.sortingShow { show = true }
-                stack.append(contentsOf: node.children)
+                stack.append(contentsOf: node.children.reversed())
             }
             if let frame = skip, !frame.isEmpty, root.frame.contains(frame),
                bar.map({ frame.minY >= $0.maxY - 1 }) ?? true,
                tabs.map({ frame.maxY <= $0.minY + 1 }) ?? true {
+                lastSkip = frame
                 return true
             }
-            ended = skip == nil && !show
-            return ended
+            if show || skip != nil {
+                pollsWithShow += 1
+                lastSkip = skip; lastBar = bar; lastTabs = tabs
+                return false
+            }
+            ended = true
+            return true
         }
         print("UI_TIMING wait \(step): skip button in reach \(String(format: "%.1f", Date().timeIntervalSince(start))) s")
-        let place = skip.map { "\($0)" } ?? "missing"
-        let tabPlace = tabs.map { "\($0)" } ?? "missing"
+        let place = lastSkip.map { "\($0)" } ?? "missing"
+        let barPlace = lastBar.map { "\($0)" } ?? "missing"
+        let tabPlace = lastTabs.map { "\($0)" } ?? "missing"
         if settled && !ended {
             print("UI_STEP_OK \(step): skip button in reach without scrolling (\(place))")
-        } else if ended {
-            print("UI_FACT \(step): the show ended before its button was measured")
+        } else if ended && pollsWithShow == 0 {
+            print("UI_FACT \(step): the show had ended before its button was measured")
         } else {
-            print("A11Y_FAIL \(step) | skip button out of reach | button \(place), navigation bar \(bar.map { "\($0)" } ?? "missing"), tab bar \(tabPlace)")
-            XCTFail("\(step): \"Animation überspringen\" is not on screen without scrolling: button \(place), tab bar \(tabPlace)")
+            let how = ended ? "the show ended after \(pollsWithShow) look(s) with the button out of reach" : "timeout"
+            print("A11Y_FAIL \(step) | skip button out of reach (\(how)) | button \(place), navigation bar \(barPlace), tab bar \(tabPlace)")
+            XCTFail("\(step): \"Animation überspringen\" is not on screen without scrolling (\(how)): button \(place), tab bar \(tabPlace)")
         }
     }
 

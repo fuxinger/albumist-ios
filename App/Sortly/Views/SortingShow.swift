@@ -171,6 +171,7 @@ struct SortingShow: View {
                 // count runs up (a line that wrapped mid-show would shrink the scene at once).
                 Text("\(totalPhotos) Fotos einsortiert")
                     .hidden()
+                    .accessibilityHidden(true)
                 Text("\(counted) Fotos einsortiert")
                     .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(counted)))
             }

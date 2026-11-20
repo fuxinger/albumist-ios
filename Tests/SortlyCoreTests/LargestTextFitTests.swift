@@ -84,9 +84,12 @@ struct LargestTextFitTests {
     }
 
     /// The count stays text (VoiceOver reads the mosaic's button with its full count, "Alle 31
-    /// Fotos ansehen") and carries an identifier. The accessibility walk reports what it can read
-    /// of it and never fails on it: inside the button the count is most likely not in the tree,
-    /// and a failure there would fail every walk (second review of P3-18).
+    /// Fotos ansehen") and carries an identifier. Inside the button the count is most likely not
+    /// in the tree: then the walk only reports it, a failure there would fail every walk (second
+    /// review of P3-18). Where the tree does list it, among the button's texts (never the button
+    /// itself, whose own label an identifier could carry), a count cut even at the smallest size
+    /// it may shrink to (half the size its height shows, `minimumScaleFactor(0.5)`) fails the
+    /// walk (third review).
     @Test func theCountIsReportedByTheAccessibilityWalk() throws {
         let more = try Self.moreCount()
         #expect(!more.contains(".accessibilityHidden"), "\(more)")
@@ -95,7 +98,14 @@ struct LargestTextFitTests {
         let report = try #require(AppSource.body(of: "func reportMoreCount(", in: walk), "the walk does not look at the count")
         #expect(report.contains("\"thumbnails.more\""))
         #expect(report.contains("UI_FACT"))
-        #expect(!report.contains("XCTFail"), "the walk fails where it cannot see the count: \(report)")
+        let missing = try #require(AppSource.body(of: "guard let count", in: report), "no branch for a count not in the tree")
+        #expect(!missing.contains("XCTFail"), "the walk fails where it cannot see the count: \(missing)")
+        #expect(report.contains("XCTFail"), "a count measured as cut does not fail the walk: \(report)")
+        #expect(report.contains(/\[\s*button\s*\]/) == false, "the button itself is searched for the count: \(report)")
+        #expect(report.contains(/button\.children/), "\(report)")
+        #expect(report.contains(/elementType\s*==\s*\.staticText/), "\(report)")
+        #expect(report.contains(/(size\s*\*\s*0?\.5|size\s*\/\s*2|0?\.5\s*\*\s*size)/),
+                "a count shrunk by its minimumScaleFactor would count as cut: \(report)")
         let body = try #require(AppSource.body(of: "private func walk(", in: walk))
         #expect(!AppSource.calls(of: "reportMoreCount(", in: body).isEmpty, "the walk never looks at the count")
     }
@@ -197,6 +207,14 @@ struct LargestTextFitTests {
         #expect(!reach.contains("app.buttons["), "the button is queried again and again: \(reach)")
         #expect(reach.contains(".tabBar"), "the button may stand behind the tab bar: \(reach)")
         #expect(reach.contains(".navigationBar"), "the button may stand under the navigation bar: \(reach)")
+        // The show ends by itself after a few seconds: an end is harmless only when no poll saw
+        // the show (third review of P3-18). A poll that saw it with the button out of reach,
+        // and then the end, fails the walk.
+        #expect(reach.contains(/pollsWithShow\s*\+=\s*1/), "the polls that saw the show are not counted: \(reach)")
+        #expect(reach.contains(/if\s+[^{]*\bended\b[^{]*\bpollsWithShow\s*==\s*0\b[^{]*\{/),
+                "a show that ended after it was seen with the button out of reach passes: \(reach)")
+        // The first bar in the order of the tree, as `firstMatch` finds it.
+        #expect(reach.contains(/children\.reversed\(\)/), "\(reach)")
         let body = try #require(AppSource.body(of: "private func walk(", in: walk))
         #expect(!AppSource.calls(of: "expectSkipInReach(", in: body).isEmpty, "the walk never checks the button")
     }

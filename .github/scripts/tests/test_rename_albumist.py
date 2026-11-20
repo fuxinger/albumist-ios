@@ -73,6 +73,8 @@ class ExclusionTests(unittest.TestCase):
                'public static let legacyName = "sortly.sqlite"\n')
         self.assertEqual(rename(src), 'public static let name = "albumist.sqlite"\n'
                                       'public static let legacyName = "sortly.sqlite"\n')
+        self.assertEqual(rename('#expect(DatabaseFile.legacyName == "sortly.sqlite")'),
+                         '#expect(DatabaseFile.legacyName == "sortly.sqlite")')
 
     def test_outside_names_stay(self):
         for text in ("if: github.ref == 'refs/heads/claude/sortly-app'",
@@ -231,6 +233,25 @@ class ThisRepositoryTests(unittest.TestCase):
         plan = ra.build_plan(str(REPO))
         if plan.moves:
             self.assertIn(("App/Sortly/Model/AppModel.swift", "App/Albumist/Model/AppModel.swift"), plan.moves)
+
+    def renamed(self, path):
+        """The real file (before or after the rename) as the rename leaves it."""
+        for candidate in (REPO / path, REPO / ra.map_path(path)):
+            if candidate.exists():
+                return ra.rename_text(candidate.read_text(encoding="utf-8")).text
+        self.fail(f"{path} not found")
+
+    def test_the_stored_names_survive_in_the_real_files(self):
+        # The exclusions match exact text: a reformatted line would be renamed silently and an
+        # update would lose the user's database or album records (second review of prep/rename).
+        database = self.renamed("Sources/SortlyStore/DatabaseFile.swift")
+        self.assertIn('public static let legacyName = "sortly.sqlite"', database)
+        self.assertIn('public static let name = "albumist.sqlite"', database)
+        tests = self.renamed("Tests/SortlyStoreTests/DatabaseFileTests.swift")
+        self.assertIn('#expect(DatabaseFile.legacyName == "sortly.sqlite")', tests)
+        tracker = self.renamed("Sources/SortlyCore/Status/ManagedAlbumTracker.swift")
+        self.assertIn('case addedByAlbumist = "addedBySortly"', tracker)
+        self.assertIn('case createdByAlbumist = "createdBySortly"', tracker)
 
     def test_each_rewritten_sentence_is_still_there_or_done(self):
         # A sentence changed in the meantime would otherwise get the plain mapping silently.

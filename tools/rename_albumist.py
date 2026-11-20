@@ -61,9 +61,10 @@ EXCLUSIONS = [
               "JSON keys of ManagedAlbumState (CodingKeys raw values), stored in the database and in the "
               "safety backup on users' devices; the Swift case names change, the stored keys must not, or "
               "every album record of an update fails to load."),
-    Exclusion("legacy-database-name", re.compile(r'legacyName = "sortly\.sqlite"'),
-              "The database file name older builds wrote (DatabaseFile.legacyName). The app moves "
-              "sortly.sqlite (+ -wal, -shm) to the new name once at launch; it needs the old name to find it."),
+    Exclusion("legacy-database-name", re.compile(r'legacyName\s*==?\s*"sortly\.sqlite"'),
+              "The database file name older builds wrote (DatabaseFile.legacyName, and the test that spells "
+              "it out). The app moves sortly.sqlite (+ -wal, -shm) to the new name once at launch; it needs "
+              "the old name to find it."),
     Exclusion("old-branch", re.compile(r"claude/sortly-app"),
               "Name of a real, retired git branch (release.yml condition, history in docs); renaming the "
               "text would point to a branch that never existed."),

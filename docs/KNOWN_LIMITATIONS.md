@@ -21,6 +21,11 @@
   sind, und Albumist hält deshalb einen gewählten Vorschlag zum ersten Mal, hält es ihn mit den
   freigegebenen Fotos (die übrigen sind dem Vorschlag dann nicht bekannt); mit vollem Zugriff
   bleibt er so, bis der Nutzer ihn anlegt oder abwählt.
+  Wird eine Sicherung wiederhergestellt, während nur ausgewählte Fotos freigegeben sind, kennt
+  Albumist die beiseitegelegten Teile häufiger Orte nicht mehr (sie sind Analyse, nicht Teil der
+  Sicherung): ein Ort, dessen Fotos gerade alle nicht freigegeben sind, bekommt mit vollem
+  Zugriff eine neue Kennung, ein selbst gegebener Name geht dann verloren (zweite Prüfung von
+  P1-07, selten).
 - Ortsnamen über `CLGeocoder` sind von Apple begrenzt (Drosselung, gelegentliche Fehler);
   Länder und Regionen kommen immer aus der Offline-Karte. Ein Lauf in der App fragt höchstens
   40 Ortsnamen pro Minute und wartet nie darauf; was fehlt, kommt mit einem späteren Lauf

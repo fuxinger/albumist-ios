@@ -5,7 +5,7 @@ SQLite, Version über `PRAGMA user_version`, Migrationen in `Sources/SortlyStore
 ## Tabellen
 | Tabelle | Schlüssel | Inhalt |
 |---|---|---|
-| `assets` | `id` (PhotoKit localIdentifier) | Metadaten, Fingerabdruck, `analysis_version`, `labels_version` (v5) |
+| `assets` | `id` (PhotoKit localIdentifier) | Metadaten, Fingerabdruck, `analysis_version`, `labels_version` (v5), `out_of_view` (v6) |
 | `collections` | `id` | Alben und Ordner: Titel, Art, Rechte, Eltern, Kinder |
 | `collection_members` | (`collection_id`, `asset_id`) | Album-Mitgliedschaften |
 | `place_cache` | `cell` (Rasterzelle) | aufgelöste Ortsnamen je Zelle |
@@ -48,4 +48,12 @@ Idempotenzschlüssel (Plan-ID + Index + Inhalts-Hash).
   wurde, ist nicht bekannt, es wird einmal nachklassifiziert. Kann ein Foto beim Nachholen
   nicht gelesen werden, zählt `analysis_results` (Art `labels`, `LabelAttempts`) die Versuche;
   sein Inhaltsergebnis bleibt unverändert.
+- v6: `assets.out_of_view` (Prüfbefund P1-07): Bei „Ausgewählte Fotos“ werden Fotos außerhalb
+  der Auswahl beiseitegelegt (1) statt gelöscht; ihre Analyse, ihr Ort und ihr Text bleiben.
+  Alle Abfragen für Analyse, Zählung, Vorschläge und Suche lassen sie aus (`assetCount`,
+  `allAssets`, `results`, `places`, `searchText` …); nur Änderungen an allen gespeicherten
+  Ergebnissen (Sprache der Albumnamen, strengere Masken der Texte) nehmen sie mit
+  (`includingOutOfView`). Wird ein Foto wieder gelesen, ist es wieder sichtbar (0); gelöscht
+  wird es erst, wenn ein ganzes Lesen mit vollem Zugriff es nicht findet. Ein Lauf liest nur
+  Änderungen, solange kein Foto beiseiteliegt. Fotos älterer Versionen sind sichtbar.
 Migrationen laufen nur vorwärts, jede in einer Transaktion.

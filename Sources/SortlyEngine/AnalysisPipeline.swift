@@ -230,7 +230,11 @@ public actor AnalysisPipeline {
         public var earlyProposalsFailure: String?
         public var pausedBecause: PauseReason?
         public var newOrChanged = 0
+        /// Photos deleted from the store: gone from the library, read with full access.
         public var removed = 0
+        /// Photos set aside because "Ausgewählte Fotos" hides them (review P1-07): kept with
+        /// their analysis, left out of everything until they are read again.
+        public var setAside = 0
         public var placesResolved = 0
         public var placesPendingOnline = 0
         public var onlineRequests = 0
@@ -897,7 +901,8 @@ public actor AnalysisPipeline {
     /// again only when anything changed at all. Returns the albums and the number of photos,
     /// or `nil` when the whole library has to be read: no mark (or one that cannot be read, or
     /// of another reader version), another setting for hidden photos, limited access (the
-    /// selection can change without a change in the library), a history that cannot tell or
+    /// selection can change without a change in the library), photos still set aside from
+    /// limited access (review P1-07), a history that cannot tell or
     /// does not answer (too old, another library, an error), many changes, every
     /// `wholeReadEvery`-th time, a week after the last whole read, or a number of photos after
     /// the changes that does not fit the library. Nothing is written before that is known.
@@ -905,7 +910,9 @@ public actor AnalysisPipeline {
     /// read again next time).
     private func readChanges(includeHidden: Bool, control: AnalysisRunControl,
                              report: inout Report) async throws -> (CollectionInventory, Int)? {
-        guard runAccess == .full,
+        // Photos set aside under "Ausgewählte Fotos" are put right by a whole read only (it
+        // takes them back or deletes them); the history knows nothing of the selection.
+        guard runAccess == .full, try await store.outOfViewCount() == 0,
               let stored = await storedLibraryMark(),
               stored.readerVersion == Self.currentReaderVersion,
               stored.includeHidden == includeHidden, stored.changeReads < Self.wholeReadEvery,
@@ -1028,7 +1035,15 @@ public actor AnalysisPipeline {
                     return !control.isPaused
                 }
                 report.newOrChanged += try await store.upsertAssets(assets).count
-                report.removed += try await store.removeAssets(notIn: Set(assets.map(\.id)))
+                // A photo missing from a read of "Ausgewählte Fotos" is only out of view: it is
+                // set aside with its analysis, place and text, not deleted. Only full access
+                // shows that a photo is gone (review P1-07: back on "Alle Fotos" every photo
+                // outside the selection was analysed again, hours on a large library).
+                if runAccess == .full {
+                    report.removed += try await store.removeAssets(notIn: Set(assets.map(\.id)))
+                } else {
+                    report.setAside += try await store.setAside(notIn: Set(assets.map(\.id)))
+                }
                 inventory = try await reader.currentInventory()
                 try await store.saveInventory(inventory)
                 libraryCount = assets.count
@@ -1780,7 +1795,8 @@ public actor AnalysisPipeline {
         guard let map, try await store.value(TitleLanguage.self, forKey: Key.placesLanguage) != language else { return }
         let renamer = map.renamer(to: language)
         var renamed: [AssetID: ResolvedPlace] = [:]
-        for (id, var place) in try await store.places() {
+        // Also the places of photos set aside under "Ausgewählte Fotos": they come back renamed.
+        for (id, var place) in try await store.places(includingOutOfView: true) {
             let components = renamer.renamed(place.components)
             guard components != place.components else { continue }
             place.components = components
@@ -2007,8 +2023,9 @@ public actor AnalysisPipeline {
     private func remaskStoredTexts() async throws {
         let done = try await store.value(Int.self, forKey: Key.textMaskVersion) ?? 1
         guard done < TextMinimizer.maskVersion else { return }
-        let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
-        for (asset, var result) in try await store.results(TextResult.self, kind: "text") {
+        // Also the texts of photos set aside under "Ausgewählte Fotos": they come back masked.
+        let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion, includingOutOfView: true)
+        for (asset, var result) in try await store.results(TextResult.self, kind: "text", includingOutOfView: true) {
             // A big library takes minutes the first time; a cut-off run keeps what it did (masked
             // rows are skipped next time) and the purge below runs when the last row is done.
             try Task.checkCancellation()

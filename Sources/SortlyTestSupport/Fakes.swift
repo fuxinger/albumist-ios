@@ -129,6 +129,11 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
         inventory = new
     }
     public func set(access: LibraryAccess) { accessLevel = access }
+    /// The photos the user chose under "Ausgewählte Fotos": with `.limited` access only these
+    /// are read, and albums show only these of their photos, like PhotoKit. The library itself
+    /// does not change (no entry in its history). `nil`: every photo.
+    public private(set) var selection: Set<AssetID>?
+    public func set(selection new: Set<AssetID>?) { selection = new }
     /// Called for each photo a read of changed photos reads (a test pauses there).
     private var onChangedRead: (@Sendable (AssetID) -> Void)?
     public func set(onChangedRead hook: (@Sendable (AssetID) -> Void)?) { onChangedRead = hook }
@@ -150,7 +155,12 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
     }
 
     private func readable(_ asset: AssetSnapshot, includeHidden: Bool) -> Bool {
-        includeHidden || !hidden.contains(asset.id)
+        (includeHidden || !hidden.contains(asset.id)) && selected(asset.id)
+    }
+
+    private func selected(_ id: AssetID) -> Bool {
+        guard accessLevel == .limited, let selection else { return true }
+        return selection.contains(id)
     }
 
     /// Like PhotoKit: file details (name, type, RAW flag) only for assets that are new to the
@@ -193,7 +203,12 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
     }
     public func currentInventory() async throws -> CollectionInventory {
         inventoryReads += 1
-        return inventory
+        guard accessLevel == .limited, let selection else { return inventory }
+        return CollectionInventory(inventory.collections.values.map { album in
+            var seen = album
+            seen.assetIDs.formIntersection(selection)
+            return seen
+        })
     }
 
     public func changeMark() async -> LibraryChangeMark? {

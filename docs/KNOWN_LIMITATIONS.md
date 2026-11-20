@@ -6,15 +6,13 @@
   und `BGProcessingTask`, wie lange Albumist im Hintergrund rechnen darf. Endet die Zeit,
   hält iOS die App an, und die Analyse geht beim nächsten Öffnen an derselben Stelle weiter.
 - Apps können die Fotos-App öffnen, aber nicht ein bestimmtes Album darin.
-- Bei „Ausgewählte Fotos“ sieht Albumist nur diese Auswahl. Die Analyse der übrigen Fotos wird
-  dabei gelöscht wie bei gelöschten Fotos (`removeAssets(notIn:)`, die Ergebnisse hängen mit
-  `ON DELETE CASCADE` daran); zurück auf „Alle Fotos“ werden sie neu analysiert, bei 14.000
-  Fotos Stunden (Prüfbefund P1-07, offen). Behebung: die nicht sichtbaren Fotos in der
-  Datenbank als „zurzeit nicht sichtbar“ markieren statt sie zu löschen (neue Spalte, also eine
-  Migration), sie aus allen Abfragen der Analyse, Zählung und Suche herausnehmen und erst
-  löschen, wenn Albumist wieder alle Fotos sieht und das Foto dann fehlt. Das berührt die
-  13 Abfragen auf die Tabelle `assets` in `SortlyStore` und die Anzeige der App bei eingeschränktem Zugriff und ist
-  darum nicht im Kern allein zu machen.
+- Bei „Ausgewählte Fotos“ sieht Albumist nur diese Auswahl: Vorschläge, Reisen, Zuhause,
+  Zählung und Suche entstehen nur aus diesen Fotos. Die übrigen Fotos werden beiseitegelegt,
+  nicht gelöscht (Prüfbefund P1-07, behoben 20.11.): Zurück auf „Alle Fotos“ oder in einer
+  anderen Auswahl kommen sie mit Analyse, Ort und Text zurück und werden nicht neu analysiert.
+  Ob ein beiseitegelegtes Foto in Fotos gelöscht wurde, kann Albumist bei eingeschränktem
+  Zugriff nicht wissen; es verschwindet aus der Datenbank erst, wenn Albumist wieder alle
+  Fotos sieht. Der erste Lauf danach liest die Mediathek einmal ganz.
 - Ortsnamen über `CLGeocoder` sind von Apple begrenzt (Drosselung, gelegentliche Fehler);
   Länder und Regionen kommen immer aus der Offline-Karte. Ein Lauf in der App fragt höchstens
   40 Ortsnamen pro Minute und wartet nie darauf; was fehlt, kommt mit einem späteren Lauf

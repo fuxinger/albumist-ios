@@ -139,9 +139,12 @@ struct DataSafetyTests {
 
     /// Everything of `makeDatabase` reads back through the store, unchanged.
     func expectIntact(_ s: SortlyStore, _ c: Contents, version: Int) async throws {
-        #expect(await s.schemaVersion == 5)
+        #expect(await s.schemaVersion == 6)
         #expect(try await s.integrityReport() == "ok")
         #expect(try await s.asset("a") == c.asset)
+        // Every photo of an older version is in view (version 6, review P1-07).
+        #expect(try await s.outOfViewCount() == 0)
+        #expect(try await s.assetCount() == 1)
         // Same fingerprint: the photo is not taken as changed and analysed again.
         #expect(try await s.upsertAssets([c.asset]).isEmpty)
         #expect(try await s.assetsNeedingAnalysis(version: 3, limit: 10).isEmpty)
@@ -175,7 +178,7 @@ struct DataSafetyTests {
 
     // MARK: Migrations from every older version
 
-    @Test(arguments: [1, 2, 3])
+    @Test(arguments: [1, 2, 3, 4, 5])
     func everyOlderVersionMigratesWithItsDataIntact(version: Int) async throws {
         let dir = try folder()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -188,9 +191,17 @@ struct DataSafetyTests {
         }
         // Opened again: nothing runs twice, the data is still there.
         let reopened = try SortlyStore(url: url)
-        #expect(await reopened.schemaVersion == 5)
+        #expect(await reopened.schemaVersion == 6)
         #expect(try await reopened.overrides() == [c.override])
         #expect(try await reopened.searchText("Bordkarte") == ["a"])
+        // A photo set aside (version 6) stays set aside in the file, with its results.
+        #expect(try await reopened.setAside(notIn: []) == 1)
+        let third = try SortlyStore(url: url)
+        #expect(try await third.outOfViewCount() == 1)
+        #expect(try await third.assetCount() == 0)
+        #expect(try await third.upsertAssets([c.asset]).isEmpty)
+        #expect(try await third.results([String: Double].self, kind: "vision") == ["a": ["beach": 0.9]])
+        #expect(try await third.searchText("Bordkarte") == ["a"])
     }
 
     /// A migration that cannot finish (here: the disk is full while version 3 copies the
@@ -216,7 +227,7 @@ struct DataSafetyTests {
             #expect(try old.query("SELECT 1 FROM sqlite_master WHERE name = 'text_plain_v3' OR name = 'plan_steps'").isEmpty)
         }
         let s = try SortlyStore(url: url)
-        #expect(await s.schemaVersion == 5)
+        #expect(await s.schemaVersion == 6)
         #expect(try await s.integrityReport() == "ok")
         #expect(try await s.searchText("Bäckerei", limit: 10_000).count == 3_000)
         #expect(try await s.searchText("Hotel") == ["a"])
@@ -330,7 +341,7 @@ struct DataSafetyTests {
         let url = dir.appendingPathComponent("sortly.sqlite")
         FileManager.default.createFile(atPath: url.path, contents: Data())
         let s = try SortlyStore(url: url)
-        #expect(await s.schemaVersion == 5)
+        #expect(await s.schemaVersion == 6)
         #expect(try await s.hasSafetyData() == false)
     }
 
@@ -364,7 +375,7 @@ struct DataSafetyTests {
         for suffix in ["", "-wal", "-shm"] { #expect(!FileManager.default.fileExists(atPath: url.path + suffix)) }
 
         let rebuilt = try SortlyStore(url: url)
-        #expect(await rebuilt.schemaVersion == 5)
+        #expect(await rebuilt.schemaVersion == 6)
         let backup = try #require(try SafetyBackup.read(from: backupURL))
         #expect(try await rebuilt.restore(backup, includingLibraryState: backup.belongsToLibrary(access: .full, visibleAlbums: Set(c.inventory.collections.keys)) == true))
         #expect(try await rebuilt.overrides() == [c.override])

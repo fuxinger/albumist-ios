@@ -10,7 +10,7 @@ struct StoreTests {
 
     @Test func migrationsRun() async throws {
         let s = try store()
-        #expect(await s.schemaVersion == 5)
+        #expect(await s.schemaVersion == 6)
     }
 
     @Test func fileBackedStoreSurvivesReopen() async throws {
@@ -22,7 +22,7 @@ struct StoreTests {
         }
         let reopened = try SortlyStore(url: url)
         #expect(try await reopened.assetCount() == 1)
-        #expect(await reopened.schemaVersion == 5)
+        #expect(await reopened.schemaVersion == 6)
     }
 
     @Test func upsertReportsOnlyChangedAssetsAndRoundTrips() async throws {
@@ -98,6 +98,89 @@ struct StoreTests {
         let many = Set((0..<40_000).map { AssetID("x\($0)") }).union(["p0"])
         #expect(try await s.countNeedingAnalysis(version: 3, within: range, excluding: many) == 7)
         #expect(try await s.countNeedingAnalysis(version: 3, within: range) == 8)
+    }
+
+    /// Review P1-07: a photo set aside under "Ausgewählte Fotos" keeps its analysis, place and
+    /// text, and is left out of every read of the analysis, the counts and the search, until it
+    /// is read again. Only `removeAssets` deletes it.
+    @Test func photosSetAsideAreLeftOutOfEveryReadAndComeBackWhole() async throws {
+        let s = try store()
+        let a = AssetSnapshot(id: "a", creationDate: Fixture.date("2026-01-01"), location: GeoCoordinate(latitude: 48.1, longitude: 11.5),
+                              uniformTypeIdentifier: "public.heic")
+        let b = AssetSnapshot(id: "b", creationDate: Fixture.date("2026-01-02"), location: GeoCoordinate(latitude: 41.9, longitude: 12.5),
+                              originalFilename: "IMG_0002.HEIC", uniformTypeIdentifier: "public.heic")
+        let c = AssetSnapshot(id: "c", creationDate: Fixture.date("2026-01-03"))
+        try await s.upsertAssets([a, b, c])
+        let place = ResolvedPlace(components: PlaceComponents(isoCountryCode: "IT", country: "Italien"), source: .gpsReverseGeocoded,
+                                  resolvedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        try await s.setPlaces(["a": place, "b": place])
+        try await s.saveResults([(AssetID("a"), "a labels"), (AssetID("b"), "b labels")], kind: "content", version: 3,
+                                markingAnalyzed: ["a", "b"], labelsVersion: 1)
+        try await s.saveResult("c pending", kind: "content", asset: "c", version: 3)
+        try await s.saveResult("b text", kind: "text", asset: "b", version: 1)
+        try await s.indexText("Rechnung Hotel Rom", for: "b")
+        try await s.indexText("Rechnung Bäcker", for: "a")
+        try await s.addOverride(UserOverride(scope: .asset("b"), decision: .ignoreAsset))
+        let revision = await s.placesRevision
+
+        #expect(try await s.setAside(notIn: ["a"]) == 2)
+        #expect(await s.placesRevision > revision)
+        #expect(try await s.setAside(notIn: ["a"]) == 0, "set aside once")
+        #expect(try await s.outOfViewCount() == 2)
+        #expect(try await s.assetCount() == 1)
+        #expect(try await s.allAssets().map(\.id) == ["a"])
+        #expect(try await s.asset("b") == nil)
+        #expect(try await s.assetsNeedingAnalysis(version: 3, limit: 10).isEmpty)
+        #expect(try await s.countNeedingAnalysis(version: 3) == 0)
+        #expect(try await s.countNeedingAnalysis(version: 3, labelsVersion: 2) == 1)
+        #expect(try await s.countNeedingLabelsOnly(version: 3, labelsVersion: 2) == 1)
+        #expect(try await s.unlabelledAssets(version: 3, labelsVersion: 2) == ["a"])
+        #expect(try await s.unlabelledAssets(version: 3, labelsVersion: 2, withResult: "content") == ["a"])
+        #expect(try await s.labelsVersions() == ["a": 1])
+        #expect(try await s.analyzedResults(String.self, kind: "content", version: 3, of: ["a", "b"]) == ["a": "a labels"])
+        #expect(try await s.results(String.self, kind: "content") == ["a": "a labels"])
+        #expect(try await s.results(String.self, kind: "text").isEmpty)
+        #expect(try await s.pendingResults(String.self, kind: "content", version: 3).isEmpty)
+        #expect(try await s.places() == ["a": place])
+        #expect(try await s.searchText("Rechnung") == ["a"])
+        #expect(try await s.searchText("Hotel").isEmpty)
+        // Kept, for the changes that go over every stored result and for reading the library.
+        #expect(try await s.results(String.self, kind: "text", includingOutOfView: true) == ["b": "b text"])
+        #expect(try await s.places(includingOutOfView: true) == ["a": place, "b": place])
+        #expect(try await s.storedAssets(among: ["a", "b", "x"]) == ["a", "b"])
+        #expect(try await s.assetsWithFileDetails().keys.contains("b"))
+        #expect(try await s.overrides().count == 1)
+
+        // Read again, unchanged and without its file details (known): back with everything,
+        // not counted as changed (nothing is analysed again).
+        var bare = b
+        bare.uniformTypeIdentifier = nil
+        bare.originalFilename = nil
+        #expect(try await s.upsertAssets([bare]).isEmpty)
+        #expect(try await s.outOfViewCount() == 1)
+        #expect(try await s.asset("b") == b)
+        #expect(try await s.results(String.self, kind: "content") == ["a": "a labels", "b": "b labels"])
+        #expect(try await s.places()["b"] == place)
+        #expect(Set(try await s.searchText("Rechnung")) == ["a", "b"])
+        #expect(try await s.labelsVersions() == ["a": 1, "b": 1])
+        // Read again changed: back, and analysed again as any changed photo.
+        var edited = c
+        edited.pixelWidth = 100
+        #expect(try await s.upsertAssets([edited]) == ["c"])
+        #expect(try await s.outOfViewCount() == 0)
+        #expect(try await s.countNeedingAnalysis(version: 3) == 1)
+
+        // Only `removeAssets` deletes a photo set aside, with its results.
+        #expect(try await s.setAside(notIn: ["a", "c"]) == 1)
+        #expect(try await s.removeAssets(notIn: ["a", "c"]) == 1)
+        #expect(try await s.outOfViewCount() == 0)
+        #expect(try await s.rawResult(kind: "content", asset: "b") == nil)
+        #expect(try await s.recognizedText(for: "b") == nil)
+        #expect(try await s.places(includingOutOfView: true).keys.sorted() == ["a"])
+        #expect(try await s.setAside(notIn: ["a"]) == 1)
+        #expect(try await s.removeAssets(["c"]) == 1)
+        #expect(try await s.assetCount() == 1)
+        #expect(try await s.overrides().count == 1, "the user's decisions stay")
     }
 
     @Test func incrementalAnalysisTracking() async throws {
@@ -186,7 +269,7 @@ struct StoreTests {
             try old.execute("INSERT INTO text_fts (asset_id, content) VALUES ('gone', 'Kontoauszug alt')")
         }
         let s = try SortlyStore(url: URL(fileURLWithPath: path))
-        #expect(await s.schemaVersion == 5)
+        #expect(await s.schemaVersion == 6)
         #expect(await s.hasFullTextSearch)
         #expect(try await s.searchText("Hotel") == ["a"])
         #expect(try await s.searchText("Kontoauszug").isEmpty) // orphan from the old index is gone

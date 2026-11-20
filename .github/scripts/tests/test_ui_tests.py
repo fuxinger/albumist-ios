@@ -1544,7 +1544,7 @@ class SleepRuleTests(unittest.TestCase):
         "AccessibilityUITests.swift": 6,
         "DeviceConditionUITests.swift": 14,
         "SearchUITests.swift": 1,
-        "SortlyFlowUITests.swift": 87,
+        "SortlyFlowUITests.swift": 51,
         "SortlyLockedUITests.swift": 1,
         "UITestOnboarding.swift": 1,
         # The poll interval of the condition waits (holds, which until, screenAtRest and never use),
@@ -1556,7 +1556,7 @@ class SleepRuleTests(unittest.TestCase):
     # UITestWait.atLeast calls per file (a fixed minimum after a wait; second review of C2):
     # counted like the sleeps, so a new one is a decision, not a habit.
     AT_LEAST = {"AccessibilityUITests.swift": 1, "DeviceConditionUITests.swift": 1, "ReleaseSmokeUITests.swift": 1,
-                "SortlyFlowUITests.swift": 4}
+                "SortlyFlowUITests.swift": 13}
     # Long sleeps (3 s or more, or a computed length) without a "// pacing:" note, per file:
     # the ones still standing in for a state. None left since the condition waits of
     # UITestWait.swift; a new one fails test_a_long_sleep_is_pacing_and_says_so.

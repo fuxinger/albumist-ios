@@ -608,8 +608,20 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
     elif left:
         md += ["", f"Not chosen: {', '.join(left)}."]
     append("GITHUB_STEP_SUMMARY", "\n".join(md) + "\n")
-    append("GITHUB_OUTPUT", f"matrix={json.dumps(matrix, separators=(',', ':'))}\ncount={len(run)}\n")
+    red, red_text = known_red(decisions or [])
+    append("GITHUB_OUTPUT", f"matrix={json.dumps(matrix, separators=(',', ':'))}\ncount={len(run)}\n"
+                            f"known_red={' '.join(red)}\nknown_red_text={red_text}\n")
     return 0
+
+
+def known_red(decisions: list[dict]) -> tuple[list[str], str]:
+    """The groups already red for this app and their test code (tempo plan 20.11.): the verdict of
+    this run will be red whatever they show now (a red test is never re-run to green), so ui.yml's
+    job "UI known red" says so within a minute instead of after the groups (8b71209: the verdict
+    was red after 69 min from a red known at minute 0). The groups still run."""
+    red = [d for d in decisions if d["state"] == "red"]
+    text = "; ".join(f"{d['group']} red in " + ", ".join(e["url"] for e in d["reds"]) for d in red)
+    return [d["group"] for d in red], " ".join(text.splitlines())[:900]
 
 
 def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = False,

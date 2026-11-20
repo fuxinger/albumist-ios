@@ -450,6 +450,28 @@ class CommandTests(unittest.TestCase):
         self.assertIn("UI_PLAN reuse device: green in [run 1", log)
         self.assertIn("Not run again: device", self.read(self.summary))
 
+    def test_plan_names_the_groups_already_red_for_this_key(self):
+        # Tempo plan 20.11. (8b71209): a group red for this app and test code makes the verdict
+        # red whatever this run shows; the plan says so at once for ui.yml's "UI known red".
+        red = self.NIGHT + [run(8, "b" * 40, [job("other", "failure", "failure", tests=TEST_ONLY_FPS["other"],
+                                                    end="2026-11-19T13:00:00Z")])]
+        code, log = self.plan("auto", red)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.outputs()["known_red"], "other")
+        self.assertTrue(self.outputs()["known_red_text"].startswith("other red in "), self.outputs())
+        # The red group still runs (its result is shown, its green does not count).
+        self.assertIn("other", [e["group"] for e in json.loads(self.outputs()["matrix"])["include"]])
+        os.remove(self.output)
+        self.plan("auto", self.NIGHT)
+        self.assertEqual(self.outputs()["known_red"], "")
+        os.remove(self.output)
+        # No reading of earlier results (a choice by name, or the API down): nothing is known.
+        self.plan("all", red)
+        self.assertEqual(self.outputs()["known_red"], "")
+        os.remove(self.output)
+        self.plan("auto", red, fail=True)
+        self.assertEqual(self.outputs()["known_red"], "")
+
     def test_plan_choices(self):
         self.assertEqual(self.plan("all", self.NIGHT)[0], 0)
         self.assertEqual(self.outputs()["count"], "4")

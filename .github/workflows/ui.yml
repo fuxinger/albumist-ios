@@ -164,6 +164,8 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
+      known_red: ${{ steps.plan.outputs.known_red }}
+      known_red_text: ${{ steps.plan.outputs.known_red_text }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -176,6 +178,34 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           UI_GROUPS: ${{ inputs.groups || 'auto' }}
         run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS" ${UI_QUICK:+--quick}
+
+  known-red:
+    # Tempo plan 20.11.: a group that is red for exactly this app and its test code makes the
+    # verdict red whatever this run shows (a red test is never re-run to green). The plan knows
+    # that at minute one; this job turns it into a red check at once instead of after the groups
+    # (8b71209: the verdict was red after 69 min from a red of a cancelled run). The groups still
+    # run (their results show whether the red came back); nothing is skipped or re-run, and the
+    # verdict below decides as before. Not in a TestFlight run: its UI gate decides there.
+    name: UI known red (verdict will be red)
+    needs: plan
+    if: ${{ needs.plan.outputs.known_red != '' && !inputs.release }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Red before for this app and test code
+        env:
+          KNOWN_RED: ${{ needs.plan.outputs.known_red }}
+          KNOWN_RED_TEXT: ${{ needs.plan.outputs.known_red_text }}
+        run: |
+          echo "::error title=UI known red::$KNOWN_RED_TEXT. The verdict of this run will be red: fix the test or the app and push; a red test is never re-run to green."
+          {
+            echo "### UI groups already red for this app and test code: $KNOWN_RED"
+            echo "$KNOWN_RED_TEXT"
+            echo
+            echo "The groups still run; their green does not count for this app and test code."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
   dependabot-note:
     name: 'Dependabot: UI by hand'

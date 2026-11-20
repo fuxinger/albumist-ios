@@ -510,6 +510,35 @@ class CompileFirstTests(unittest.TestCase):
         self.assertFalse(earlier_attempts.is_machinery("Build UI tests"))
 
 
+class KnownRedTests(unittest.TestCase):
+    """Tempo plan 20.11.: a group already red for this app and test code shows as a red check at
+    minute one (ui.yml "UI known red"), the groups still run and the verdict decides as before."""
+
+    def test_the_known_red_job(self):
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        jobs = job_blocks(ui)
+        self.assertIn("known-red", jobs)
+        self.assertEqual(job_field(ui, "known-red", "needs").strip(), "plan")
+        rule = job_field(ui, "known-red", "if")
+        self.assertIn("needs.plan.outputs.known_red != ''", rule)
+        self.assertIn("!inputs.release", rule)
+        self.assertIn("known_red: ${{ steps.plan.outputs.known_red }}", jobs["plan"])
+        steps = job_steps(ui, "known-red")
+        self.assertEqual(len(steps), 1)
+        self.assertTrue(steps[0][2].rstrip().endswith("exit 1"), "the job fails")
+        # Nothing else waits for it: the groups and the verdict run as before.
+        for job in ("build", "ui", "verdict", "summary"):
+            with self.subTest(job=job):
+                self.assertNotIn("known-red", job_field(ui, job, "needs"))
+        # Its red is a verdict, not machinery: "Re-run failed jobs" does not hide it.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "earlier_attempts", os.path.join(ROOT, ".github", "scripts", "earlier_attempts.py"))
+        earlier_attempts = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(earlier_attempts)
+        self.assertFalse(earlier_attempts.is_machinery(steps[0][0]))
+
+
 class ReleaseSkipTests(unittest.TestCase):
     """In a TestFlight run (release) CI's Mac job leaves out a step only when ui.yml, called in
     the same run right after it, builds the same thing itself (coordinator's rule for C4: no

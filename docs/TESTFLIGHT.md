@@ -340,6 +340,10 @@ Testcode gibt.
   nur durch eine gemeinsame Datei (Hilfsdatei, Skript, Workflow) zu einem neuen Schlüssel,
   ohne dass sich eine eigene Testdatei der Gruppe änderte, warnen Plan und Gate („UI red
   cleared by a shared change“): prüfen, ob das wirklich die Korrektur war.
+- **Bekanntes Rot sofort** (Tempo-Plan 20.11.): ist eine Gruppe schon rot für dieselbe App und
+  ihren Testcode, scheitert der Linux-Job „UI known red (verdict will be red)“ in der ersten
+  Minute und nennt die Läufe. Die Gruppen laufen trotzdem, das Urteil bleibt der Job „UI
+  verdict“.
 - **Längere Wartezeiten in Tests brauchen einen gemessenen Grund** (Regel 17.11.): wer ein
   `timeout` oder eine Wartezeit verlängert, nennt im Commit die Messung (Lauf und gemessene
   Sekunden), so wie 4bb7fdd („say how long it took“). Eine reine Verlängerung ohne Messung ist

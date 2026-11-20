@@ -23,7 +23,8 @@ import XCTest
 /// - After "Anlegen" on a card (`QuickCreate`): the banner "„Name“ angelegt" with "Widerrufen".
 /// - The purchase sheet (`Purchase`): "Albumist freischalten" with the price, "Kauf
 ///   wiederherstellen", "Code einlösen" and "Schließen".
-/// - The tab "Unsortiert" (`Unsorted`): its filters `library.filter.<area>`.
+/// - The tab "Unsortiert" (`Unsorted`): its filters `library.filter.<area>`, and "Anlegen …" in
+///   its sheet "Zu Album hinzufügen" (`addToAlbum.create`).
 /// - The tab "Alben" (`Albums`): "Verlauf und Rückgängig" (`albums.history`), the only way to
 ///   the history since 5C, and the album tiles (`album.tile`) with "…" and "Rückgängig machen".
 ///
@@ -617,6 +618,13 @@ enum UITestScreens {
         /// One filter's chip, at the standard text sizes.
         static func filter(_ app: XCUIApplication, _ area: String) -> XCUIElement {
             app.buttons["library.filter.\(area)"]
+        }
+
+        /// "Anlegen …" next to "Name des neuen Albums" in the sheet "Zu Album hinzufügen"
+        /// (`addToAlbum.create`; the "…" since wave 1: the preview opens first). By its name
+        /// too, for a build without the identifier.
+        static func createAlbum(_ app: XCUIApplication) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@", "addToAlbum.create", "Anlegen …")).firstMatch
         }
 
         /// Shows the filter: its chip at the standard text sizes; at the accessibility sizes

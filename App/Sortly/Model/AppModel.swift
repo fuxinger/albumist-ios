@@ -377,7 +377,7 @@ final class AppModel {
     var factsByID: FactsByID {
         access(keyPath: \.facts)
         // Handed over with these facts, never with others (second review of P4-09, NIT-5).
-        assert(factsIndex.map { $0.facts.count == facts.count } ?? facts.isEmpty, "factsIndex is not made from the facts")
+        assert(factsIndex.map { DerivedLibrary.sameFacts($0.facts, facts) } ?? facts.isEmpty, "factsIndex is not made from the facts")
         return factsIndex ?? FactsByID()
     }
 

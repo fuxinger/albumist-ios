@@ -471,6 +471,8 @@ struct ResultCard: View {
                     guard !askingUndo else { return }
                     askingUndo = true
                     Task {
+                        // Full access first: not "not possible" after the dialog was confirmed.
+                        guard await model.changesHaveFullAccess() else { askingUndo = false; return }
                         undoDeletes = await model.undoDeletesCollections(plan)
                         askingUndo = false
                         confirmUndo = true

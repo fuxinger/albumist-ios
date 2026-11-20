@@ -420,6 +420,8 @@ struct InterruptedHistoryRow: View {
                 guard !askingUndo else { return }
                 askingUndo = true
                 Task {
+                    // Full access first: not "not possible" after the dialog was confirmed.
+                    guard await model.changesHaveFullAccess() else { askingUndo = false; return }
                     undoDeletes = await model.interruptedUndoDeletesCollections()
                     askingUndo = false
                     confirmUndo = true

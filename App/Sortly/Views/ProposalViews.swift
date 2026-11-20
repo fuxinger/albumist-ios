@@ -266,6 +266,7 @@ private struct ProposalListCard: View {
                 .allowsHitTesting(!selecting)
                 .accessibilityHidden(selecting)
         }
+        .selected(selecting && isSelected)
         // Names the card's container (UI tests: the card, its body and its one button).
         .accessibilityIdentifier("suggestion.row")
         .overlay(alignment: .topTrailing) {

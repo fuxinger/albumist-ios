@@ -69,6 +69,8 @@ struct PhotoCard<Actions: View, MenuItems: View, MenuPreview: View>: View {
     private let menuItems: MenuItems
     /// What the long press lifts; `EmptyView`: the card itself.
     private let menuPreview: MenuPreview
+    /// Ticked in a list that selects (`selected(_:)`).
+    private var isSelected = false
 
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorSchemeContrast) private var contrast
@@ -211,6 +213,7 @@ struct PhotoCard<Actions: View, MenuItems: View, MenuPreview: View>: View {
             .accessibilityLabel(spokenTitle)
             .accessibilityValue(badge?.spoken ?? Text(verbatim: ""))
             .accessibilityInputLabels([title])
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
             .accessibilitySortPriority(1)
             .accessibilityIdentifier("photoCard.body")
         if hasMenu {
@@ -302,6 +305,17 @@ struct PhotoCard<Actions: View, MenuItems: View, MenuPreview: View>: View {
             .padding(.trailing, Theme.Spacing.m)
             .padding(.bottom, Theme.Spacing.m)
         }
+    }
+}
+
+extension PhotoCard {
+    /// The card is ticked in a list that selects, as in Photos: VoiceOver says "ausgewählt" on
+    /// its body too, where it starts, not only on the tick (second review of the suggestion
+    /// cards). The tick itself stays the list's.
+    func selected(_ selected: Bool) -> Self {
+        var card = self
+        card.isSelected = selected
+        return card
     }
 }
 

@@ -355,7 +355,7 @@ struct StartProposalCard: View {
             Button {} label: { StartMadeLabel() }
                 .buttonStyle(StartMadeButtonStyle())
                 .disabled(true)
-                .accessibilityLabel(Text("„\(text.title)“ angelegt"))
+                .accessibilityLabel(text.spokenMade)
         } else {
             Button(action: onAction) {
                 ZStack {
@@ -369,19 +369,10 @@ struct StartProposalCard: View {
             }
             .buttonStyle(CardActionButtonStyle())
             .disabled(working || waits)
-            .accessibilityLabel(actionLabel)
-            .accessibilityInputLabels([actionWord, actionLabel])
-        }
-    }
-
-    /// The word with the album's name, for VoiceOver: a shelf of cards is not a row of
-    /// "Anlegen" (the same words as the suggestion list's cards).
-    private var actionLabel: Text {
-        switch text.action {
-        case .create: Text("„\(text.title)“ anlegen")
-        case .add: Text("„\(text.title)“ ergänzen")
-        case .name: Text("„\(text.title)“ benennen")
-        case .look: Text("„\(text.title)“ ansehen")
+            // The suggestion list's words („Toskana“ ergänzen names the album that gets the
+            // photos), so a card says the same on both screens.
+            .accessibilityLabel(text.spokenAction)
+            .accessibilityInputLabels(text.actionInputLabels)
         }
     }
 

@@ -366,17 +366,30 @@ extension LibraryStatus {
 
 // MARK: Overlapping calls
 
-/// Calls that may overlap (`AppModel.refreshDerived` waits for detached work): only the newest
-/// one may assign its result. An older call that finishes later would otherwise put back an
-/// older state (review of 9f0bc40).
+/// Calls that may overlap (`AppModel.refreshDerived` waits for detached work): a call assigns its
+/// result only when it is newer than the result on screen (`mayShow`). An older call that
+/// finishes later would otherwise put back an older state (review of 9f0bc40).
 public struct LatestCall: Sendable {
     public private(set) var newest = 0
+    /// The call whose result is on screen (0: none yet).
+    public private(set) var lastShown = 0
     public init() {}
     public mutating func begin() -> Int {
         newest += 1
         return newest
     }
     public func isNewest(_ call: Int) -> Bool { call == newest }
+
+    /// Call `call` may show its result: it is newer than the result on screen. An older call
+    /// never puts back its result over a newer one's; but when the newer calls failed (or are
+    /// still going), an older call's result is newer than what is shown, and it is shown
+    /// (second review of P4-10, NIT-1: "only the newest call assigns" threw it away).
+    public func mayShow(_ call: Int) -> Bool { call > lastShown }
+
+    /// Call `call` showed its result.
+    public mutating func shown(_ call: Int) {
+        lastShown = max(lastShown, call)
+    }
 }
 
 // MARK: Everything the overview derives from the analysis, in one pass off the main actor

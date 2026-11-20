@@ -389,10 +389,14 @@ public struct HomeName: Hashable, Sendable {
 
     /// The components most photos within `radius` of `center` have (towns first): what the
     /// detected home is called, from the user's own photos.
-    public static func components(near center: GeoCoordinate, facts: [AssetFacts], radius: Double = RecurringPlaceAnswers.matchRadiusMeters) -> PlaceComponents? {
+    /// `stop`: asked every 4,096 photos; once it says so, the pass gives up and says `nil`
+    /// (`DerivedLibrary.namedHome` when its task is cancelled).
+    public static func components(near center: GeoCoordinate, facts: [AssetFacts], radius: Double = RecurringPlaceAnswers.matchRadiusMeters,
+                                  stoppingWhen stop: () -> Bool = { false }) -> PlaceComponents? {
         var towns: [PlaceKey: (PlaceComponents, Int)] = [:]
         var regions: [PlaceKey: (PlaceComponents, Int)] = [:]
-        for f in facts {
+        for (index, f) in facts.enumerated() {
+            if index & 4095 == 0, stop() { return nil }
             guard let place = f.gpsPlace, let c = f.asset.usableLocation, GeoMath.distance(c, center) <= radius else { continue }
             if let key = place.key(at: .locality) { towns[key, default: (place, 0)].1 += 1 }
             if let key = place.key(at: .administrativeArea) ?? place.key(at: .country) { regions[key, default: (place, 0)].1 += 1 }

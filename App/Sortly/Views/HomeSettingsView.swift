@@ -15,7 +15,15 @@ struct HomeSettingsRow: View {
             HomeSettingsView()
         } label: {
             LabeledContent {
-                Text(HomeText.summary(model.homeSettings, detected: model.detectedHomePlace))
+                // The detected home is named off the main thread when the settings ask, and only
+                // when the row shows it (a fraction of a second): not "Noch nicht erkannt" meanwhile.
+                let automatic = model.homeSettings.currentMode == .automatic
+                if automatic && model.detectedHomeNaming {
+                    ProgressView()
+                        .accessibilityLabel(Text("Zuhause wird geladen"))
+                } else {
+                    Text(HomeText.summary(model.homeSettings, detected: automatic ? model.detectedHomePlace : nil))
+                }
             } label: {
                 Label("Dein Zuhause", systemImage: "house")
             }
@@ -152,6 +160,17 @@ struct HomeSettingsView: View {
                             .font(.subheadline)
                             .foregroundStyle(.noteText)
                     }
+                    changeLink(Text("Ändern"))
+                } else if model.detectedHomeNaming {
+                    // Named off the main thread when the screen opens (a fraction of a second):
+                    // not "Noch kein Zuhause erkannt" or "Ort ohne Namen" meanwhile.
+                    HStack(spacing: Theme.Spacing.m) {
+                        ProgressView()
+                            .accessibilityHidden(true) // the text beside it says what runs
+                        Text("Zuhause wird geladen …").foregroundStyle(.secondary)
+                    }
+                    .frame(minHeight: 44, alignment: .leading)
+                    .accessibilityElement(children: .combine)
                     changeLink(Text("Ändern"))
                 } else {
                     // Empty state: nothing detected yet, and why.
@@ -299,8 +318,13 @@ struct HomePlacePicker: View {
     @State private var query = ""
     /// The town picked as the current home, asking since when.
     /// The place picked as home and the proposed "Seit wann": worked out once when it is
-    /// picked (it goes over every photo), not on every redraw.
+    /// picked (it goes over every photo), not on every redraw, and off the main thread
+    /// (`AppModel.homeStayStart`, review P4-09).
     @State private var askingSince: SinceQuestion?
+    /// The place whose "Seit wann" is being worked out (a fraction of a second): its row shows a
+    /// spinner, and the other choices are dimmed and take no tap meanwhile, so nothing is asked
+    /// twice (second review of P4-09, NIT-3).
+    @State private var proposing: String?
 
     struct SinceQuestion: Identifiable {
         var candidate: HomeCandidate
@@ -349,20 +373,27 @@ struct HomePlacePicker: View {
                 ForEach(candidates) { candidate in
                     Button {
                         if purpose == .current {
-                            askingSince = SinceQuestion(candidate: candidate, proposed: model.homeStayStart(candidate))
+                            askSince(candidate)
                         } else {
                             onPick(.place(candidate))
                             dismiss()
                         }
                     } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(HomeText.short(candidate.components)).foregroundStyle(.primary)
-                            Text(detail(candidate)).font(.subheadline).foregroundStyle(.noteText)
+                        HStack(spacing: Theme.Spacing.m) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(HomeText.short(candidate.components)).foregroundStyle(.primary)
+                                Text(detail(candidate)).font(.subheadline).foregroundStyle(.noteText)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            if proposing == candidate.id {
+                                ProgressView()
+                                    .accessibilityLabel(Text("Datum wird vorgeschlagen"))
+                            }
                         }
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                     }
-                    .disabled(busy)
+                    .disabled(busy || (proposing != nil && proposing != candidate.id))
                     .accessibilityIdentifier("home.candidate")
                 }
             } header: {
@@ -378,6 +409,17 @@ struct HomePlacePicker: View {
                 onPick(.home(question.candidate, since: since))
                 dismiss()
             }
+        }
+    }
+
+    /// "Seit wann wohnst du dort?" with the start of the latest stay there proposed.
+    private func askSince(_ candidate: HomeCandidate) {
+        guard proposing == nil else { return }
+        proposing = candidate.id
+        Task {
+            let proposed = await model.homeStayStart(candidate)
+            proposing = nil
+            askingSince = SinceQuestion(candidate: candidate, proposed: proposed)
         }
     }
 
@@ -397,7 +439,7 @@ struct HomePlacePicker: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .disabled(busy)
+        .disabled(busy || proposing != nil)
     }
 
     /// "Bayern, Deutschland · 120 Tage".

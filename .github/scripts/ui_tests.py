@@ -23,7 +23,8 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
       answers the tests' request lines in the log (class HostGrants; xcodebuild gets
       TEST_RUNNER_SORTLY_HOST_HELPER=1, so the tests know someone answers): a test that reset
       the photo access (the CI simulator then answers "denied" without asking) prints
-      UI_HOST_GRANT_PHOTOS, and the access is given back (`simctl privacy grant`); a device
+      UI_HOST_GRANT_PHOTOS [<answer file>], and the access is given back (`simctl privacy grant`;
+      then "granted" or "failed" is written to the test's answer file, `write_host_answer`); a device
       test about to launch the app again prints "UI_HOST_TERMINATE_APP <epoch second> [<pid>]",
       and the running app is ended by the Mac instead of XCTest's terminate, which failed on an
       idle app in UI run 44446270757 (test07): with the app's process id exactly that process
@@ -109,6 +110,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -833,7 +835,9 @@ class Recorder(threading.Thread):
         self.join(timeout=60)
 
 
-HOST_GRANT = re.compile(r"(?:^|\s)UI_HOST_GRANT_PHOTOS\s*$")
+# "UI_HOST_GRANT_PHOTOS [<answer file>]": with a file (DeviceConditionUITests.grantFromHost) the
+# Mac writes its answer there once the grant has ended (`write_host_answer`).
+HOST_GRANT = re.compile(r"(?:^|\s)UI_HOST_GRANT_PHOTOS(?: (/\S+))?\s*$")
 # UITestAppEnd.end: "UI_HOST_TERMINATE_APP <epoch second of the request> [<app process id>]".
 HOST_TERMINATE = re.compile(r"(?:^|\s)UI_HOST_TERMINATE_APP(?: (\d+))?(?: (\d+))?\s*$")
 
@@ -843,14 +847,14 @@ def host_grant_requests(text: str) -> int:
     return sum(1 for line in text.split("\n") if HOST_GRANT.search(line))
 
 
-def host_requests(text: str) -> list[tuple[str, float | None, int | None]]:
+def host_requests(text: str) -> list[tuple[str, float | None, int | str | None]]:
     """The requests to the Mac in the complete lines of `text`, in log order: ("grant", None,
-    None) for UI_HOST_GRANT_PHOTOS, ("terminate", epoch second or None, process id or None) for
-    UI_HOST_TERMINATE_APP."""
-    found: list[tuple[str, float | None, int | None]] = []
+    answer file or None) for UI_HOST_GRANT_PHOTOS, ("terminate", epoch second or None, process id
+    or None) for UI_HOST_TERMINATE_APP."""
+    found: list[tuple[str, float | None, int | str | None]] = []
     for line in text.split("\n"):
-        if HOST_GRANT.search(line):
-            found.append(("grant", None, None))
+        if match := HOST_GRANT.search(line):
+            found.append(("grant", None, match.group(1)))
         elif match := HOST_TERMINATE.search(line):
             found.append(("terminate", float(match.group(1)) if match.group(1) else None,
                           int(match.group(2)) if match.group(2) else None))
@@ -881,6 +885,50 @@ def grant_photos(udid: str, run=sh, tries: int = GRANT_TRIES, timeout: float = G
               + (f": {detail}" if detail else ""), flush=True)
     print(f"UI_HOST photo access NOT granted after {tries} attempts; the test that asked will fail on it", flush=True)
     return False
+
+
+# The answer to a grant request that named a file. Device test09 waited 190 s after each of its
+# three requests for iOS to end the app (UI runs 44617747359, 44630953220 and job 136352444126:
+# 9 of 9 requests, the app was never ended by a grant), about 9.5 minutes of the device group.
+# With the answer the test goes on as soon as the grant is done (or has failed). Only a file
+# of this simulator's test runner is written (inside its folder under SIMULATOR_DEVICES, links
+# resolved, the name the test gives it), never anything else the log names: a path that only
+# contains "/Devices/<UDID>/", a folder that is a link to elsewhere and a link planted at the
+# half-written file's name are all refused or not followed.
+HOST_ANSWER_NAME = re.compile(r"^uitest-host-answer-[A-Za-z0-9-]{1,64}$")
+# Where CoreSimulator keeps the simulators (read at each call: `~` is the runner's home).
+SIMULATOR_DEVICES = "~/Library/Developer/CoreSimulator/Devices"
+
+
+def write_host_answer(udid: str, path: str, answer: str) -> bool:
+    """Writes `answer` ("granted" or "failed") to the test's answer file `path`; True when written."""
+    folder, name = os.path.split(path)
+    device = os.path.realpath(os.path.join(os.path.expanduser(SIMULATOR_DEVICES), udid))
+    real_folder = os.path.realpath(folder) if folder else ""
+    if not os.path.isabs(path) or ".." in path.split("/") or not HOST_ANSWER_NAME.match(name) \
+            or not udid or "/" in udid or not real_folder.startswith(device + "/") or not os.path.isdir(real_folder):
+        print(f"UI_HOST answer not written: {path[:200]} is no answer file of this simulator's tests", flush=True)
+        return False
+    partial = None
+    try:
+        # A new file of its own (mkstemp: a random name, O_EXCL, so a planted link is never
+        # followed), then renamed over the answer file.
+        handle, partial = tempfile.mkstemp(dir=real_folder, prefix=f".{name}.", suffix=".partial")
+        with os.fdopen(handle, "w", encoding="utf-8") as out:
+            out.write(answer + "\n")
+        os.replace(partial, os.path.join(real_folder, name))
+        partial = None
+    except OSError as error:
+        print(f"UI_HOST answer not written ({error}); the test waits as before", flush=True)
+        return False
+    finally:
+        if partial is not None:
+            try:
+                os.unlink(partial)
+            except OSError:
+                pass
+    print(f"UI_HOST answer '{answer}' written for the test", flush=True)
+    return True
 
 
 # Ending the app from the Mac (terminate_app). The test waits TERMINATE_WAIT s for the app to be
@@ -995,17 +1043,18 @@ class HostGrants(threading.Thread):
     not on Albumist's) and ends the app before the next launch (UI_HOST_TERMINATE_APP,
     UITestAppEnd.end; `terminate_app`)."""
 
-    def __init__(self, udid: str, log_path: str, interval: float = 2, grant=None, terminate=None):
+    def __init__(self, udid: str, log_path: str, interval: float = 2, grant=None, terminate=None, answer=None):
         super().__init__(daemon=True)
         self.udid, self.log_path, self.interval = udid, log_path, interval
         self.grant = grant or self.grant_photos
         self.terminate = terminate or self.terminate_app
+        self.answer = answer or (lambda path, text: write_host_answer(self.udid, path, text))
         self.stopped = threading.Event()
         self.offset = 0
         self.tail = ""
 
-    def grant_photos(self) -> None:
-        grant_photos(self.udid)
+    def grant_photos(self) -> bool:
+        return grant_photos(self.udid)
 
     def terminate_app(self, asked: float | None, pid: int | None = None) -> None:
         # With the app's process id: exactly that process (`end_app_process`); without (a
@@ -1025,11 +1074,14 @@ class HostGrants(threading.Thread):
         except OSError:
             chunk = ""
         complete, _, self.tail = (self.tail + chunk).rpartition("\n")
-        for kind, asked, pid in host_requests(complete):
+        for kind, asked, detail in host_requests(complete):
             if kind == "grant":
-                self.grant()
+                granted = self.grant()
+                # The test waits for this answer instead of a fixed 190 s (`write_host_answer`).
+                if isinstance(detail, str):
+                    self.answer(detail, "granted" if granted else "failed")
             else:
-                self.terminate(asked, pid)
+                self.terminate(asked, detail)
         # A failure shows in the job log at once, not only when the pass ends: a run cancelled
         # (or a runner lost) after it is still red for ui_evidence.py.
         for line in complete.splitlines():

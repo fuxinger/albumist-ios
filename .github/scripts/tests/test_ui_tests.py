@@ -1009,6 +1009,84 @@ class HostGrantTests(unittest.TestCase):
             grants.check()
         self.assertEqual(len(granted), 2)
 
+    # Device test09 waited 190 s after each grant request for an end of the app that never came
+    # (9 of 9 requests in UI runs 44617747359, 44630953220 and job 136352444126). A request that
+    # names an answer file gets "granted" or "failed" there once the grant is done.
+    DEVICE = "/Users/runner/Library/Developer/CoreSimulator/Devices/U/data/Containers/Data/Application/X/tmp"
+
+    def test_a_request_with_an_answer_file_is_read_with_its_path(self):
+        log = f"UI_HOST_GRANT_PHOTOS {self.DEVICE}/uitest-host-answer-1A2B\nUI_HOST_GRANT_PHOTOS\n"
+        self.assertEqual(ui_tests.host_requests(log), [("grant", None, f"{self.DEVICE}/uitest-host-answer-1A2B"),
+                                                       ("grant", None, None)])
+        self.assertEqual(ui_tests.host_grant_requests(log), 2)
+        # A relative path or a second word is no request (the line is not the test's).
+        self.assertEqual(ui_tests.host_requests("UI_HOST_GRANT_PHOTOS tmp/a\nUI_HOST_GRANT_PHOTOS /a b\n"), [])
+
+    def test_the_watcher_answers_after_the_grant_with_its_result(self):
+        done = []
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "log.txt")
+            with open(path, "w") as log:
+                log.write("UI_HOST_GRANT_PHOTOS /D/a\nUI_HOST_GRANT_PHOTOS\nUI_HOST_GRANT_PHOTOS /D/b\n")
+            results = iter([True, True, False])
+            watcher = ui_tests.HostGrants("U", path, interval=0.01,
+                                          grant=lambda: done.append("grant") or next(results),
+                                          answer=lambda answer, text: done.append((answer, text)))
+            watcher.check()
+        self.assertEqual(done, ["grant", ("/D/a", "granted"), "grant", "grant", ("/D/b", "failed")])
+
+    def test_the_answer_is_written_only_into_a_test_file_of_this_simulator(self):
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"HOME": root}):
+            devices = os.path.join(root, "Library", "Developer", "CoreSimulator", "Devices")
+            folder = os.path.join(devices, "U", "data", "tmp")
+            os.makedirs(folder)
+            good = os.path.join(folder, "uitest-host-answer-0F-9")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(ui_tests.write_host_answer("U", good, "granted"))
+                with open(good, encoding="utf-8") as answer:
+                    self.assertEqual(answer.read(), "granted\n")
+                other = os.path.join(devices, "V", "tmp")
+                os.makedirs(other)
+                # A folder that only names this simulator: not under ~/Library/Developer/CoreSimulator.
+                fake = os.path.join(root, "elsewhere", "Devices", "U", "data", "tmp")
+                os.makedirs(fake)
+                for path in (os.path.join(other, "uitest-host-answer-1"),          # another simulator
+                             os.path.join(folder, "Sortly.sqlite"),                # not an answer file
+                             os.path.join(folder, "..", "uitest-host-answer-1"),   # climbs out
+                             os.path.join(folder, "missing", "uitest-host-answer-1"),
+                             os.path.join(fake, "uitest-host-answer-1"),           # outside, "/Devices/U/" in it
+                             "uitest-host-answer-1"):
+                    self.assertFalse(ui_tests.write_host_answer("U", path, "granted"), path)
+            self.assertEqual(sorted(os.listdir(folder)), ["uitest-host-answer-0F-9"])
+            self.assertEqual(os.listdir(other), [])
+            self.assertEqual(os.listdir(fake), [])
+
+    def test_the_answer_follows_no_link_out_of_the_simulator(self):
+        """A folder of the simulator that is a link to elsewhere, and a link planted at the name
+        of the half-written file: neither makes the Mac write outside the simulator's folder."""
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"HOME": root}):
+            folder = os.path.join(root, "Library", "Developer", "CoreSimulator", "Devices", "U", "data", "tmp")
+            os.makedirs(folder)
+            outside = os.path.join(root, "outside")
+            os.makedirs(outside)
+            victim = os.path.join(outside, "victim")
+            with open(victim, "w", encoding="utf-8") as f:
+                f.write("keep\n")
+            os.symlink(outside, os.path.join(folder, "link"))
+            os.symlink(victim, os.path.join(folder, ".uitest-host-answer-2.partial"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertFalse(ui_tests.write_host_answer("U", os.path.join(folder, "link", "uitest-host-answer-1"), "granted"))
+                self.assertTrue(ui_tests.write_host_answer("U", os.path.join(folder, "uitest-host-answer-2"), "granted"))
+            self.assertEqual(sorted(os.listdir(outside)), ["victim"])
+            with open(victim, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "keep\n")
+            answer = os.path.join(folder, "uitest-host-answer-2")
+            self.assertFalse(os.path.islink(answer))
+            with open(answer, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "granted\n")
+            # No half-written file is left behind (the planted link stays as it was).
+            self.assertEqual(sorted(os.listdir(folder)), [".uitest-host-answer-2.partial", "link", "uitest-host-answer-2"])
+
 
 class HostTerminateTests(unittest.TestCase):
     """A device test asks the Mac to end the app before its next launch (UI_HOST_TERMINATE_APP,
@@ -1274,7 +1352,9 @@ class HostTerminateTests(unittest.TestCase):
             wait = source.read()
         body = wait[wait.index("static func toBackground("):wait.index("static func testID(")]
         self.assertEqual(len(re.findall(r"\.press\(\.home\)", body)), 1)  # in the loop of ways
-        self.assertIn('("Home press", min(timeout, 20)), ("second Home press", 15), ("Settings app in front", 30)', body)
+        # The first press 8 s (20 s until 20.11.: it never had an effect on the CI simulator, in
+        # 13 of 13 presses, and the second one did within 1.4 s each time).
+        self.assertIn('("Home press", min(timeout, 8)), ("second Home press", 15), ("Settings app in front", 30)', body)
         # The time in the background counts from when iOS reported it, not from the first press:
         # after a late way the app stayed there 1 s only (second review of 5d730ac, 6d6baf1), and
         # SortlyFlowUITests says "at least the old 8 s, counted once iOS has it there".

@@ -2,7 +2,8 @@ import SwiftUI
 import SortlyCore
 import SortlyEngine
 
-/// Inbox (prompt §6): the library split by organization state, with ignore.
+/// The tab "Unsortiert" (design W1, tabs 6B): what is not sorted yet, unsure or ignored
+/// (`LibraryBuckets.unsortedTabFilters`), with ignore. Suggestions have a tab of their own.
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
     @State private var bucket: InboxBucket = .unorganized
@@ -21,8 +22,6 @@ struct LibraryView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private static let page = 3_000
-
-    private static let buckets: [InboxBucket] = [.unorganized, .suggestions, .uncertain, .organized, .ignored, .all]
 
     var body: some View {
         let _ = MainThreadWatch.shared.count("library body")
@@ -54,15 +53,13 @@ struct LibraryView: View {
         .background(Theme.background)
         .onAppear { model.showLibraryBuckets() }
         .onDisappear { model.hideLibraryBuckets() }
-        .navigationTitle("Mediathek")
+        .navigationTitle("Unsortiert")
         .toolbar {
-            if bucket != .suggestions {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(selecting ? "Fertig" : "Auswählen") {
-                        withAnimation {
-                            selecting.toggle()
-                            selection = []
-                        }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(selecting ? "Fertig" : "Auswählen") {
+                    withAnimation {
+                        selecting.toggle()
+                        selection = []
                     }
                 }
             }
@@ -94,22 +91,14 @@ struct LibraryView: View {
         .refreshable { await model.refreshDerived() }
     }
 
-    /// One area's count and its photos (or its suggestions).
+    /// One area's count and its photos.
     @ViewBuilder
     private func content(_ members: [LibraryBuckets.Item]) -> some View {
-        if bucket == .suggestions {
-            // Numbers as plural strings (design review W5: "1 Fotos und Videos").
-            Text("\(model.openProposals.count) Vorschläge für \(members.count) \(members.count.formatted()) Fotos und Videos")
-                .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
-        } else {
-            Text("\(members.count) \(members.count.formatted()) Fotos und Videos")
-                .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
-        }
+        // Numbers as plural strings (design review W5: "1 Fotos und Videos").
+        Text("\(members.count) \(members.count.formatted()) Fotos und Videos")
+            .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
 
-        if bucket == .suggestions {
-            // Photos with a suggestion: show the suggestions themselves, ready to open.
-            proposalList
-        } else if members.isEmpty {
+        if members.isEmpty {
             if SortedCountCard.EmptyList.make(bucket, settings: model.settings) == .noMainAreaChosen {
                 // Nothing counts as sorted: the way to change that, as on the overview's card.
                 ContentUnavailableView {
@@ -139,32 +128,6 @@ struct LibraryView: View {
                     .accessibilityLabel(Text("Weitere Fotos werden geladen"))
                     .accessibilityIdentifier("library.loadingMore")
             }
-        }
-    }
-
-    @ViewBuilder
-    private var proposalList: some View {
-        let open = model.openProposals.sorted { ($0.assetIDs.count, $1.title) > ($1.assetIDs.count, $0.title) }
-        if open.isEmpty {
-            ContentUnavailableView("Keine offenen Vorschläge", systemImage: "checkmark.circle",
-                                   description: Text("Alle Vorschläge sind entschieden."))
-        } else {
-            VStack(spacing: 0) {
-                ForEach(Array(open.enumerated()), id: \.element.id) { index, proposal in
-                    PushLink(.proposal(ProposalRef(proposal)), chevron: false) {
-                        HStack {
-                            ProposalRow(proposal: proposal)
-                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-                        }
-                        .padding(.horizontal, Theme.Spacing.l)
-                        .padding(.vertical, Theme.Spacing.s)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if index < open.count - 1 { Divider().padding(.leading, 84) }
-                }
-            }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         }
     }
 
@@ -201,14 +164,16 @@ struct LibraryView: View {
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
     }
 
-    /// Area chips; at the largest text sizes a menu, so every area stays reachable.
+    /// The tab's filters as chips; at the largest text sizes a menu, so every filter stays
+    /// reachable. UI tests find them by identifier: `library.filter` for the row or the menu,
+    /// `library.filter.<area>` for each chip (e.g. `library.filter.ignored`).
     @ViewBuilder
     private var bucketPicker: some View {
         if typeSize.isAccessibilitySize {
             // A menu with its own label: the system picker button cuts long names at this size.
             Menu {
                 Picker("Anzeigen", selection: Binding(get: { bucket }, set: { select($0) })) {
-                    ForEach(Self.buckets, id: \.self) { Text($0.label).tag($0) }
+                    ForEach(LibraryBuckets.unsortedTabFilters, id: \.self) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.inline)
             } label: {
@@ -216,10 +181,11 @@ struct LibraryView: View {
             }
             .accessibilityLabel(Text("Anzeigen"))
             .accessibilityValue(Text(bucket.label))
+            .accessibilityIdentifier("library.filter")
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Spacing.s) {
-                    ForEach(Self.buckets, id: \.self) { b in
+                    ForEach(LibraryBuckets.unsortedTabFilters, id: \.self) { b in
                         Button { select(b) } label: {
                             Text(b.label)
                                 .font(.subheadline.weight(.semibold))
@@ -231,9 +197,12 @@ struct LibraryView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(b == bucket ? .isSelected : [])
+                        .accessibilityIdentifier("library.filter.\(b.rawValue)")
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("library.filter")
         }
     }
 
@@ -288,11 +257,10 @@ struct LibraryView: View {
         bucket = b
         selection = []
         shown = Self.page
-        if b == .suggestions { selecting = false }
     }
 
-    /// With no main area counted, "Nicht sortiert" and "Sortiert" say what the overview says,
-    /// not "Alles sortiert" (`SortedCountCard.EmptyList`, finding N-01).
+    /// With no main area counted, "Unsortiert" says what the start page says, not "Alles
+    /// sortiert" (`SortedCountCard.EmptyList`, finding N-01).
     private var emptyTitle: LocalizedStringKey {
         switch SortedCountCard.EmptyList.make(bucket, settings: model.settings) {
         case .noMainAreaChosen: "Kein Bereich zählt als sortiert"
@@ -430,7 +398,8 @@ struct AssetDetailView: View {
                     if isIgnored {
                         Text("Albumist zählt das Foto dann wieder mit und kann es wieder vorschlagen.")
                     } else {
-                        Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit rückgängig machen.")
+                        // Two lines (decision 8A); the way back is "Nicht mehr ignorieren".
+                        Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts.")
                     }
                 }
             }
@@ -500,7 +469,7 @@ struct AssetDetailView: View {
             }
             let statuses = Set(state.areas.values)
             if statuses.contains(.proposed) || statuses.contains(.pendingConfirmation) {
-                return "Es gibt schon einen Vorschlag dafür. Du findest ihn in der Übersicht."
+                return "Es gibt schon einen Vorschlag dafür. Du findest ihn unter „Vorschläge“."
             }
             if facts.place == nil && facts.asset.kind != .video && !facts.asset.isScreenshotLike {
                 return "Das Foto hat keinen Ort und passt zu keinem Thema. Du kannst es selbst in ein Album legen."
@@ -535,7 +504,8 @@ struct AddToAlbumSheet: View {
                             .focused($naming)
                             .submitLabel(.done)
                             .onSubmit { Task { await prepare(target: nil) } }
-                        Button("Anlegen") { Task { await prepare(target: nil) } }
+                        // "…": the preview opens first (design W1, Punkt 2).
+                        Button("Anlegen …") { Task { await prepare(target: nil) } }
                             .disabled(newTitle.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 } header: {

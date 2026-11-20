@@ -72,23 +72,31 @@ struct NoPhotoAccessView: View {
     }
 }
 
+/// The tabs (design W1, 6B): "Vorschläge · Unsortiert · Alben · Suche".
 struct MainTabs: View {
     @Environment(AppModel.self) private var model
     @Environment(\.requestReview) private var requestReview
-    @State private var tab: MainTab = .overview
-    /// The overview tab's stack, also for Siri, Shortcuts and Spotlight (`AppScreen`).
-    @State private var overviewNavigator = Navigator()
+    @State private var tab: MainTab = .suggestions
+    /// The stack of the tab "Vorschläge", also for Siri, Shortcuts and Spotlight (`AppScreen`).
+    @State private var suggestionsNavigator = Navigator()
 
-    enum MainTab: Hashable { case overview, library, albums, search }
+    enum MainTab: Hashable { case suggestions, unsorted, albums, search }
+
+    /// Two cards for "Vorschläge", as in the draft: never sparkles, which stand for AI at Apple.
+    /// The fanned portrait cards came with iOS 17; should iOS not have them, the fanned cards
+    /// of iOS 14, so the tab never stands without a symbol.
+    static let suggestionsSymbol = UIImage(systemName: "rectangle.portrait.on.rectangle.portrait.angled") != nil
+        ? "rectangle.portrait.on.rectangle.portrait.angled" : "rectangle.on.rectangle.angled"
 
     var body: some View {
         TabView(selection: $tab) {
             // Every tab shows the banner after "Anlegen" above the tab bar (decision 7B).
-            Tab("Übersicht", systemImage: "square.grid.2x2", value: MainTab.overview) {
-                NavigationRoot(overviewNavigator) { OverviewView() }
+            Tab("Vorschläge", systemImage: Self.suggestionsSymbol, value: MainTab.suggestions) {
+                NavigationRoot(suggestionsNavigator) { OverviewView() }
                     .showsQuickCreateBanner()
             }
-            Tab("Mediathek", systemImage: "photo.on.rectangle", value: MainTab.library) {
+            // What is not sorted yet, unsure or ignored (`LibraryView`).
+            Tab("Unsortiert", systemImage: "photo.on.rectangle", value: MainTab.unsorted) {
                 NavigationRoot { LibraryView() }
                     .showsQuickCreateBanner()
             }
@@ -107,17 +115,17 @@ struct MainTabs: View {
         // UI tests tap every tab by name; a shrunken bar hides all but the current one.
         .tabBarMinimizeBehavior(UITestSupport.isRunning ? .never : .onScrollDown)
         // Siri, Shortcuts, Spotlight and the analysis card's buttons open their target from
-        // the overview: pushed onto its path, and the route is taken.
+        // the tab "Vorschläge": pushed onto its path, and the route is taken.
         .onChange(of: model.route, initial: true) { _, target in
             guard let target else { return }
-            tab = .overview
+            tab = .suggestions
             // A suggestion that exists opens like one from a list (`ProposalScreen`: it stays
             // when the analysis drops it while its preview is open). The same target twice in a
             // row, or a suggestion already on top, opens once (`Navigator.push`).
             if case .suggestion(let id) = target, let found = model.proposals.first(where: { $0.id == id }) {
-                overviewNavigator.push(.proposal(ProposalRef(found)))
+                suggestionsNavigator.push(.proposal(ProposalRef(found)))
             } else {
-                overviewNavigator.push(.route(target))
+                suggestionsNavigator.push(.route(target))
             }
             model.route = nil
         }

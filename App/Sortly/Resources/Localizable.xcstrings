@@ -1121,6 +1121,16 @@
         }
       }
     },
+    "Anlegen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create…"
+          }
+        }
+      }
+    },
     "Dafür braucht Albumist Zugriff auf alle Fotos. Gerade sind nur ausgewählte Fotos freigegeben, und Albumist sieht nicht, was sonst in deinen Alben liegt. Ändern kannst du das unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff." : {
       "localizations" : {
         "en" : {
@@ -1311,6 +1321,16 @@
         }
       }
     },
+    "Es gibt schon einen Vorschlag dafür. Du findest ihn unter „Vorschläge“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "There is already a suggestion for it. You’ll find it under Suggestions."
+          }
+        }
+      }
+    },
     "Foto einsortiert" : {
       "localizations" : {
         "en" : {
@@ -1327,6 +1347,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Photo taken out"
+          }
+        }
+      }
+    },
+    "Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist no longer suggests ignored photos. The photo itself stays unchanged."
           }
         }
       }
@@ -3387,16 +3417,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "There’s already another album named “%@”. You’ll then have two albums with this name."
-          }
-        }
-      }
-    },
-    "Es gibt schon einen Vorschlag dafür. Du findest ihn in der Übersicht." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "There is already a suggestion for it. You’ll find it in the overview."
           }
         }
       }
@@ -6087,16 +6107,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suggestions for This Photo"
-          }
-        }
-      }
-    },
-    "Keine offenen Vorschläge" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No Open Suggestions"
           }
         }
       }
@@ -9707,16 +9717,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist then counts the photo again and may suggest it again."
-          }
-        }
-      }
-    },
-    "Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit rückgängig machen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist no longer suggests ignored photos. The photo itself stays unchanged, and you can undo it at any time."
           }
         }
       }

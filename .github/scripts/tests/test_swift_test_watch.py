@@ -32,6 +32,12 @@ class TrackerTests(unittest.TestCase):
                          ["rebuildAfterCompleteRun()", "Case '-[CoreTests.OldTests testHang]'"])
         self.assertEqual(tracker.running()[0][1], 8)
 
+    def test_a_test_that_recorded_an_issue_is_still_running(self):
+        tracker = swift_test_watch.Tracker()
+        for line in ["◇ Test hangs() started.", "✘ Test hangs() recorded an issue at X.swift:3:5: Expectation failed"]:
+            tracker.feed(line)
+        self.assertEqual([n for n, _ in tracker.running()], ["hangs()"])
+
     def test_a_name_started_twice_stays_open_until_both_end(self):
         tracker = swift_test_watch.Tracker()
         for line in ["◇ Test same() started.", "◇ Test same() started.", "✔ Test same() passed after 1 seconds."]:
@@ -64,6 +70,35 @@ class RunTests(unittest.TestCase):
         self.assertIn("::error title=Tests hung::swift test ran longer than 0 min; still running: rebuildAfterCompleteRun()", out)
         self.assertIn("rebuildAfterCompleteRun() started", logged)
         self.assertIn("**Tests hung**", summary)
+
+    def test_nothing_of_the_session_is_left_running(self):
+        # A child in a process group of its own (like a test runner) is stopped too.
+        script = ("import os,subprocess,sys,time\n"
+                  "child = subprocess.Popen([sys.executable, '-c', 'import os,time; os.setpgid(0, 0); time.sleep(120)'])\n"
+                  "open(os.environ['CHILD_FILE'], 'w').write(str(child.pid))\n"
+                  "print('◇ Test t() started.', flush=True)\ntime.sleep(120)\n")
+        with tempfile.TemporaryDirectory() as folder:
+            os.environ["CHILD_FILE"] = os.path.join(folder, "child")
+            self.addCleanup(os.environ.pop, "CHILD_FILE", None)
+            code, out, _, _ = self.run_watch(script, 2)
+            self.assertEqual(code, 124)
+            child = int(open(os.environ["CHILD_FILE"]).read())
+            import time
+            for _ in range(20):
+                try:
+                    os.kill(child, 0)
+                except ProcessLookupError:
+                    break
+                # A zombie still answers kill(0); it is not running.
+                try:
+                    with open(f"/proc/{child}/stat") as f:
+                        if f.read().rsplit(")", 1)[1].split()[0] == "Z":
+                            break
+                except OSError:
+                    break
+                time.sleep(0.2)
+            else:
+                self.fail(f"child {child} still running")
 
     def test_without_a_hang_the_status_is_the_commands(self):
         code, out, logged, summary = self.run_watch("print('◇ Test a() started.');print('✘ Test a() failed after 1 seconds.');"

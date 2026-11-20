@@ -235,9 +235,10 @@ jobs:
     if: ${{ needs.plan.outputs.count != '0' && !inputs.release }}
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
-    # Hang limits as in CI's "Core tests (Linux)" (about twice the measured 95th percentile; the
-    # watchdog names the tests still running, swift_test_watch.py).
-    timeout-minutes: 20
+    # Hang limits as in CI's "Core tests (Linux)" (the watchdog names the tests still running,
+    # swift_test_watch.py). This job, 61 green since 16.11.: p95 5.6, longest 7.0 min; 25 leaves
+    # room for apt's retries (up to 11.6 min seen in CI during the mirror outage) and the step's 12.
+    timeout-minutes: 25
     defaults:
       run:
         shell: bash

@@ -35,7 +35,8 @@ from collections import Counter
 # seconds." / "✘ Test x() failed after ..." / "➜ Test x() skipped."; XCTest: "Test Case
 # '-[Suite test]' started." / "... passed (0.1 seconds)." / "... failed (...)." / "... skipped".
 STARTED = re.compile(r"\bTest (?P<name>.+?) started\.?\s*$")
-FINISHED = re.compile(r"\bTest (?P<name>.+?) (?:passed|failed|skipped|recorded an issue)\b")
+# "recorded an issue" is not an end: such a test may still be running (and hang).
+FINISHED = re.compile(r"\bTest (?P<name>.+?) (?:passed|failed|skipped)\b")
 
 
 class Tracker:
@@ -91,6 +92,45 @@ def report(tracker: Tracker, limit_s: float, out=None) -> list[str]:
     return names
 
 
+def session_pids(sid: int) -> list[int]:
+    """Every process of the session `sid` (the test command was started as its leader): from
+    /proc on Linux, `pgrep -s` elsewhere (macOS). The test runner and its helpers (xctest,
+    swiftpm-testing-helper) may sit in process groups of their own, but not in another session."""
+    pids = []
+    if os.path.isdir("/proc"):
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/stat", encoding="utf-8", errors="replace") as f:
+                    fields = f.read().rsplit(")", 1)[1].split()
+                if int(fields[3]) == sid:  # after "pid (comm)": state ppid pgrp session
+                    pids.append(int(entry))
+            except (OSError, IndexError, ValueError):
+                continue
+    else:
+        found = subprocess.run(["pgrep", "-s", str(sid)], capture_output=True, text=True)
+        pids = [int(p) for p in found.stdout.split() if p.isdigit()]
+    return pids
+
+
+def signal_session(sid: int, sig: int) -> int:
+    """Sends `sig` to the session's process group and to every process of the session."""
+    sent = 0
+    try:
+        os.killpg(sid, sig)
+        sent += 1
+    except (ProcessLookupError, PermissionError):
+        pass
+    for pid in session_pids(sid):
+        try:
+            os.kill(pid, sig)
+            sent += 1
+        except (ProcessLookupError, PermissionError):
+            pass
+    return sent
+
+
 def run(command: list[str], limit_s: float, log_path: str | None, quiet: bool, grace_s: float) -> int:
     tracker = Tracker()
     log = open(log_path, "w", encoding="utf-8") if log_path else None
@@ -113,18 +153,13 @@ def run(command: list[str], limit_s: float, log_path: str | None, quiet: bool, g
         status = process.wait(timeout=limit_s)
     except subprocess.TimeoutExpired:
         report(tracker, limit_s)
-        try:
-            os.killpg(process.pid, signal.SIGQUIT)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=grace_s)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
+        signal_session(process.pid, signal.SIGQUIT)
+        deadline = time.monotonic() + grace_s
+        while time.monotonic() < deadline and (process.poll() is None or session_pids(process.pid)):
+            time.sleep(0.5)
+        # Nothing of the session is left running.
+        signal_session(process.pid, signal.SIGKILL)
+        process.wait()
         reader.join(timeout=5)
         if log:
             log.close()

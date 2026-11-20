@@ -273,13 +273,14 @@ jobs:
     # longest (device conditions, 62 min) first; the short groups that wait end before it, so
     # the run takes no longer (TestFlight run 44461253154). Not after the stress pass or the UI
     # flow: that would add the whole ~30 min of this job to the run.
-    # A red here is not remembered across runs, the rule of the stress pass (second review of
-    # C7, decided so): within a run "Re-run failed jobs" cannot turn it green (earlier_attempts.py:
-    # its build and test steps block), but a NEW run on the same app runs it again, unlike a UI
-    # group, whose red the UI gate keeps for that app and test code (ui_evidence.py). The daily
-    # build never starts a new run on a commit that already was in a TestFlight run, or that adds
-    # only docs to one (daily_build.py); by hand, fix the cause first. Keeping it like a UI group would need this
-    # job's own fingerprints in its name and a check in the UI gate; not done.
+    # A red here is not remembered across runs (second review of C7, decided so): within a run
+    # "Re-run failed jobs" cannot turn it green (earlier_attempts.py: its build and test steps
+    # block), but a NEW run on the same app runs it again, unlike a UI group or, since 20.11.2026,
+    # the stress pass, whose red the UI gate keeps for that app and test code by the key in the
+    # job's name (ui_evidence.py, gate --stress). The daily build never starts a new run on a
+    # commit that already was in a TestFlight run, or that adds only docs to one
+    # (daily_build.py); by hand, fix the cause first. Keeping it like the stress pass would need
+    # this job's own key in its name and a check in the UI gate; not done.
     # Unverified until a Mac run.
     name: Release build smoke test (UI)
     needs: tests

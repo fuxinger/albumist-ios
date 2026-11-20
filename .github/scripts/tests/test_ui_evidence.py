@@ -277,7 +277,8 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(len(history), 5)
         self.assertEqual(info["older_skipped"], 0)
         saved = ui_evidence.MAX_CALLS
-        ui_evidence.MAX_CALLS = ui_evidence.RESERVED_CALLS + 4  # two listings, run 9, one older run
+        # Three listings (ui.yml, testflight.yml, ui-stress.yml), run 9, one older run.
+        ui_evidence.MAX_CALLS = ui_evidence.RESERVED_CALLS + 5
         self.addCleanup(setattr, ui_evidence, "MAX_CALLS", saved)
         history = ui_evidence.fetch_history(APP, None, older, call=fake_api(runs), now=NOW, keys=keys, info=info)
         self.assertEqual(sorted(r["id"] for r, _ in history), [4, 9])
@@ -648,8 +649,9 @@ class MergeContentTests(unittest.TestCase):
         self.assertEqual(ui_evidence.content_differences(HEAD, HEAD), [])
         docs = repo(**{"docs__NOTES.md": "# notes"})
         self.assertEqual(ui_evidence.content_differences(HEAD, docs), [])
+        # The fixture lists the stress test in no group by name, so its key follows every group's.
         self.assertEqual(ui_evidence.content_differences(HEAD, TEST_ONLY),
-                         [f"the test code of {g}" for g in ("full", "other", "small")])
+                         [f"the test code of {g}" for g in ("full", "other", "small")] + ["the stress pass's test code"])
         app = repo(**{"App__Sortly__App__AlbumistApp.swift": "@main struct AlbumistApp { let x = 1 }"})
         self.assertEqual(ui_evidence.content_differences(HEAD, app)[0], "the app")
 
@@ -691,6 +693,103 @@ class MergeContentTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()) as log:
                 self.assertEqual(ui_evidence.merge_content("main", cwd=folder), 1)
             self.assertIn("does not merge cleanly", log.getvalue())
+
+
+STRESS = ui_evidence.stress_keys(ui_groups.Groups(HEAD))
+STRESS_VERIFIER = FakeVerifier(dict(VERIFIER.commits, **{"s" * 40: (APP, {**FPS, **STRESS})}))
+
+
+def stress_job(conclusion="success", step="success", job_id=700, tests=None, end="2026-11-19T12:00:00Z"):
+    tests = tests or STRESS["stress-10000-15"]
+    return {"id": job_id, "name": f"Stress pass / UI stress 10000 photos [stress-10000-15 app {APP[:12]} tests {tests[:12]}]",
+            "conclusion": conclusion, "started_at": "2026-11-19T11:00:00Z", "completed_at": end, "run_attempt": 1,
+            "steps": [{"name": "Set up job", "conclusion": "success"},
+                      {"name": "Stress run", "conclusion": step, "started_at": "2026-11-19T11:05:00Z"}],
+            "html_url": "https://example/job/stress"}
+
+
+class StressEvidenceTests(unittest.TestCase):
+    """The owner's decision of 20.11.2026, 17:20: the stress pass runs once before the merge, and
+    TestFlight takes its green by content (app fingerprint and stress test fingerprint)."""
+
+    setUp, read, outputs = CommandTests.setUp, CommandTests.read, CommandTests.outputs
+
+    def test_the_key(self):
+        groups = ui_groups.Groups(HEAD)
+        small, full = STRESS["stress-10000-15"], STRESS["stress-50000-45"]
+        self.assertNotEqual(small, full)
+        self.assertEqual(ui_evidence.stress_fingerprint(groups, "10000", "15"), small)
+        self.assertNotEqual(ui_evidence.stress_fingerprint(groups, "10000", "16"), small)
+        docs = ui_groups.Groups(repo(**{"docs__NOTES.md": "# notes"}))
+        self.assertEqual(ui_evidence.stress_keys(docs), STRESS)
+        device = ui_groups.Groups(repo(**{"App__SortlyUITests__DeviceUITests.swift": DEVICE + "\n// x\nfunc more() {}\n"}))
+        self.assertNotEqual(ui_evidence.stress_keys(device)["stress-10000-15"], small)
+        self.assertTrue(ui_evidence.is_stress("stress-10000-15"))
+        self.assertFalse(ui_evidence.is_stress("device"))
+
+    def test_results_read_the_stress_step(self):
+        found = ui_evidence.results([run(5, "s" * 40, [stress_job()], workflow="ui-stress.yml")])
+        self.assertEqual([(e["group"], e["result"]) for e in found], [("stress-10000-15", "green")])
+        red = stress_job("failure", "failure", job_id=701)
+        found = ui_evidence.results([run(6, "s" * 40, [red], workflow="ui-stress.yml")],
+                                    logs=lambda _: "UI_RESULT stress fail\n")
+        self.assertEqual(found[0]["result"], "red")
+        found = ui_evidence.results([run(6, "s" * 40, [red], workflow="ui-stress.yml")],
+                                    logs=lambda _: "UI_RESULT stress infra\n")
+        self.assertEqual(found[0]["result"], "none")
+
+    def stress_gate(self, runs, stress_only=False, only=""):
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = ui_evidence.gate(None, call=fake_api(runs), verifier=STRESS_VERIFIER, tree=HEAD, now=NOW,
+                                    only=only, stress="10000-15", stress_only=stress_only)
+        return code, log.getvalue()
+
+    def test_the_gate_takes_a_green_pass_by_content(self):
+        groups = run(1, "a" * 40, [job(g) for g in NAMES])
+        before = run(2, "s" * 40, [stress_job()], workflow="ui-stress.yml")
+        code, log = self.stress_gate([groups, before])
+        self.assertEqual(code, 0, log)
+        self.assertIn("stress-10000-15 reused from run 2", self.outputs()["text"])
+        os.remove(self.output)
+        code, log = self.stress_gate([groups])
+        self.assertEqual(code, 1)
+        self.assertIn("::error title=UI stress-10000-15::no green full result", log)
+        os.remove(self.output)
+        red = run(3, "s" * 40, [stress_job("failure", "failure", job_id=702, end="2026-11-19T13:00:00Z")],
+                  workflow="ui-stress.yml")
+        code, log = self.stress_gate([groups, before, red])
+        self.assertEqual(code, 1)
+        self.assertIn("::error title=UI stress-10000-15::red for this app and this test code", log)
+        os.remove(self.output)
+        code, log = self.stress_gate([before], stress_only=True)
+        self.assertEqual(code, 0, log)
+        self.assertEqual(self.outputs()["text"], "UI groups (stress pass 10000-15 only): stress-10000-15 reused from run 2 (sssssss)")
+
+    def plan_stress(self, runs, reuse=True, fail=False):
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = ui_evidence.stress_plan("10000", "15", reuse, call=fake_api(runs, fail=fail),
+                                           verifier=STRESS_VERIFIER, tree=HEAD, now=NOW)
+        return code, log.getvalue()
+
+    def test_the_stress_plan(self):
+        before = run(2, "s" * 40, [stress_job()], workflow="ui-stress.yml")
+        self.assertEqual(self.plan_stress([before])[0], 0)
+        out = self.outputs()
+        self.assertEqual((out["group"], out["app"], out["tests"], out["run"]),
+                         ("stress-10000-15", APP[:12], STRESS["stress-10000-15"][:12], "false"))
+        for runs, reuse, fail in (([], True, False), ([before], False, False), ([before], True, True)):
+            with self.subTest(runs=len(runs), reuse=reuse, fail=fail):
+                os.remove(self.output)
+                self.assertEqual(self.plan_stress(runs, reuse, fail)[0], 0)
+                self.assertEqual(self.outputs()["run"], "true")
+        os.remove(self.output)
+        red = run(3, "s" * 40, [stress_job("failure", "failure", job_id=703, end="2026-11-19T13:00:00Z")],
+                  workflow="ui-stress.yml")
+        code, log = self.plan_stress([before, red])
+        self.assertEqual(self.outputs()["run"], "true")
+        self.assertIn("red before for this key", log)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ui_evidence.stress_plan("10000", "1e3", True, tree=HEAD), 1)
 
 
 if __name__ == "__main__":

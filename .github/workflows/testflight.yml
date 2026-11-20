@@ -23,6 +23,10 @@ run-name: >-
 #     gate"; such a build is not given to testers.
 #   The stress pass belongs to both gates: the owner's rule 17.11. and his decision 4 want it
 #   before every upload, and the daily build uploads too (an internal build for the owner).
+#   Since the owner's decision of 20.11.2026, 17:20 it runs once before the merge (by hand on the
+#   pull request's branch, beside the full UI pass); ui-stress.yml skips it here when a green
+#   pass of 10,000 photos exists for exactly this content, and the UI gate checks it either way
+#   (--stress 10000-15). Without such a green it runs here as before.
 # Either way the upload follows the gates, without a click (the owner's decision of 19.11.2026):
 # the upload job runs only from main and only when every gate below is green, in the GitHub
 # environment "testflight-upload", which only the branch main may use, and the four App Store
@@ -241,6 +245,12 @@ jobs:
     # included, as it uploads too).
     needs: tests
     uses: ./.github/workflows/ui-stress.yml
+    # actions: read for its "Stress plan" (earlier passes, reuse by content); checks: read for its
+    # "UI stress verdict", which is skipped here (release) but must not ask for more than it gets.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
     with:
       release: true
       # The small pass (the owner's rule 17.11.), named here rather than left to defaults.
@@ -479,10 +489,12 @@ jobs:
           # Empty for the big gate (every group); the small gate's two groups.
           GATE_GROUPS: ${{ needs.check.outputs.gate_groups }}
         run: |
+          # The stress pass of this run or, since the owner's decision of 20.11.2026, 17:20, the
+          # one before the merge for exactly this content (ui-stress.yml skips it then).
           if [ -n "$GATE_GROUPS" ]; then
-            python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS"
+            python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS" --stress 10000-15
           else
-            python3 .github/scripts/ui_evidence.py gate
+            python3 .github/scripts/ui_evidence.py gate --stress 10000-15
           fi
 
   release:

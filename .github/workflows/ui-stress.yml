@@ -107,16 +107,58 @@ env:
 #   - a pass on main (by hand, e.g. after a merge): "mac-queue-main", with the UI runs on main,
 #     so that no pull request run replaces it while it waits (19.11.2026: a rebased Dependabot
 #     pull request did). A newer run on main still replaces a waiting one.
+#   - the pass before the merge, by hand on a pull request's branch (the owner's decision of
+#     20.11.2026, 17:20): "stress-branch-<branch>", so it runs beside the full UI pass of that
+#     branch (in "mac-queue") instead of waiting behind it; a newer pass on the same branch
+#     replaces a waiting one. Start it first, it is the longest Mac job (docs/TESTFLIGHT.md).
+#
+# Reuse (the owner's decision of 20.11.2026, 17:20): the first job, "Stress plan", names the
+# pass's evidence key (app fingerprint, stress test fingerprint, size; ui_evidence.py
+# stress-plan) and, for a run by hand or from TestFlight, skips the pass when a green pass of
+# this size exists for exactly this content and none is red for that key. The weekly pass
+# always runs. The key is in the stress job's name ("[stress-10000-15 app ... tests ...]"),
+# where the TestFlight gate (ui_evidence.py gate --stress 10000-15) and later plans find it.
+# "UI stress verdict" (not in TestFlight, whose UI gate checks it) is the pass's check with a
+# fixed name: green only when this size is green for this content, from this run or reused.
 concurrency:
   group: >-
     ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-stress-{0}', github.run_id)
     || (github.event_name == 'schedule' && 'stress-weekly')
-    || (github.ref == 'refs/heads/main' && 'mac-queue-main' || 'mac-queue') }}
+    || (github.ref == 'refs/heads/main' && 'mac-queue-main')
+    || (github.event_name == 'workflow_dispatch' && format('stress-branch-{0}', github.ref))
+    || 'mac-queue' }}
   cancel-in-progress: false
 
 jobs:
+  plan:
+    name: Stress plan (key, reuse)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      group: ${{ steps.plan.outputs.group }}
+      app: ${{ steps.plan.outputs.app }}
+      tests: ${{ steps.plan.outputs.tests }}
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commits of earlier results, to recompute their fingerprints from git.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Key of this pass and whether it runs
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE: ${{ github.event_name != 'schedule' && 'yes' || '' }}
+        run: python3 .github/scripts/ui_evidence.py stress-plan --photos "$STRESS_PHOTOS" --minutes "$STRESS_MINUTES" ${REUSE:+--reuse}
+
   stress:
-    name: UI stress ${{ inputs.photos || (github.event_name == 'schedule' && '50000' || '10000') }} photos
+    name: UI stress ${{ inputs.photos || (github.event_name == 'schedule' && '50000' || '10000') }} photos [${{ needs.plan.outputs.group }} app ${{ needs.plan.outputs.app }} tests ${{ needs.plan.outputs.tests }}]
+    needs: plan
+    if: ${{ needs.plan.outputs.run == 'true' }}
     runs-on: xcode-27
     # Build ~10 min (the simulator boots meanwhile), creating ~0.6 min per 1,000 photos, then
     # `minutes` of measuring. The watchdog in "Stress run" stops the pass itself in time for
@@ -280,3 +322,27 @@ jobs:
           if-no-files-found: ignore
           # "Re-run failed jobs" uploads it again under the same name.
           overwrite: true
+
+  verdict:
+    # The pass's check with a fixed name (the merge gate asks for it on a pull request's branch):
+    # green only when this size is green for exactly this content and none red for that key,
+    # from this run or reused (ui_evidence.py gate --stress-only). Not in a TestFlight run, whose
+    # UI gate checks the same (--stress 10000-15).
+    name: UI stress verdict
+    needs: [plan, stress]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !inputs.release }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Stress pass green for this app and test code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/ui_evidence.py gate --stress "${STRESS_PHOTOS}-${STRESS_MINUTES}" --stress-only

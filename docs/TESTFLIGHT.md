@@ -486,7 +486,8 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   Konflikte, ist er rot: `main` in den Zweig holen und den vollen Lauf neu starten (Gruppen mit
   gleichem Schlüssel werden übernommen, kosten also keinen Mac).
 - **Damit GitHub es erzwingt** (nur Fuchs, Einstellung, P5-09): Schutzregel für `main` mit
-  Pflicht-Prüfung „UI verdict (full)“ und „Require branches to be up to date before merging“.
+  Pflicht-Prüfungen „UI verdict (full)“ und „UI stress verdict“ (seit 17:20, unten) und „Require
+  branches to be up to date before merging“.
   Bis dahin gilt es als Regel für Agenten und Fuchs.
 - **TestFlight (großes Tor)**: unverändert `ui_groups: auto`; es laufen nur Gruppen ohne volles
   Grün für genau diesen Inhalt (nach Stufe 1 meist keine), das UI-Tor prüft alle Gruppen wie
@@ -498,6 +499,39 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
 - Achtung Mac-Warteschlange: der Lauf von Hand wartet in `mac-queue`; ein neuer Push auf
   irgendeinen Pull Request kann ihn dort ersetzen (GitHub hält je Gruppe einen wartenden Lauf).
   Darum erst starten, wenn der schnelle Lauf des letzten Pushs fertig ist.
+
+### Härtetest einmal vor dem Merge (Entscheidung Fuchs 20.11. 17:20 Uhr)
+
+Regeländerung: Der kleine Härtetest (10.000 Fotos, 15 Minuten) läuft einmal vor dem Merge,
+neben dem vollen UI-Lauf, und TestFlight übernimmt sein Grün, wenn der Inhalt nachweislich gleich
+ist. Ohne passendes Grün läuft er im TestFlight-Lauf wie bisher, nie ungeprüft.
+
+- **Starten**: auf dem Zweig zuerst Actions > UI stress > Run workflow (Vorgaben 10000/15;
+  `gh workflow run ui-stress.yml --ref <zweig>`), dann den vollen UI-Lauf. Der Härtetest hat
+  dort eine eigene Gruppe `stress-branch-<zweig>`, wartet also nicht hinter dem UI-Lauf in
+  `mac-queue`.
+- **Schlüssel**: wie bei den UI-Gruppen. Der Job heißt `UI stress 10000 photos [stress-10000-15
+  app … tests …]`: App-Fingerabdruck und Test-Fingerabdruck des Härtetests (der volle
+  Fingerabdruck der Gruppe, die `test12` nennt, also Testdatei, Hilfsdateien und Harness samt
+  `ui-stress.yml`, dazu Fotos und Minuten; `ui_evidence.py stress_fingerprint`). Rot bleibt rot
+  für diesen Schlüssel wie bei den Gruppen.
+- **Wiederverwenden**: der erste Job „Stress plan (key, reuse)“ lässt den Lauf aus, wenn es für
+  genau diesen Inhalt ein grünes Ergebnis dieser Größe und kein rotes gibt (Lauf von Hand und
+  TestFlight; der wöchentliche Lauf läuft immer).
+- **Merge-Tor**: zusätzlich „UI stress verdict“ grün auf dem letzten Commit des Zweigs. Der
+  Merge-Inhalt-Schritt des vollen UI-Laufs deckt den Härtetest mit ab (sein Schlüssel folgt aus
+  dem der Gruppe).
+- **TestFlight**: ruft den Härtetest in jedem Lauf auf (beide Tore); er läuft nur ohne passendes
+  Grün. Das UI-Tor prüft ihn immer (`ui_evidence.py gate --stress 10000-15`), der Upload braucht
+  ihn grün wie bisher. Release-Kurztest, Archiv-Prüfung, frühere Versuche, Upload-Bedingungen
+  und alle Tore laufen in jedem TestFlight-Lauf.
+- **Macs und Dauer vor dem Merge**: voller UI-Lauf (fünf Gruppen zugleich) und Härtetest wollen
+  sechs Macs, das Konto hat fünf. Der Härtetest startet zuerst (sein Plan braucht eine halbe
+  Minute, die UI-Gruppen kommen erst nach Plan, Linux-Kern und Bau, rund 8 Minuten). Er belegt
+  einen Mac rund 40–50 Minuten; die Gruppen laufen so lange auf vier. Erwartet: Härtetest fertig
+  nach rund 50, voller UI-Lauf nach rund 70 Minuten (ohne Härtetest rund 57).
+- **TestFlight danach**: mit übernommenen Gruppen und Härtetest bestimmt der Release-Kurztest
+  (rund 25 Minuten) die Dauer: großes Tor rund 65–70 statt 129–156 Minuten.
 
 Noch nicht umgesetzt, Entscheidung nötig:
 

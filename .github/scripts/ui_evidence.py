@@ -13,6 +13,11 @@ test code (the owner's rule of 17.11.).
       daily TestFlight build (testflight.yml, gate small; the owner's decision 10 of 18.11.2026).
       The rules per group are the same; the groups left out are named in the summary and the
       text as not checked.
+  python3 .github/scripts/ui_evidence.py stress-plan --photos 10000 --minutes 15 [--reuse]
+      For ui-stress.yml: the key of the stress pass (job name "[stress-10000-15 app ... tests
+      ...]") and whether it runs; with --reuse not when a green pass of that size exists for
+      exactly this app and stress test code (the owner's decision of 20.11.2026, 17:20). The
+      gate takes --stress 10000-15 (that pass green too) and --stress-only.
   python3 .github/scripts/ui_evidence.py merge-content [--base origin/main]
       For the "UI verdict (full)" job of a full run on a pull request's branch (the full pass
       before the merge, the owner's decision of 20.11.2026, 17:12): exits 0 only when merging
@@ -101,7 +106,7 @@ import earlier_attempts  # noqa: E402
 import ui_groups  # noqa: E402
 
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
-WORKFLOWS = ("ui.yml", "testflight.yml")
+WORKFLOWS = ("ui.yml", "testflight.yml", "ui-stress.yml")
 HISTORY_DAYS = 90     # GitHub's default run retention: older runs (and their reds) are gone
 # No group job carries fingerprints in its name before this (they came with ui_evidence.py).
 FINGERPRINTS_SINCE = datetime(2026, 11, 18, tzinfo=timezone.utc)
@@ -111,6 +116,17 @@ MAX_LISTED = 1000     # the run list answers at most this many runs for one filt
 # group, `gate` fails. Each invocation prints UI_API_CALLS.
 MAX_CALLS = 300
 TEST_STEP = "Run UI tests"
+# The stress pass (ui-stress.yml; the owner's decision of 20.11.2026, 17:20: it runs once before
+# the merge and TestFlight takes its green by content). Its job carries the evidence key like a
+# group job, as the pseudo group "stress-<photos>-<minutes>": the app fingerprint and a stress
+# test fingerprint (stress_fingerprint). Its test step is "Stress run", its time limit 170 min.
+STRESS_TEST = "DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline"
+STRESS_STEP = "Stress run"
+STRESS_TIMEOUT_MINUTES = 170
+STRESS_GROUP = re.compile(r"^stress-([1-9][0-9]{0,5})-([1-9][0-9]{0,5})$")
+# The passes whose keys every commit is checked for: the small one before each upload and the
+# weekly full one.
+STRESS_PASSES = (("10000", "15"), ("50000", "45"))
 JOB_NAME = re.compile(r"\[([a-z0-9-]+) app ([0-9a-f]{12}) tests ([0-9a-f]{12})\]$")
 # ui.yml's run-name of a pull request run starts with the merge commit it tests.
 MERGE = re.compile(r"^\[merge ([0-9a-f]{40})\]")
@@ -187,16 +203,40 @@ def counted(call, limit: int | None = None):
 # Results of earlier group jobs
 
 
-def classify(job: dict) -> str:
+def stress_group(photos: str, minutes: str) -> str:
+    return f"stress-{photos}-{minutes}"
+
+
+def is_stress(group: str) -> bool:
+    return bool(STRESS_GROUP.match(group or ""))
+
+
+def stress_fingerprint(groups, photos: str, minutes: str) -> str:
+    """The stress pass's test fingerprint: the full fingerprint of the group that lists its test
+    (its test file, the helpers it uses, the harness, which holds ui-stress.yml; the device
+    group), or of every group when none lists it by name (fails toward "changed"), and the size
+    of the pass."""
+    owners = [n for n in groups.names()
+              if any(e == STRESS_TEST or STRESS_TEST.startswith(e + "/") for e in groups.group(n).get("only", "").split())]
+    base = [f"{n} {groups.fingerprint(n)}" for n in (owners[:1] or groups.names())]
+    return ui_groups._digest(["stress pass", STRESS_TEST, *base, f"photos {photos}", f"minutes {minutes}"])
+
+
+def stress_keys(groups) -> dict[str, str]:
+    """{stress group: its test fingerprint} for the passes of STRESS_PASSES."""
+    return {stress_group(p, m): stress_fingerprint(groups, p, m) for p, m in STRESS_PASSES}
+
+
+def classify(job: dict, step: str = TEST_STEP) -> str:
     """green, red or none (see the top of this file); "red" here is confirmed from the log by
-    results()."""
+    results(). `step`: the test step (the stress pass's is STRESS_STEP)."""
     if job.get("status") not in (None, "completed"):
         return "none"  # still running
     steps = {s.get("name"): s for s in job.get("steps") or []}
-    test = steps.get(TEST_STEP)
+    test = steps.get(step)
     if job.get("conclusion") == "success":
         return "green" if test and test.get("conclusion") == "success" else "none"
-    if test and TEST_STEP in earlier_attempts.failed_steps(job):
+    if test and step in earlier_attempts.failed_steps(job):
         return "red"  # started and not passed; results() reads the log
     return "none"
 
@@ -238,12 +278,14 @@ def results(runs_and_jobs, logs=None) -> list[dict]:
             if not match or job.get("id") in seen or (job.get("completed_at") and key in seen):
                 continue
             seen.update({job.get("id"), key})
-            result, log_state = classify(job), ""
-            if result == "red" and logs is not None and not ran_out_of_time(job):
+            stress = is_stress(match.group(1))
+            result, log_state = classify(job, STRESS_STEP if stress else TEST_STEP), ""
+            limit = STRESS_TIMEOUT_MINUTES if stress else GROUP_TIMEOUT_MINUTES
+            if result == "red" and logs is not None and not ran_out_of_time(job, limit):
                 text = logs(job.get("id"))
                 if text is None:
                     log_state = "gone"  # red: whether a test failed cannot be checked any more
-                elif not red_in_log(text, match.group(1)):
+                elif not red_in_log(text, "stress" if stress else match.group(1)):
                     result = "none"  # stopped during the tests without a test result (a cancel)
             found.append({
                 "group": match.group(1), "app": match.group(2), "tests": match.group(3),
@@ -367,7 +409,7 @@ class Verifier:
     """Recomputes the fingerprints of commits from git (fetching a missing one once)."""
 
     def __init__(self, cwd: str = ui_groups.ROOT):
-        self.cwd, self.cache, self.apps = cwd, {}, {}
+        self.cwd, self.cache, self.apps, self.trees = cwd, {}, {}, {}
 
     def _have(self, sha: str) -> bool:
         if not (sha and re.fullmatch(r"[0-9a-f]{40}", sha)):
@@ -387,14 +429,17 @@ class Verifier:
         return self.apps[sha]
 
     def _groups(self, sha: str):
-        """(app, {group: full fingerprint}, {group: quick fingerprint}) of a commit, or None."""
+        """(app, {group: full fingerprint}, {group: quick fingerprint}) of a commit, or None. The
+        full ones hold the stress pass's keys too (stress_keys); one of another size is added when
+        an entry asks for it (matches)."""
         if sha not in self.cache:
             value = None
             app = self.app(sha)
             if app:
                 try:
                     groups = ui_groups.Groups(ui_groups.GitTree(sha, self.cwd))
-                    value = (app, groups.fingerprints(), groups.fingerprints(quick=True))
+                    value = (app, {**groups.fingerprints(), **stress_keys(groups)}, groups.fingerprints(quick=True))
+                    self.trees[sha] = groups
                 except (ValueError, KeyError):
                     value = (app, {}, {})
             self.cache[sha] = value
@@ -405,6 +450,9 @@ class Verifier:
         if not found:
             return False
         app, full, quick = found
+        size = STRESS_GROUP.match(entry["group"])
+        if size and entry["group"] not in full and sha_groups(self, entry["sha"]):
+            full[entry["group"]] = stress_fingerprint(self.trees[entry["sha"]], *size.groups())
         keys = {full.get(entry["group"], "")[:ui_groups.SHORT], quick.get(entry["group"], "")[:ui_groups.SHORT]}
         return app[:ui_groups.SHORT] == entry["app"] and entry["tests"] in keys - {""}
 
@@ -422,6 +470,10 @@ class Verifier:
             return ui_groups.changed_files(sha, "HEAD", self.cwd)
         except ValueError:
             return None
+
+
+def sha_groups(verifier, sha: str) -> bool:
+    return sha in getattr(verifier, "trees", {})
 
 
 def decide(group: str, app: str, tests: str, entries: list[dict], verifier, accept=None, block=None) -> dict:
@@ -545,9 +597,14 @@ def flaky_notes(decisions: list[dict], call=None) -> list[str]:
 # Commands
 
 
-def keys(groups) -> set[str]:
-    """The short test fingerprints, full and quick, of every group of this tree."""
-    return {fp[:ui_groups.SHORT] for quick in (False, True) for fp in groups.fingerprints(quick).values()}
+def keys(groups, stress: tuple[str, str] | None = None) -> set[str]:
+    """The short test fingerprints, full and quick, of every group of this tree, and the stress
+    pass's (STRESS_PASSES, and `stress` (photos, minutes) when given)."""
+    found = {fp[:ui_groups.SHORT] for quick in (False, True) for fp in groups.fingerprints(quick).values()}
+    found |= {fp[:ui_groups.SHORT] for fp in stress_keys(groups).values()}
+    if stress:
+        found.add(stress_fingerprint(groups, *stress)[:ui_groups.SHORT])
+    return found
 
 
 def current(tree=None):
@@ -633,24 +690,32 @@ def known_red(decisions: list[dict]) -> tuple[list[str], str]:
 
 
 def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = False,
-         now: datetime | None = None, only: str = "") -> int:
+         now: datetime | None = None, only: str = "", stress: str = "", stress_only: bool = False) -> int:
+    """`stress` ("<photos>-<minutes>", e.g. 10000-15): the stress pass of that size must be green
+    for this app and its stress test fingerprint too (the owner's decision of 20.11.2026, 17:20:
+    TestFlight takes the pass before the merge by content); `stress_only`: no UI group checked
+    (the verdict of ui-stress.yml)."""
     tree, groups, app = current(tree)
     names = groups.names()
     chosen = only.split()
     unknown = [w for w in chosen if w not in names]
-    if unknown:
-        print(earlier_attempts.command("error", "UI gate", f"unknown group(s) {' '.join(unknown)}; "
-                                       f"use some of: {' '.join(names)}"))
+    size = STRESS_GROUP.match(f"stress-{stress}") if stress else None
+    if unknown or (stress and not size) or (stress_only and not stress):
+        print(earlier_attempts.command("error", "UI gate", f"unknown group(s) {' '.join(unknown)} or stress size "
+                                       f"{stress!r}; use some of: {' '.join(names)}; --stress <photos>-<minutes>"))
         return 1
-    checked = [n for n in names if n in chosen] if chosen else names
-    left_out = [n for n in names if n not in checked]
+    checked = [] if stress_only else ([n for n in names if n in chosen] if chosen else names)
+    left_out = [] if stress_only else [n for n in names if n not in checked]
     verifier = verifier or Verifier()
     mode = "quick" if quick else "full"
     scope = f"{mode}, only {' '.join(checked)}" if left_out else mode
+    if stress:
+        scope = f"stress pass {stress} only" if stress_only else f"{scope}, stress pass {stress}"
     call = counted(call or api)
     try:
         info = {}
-        entries = results(fetch_history(app, run_id, verifier, call=call, now=now, keys=keys(groups), info=info),
+        entries = results(fetch_history(app, run_id, verifier, call=call, now=now,
+                                        keys=keys(groups, size.groups() if size else None), info=info),
                           logs=log_reader(call))
         if info.get("older_skipped"):
             print(earlier_attempts.command("notice", "UI gate", f"{info['older_skipped']} run(s) with only older "
@@ -664,8 +729,11 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
         return 1
     print(f"UI_API_CALLS {call.count} (budget {MAX_CALLS})")
     decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in checked]
+    if size:
+        decisions.append(decide(stress_group(*size.groups()), app, stress_fingerprint(groups, *size.groups()),
+                                entries, verifier))
     flaky = flaky_notes(decisions, call)
-    cleared = cleared_notes(decisions, groups, verifier)
+    cleared = cleared_notes([d for d in decisions if not is_stress(d["group"])], groups, verifier)
     parts, blocked = [], False
     for d in decisions:
         if d["state"] == "green":
@@ -721,6 +789,9 @@ def content_differences(head, merged) -> list[str]:
     for group in sorted(set(mine) | set(theirs), key=lambda g: (g not in mine, g)):
         if mine.get(group) != theirs.get(group):
             out.append(f"the test code of {group}")
+    # The stress pass's key follows from its group's (stress_fingerprint); said for the reader.
+    if stress_keys(ui_groups.Groups(head)) != stress_keys(ui_groups.Groups(merged)):
+        out.append("the stress pass's test code")
     return out
 
 
@@ -750,6 +821,46 @@ def merge_content(base: str, cwd: str = ui_groups.ROOT) -> int:
     return 0
 
 
+def stress_plan(photos: str, minutes: str, reuse: bool, call=None, verifier=None, tree=None,
+                now: datetime | None = None) -> int:
+    """ui-stress.yml's first job: the key of this pass (outputs group, app, tests, for the stress
+    job's name) and whether it has to run (run=true|false). With `reuse` (a run by hand or from
+    TestFlight, never the weekly one) a green pass of this size for exactly this app and stress
+    test code, from an earlier run, and no red for that key, makes run=false: the decision of
+    20.11.2026, 17:20 (the pass before the merge counts for TestFlight). Fails safe: when the
+    API does not answer, the pass runs."""
+    for value in (photos, minutes):
+        if not re.fullmatch(r"[1-9][0-9]{0,5}", value or ""):
+            print("::error::photos and minutes must be whole numbers from 1 to 999999")
+            return 1
+    tree, groups, app = current(tree)
+    group, fp = stress_group(photos, minutes), stress_fingerprint(groups, photos, minutes)
+    run, note = True, "runs (no reuse asked for)"
+    if reuse:
+        verifier = verifier or Verifier()
+        call = counted(call or api)
+        try:
+            entries = results(fetch_history(app, None, verifier, call=call, now=now,
+                                            keys=keys(groups, (photos, minutes))), logs=log_reader(call))
+            d = decide(group, app, fp, entries, verifier)
+            if d["state"] == "green":
+                run, note = False, f"green for this app and stress test code in {where(d['evidence'])}: not run again"
+            elif d["state"] == "red":
+                note = "runs (red before for this key: its green will not count)"
+            else:
+                note = "runs (no green result for this app and stress test code)"
+        except (ApiError, KeyError) as error:
+            note = f"runs (earlier results not readable: {error})"
+            print(f"::warning title=Stress plan::{note}")
+        print(f"UI_API_CALLS {call.count} (budget {MAX_CALLS})")
+    print(f"UI_STRESS_PLAN {group} app {app[:ui_groups.SHORT]} tests {fp[:ui_groups.SHORT]}: {note}")
+    append("GITHUB_STEP_SUMMARY", f"### Stress pass {photos} photos, {minutes} min (app {app[:ui_groups.SHORT]}, "
+                                  f"stress test code {fp[:ui_groups.SHORT]}): {note}\n")
+    append("GITHUB_OUTPUT", f"group={group}\napp={app[:ui_groups.SHORT]}\ntests={fp[:ui_groups.SHORT]}\n"
+                            f"run={'true' if run else 'false'}\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -759,15 +870,23 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("gate")
     g.add_argument("--quick", action="store_true", help="the verdict of a quick run; never for an upload")
     g.add_argument("--groups", default="", help="check only these groups (the small gate of the daily build)")
+    g.add_argument("--stress", default="", help="<photos>-<minutes>: the stress pass of that size must be green too")
+    g.add_argument("--stress-only", action="store_true", help="check only the stress pass (ui-stress.yml's verdict)")
+    sp = sub.add_parser("stress-plan")
+    sp.add_argument("--photos", required=True)
+    sp.add_argument("--minutes", required=True)
+    sp.add_argument("--reuse", action="store_true", help="skip the pass when a green one for this content exists")
     m = sub.add_parser("merge-content")
     m.add_argument("--base", default="origin/main")
     args = parser.parse_args(argv)
     if args.command == "merge-content":
         return merge_content(args.base)
+    if args.command == "stress-plan":
+        return stress_plan(args.photos.strip(), args.minutes.strip(), args.reuse)
     if args.command == "plan":
         return plan(args.groups.strip(), quick=args.quick)
     run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
-    return gate(run_id, quick=args.quick, only=args.groups)
+    return gate(run_id, quick=args.quick, only=args.groups, stress=args.stress.strip(), stress_only=args.stress_only)
 
 
 if __name__ == "__main__":

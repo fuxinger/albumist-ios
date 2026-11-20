@@ -404,7 +404,9 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertIn("plan --groups \"$UI_GROUPS\" ${UI_QUICK:+--quick}", text)
         self.assertIn("TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}", text)
         testflight = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
-        self.assertIn("python3 .github/scripts/ui_evidence.py gate\n", testflight)  # full, never --quick
+        # Full, never --quick; the stress pass of 10,000 photos too (decision 20.11.2026, 17:20).
+        self.assertIn("python3 .github/scripts/ui_evidence.py gate --stress 10000-15\n", testflight)
+        self.assertIn('python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS" --stress 10000-15\n', testflight)
         self.assertIn("      release: true\n      quick: false\n", testflight)
 
     def test_pull_request_runs_name_their_merge_commit(self):
@@ -608,6 +610,44 @@ class HangLimitTests(unittest.TestCase):
             self.assertIn("apt_install.sh libsqlite3-dev python3", text)
 
 
+class StressBeforeMergeTests(unittest.TestCase):
+    """The owner's decision of 20.11.2026, 17:20: the stress pass runs once before the merge, and
+    TestFlight takes its green by content; without one it runs there as before."""
+
+    def test_the_stress_workflow_plans_names_and_judges_its_pass(self):
+        text = read(os.path.join(ROOT, ".github", "workflows", "ui-stress.yml"))
+        jobs = job_blocks(text)
+        self.assertEqual(list(jobs)[:3], ["plan", "stress", "verdict"])
+        plan = {n: r for n, _, r in job_steps(text, "plan")}["Key of this pass and whether it runs"]
+        self.assertIn('ui_evidence.py stress-plan --photos "$STRESS_PHOTOS" --minutes "$STRESS_MINUTES" ${REUSE:+--reuse}', plan)
+        # The weekly pass never reuses.
+        self.assertIn("REUSE: ${{ github.event_name != 'schedule' && 'yes' || '' }}", jobs["plan"])
+        self.assertIn("fetch-depth: 0", jobs["plan"])
+        # The key in the job's name, where the gate and later plans find it.
+        self.assertIn("[${{ needs.plan.outputs.group }} app ${{ needs.plan.outputs.app }} tests ${{ needs.plan.outputs.tests }}]",
+                      jobs["stress"])
+        self.assertEqual(job_field(text, "stress", "if").strip(), "${{ needs.plan.outputs.run == 'true' }}")
+        verdict = {n: r for n, _, r in job_steps(text, "verdict")}["Stress pass green for this app and test code"]
+        self.assertIn('ui_evidence.py gate --stress "${STRESS_PHOTOS}-${STRESS_MINUTES}" --stress-only', verdict)
+        self.assertIn("!inputs.release", job_field(text, "verdict", "if"))
+        self.assertIn("name: UI stress verdict", jobs["verdict"])
+
+    def test_testflight_checks_the_stress_pass_by_content(self):
+        tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        jobs = job_blocks(tf)
+        gate = "\n".join(r for _, _, r in job_steps(tf, "ui-gate"))
+        self.assertEqual(gate.count("--stress 10000-15"), 2)
+        # Still called in every run with the small pass; the upload still needs it green
+        # (a pass skipped for a green one by content leaves the called workflow green).
+        self.assertIn("photos: '10000'", jobs["stress"])
+        # The called workflow's plan reads earlier runs: the caller grants it.
+        self.assertIn("actions: read", jobs["stress"])
+        self.assertIn("checks: read", jobs["stress"])
+        self.assertIn("minutes: '15'", jobs["stress"])
+        self.assertIn("needs.stress.result == 'success'", job_field(tf, "release", "if"))
+        self.assertIn("needs.release-smoke.result == 'success'", job_field(tf, "release", "if"))
+
+
 class ReleaseSkipTests(unittest.TestCase):
     """In a TestFlight run (release) CI's Mac job leaves out a step only when ui.yml, called in
     the same run right after it, builds the same thing itself (coordinator's rule for C4: no
@@ -809,7 +849,10 @@ class MacQueueTests(unittest.TestCase):
             group = concurrency_group(text)
             with self.subTest(workflow=name):
                 self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main")), "mac-queue-main")
-                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/feature")), "mac-queue")
+                # The stress pass before the merge runs beside the branch's full UI pass (the
+                # owner's decision of 20.11.2026, 17:20): a group per branch, not the Mac queue.
+                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/feature")),
+                                 "stress-branch-refs/heads/feature" if name == "ui-stress" else "mac-queue")
 
     def test_no_pull_request_joins_the_queue_of_main(self):
         group = concurrency_group(self.ui)

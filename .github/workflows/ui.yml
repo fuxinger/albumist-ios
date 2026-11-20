@@ -508,7 +508,7 @@ jobs:
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: |
-          echo "::notice title=Full UI pass before the merge::Once the last commit is pushed: Actions > UI flow > Run workflow on branch $HEAD_REF with quick off. Its job 'UI verdict (full)' must be green on the branch's last commit before the merge (docs/TESTFLIGHT.md)."
+          echo "::notice title=Full UI pass before the merge::Once the last commit is pushed: Actions > UI stress > Run workflow on branch $HEAD_REF (first, the longest Mac job), then Actions > UI flow > Run workflow on it with quick off. 'UI stress verdict' and 'UI verdict (full)' must be green on the branch's last commit before the merge (docs/TESTFLIGHT.md)."
       - name: UI groups green for this app and test code
         env:
           GH_TOKEN: ${{ github.token }}

@@ -811,46 +811,6 @@
         }
       }
     },
-    "%lld Einträge" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld entry"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld entries"
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Eintrag"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Einträge"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "%lld Fotos" : {
       "localizations" : {
         "en" : {
@@ -1971,16 +1931,6 @@
         }
       }
     },
-    "%lld offen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld open"
-          }
-        }
-      }
-    },
     "%lld Originale gelöscht" : {
       "localizations" : {
         "en" : {
@@ -2204,46 +2154,6 @@
                 "stringUnit" : {
                   "state" : "translated",
                   "value" : "%lld suggestions rechecked: please take another look."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "%lld Vorschläge prüfen" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Review %lld Suggestion"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Review %lld Suggestions"
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Vorschlag prüfen"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Vorschläge prüfen"
                 }
               }
             }
@@ -3547,16 +3457,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The Photos app reported an error."
-          }
-        }
-      }
-    },
-    "Die Zahl kommt mit den ersten Vorschlägen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The number arrives with the first suggestions."
           }
         }
       }
@@ -5411,12 +5311,12 @@
         }
       }
     },
-    "Albumist sucht nach neuen Fotos. Die Vorschläge findest du in der Übersicht." : {
+    "Albumist sucht nach neuen Fotos. Neue Vorschläge findest du dann auf der Seite „Vorschläge“." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist is looking for new photos. You’ll find the suggestions in the overview."
+            "value" : "Albumist is looking for new photos. You’ll find new suggestions on the Suggestions page."
           }
         }
       }
@@ -5951,16 +5851,6 @@
         }
       }
     },
-    "Was soll Albumist sortieren?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "What should Albumist sort?"
-          }
-        }
-      }
-    },
     "Weiter" : {
       "localizations" : {
         "en" : {
@@ -6167,16 +6057,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Adopted"
-          }
-        }
-      }
-    },
-    "Übersicht" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Overview"
           }
         }
       }
@@ -6851,16 +6731,6 @@
         }
       }
     },
-    "Von Albumist angelegt oder ergänzt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Created or Extended by Albumist"
-          }
-        }
-      }
-    },
     "Von Albumist" : {
       "localizations" : {
         "en" : {
@@ -7104,46 +6974,6 @@
                 "stringUnit" : {
                   "state" : "translated",
                   "value" : "%lld Alben gefunden"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "%lld neue Alben" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld new album"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld new albums"
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld neues Album"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld neue Alben"
                 }
               }
             }
@@ -8141,16 +7971,6 @@
         }
       }
     },
-    "%@ von %@ sortiert" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ of %2$@ sorted"
-          }
-        }
-      }
-    },
     "Unterbrochen: %lld von %lld Schritten erledigt" : {
       "localizations" : {
         "de" : {
@@ -8441,16 +8261,6 @@
         }
       }
     },
-    "Womit soll Albumist anfangen?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Where should Albumist start?"
-          }
-        }
-      }
-    },
     "Jahr" : {
       "localizations" : {
         "en" : {
@@ -8661,86 +8471,6 @@
         }
       }
     },
-    "%lld ausgewählte Alben anlegen" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Create %lld Selected Album"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Create %lld Selected Albums"
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld ausgewähltes Album anlegen"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld ausgewählte Alben anlegen"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "%lld Vorschläge ausgewählt" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld suggestion selected"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld suggestions selected"
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Vorschlag ausgewählt"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Vorschläge ausgewählt"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "Es gibt gerade keine ausgewählten Vorschläge." : {
       "localizations" : {
         "en" : {
@@ -8787,26 +8517,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tap a suggestion to view and select it."
-          }
-        }
-      }
-    },
-    "%lld empfohlene auswählen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select %lld Recommended"
-          }
-        }
-      }
-    },
-    "Auswählen und später anlegen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select and Create Later"
           }
         }
       }
@@ -9241,32 +8951,12 @@
         }
       }
     },
-    "Mit einem Jahr anzufangen geht schneller: Albumist analysiert dann nur diese Fotos und macht nur dafür Vorschläge. So prüfst du das Ergebnis in Ruhe. Die ganze Mediathek kannst du jederzeit dazunehmen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Starting with one year is faster: Albumist then analyzes only those photos and suggests albums only for them, so you can check the result calmly. You can add the whole library at any time."
-          }
-        }
-      }
-    },
     "Angelegt" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Created"
-          }
-        }
-      }
-    },
-    "Die erste Analyse kann bei großen Mediatheken eine Weile dauern. Du kannst die App dabei verlassen: Solange iOS es erlaubt, läuft sie weiter und zeigt den Fortschritt auf dem Sperrbildschirm, sonst geht sie beim nächsten Öffnen genau dort weiter. Wenn du magst, sagt Albumist dir Bescheid, sobald sie fertig ist." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The first analysis can take a while for large libraries. You can leave the app: as long as iOS allows, it keeps running and shows its progress on the Lock Screen; otherwise it picks up right there the next time you open the app. If you like, Albumist lets you know when it is done."
           }
         }
       }
@@ -10451,12 +10141,12 @@
         }
       }
     },
-    "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter." : {
+    "Ein früheres Anlegen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach geht es hier weiter." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Creating albums was interrupted earlier. Decide on the overview how to go on; then you can continue here."
+            "value" : "Creating albums was interrupted earlier. Decide on the Suggestions page how to go on; then you can continue here."
           }
         }
       }
@@ -10467,16 +10157,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose which areas count under “Counts as Sorted” in Settings."
-          }
-        }
-      }
-    },
-    "Wähle mindestens einen Bereich." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Choose at least one area."
           }
         }
       }
@@ -11112,106 +10792,6 @@
                     "stringUnit" : {
                       "state" : "translated",
                       "value" : "%2$@ matching photos are still missing and will be added."
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "%lld Vorschläge für %lld %@ Fotos und Videos" : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%#@sugg@ für %#@media@"
-          },
-          "substitutions" : {
-            "sugg" : {
-              "argNum" : 1,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg Vorschlag"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg Vorschläge"
-                    }
-                  }
-                }
-              }
-            },
-            "media" : {
-              "argNum" : 2,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%3$@ Foto oder Video"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%3$@ Fotos und Videos"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%#@sugg@ for %#@media@"
-          },
-          "substitutions" : {
-            "sugg" : {
-              "argNum" : 1,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg suggestion"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%arg suggestions"
-                    }
-                  }
-                }
-              }
-            },
-            "media" : {
-              "argNum" : 2,
-              "formatSpecifier" : "lld",
-              "variations" : {
-                "plural" : {
-                  "one" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%3$@ photo or video"
-                    }
-                  },
-                  "other" : {
-                    "stringUnit" : {
-                      "state" : "translated",
-                      "value" : "%3$@ photos and videos"
                     }
                   }
                 }
@@ -12431,16 +12011,6 @@
         }
       }
     },
-    "Alles, was Albumist in Fotos geändert hat, und der Weg zurück." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Everything Albumist changed in Photos, and the way back."
-          }
-        }
-      }
-    },
     "Zählt als sortiert" : {
       "localizations" : {
         "en" : {
@@ -12691,32 +12261,12 @@
         }
       }
     },
-    "Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du in der Vorschau bestätigst. Dort siehst du jedes Album noch einmal." : {
+    "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach geht es hier weiter." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Recommended are certain and likely suggestions without personal topics. Nothing is created until you confirm in the preview, where you see every album once more."
-          }
-        }
-      }
-    },
-    "Angelegt wird erst, wenn du in der Vorschau bestätigst." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nothing is created until you confirm in the preview."
-          }
-        }
-      }
-    },
-    "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Undoing earlier changes was interrupted. Decide on the overview how to go on; then you can continue here."
+            "value" : "Undoing earlier changes was interrupted. Decide on the Suggestions page how to go on; then you can continue here."
           }
         }
       }
@@ -14901,12 +14451,12 @@
         }
       }
     },
-    "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als rückgängig gemacht. Sobald Fotos wieder reagiert, kannst du in der Übersicht fortsetzen." : {
+    "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als rückgängig gemacht. Sobald Fotos wieder reagiert, kannst du auf der Seite „Vorschläge“ fortsetzen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Photos isn’t responding right now. What Albumist was about to change counts neither as done nor as undone. As soon as Photos responds again, you can continue from the overview."
+            "value" : "Photos isn’t responding right now. What Albumist was about to change counts neither as done nor as undone. As soon as Photos responds again, you can continue from the Suggestions page."
           }
         }
       }
@@ -14961,12 +14511,12 @@
         }
       }
     },
-    "Albumist war gerade ausgelastet und hat diese Änderung nicht an Fotos geschickt – sie ist nicht passiert. Versuche es gleich noch einmal – bei einem Plan mit „Fortsetzen“ in der Übersicht." : {
+    "Albumist war gerade ausgelastet und hat diese Änderung nicht an Fotos geschickt – sie ist nicht passiert. Versuche es gleich noch einmal – bei einem Plan mit „Fortsetzen“ auf der Seite „Vorschläge“." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist was busy just now and did not send this change to Photos – it did not happen. Try again in a moment – for a plan, with “Resume” in the overview."
+            "value" : "Albumist was busy just now and did not send this change to Photos – it did not happen. Try again in a moment – for a plan, with “Resume” on the Suggestions page."
           }
         }
       }
@@ -15011,12 +14561,12 @@
         }
       }
     },
-    "Die Rückfrage von iOS zum Löschen blieb ohne Antwort und ist vielleicht noch offen. Ob gelöscht wird, steht noch nicht fest. Sobald das geklärt ist, kannst du in der Übersicht fortsetzen." : {
+    "Die Rückfrage von iOS zum Löschen blieb ohne Antwort und ist vielleicht noch offen. Ob gelöscht wird, steht noch nicht fest. Sobald das geklärt ist, kannst du auf der Seite „Vorschläge“ fortsetzen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The iOS question about deleting got no answer and may still be open. Whether anything is deleted is not known yet. Once that is settled, you can continue in the overview."
+            "value" : "The iOS question about deleting got no answer and may still be open. Whether anything is deleted is not known yet. Once that is settled, you can continue on the Suggestions page."
           }
         }
       }

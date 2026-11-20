@@ -9,16 +9,6 @@ enum Counted {
         parts.joined(separator: separator)
     }
 
-    /// "25 neue Alben, 236 Fotos einsortiert." Parts that are zero are left out
-    /// ("0 ergänzt" only raised the question what that means).
-    static func resultLine(_ summary: PlanSummary) -> String {
-        var parts: [String] = []
-        if summary.newAlbums > 0 { parts.append(String(localized: "\(summary.newAlbums) neue Alben")) }
-        if summary.extendedAlbums > 0 { parts.append(String(localized: "\(summary.extendedAlbums) ergänzt")) }
-        parts.append(String(localized: "\(summary.distinctAssets) \(summary.distinctAssets.formatted()) Fotos einsortiert"))
-        return join(parts, separator: ", ") + "."
-    }
-
     /// History row in Settings: "25 neu, 236 Fotos", zero parts left out.
     static func historyLine(_ summary: PlanSummary) -> String {
         var parts: [String] = []

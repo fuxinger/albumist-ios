@@ -16,7 +16,11 @@ extension TripGeometry {
     ///   - airborne: photos taken in flight (`AirborneFilter.airborne`): left out of places,
     ///     route and countries, counted in `airborneCount`.
     ///   - altitudes: metres above sea level by photo, where the iPhone stored one (`TripPlace.altitude`).
-    ///   - timeZone: the device's time zone, for a trip none of whose places has a known one.
+    ///   - timeZone: the device's time zone, for a trip none of whose photos has a known one.
+    ///
+    /// A photo's day is the day on the clock where it was taken, as the app's albums count it
+    /// (`AssetFacts.timeZone`, review P1-15; decision 19.11.2026), else in its place's zone, else
+    /// in the trip's zone (the most common zone of its photos on the map).
     public static func build(trip: Trip, facts: [AssetFacts], airborne: Set<AssetID>, altitudes: [AssetID: Double] = [:],
                              timeZone: TimeZone) -> TripGeometry {
         TripGeometryBuilder.build(trip: trip, facts: facts, airborne: airborne, altitudes: altitudes, deviceTimeZone: timeZone)
@@ -36,7 +40,8 @@ enum TripGeometryBuilder {
         var source: Int
         var date: Date
         var coordinate: GeoCoordinate
-        /// Its local day: where its place is, else in the trip's zone.
+        /// Its local day: on the clock where it was taken (`AssetFacts.timeZone`), else where its
+        /// place is, else in the trip's zone.
         var day = LocalDay(year: 1970, month: 1, day: 1)
     }
 
@@ -129,7 +134,9 @@ enum TripGeometryBuilder {
             if dated.isEmpty || date > end { end = date }
             let place = fact.gpsPlace
             var zone = -1
-            if let identifier = place?.timeZoneIdentifier { zone = zones.number(identifier) }
+            // The clock where it was taken, as the app counts its days and months
+            // (`AssetFacts.timeZone`, review P1-15), else its place's zone.
+            if let identifier = fact.timeZone?.identifier ?? place?.timeZoneIdentifier { zone = zones.number(identifier) }
             guard !inFlight, !fact.asset.isScreenshotLike, let coordinate = fact.asset.usableLocation else {
                 dated.append((date, zone, -1))
                 continue

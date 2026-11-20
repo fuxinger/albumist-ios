@@ -401,6 +401,25 @@ struct TripGeometryTests {
         #expect(geometry.route.map(\.day) == [Self.day("2023-06-15")])
     }
 
+    /// A photo's day is the day on the clock where it was taken, as the app's albums count it
+    /// (`AssetFacts.timeZone`, review P1-15): it wins over its place's zone and the trip's.
+    @Test func theClockWhereAPhotoWasTakenDecidesItsDay() throws {
+        // Offline places name no zone; the analysis gave each photo Tokyo's clock from its country.
+        let tokyo = MapFixture.burst("tokyo", count: 4, at: Places.tokyo, day: "2023-06-14", hour: 23, country: "JP", town: "Tokyo")
+            .map { fact -> AssetFacts in var fact = fact; fact.timeZone = TimeZone(identifier: "Asia/Tokyo"); return fact }
+        var unlocated = MapFixture.photo("no-place", at: MapFixture.date("2023-06-14 23:30"), nil)
+        unlocated.timeZone = TimeZone(identifier: "Asia/Tokyo")
+        let geometry = Self.build(tokyo + [unlocated], timeZone: MapFixture.utc)
+        #expect(geometry.timeZoneIdentifier == "Asia/Tokyo")
+        #expect(geometry.dayCounts == [TripDay(day: Self.day("2023-06-15"), photoCount: 5, placeIndex: 0)])
+        #expect(geometry.dayPlaces.map(\.day) == [Self.day("2023-06-15")])
+        // The clock wins over a place's zone that says otherwise.
+        let mixed = MapFixture.burst("utc", count: 3, at: Places.tokyo, day: "2023-06-14", hour: 23, country: "JP", town: "Tokyo",
+                                     timeZone: "UTC")
+            .map { fact -> AssetFacts in var fact = fact; fact.timeZone = TimeZone(identifier: "Asia/Tokyo"); return fact }
+        #expect(Self.build(mixed, timeZone: MapFixture.utc).firstDay == Self.day("2023-06-15"))
+    }
+
     @Test func placesAreNumberedInTimeOrderAcrossTheDateLine() throws {
         // Tokyo on the morning of the 15th (local), then Honolulu on the evening of the 14th
         // (local): later in time, earlier by the calendar.

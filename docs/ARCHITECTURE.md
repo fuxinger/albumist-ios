@@ -85,9 +85,13 @@ neu. Ein zweiter Lauf nach dem Commit findet nichts mehr.
 Gespeicherte Namen dürfen sich nicht still ändern, sonst verliert ein Update Daten:
 - Datenbankdatei: `DatabaseFile` (Store-Modul) zieht `sortly.sqlite` mit `-wal` und `-shm` einmal
   auf den neuen Namen um, in `AppModel.databaseURL()` bevor die Datenbank öffnet. Gibt es die neue
-  Datei schon, bleibt alles, wie es ist; scheitert ein Schritt, wandert alles zurück und die alte
-  Datei öffnet unter ihrem Namen (nie eine leere neue Datenbank daneben); der nächste Start
-  versucht es wieder. Bis zur Umbenennung sind beide Namen gleich und nichts zieht um.
+  Datei schon, bleibt alles, wie es ist; ältere Dateien daneben (etwa nach einem älteren Build, der
+  noch einmal lief) bleiben und stehen im Diagnosebericht. Scheitert ein Schritt, wandert alles
+  zurück, auch ein Log, das ein früherer Start schon verschoben hatte, und die alte Datei öffnet
+  mit ihrem Log unter ihrem Namen (nie eine leere neue Datenbank daneben, nie eine ohne ihr Log);
+  scheitert auch der Rückweg, scheitert der Start (Startfehler-Seite), gelöscht wird nichts. Ein
+  Log unter beiden Namen: nichts zieht um, nichts wird gelöscht. Bis zur Umbenennung sind beide
+  Namen gleich und nichts zieht um.
 - JSON-Schlüssel `addedBySortly` und `createdBySortly` der verwalteten Alben (Datenbank,
   Sicherungskopie): feste Rohwerte in `ManagedAlbumState.CodingKeys`; nur die Swift-Namen ändern sich.
 - Alle anderen gespeicherten Namen tragen den alten Namen nicht: UserDefaults-Schlüssel,

@@ -150,6 +150,64 @@ public enum PreviewPicker {
         return AlbumProposal.cover(for: proposal, from: Set(suited))
     }
 
+    /// The photos a big cover tries, best first (design wave 1: the app's `CoverPhoto` shows the
+    /// first one that is sharp on the device and never loads from iCloud):
+    /// 1. `cover` (the suggestion's own, `cover(_:preferred:proposal:ranks:)`), when it suits;
+    /// 2. the other analysed ordinary photos: the user's `favorites` first, then the newest
+    ///    (Photos keeps the newest photos on the device the longest; an album's cover is its
+    ///    newest photo, `newest`);
+    /// 3. only after them, photos the image analysis has not looked at yet (before the first
+    ///    analysis is through, every photo), again favourites, then the newest.
+    /// Never a sensitive document, and never a screenshot or another document either: a big
+    /// cover is a photo (design rule 9), so a suggestion of only those has no candidates and its
+    /// card shows its calm placeholder. At most `count`; stable whatever the order of `ids`
+    /// (equal dates fall back to the id, photos without a date come last). Looks at every id
+    /// once and keeps only the best `count` of each kind, so a suggestion of thousands of photos
+    /// costs no sorting.
+    public static func coverCandidates(_ ids: some Collection<AssetID>, cover: AssetID?, dates: [AssetID: Date],
+                                       ranks: [AssetID: PreviewRank], favorites: Set<AssetID> = [],
+                                       count: Int = 4) -> [AssetID] {
+        guard count > 0, !ids.isEmpty else { return [] }
+        // Favourites first, then newer before older, undated last, ties by the smaller id.
+        func precedes(_ a: AssetID, _ b: AssetID) -> Bool {
+            let favoriteA = favorites.contains(a), favoriteB = favorites.contains(b)
+            if favoriteA != favoriteB { return favoriteA }
+            switch (dates[a], dates[b]) {
+            case let (x?, y?): return x == y ? a < b : x > y
+            case (.some, nil): return true
+            case (nil, .some): return false
+            case (nil, nil): return a < b
+            }
+        }
+        // The best `count` so far, best first.
+        func keep(_ id: AssetID, in best: inout [AssetID]) {
+            guard !best.contains(id) else { return }
+            let index = best.firstIndex { precedes(id, $0) } ?? best.endIndex
+            guard index < count else { return }
+            best.insert(id, at: index)
+            if best.count > count { best.removeLast() }
+        }
+        var photos: [AssetID] = [], notAnalysed: [AssetID] = []
+        for id in ids where id != cover {
+            switch ranks[id] ?? .photo {
+            case .photo: keep(id, in: &photos)
+            case .unknown: keep(id, in: &notAnalysed)
+            case .document, .sensitive: continue
+            }
+        }
+        // The suggestion's own cover leads its kind: before every other analysed photo, or, not
+        // analysed yet, before the other photos not analysed yet (after the analysed ones, as
+        // `cover` itself only takes it when no analysed ordinary photo is there).
+        if let cover, ids.contains(cover) {
+            switch ranks[cover] ?? .photo {
+            case .photo: photos.insert(cover, at: 0)
+            case .unknown: notAnalysed.insert(cover, at: 0)
+            case .document, .sensitive: break
+            }
+        }
+        return Array((photos + notAnalysed).prefix(count))
+    }
+
     /// The preview of a suggestion: `count` of `ids` spread evenly over their time (one per
     /// moment), oldest first, with `cover` when it may be shown. Ordinary photos fill it first,
     /// documents and screenshots only the tiles that are left, sensitive documents never: with

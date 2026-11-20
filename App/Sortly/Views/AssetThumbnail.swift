@@ -32,7 +32,35 @@ final class ThumbnailCache {
         guard let asset = await photoAsset(for: id) else { return nil }
         let scale = UITraitCollection.current.displayScale
         let size = CGSize(width: side * scale, height: side * scale)
-        let image = await ThumbnailRequest.load(asset, size: size, manager: manager)
+        return await load(asset, pixels: size, key: key)
+    }
+
+    /// A cover (`CoverPhoto`): the photo at `pixels` (filled, cropped later), only from what is
+    /// on the device, and whether it is a screenshot (a cropped one keeps its top). The image can
+    /// be only the small preview Photos keeps of a photo whose original is in iCloud:
+    /// `ThumbnailRequest.isSharp` says whether it is sharp at that size. `nil` when Photos does
+    /// not know the photo (deleted) or has nothing of it on the device.
+    func cover(for id: AssetID, pixels: CGSize) async -> (image: UIImage, screenshot: Bool)? {
+        guard pixels.width >= 1, pixels.height >= 1, let asset = await photoAsset(for: id) else { return nil }
+        let screenshot = asset.value.mediaSubtypes.contains(.photoScreenshot)
+        let key = "\(id.rawValue)#\(Int(pixels.width))x\(Int(pixels.height))" as NSString
+        if let cached = cache.object(forKey: key) { return (cached, screenshot) }
+        guard let image = await load(asset, pixels: pixels, key: key) else { return nil }
+        return (image, screenshot)
+    }
+
+    /// Looks the ids up in one batch (`photoAsset`), so a cover whose first photo was not sharp
+    /// waits for Photos once for all its other candidates, not once for each of them.
+    func lookUp(_ ids: [AssetID]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for id in ids {
+                group.addTask { _ = await self.photoAsset(for: id) }
+            }
+        }
+    }
+
+    private func load(_ asset: ThumbnailRequest.Asset, pixels: CGSize, key: NSString) async -> UIImage? {
+        let image = await ThumbnailRequest.load(asset, size: pixels, manager: manager)
         // A cancelled request is not kept: what came back may not be the prepared thumbnail.
         if let image, !Task.isCancelled {
             let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
@@ -224,6 +252,28 @@ enum ThumbnailRequest {
         }
     }
 
+    /// How much of the pixels it fills an image must bring, per side, to count as sharp: Photos'
+    /// small previews of a photo whose original is in iCloud fall far below it (a cover would be
+    /// stretched three times and more), a thumbnail made at the asked size is above it.
+    static let sharpShare: CGFloat = 0.7
+
+    /// Whether `image` is sharp enough to fill `target` pixels (aspect fill): it is stretched by
+    /// at most 1 / `sharpShare` on the side that decides. For a square target this is the
+    /// shorter side of the image against the side of the square.
+    nonisolated static func isSharp(_ image: UIImage, for target: CGSize) -> Bool {
+        let width = image.size.width * image.scale, height = image.size.height * image.scale
+        guard width >= 1, height >= 1, target.width >= 1, target.height >= 1 else { return false }
+        return max(target.width / width, target.height / height) * sharpShare <= 1
+    }
+
+    /// A preview Photos delivers first that may be shown at once. Filled: sharp by `isSharp` (a
+    /// wide cover must not take a tall preview that is sharp only on its short side, it waits
+    /// for the real thumbnail); fitted (the full-screen viewer): its shorter side as before.
+    nonisolated private static func nearlySharp(_ image: UIImage, for target: CGSize, fill: Bool) -> Bool {
+        if fill { return isSharp(image, for: target) }
+        return min(image.size.width * image.scale, image.size.height * image.scale) >= min(target.width, target.height) * sharpShare
+    }
+
     nonisolated static func load(_ asset: Asset, size: CGSize, manager: Manager, contentMode: PHImageContentMode = .aspectFill) async -> UIImage? {
         let delivered = await request(asset, size: size, manager: manager, contentMode: contentMode)
         // Cancelled: nothing, not the raw image (it can be the full original, see `prepared`).
@@ -274,8 +324,7 @@ enum ThumbnailRequest {
                         // A preview that is nearly sharp enough is shown at once; a tiny one would
                         // stay blurry in the cache, so it only serves as fallback.
                         guard let image else { return }
-                        let pixels = min(image.size.width * image.scale, image.size.height * image.scale)
-                        if pixels >= min(size.width, size.height) * 0.7 { state.finish(image) } else { state.keep(image) }
+                        if nearlySharp(image, for: size, fill: contentMode == .aspectFill) { state.finish(image) } else { state.keep(image) }
                         return
                     }
                     state.finish(image ?? state.kept)

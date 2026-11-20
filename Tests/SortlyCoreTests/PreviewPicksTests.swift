@@ -214,4 +214,20 @@ struct PreviewPicksAppTests {
         #expect(routes.contains("case starterPlan(AppModel.PreviewSelection)"))
         #expect(routes.contains("PlanReviewView(selection: selection)"))
     }
+
+    /// Each preview keeps its own plan: a removal previewed under "Alben" replaced the shared
+    /// `model.plan`, and the preview of picks left open on "Vorschläge" then showed and offered
+    /// that removal. A plan that ran is never offered again. Red before: the preview read
+    /// `model.plan`, and the model held it for every preview.
+    @Test func eachPreviewKeepsItsOwnPlan() throws {
+        let view = AppSource.code(try AppSource.read(Self.preview))
+        #expect(view.firstMatch(of: /model\.plan\b/) == nil, "the preview shows a plan another preview can replace")
+        #expect(view.contains("@State private var plan: ChangePlan?"))
+        #expect(view.contains("if await model.execute(plan) { self.plan = nil }"))
+        let model = AppSource.code(try AppSource.read(Self.model))
+        #expect(!model.contains("var plan: ChangePlan?"))
+        #expect(model.contains("func execute(_ plan: ChangePlan) async -> Bool"))
+        let quick = AppSource.code(try AppSource.read("App/Sortly/Model/AppModel+QuickCreate.swift"))
+        #expect(!quick.contains("previewed"), "quick create still puts back a shared plan")
+    }
 }

@@ -499,7 +499,6 @@ final class AppModel {
     var historyHasMore = false
     /// Albums Albumist created or extended, with exactly the media it added.
     var managedAlbums: [ManagedAlbumState] = []
-    var plan: ChangePlan?
     /// A plan that stopped half way because the app was closed while it ran. Its free albums
     /// are held back until it is continued, kept or taken back (it continues without a new check).
     var interruptedPlan: ChangePlan? {
@@ -2077,12 +2076,12 @@ final class AppModel {
 
     /// "Die ersten N jetzt anlegen": the preview keeps its biggest suggestions within the free
     /// albums; the others are given back as if never picked (nothing is lost: they show what
-    /// they showed before) and the plan is made again.
-    func keepFirst(_ limit: Int, in selection: PreviewSelection) async {
+    /// they showed before) and its plan is made again.
+    func keepFirst(_ limit: Int, in selection: PreviewSelection) async -> ChangePlan? {
         let planned = plannedProposals(in: selection).sorted { ($0.assetIDs.count, $1.title) > ($1.assetIDs.count, $0.title) }
         let others = Set(planned.dropFirst(max(0, limit)).map(\.id))
         show(previewPicks.giveBack(selection, only: others, shown: decisions))
-        await buildPlan(for: selection)
+        return await buildPlan(for: selection)
     }
 
     func accept(_ proposals: [AlbumProposal]) {
@@ -2583,11 +2582,12 @@ final class AppModel {
     // MARK: Plan and execution
 
     /// The plan of a preview of suggestions: exactly the picks of `selection` that still stand
-    /// (`PreviewPicks.planned`), each as the preview picked it.
-    func buildPlan(for selection: PreviewSelection) async {
-        guard let store else { return }
+    /// (`PreviewPicks.planned`), each as the preview picked it. The preview keeps it itself
+    /// (`PlanReviewView`), so a preview on another tab never replaces it.
+    func buildPlan(for selection: PreviewSelection) async -> ChangePlan? {
+        guard let store else { return nil }
         // The user's latest changes in Photos count before anything is planned.
-        guard let current = await reconcileManagedAlbums() else { return }
+        guard let current = await reconcileManagedAlbums() else { return nil }
         do {
             let overrides = try await planningOverrides(store)
             let planned = previewPicks.planned(in: selection, shown: decisions)
@@ -2598,11 +2598,12 @@ final class AppModel {
                 }
                 return ConfirmedProposal(proposal: proposal, decision: decision)
             }
-            plan = MainThreadWatch.shared.section("make plan") {
+            return MainThreadWatch.shared.section("make plan") {
                 OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle).makePlan(from: confirmed, inventory: current, overrides: overrides)
             }
         } catch {
             message = .failure(error.localizedDescription)
+            return nil
         }
     }
 
@@ -2626,12 +2627,16 @@ final class AppModel {
         }
     }
 
-    /// Applies a reviewed plan. Only one plan runs at a time.
-    func execute(_ plan: ChangePlan) async {
-        guard await changesHaveFullAccess() else { return }
-        guard claimExecution() else { return }
+    /// Applies a reviewed plan. Only one plan runs at a time. True when it ran (it started, and
+    /// may have ended with errors); false when it was refused or another plan had the turn.
+    @discardableResult
+    func execute(_ plan: ChangePlan) async -> Bool {
+        guard await changesHaveFullAccess() else { return false }
+        guard claimExecution() else { return false }
         defer { releaseExecution() }
         await run(plan)
+        // Still this run's: the claim is held until the end of this function.
+        return executionProgress.planID == plan.id
     }
 
     /// Undo, "Rest rückgängig machen" and finishing or taking back an interrupted plan change
@@ -2750,7 +2755,6 @@ final class AppModel {
         await reloadInterruptedPlan()
         keepAwake.end()
         execution.isRunning = false
-        self.plan = nil
         // A run that ended early by itself keeps its wait here too (like `releaseExecution`):
         // only a try that came due during the plan starts now (second review of the PhotoKit
         // limits, 5).

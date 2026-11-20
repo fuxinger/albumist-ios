@@ -24,10 +24,13 @@ struct PlanReviewView: View {
     /// Otherwise the picks the preview plans ("Dein Startpaket", "N Alben anlegen", "Ergänzen …"
     /// in a list): exactly these (`AppModel.buildPlan(for:)`); leaving gives them back.
     var selection: AppModel.PreviewSelection? = nil
+    /// The plan this preview shows: its own, so a preview opened on another tab (a removal
+    /// under "Alben", "Ergänzen …" on a card) never replaces it.
+    @State private var plan: ChangePlan?
     @State private var loading = true
     /// Albums of the plan that is running, for the "photos fly into albums" show.
     @State private var show: [SortingShow.Album]?
-    /// What the screen shows of `model.plan`, made by `makeFacts()`.
+    /// What the screen shows of `plan`, made by `makeFacts()`.
     @State private var facts: PlanReviewFacts?
     /// The plan and album list `facts` were made for.
     @State private var factsMadeFor: FactsKey?
@@ -74,7 +77,7 @@ struct PlanReviewView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     } else if model.execution.isRunning {
                         runningCard
-                    } else if loading || (model.plan != nil && !factsKey.samePlan(as: factsMadeFor)) {
+                    } else if loading || (plan != nil && !factsKey.samePlan(as: factsMadeFor)) {
                         // Facts of another plan (or of this plan before "Nur die Gratis-Alben"
                         // or a change of steps) are never shown. After a change of the album
                         // list alone the shown facts stay until the new ones are made, so the
@@ -128,11 +131,9 @@ struct PlanReviewView: View {
                 if model.execution.finished != nil { model.execution.finished = nil }
                 if model.execution.failure != nil { model.execution.failure = nil }
                 if let prebuilt {
-                    model.plan = prebuilt
+                    plan = prebuilt
                 } else if let selection {
-                    await model.buildPlan(for: selection)
-                } else {
-                    model.plan = nil
+                    plan = await model.buildPlan(for: selection)
                 }
             }
             loading = false
@@ -148,13 +149,12 @@ struct PlanReviewView: View {
     /// progress card), its result, the preview.
     private var phase: PlanReviewPhase {
         PlanReviewPhase(running: model.execution.isRunning, runningPlan: model.execution.planID,
-                        previewedPlan: model.plan?.id, hasResult: model.execution.finished != nil)
+                        previewedPlan: plan?.id, hasResult: model.execution.finished != nil)
     }
 
     private var factsKey: FactsKey {
-        let plan = model.plan
-        return FactsKey(plan: plan?.id, steps: plan?.steps.count ?? 0, conflicts: plan?.conflicts.count ?? 0,
-                        inventory: model.inventoryVersion)
+        FactsKey(plan: plan?.id, steps: plan?.steps.count ?? 0, conflicts: plan?.conflicts.count ?? 0,
+                 inventory: model.inventoryVersion)
     }
 
     /// The plan on screen, with what stops it: nil during the sorting show, the run, over a
@@ -162,7 +162,7 @@ struct PlanReviewView: View {
     /// button never stands where the plan is not shown.
     private var previewed: (plan: ChangePlan, facts: PlanReviewFacts, obstacle: Obstacle?)? {
         guard show == nil, !model.execution.isRunning, model.execution.finished == nil, !loading,
-              let plan = model.plan, let facts, factsKey.samePlan(as: factsMadeFor) else { return nil }
+              let plan, let facts, factsKey.samePlan(as: factsMadeFor) else { return nil }
         return (plan, facts, obstacle(for: plan, facts))
     }
 
@@ -186,7 +186,7 @@ struct PlanReviewView: View {
 
     /// Works out what the screen shows of the current plan, off the main thread.
     private func makeFacts() async {
-        guard let plan = model.plan else { return }
+        guard let plan else { return }
         let key = factsKey
         let inventory = model.inventory
         // The albums in the order of the suggestions the preview plans.
@@ -334,7 +334,11 @@ struct PlanReviewView: View {
                     scrollToTop()
                 }
             }
-            Task { await model.execute(plan) }
+            Task {
+                // Once it ran, the preview never offers it again (the result shows, and a result
+                // cleared later leaves "Nichts zu tun"), whatever runs on other tabs meanwhile.
+                if await model.execute(plan) { self.plan = nil }
+            }
         } label: {
             applyTitle(plan, facts.summary)
         }
@@ -398,7 +402,7 @@ struct PlanReviewView: View {
     private var limitToFreeAlbums: (() -> Void)? {
         guard prebuilt == nil, let selection, purchases.remainingFreeAlbums > 0 else { return nil }
         let free = purchases.remainingFreeAlbums
-        return { Task { await model.keepFirst(free, in: selection) } }
+        return { Task { plan = await model.keepFirst(free, in: selection) } }
     }
 
     /// The button says what it does, one verb after "Jetzt" (design W1, Punkt 2; design review

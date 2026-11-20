@@ -113,10 +113,8 @@ extension AppModel {
             state.purchase = QuickCreatePurchase(proposal: proposal)
             return .needsPurchase
         }
-        // A preview open on another tab keeps its plan: the run ends with no plan on screen.
-        let previewed = plan
+        // A preview open on another tab keeps its own plan (`PlanReviewView`).
         await execute(made)
-        if plan == nil, let previewed, previewed.id != made.id { plan = previewed }
         return finishQuickCreate(made, proposal: proposal)
     }
 
@@ -143,10 +141,8 @@ extension AppModel {
         let deletes = await undoDeletesCollections(banner.plan)
         guard state.banner?.id == banner.id else { return }
         state.banner?.phase = .undoing(deletesAlbum: deletes)
-        let previewed = plan
         let before = execution
         await undo(banner.plan)
-        if plan == nil, let previewed { plan = previewed }
         let undoRan = execution.planID != before.planID
         if undonePlans.contains(banner.plan.id) {
             if state.banner?.id == banner.id { state.banner = nil }

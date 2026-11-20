@@ -112,6 +112,9 @@
   „Anpassen“ gewählter Vorschlag, der noch nicht angelegt ist, kam vorher in jede solche Vorschau, auch
   ohne Haken; er behält seine Wahl jetzt für seinen eigenen Knopf. „Die ersten N jetzt anlegen“ gibt die
   übrigen so zurück, wie sie vorher waren. „Auswahl aufheben“ entfällt: Zurück gibt seit Welle 1 dasselbe zurück.
+- 20.11.: Jede Vorschau behält ihren eigenen Plan. Eine Entfernung, die man unter „Alben“ ansah, ersetzte vorher den
+  Plan einer Vorschau, die auf einem anderen Tab offen war; die zeigte dann die Entfernung. Ein Plan, der gelaufen ist,
+  wird nicht noch einmal angeboten.
 - 20.11.: Größte Schrift (P3-18): Das Mosaik eines Vorschlags zeigt „+24“ statt „+…“; die Zahl wächst nur bis
   zur ersten Bedienungshilfe-Größe, steht in einer Zeile und wird eher etwas
   kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht

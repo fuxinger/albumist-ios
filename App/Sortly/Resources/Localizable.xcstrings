@@ -2191,6 +2191,156 @@
         }
       }
     },
+    "Ergänzen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add…"
+          }
+        }
+      }
+    },
+    "Benennen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Name…"
+          }
+        }
+      }
+    },
+    "Ansehen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View…"
+          }
+        }
+      }
+    },
+    "Bitte kurz ansehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Please take a look"
+          }
+        }
+      }
+    },
+    "Album wird angelegt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating album"
+          }
+        }
+      }
+    },
+    "Fotos anzeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Photos"
+          }
+        }
+      }
+    },
+    "Alle auswählen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select All"
+          }
+        }
+      }
+    },
+    "%lld %@ Alben anlegen" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@albums@"
+          },
+          "substitutions" : {
+            "albums" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Album anlegen"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Alben anlegen"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@albums@"
+          },
+          "substitutions" : {
+            "albums" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "Create %2$@ Album"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "Create %2$@ Albums"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Angelegt wird erst mit „Album anlegen“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing is created until you tap “Create Album”."
+          }
+        }
+      }
+    },
+    "Ergänzt wird erst, wenn du in der Vorschau bestätigst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing is added until you confirm in the preview."
+          }
+        }
+      }
+    },
     "Anpassen" : {
       "localizations" : {
         "en" : {

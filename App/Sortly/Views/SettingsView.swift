@@ -359,7 +359,7 @@ struct InterruptedHistoryRow: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
     @State private var confirmUndo = false
-    /// "Alles zurücknehmen" deletes albums or folders: the confirmation says that iOS asks
+    /// "Alles rückgängig machen" deletes albums or folders: the confirmation says that iOS asks
     /// next (P3-07). Worked out once on the tap, not while the dialog is drawn.
     @State private var undoDeletes = false
     /// Albumist reads the albums to see whether the undo deletes any: a spinner beside the
@@ -389,8 +389,8 @@ struct InterruptedHistoryRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .confirmationDialog("Alles zurücknehmen?", isPresented: $confirmUndo, titleVisibility: .visible) {
-            Button("Alles zurücknehmen", role: .destructive) {
+        .confirmationDialog("Alles rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
+            Button("Alles rückgängig machen", role: .destructive) {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
@@ -412,7 +412,7 @@ struct InterruptedHistoryRow: View {
                 await model.refreshDerived()
             }
         } label: {
-            Text(isUndo ? LocalizedStringKey("Rest zurücknehmen") : isRemoval ? LocalizedStringKey("Rest entfernen") : LocalizedStringKey("Rest anlegen")).minimumHitTarget()
+            Text(isUndo ? LocalizedStringKey("Rest rückgängig machen") : isRemoval ? LocalizedStringKey("Rest entfernen") : LocalizedStringKey("Rest anlegen")).minimumHitTarget()
         }
         // An interrupted undo cannot itself be taken back; it goes on or stays as it is.
         if !isUndo {
@@ -426,7 +426,7 @@ struct InterruptedHistoryRow: View {
                     askingUndo = false
                     confirmUndo = true
                 }
-            } label: { Text("Alles zurücknehmen").checkingBeside(askingUndo).minimumHitTarget() }
+            } label: { Text("Alles rückgängig machen").checkingBeside(askingUndo).minimumHitTarget() }
             .disabled(askingUndo)
         }
         Button { Task { await model.keepInterruptedPlanAsIs() } } label: {

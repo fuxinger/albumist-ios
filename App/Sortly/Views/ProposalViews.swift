@@ -334,7 +334,7 @@ struct ProposalDetailView: View {
         .confirmationDialog("Keine Reise?", isPresented: $confirmOftenHere, titleVisibility: .visible) {
             Button("Keine Reise, hier bin ich öfter") { answerOftenHere(true) }
         } message: {
-            Text("Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Zurücknehmen kannst du das in den Einstellungen.")
+            Text("Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Rückgängig machen kannst du das in den Einstellungen.")
         }
         .onAppear {
             // A name given before is where the field starts. A name typed here stays while

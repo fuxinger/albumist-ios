@@ -278,12 +278,21 @@ struct OverviewView: View {
                                 .foregroundStyle(.noteText)
                                 .monospacedDigit()
                         }
-                        if model.interruptedPlan != nil {
+                        if let interrupted = model.interruptedPlan {
                             // The unfinished run counts only once the user has decided above
                             // (unknown is not done), so "0 sortiert" next to "39 of 61 steps" is explained.
-                            Text("Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.")
-                                .font(.subheadline)
-                                .foregroundStyle(.noteText)
+                            // Named with the card's own word ("Anlegen wurde unterbrochen", P3-09).
+                            Group {
+                                if interrupted.reverts != nil {
+                                    Text("Das unterbrochene Rückgängigmachen zählt, sobald du oben entschieden hast.")
+                                } else if !interrupted.removalSources.isEmpty {
+                                    Text("Das unterbrochene Entfernen zählt, sobald du oben entschieden hast.")
+                                } else {
+                                    Text("Das unterbrochene Anlegen zählt, sobald du oben entschieden hast.")
+                                }
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(.noteText)
                         }
                     }
                 }
@@ -301,7 +310,8 @@ struct OverviewView: View {
             .map { open + String(localized: $0.titleResource) + close }
         // Only photos the main areas apply to count, so the total is smaller than the library
         // (device test 15.11.: "141 von 5.737 sortiert" next to "14.351 von 14.352 Fotos analysiert").
-        return String(localized: "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: \(names.formatted(.list(type: .and))).")
+        // The areas by name, no word of their own: the setting is "Zählt als sortiert" (P3-09).
+        return String(localized: "Gezählt werden nur Fotos, die zu \(names.formatted(.list(type: .and))) passen.")
     }
 
     /// Every photo the ring leaves out, each in one group (`SortedCountCard.NotCounted`): with
@@ -322,7 +332,7 @@ struct OverviewView: View {
                 if isNoPlace {
                     parts.append(String(localized: "\(n) Fotos ohne Ort"))
                 } else {
-                    parts.append(String(localized: "\(n) Fotos außerhalb deiner Hauptbereiche"))
+                    parts.append(String(localized: "\(n) Fotos außerhalb dieser Bereiche"))
                 }
             case .ignored(let n):
                 // Ignored photos are neither sorted nor open, so they leave the ring (Fuchs 18.11.):
@@ -397,7 +407,15 @@ struct OverviewView: View {
                 // UI runs read how the image requests ended (all demo photos were unreadable there).
                 .accessibilityValue(UITestSupport.isRunning ? "image loads: \(ImageLoadStats.summary)" : "")
                 if let date = model.analysis.lastRun {
-                    Text("Zuletzt geprüft \(date.formatted(.relative(presentation: .named)))").font(.subheadline).foregroundStyle(.noteText)
+                    // „Gerade eben geprüft“ in the first minute, not „Zuletzt geprüft jetzt“ (P3-18);
+                    // drawn again every minute, so neither stays after the minute has passed.
+                    TimelineView(.everyMinute) { context in
+                        switch LastCheck(date, now: context.date) {
+                        case .justNow: Text("Gerade eben geprüft")
+                        case .earlier(let checked): Text("Zuletzt geprüft \(checked.formatted(.relative(presentation: .named)))")
+                        }
+                    }
+                    .font(.subheadline).foregroundStyle(.noteText)
                 } else {
                     Text("Neue Fotos erkennt Albumist von selbst.").font(.subheadline).foregroundStyle(.noteText)
                 }
@@ -451,12 +469,12 @@ struct OverviewView: View {
         Divider()
         ViewThatFits(in: .horizontal) {
             HStack {
-                Label("Probelauf: nur Fotos aus \(String(year))", systemImage: "calendar").font(.subheadline)
+                Label("Albumist arbeitet nur mit Fotos aus \(String(year))", systemImage: "calendar").font(.subheadline)
                 Spacer()
                 Button { model.changeScope(.all) } label: { TapTarget("Alle Jahre") }
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                Label("Probelauf: nur Fotos aus \(String(year))", systemImage: "calendar").font(.subheadline)
+                Label("Albumist arbeitet nur mit Fotos aus \(String(year))", systemImage: "calendar").font(.subheadline)
                 Button { model.changeScope(.all) } label: { TapTarget("Ganze Mediathek dazunehmen") }
             }
         }
@@ -636,7 +654,7 @@ struct InterruptedPlanCard: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
     @State private var confirmUndo = false
-    /// "Alles zurücknehmen" deletes albums or folders: the confirmation says that iOS asks
+    /// "Alles rückgängig machen" deletes albums or folders: the confirmation says that iOS asks
     /// next (P3-07). Worked out once on the tap, not while the dialog is drawn.
     @State private var undoDeletes = false
     /// Albumist reads the albums to see whether the undo deletes any: a spinner beside the
@@ -669,7 +687,7 @@ struct InterruptedPlanCard: View {
             } else {
                 // The ways out (I16). An interrupted undo cannot itself be taken back (Photos
                 // cannot bring deleted albums back): it can only go on or stay as it is.
-                Button(isUndo ? LocalizedStringKey("Rest zurücknehmen") : isRemoval ? LocalizedStringKey("Rest entfernen") : LocalizedStringKey("Rest anlegen")) { Task { await model.resumeInterruptedPlan() } }
+                Button(isUndo ? LocalizedStringKey("Rest rückgängig machen") : isRemoval ? LocalizedStringKey("Rest entfernen") : LocalizedStringKey("Rest anlegen")) { Task { await model.resumeInterruptedPlan() } }
                     .buttonStyle(PrimaryButtonStyle())
                     .accessibilityIdentifier("interrupted.resume")
                 if !isUndo {
@@ -684,7 +702,7 @@ struct InterruptedPlanCard: View {
                             confirmUndo = true
                         }
                     } label: {
-                        Text("Alles zurücknehmen").checkingBeside(askingUndo)
+                        Text("Alles rückgängig machen").checkingBeside(askingUndo)
                     }
                         .buttonStyle(SecondaryButtonStyle())
                         .disabled(askingUndo)
@@ -715,8 +733,8 @@ struct InterruptedPlanCard: View {
                 ErrorNote(text: failure)
             }
         }
-        .confirmationDialog("Alles zurücknehmen?", isPresented: $confirmUndo, titleVisibility: .visible) {
-            Button("Alles zurücknehmen", role: .destructive) {
+        .confirmationDialog("Alles rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
+            Button("Alles rückgängig machen", role: .destructive) {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {

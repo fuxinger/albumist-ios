@@ -45,7 +45,7 @@ public struct DeleteQuestion: Sendable {
         return deletes(cached) || !made.isEmpty
     }
 
-    /// "Alles zurücknehmen" of the interrupted plan `interrupted`.
+    /// "Alles rückgängig machen" of the interrupted plan `interrupted`.
     public func interruptedUndo(_ interrupted: ChangePlan, cached: CollectionInventory) async -> Bool {
         let made = interrupted.collectionsMade
         if let current = await read(adding: made) {

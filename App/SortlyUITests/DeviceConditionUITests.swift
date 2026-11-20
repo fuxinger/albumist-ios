@@ -678,7 +678,7 @@ final class DeviceConditionUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
     }
 
-    /// Two photos from the library into a new album: opens the plan for it ("Umsetzen").
+    /// Two photos from the library into a new album: opens the plan for it ("Anlegen").
     private func openManualPlan(_ title: String) -> Bool {
         guard tap(tabButton("Mediathek"), "library for \(title)") else { return false }
         // The first pass over the library comes before the photos (`library.preparing`): up to
@@ -735,7 +735,7 @@ final class DeviceConditionUITests: XCTestCase {
     ///   gone (the plan started) and no result is shown (it is not done); that is asserted;
     /// - the first change gets 5 s from the start of the plan (it goes through at once), and after the
     ///   relaunch the card must say that some but not all steps are done, so "Rest anlegen"
-    ///   and "Alles zurücknehmen" run on a real half-done plan;
+    ///   and "Alles rückgängig machen" run on a real half-done plan;
     /// - when the plan was over anyway (its result showed, or no card came after an end later
     ///   than 25 s), one more album is tried once and a `UI_FLAKY_RETRY` line says so. That
     ///   retry hides a flake and stays only until the switch holds every later change until the
@@ -1082,7 +1082,7 @@ final class DeviceConditionUITests: XCTestCase {
         var swipes = 0
         while !(undo.exists && undo.isHittable) && swipes < 6 { app.swipeUp(); swipes += 1 }
         guard tap(undo, "undo \(title)"), confirm("Rückgängig machen", "confirm undo of \(title)") else { return true }
-        let partial = anything("Nicht alles ließ sich zurücknehmen")
+        let partial = anything("Nicht alles ließ sich rückgängig machen")
         let removed = anything("Entfernte Alben und Ordner")
         if fault == nil {
             let asked = answerDeleteQuestion(allow: false, timeout: 30) { partial.exists || removed.exists }
@@ -1180,7 +1180,7 @@ final class DeviceConditionUITests: XCTestCase {
     // MARK: 7–8 Interrupted plan, removing an album
 
     /// A5: the app is closed while a plan runs (made slow, so it always lands half way). Both
-    /// ways out: "Rest anlegen" finishes the album, "Alles zurücknehmen" takes back what was done.
+    /// ways out: "Rest anlegen" finishes the album, "Alles rückgängig machen" takes back what was done.
     /// The slow plan stops before its add request reaches Photos, so "Rest anlegen" has to fill
     /// the album the plan made (UI run 43949880264 left "Testalbum Vollendet" with 0 photos).
     func test07_InterruptedPlanContinueAndUndo() {
@@ -1208,15 +1208,15 @@ final class DeviceConditionUITests: XCTestCase {
             // stood under "Von Albumist angelegt oder ergänzt" and again under "Deine Alben".
             XCTAssertEqual(albumRowCount(continued), 1, "The album stands more than once in the albums tab")
         }
-        if let undone = interruptManualPlan("Testalbum Zurueck"), tap(app.buttons["Alles zurücknehmen"].firstMatch, "undo interrupted plan") {
-            confirm("Alles zurücknehmen", "confirm undo of interrupted plan")
+        if let undone = interruptManualPlan("Testalbum Zurueck"), tap(app.buttons["Alles rückgängig machen"].firstMatch, "undo interrupted plan") {
+            confirm("Alles rückgängig machen", "confirm undo of interrupted plan")
             let asked = answerDeleteQuestion(allow: true, timeout: 30) { !card.exists }
             print("UI_FACT undo of interrupted plan asked by iOS: \(asked)")
             let done = waitGone(card, timeout: 120)
             print(done ? "UI_STEP_OK interrupted plan taken back" : "UI_STEP_MISSING interrupted plan taken back")
-            XCTAssertTrue(done, "\"Alles zurücknehmen\" did not settle the interrupted plan")
+            XCTAssertTrue(done, "\"Alles rückgängig machen\" did not settle the interrupted plan")
             dismissNotices()
-            XCTAssertFalse(albumExists(undone), "After \"Alles zurücknehmen\" the album is still there")
+            XCTAssertFalse(albumExists(undone), "After \"Alles rückgängig machen\" the album is still there")
         }
     }
 

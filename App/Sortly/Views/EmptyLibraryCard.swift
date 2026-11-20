@@ -116,7 +116,7 @@ struct EmptyLibraryCard: View {
         case .nothingShared:
             "Du hast Albumist noch keine Fotos freigegeben. Gib oben Fotos frei."
         case .emptyTrialYear(let year):
-            "Im Probelauf sieht Albumist nur Fotos aus \(String(year)). Nimm die ganze Mediathek dazu."
+            "Albumist arbeitet nur mit Fotos aus \(String(year)). Nimm die ganze Mediathek dazu."
         case .fewPhotos(let count):
             "Albumist sieht erst \(count) Fotos. Für ein Album braucht es mehr Fotos von einem Ort oder einer Reise."
         case .noPlaces:

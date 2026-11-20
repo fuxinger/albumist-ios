@@ -65,7 +65,7 @@ es gibt kein Konto und keinen Server.
    hat (anhand der gespeicherten Kennungen, mit der Löschabfrage von iOS; danach liegen sie 30 Tage
    unter „Zuletzt gelöscht“), und die Alben, die sie nur aus ihnen gemacht hat. Auch ein bearbeitetes
    oder in ein eigenes Album gelegtes Beispielfoto wird gelöscht; eigene Fotos und Alben bleiben
-   unberührt. Entfernen braucht vollen Fotozugriff und kein laufendes Umsetzen (sonst sagt die App das).
+   unberührt. Entfernen braucht vollen Fotozugriff und kein laufendes Anlegen (sonst sagt die App das).
 
 **Kauf:** Die ersten 10 Alben sind kostenlos. Ein einmaliger Kauf („Albumist freischalten“,
 Nicht-Verbrauchsartikel) hebt die Grenze auf; er wird mit dieser Version eingereicht. Wiederherstellen
@@ -90,12 +90,12 @@ löschen und neu installieren, Nicht-Stören an, keine privaten Fotos im Bild, d
 | Zeit | Bild | Was zu sehen sein muss |
 |---|---|---|
 | 0–8 s | Start, „Los geht's“, Bereiche, „Weiter“ | Das Versprechen: Fotos bleiben auf dem Gerät |
-| 8–15 s | Zugriff „Alle Fotos erlauben“, Probelauf, „Analyse starten“ | Der iOS-Dialog für vollen Zugriff |
+| 8–15 s | Zugriff „Alle Fotos erlauben“, „Albumist arbeitet mit“, „Analyse starten“ | Der iOS-Dialog für vollen Zugriff |
 | 15–30 s | Übersicht während der Analyse | Fortschritt, die eigenen Fotos im Mosaik |
 | 30–40 s | „Vorschläge prüfen“, eine Reise öffnen, Fotos wischen | Echte Reisen mit Ort und Datum |
 | 40–50 s | Startpaket oder Auswahl, Vorschau, „Alben jetzt anlegen“ | Vorschau vor jeder Änderung, Fotos fliegen in Alben |
 | 50–55 s | „Fotos-App öffnen“, Sammlungen › Alben | Die neuen Alben in Fotos |
-| 55–60 s | Zurück, „Rückgängig machen“ | Alles lässt sich zurücknehmen |
+| 55–60 s | Zurück, „Rückgängig machen“ | Alles lässt sich rückgängig machen |
 
 Danach: Video in App Store Connect bei der Prüfnotiz anhängen (oder als nicht gelisteten Link
 eintragen) und den `<link>` oben ersetzen.

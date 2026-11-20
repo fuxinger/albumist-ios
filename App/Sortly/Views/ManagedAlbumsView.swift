@@ -29,7 +29,7 @@ struct ManagedAlbumsView: View {
                             .foregroundStyle(.primary)
                     }
                 } footer: {
-                    Text("Tippe auf ein Album, um Albumists Änderungen daran zurückzunehmen. Fotos, die du selbst hinzugefügt hast, bleiben drin. Deine Originale bleiben immer in der Mediathek.")
+                    Text("Tippe auf ein Album, um Albumists Änderungen daran rückgängig zu machen. Fotos, die du selbst hinzugefügt hast, bleiben drin. Deine Originale bleiben immer in der Mediathek.")
                 }
             }
         }
@@ -37,7 +37,7 @@ struct ManagedAlbumsView: View {
         .navigationTitle("Alben von Albumist")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
-            pending.map { Text("„\($0.lastKnownTitle)“ zurücknehmen?") } ?? Text(""),
+            pending.map { Text("„\($0.lastKnownTitle)“ rückgängig machen?") } ?? Text(""),
             isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
             titleVisibility: .visible,
             presenting: pending
@@ -85,7 +85,7 @@ struct ManagedAlbumsView: View {
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityHint(Text("Änderungen von Albumist zurücknehmen"))
+        .accessibilityHint(Text("Änderungen von Albumist rückgängig machen"))
     }
 
     private func prepare(_ state: ManagedAlbumState) async {

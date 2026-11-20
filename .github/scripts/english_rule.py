@@ -5,8 +5,9 @@ terms from coming back:
 - "Sicher" (the confidence of a suggestion) is "Certain", never "Safe"; no English text says
   "safe" as an adjective (the confidence badge, "Accept all safe ones").
 - American spelling: "analyzing", "analyzed", never "analysing", "analysed", "analyse".
-- "Probelauf" is always "test run", never "trial run".
-- "Alles zurücknehmen" is "Undo Everything", never "Take Everything Back".
+- "trial run" stays out (the trial year is "Albumist works with", P3-09; the old word
+  "Probelauf" was "test run").
+- "Alles rückgängig machen" is "Undo Everything", never "Take Everything Back".
 - Every visible button title is in title case, as Apple writes buttons in English
   ("Create Album", "Not Now", "Restore Purchase"). Button titles are read from the Swift code:
   Button("…"), Button(a ? "…" : "…"), Button { } label: { Text("…") } or Label("…", …),
@@ -36,7 +37,7 @@ MINOR = {"a", "an", "the", "and", "but", "or", "nor", "for", "so", "yet", "as", 
 
 TERMS = [
     (re.compile(r"\banalys(e|es|ed|ing)\b", re.I), "British spelling, write analyze/analyzing/analyzed"),
-    (re.compile(r"\btrial run\b", re.I), "write \"test run\" (Probelauf)"),
+    (re.compile(r"\btrial run\b", re.I), "the trial year is \"Albumist works with\""),
     (re.compile(r"\btake everything back\b", re.I), "write \"Undo Everything\""),
     (re.compile(r"\bsafe\b", re.I), "\"Sicher\" is \"Certain\", not \"Safe\""),
 ]

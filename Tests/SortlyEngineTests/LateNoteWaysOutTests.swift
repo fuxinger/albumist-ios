@@ -7,7 +7,7 @@ import SortlyTestSupport
 /// Second review of P2-01 (S1): the id of a new album is written into the stored plan from
 /// inside the change that makes it (`ChangePlanStoring.noteCreated`). Photos may run that change
 /// only after the run stopped waiting for it (`PhotosDeadline`). The ways out "Fortsetzen",
-/// "Alles zurücknehmen" and "So lassen" then start from the copy of the plan the app read
+/// "Alles rückgängig machen" and "So lassen" then start from the copy of the plan the app read
 /// before, without the id. Before, they took the album over by its name (adopted: never
 /// removed by undo, kept as the user's), and the next save of that copy replaced the stored
 /// plan and lost the id. Now the executor reads the noted ids back before it decides, and no
@@ -177,7 +177,7 @@ struct LateNoteWaysOutTests {
         try await expectUndoRemovesAll(resumed, s)
     }
 
-    /// "Alles zurücknehmen" with the copy: the late album goes with everything else, nothing is
+    /// "Alles rückgängig machen" with the copy: the late album goes with everything else, nothing is
     /// named as left, and the plan is cancelled.
     @Test func undoWithTheStaleCopyRemovesTheLateAlbum() async throws {
         let s = try await interrupted()

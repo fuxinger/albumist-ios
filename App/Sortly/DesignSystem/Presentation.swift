@@ -140,7 +140,7 @@ extension InboxBucket {
     var label: LocalizedStringKey {
         switch self {
         case .all: "Alle"
-        case .unorganized: "Nicht sortiert"
+        case .unorganized: "Unsortiert"
         case .suggestions: "Vorschläge"
         case .organized: "Sortiert"
         case .uncertain: "Unsicher"
@@ -217,7 +217,7 @@ extension OverallStatus {
         switch self {
         case .fullyOrganized: "Sortiert"
         case .partiallyOrganized: "Teilweise sortiert"
-        case .unorganized: "Nicht sortiert"
+        case .unorganized: "Unsortiert"
         case .ignored: "Ignoriert"
         case .excluded: "Ausgeschlossen"
         case .pending: "Analyse läuft"

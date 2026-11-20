@@ -283,9 +283,9 @@ struct LibraryView: View {
         case .unorganized:
             // "Nur 2026": the list holds what the ring counts, the photos of that year.
             if case .year(let year) = model.analysisScope {
-                return "Alle Fotos aus \(String(year)) liegen in deinen Hauptbereichen."
+                return "Alle gezählten Fotos aus \(String(year)) liegen in passenden Alben."
             }
-            return "Alle Fotos liegen in deinen Hauptbereichen."
+            return "Alle gezählten Fotos liegen in passenden Alben."
         case .ignored: return "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen."
         default: return "In diesem Bereich gibt es gerade nichts."
         }
@@ -370,7 +370,7 @@ struct AssetDetailView: View {
                         Text("Tippe auf einen Vorschlag, um ihn anzusehen und auszuwählen.")
                     }
                 } else if let reason = reasonText {
-                    Section("Warum nicht sortiert?") {
+                    Section("Warum unsortiert?") {
                         Text(reason).foregroundStyle(.secondary)
                     }
                 }
@@ -404,7 +404,7 @@ struct AssetDetailView: View {
                     if isIgnored {
                         Text("Albumist zählt das Foto dann wieder mit und kann es wieder vorschlagen.")
                     } else {
-                        Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit zurücknehmen.")
+                        Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit rückgängig machen.")
                     }
                 }
             }
@@ -428,6 +428,14 @@ struct AssetDetailView: View {
         let inScope = model.analysisScope.includes(facts, calendar: .sortlyDefault)
         switch model.resolver.ringPart(state, inScope: inScope) {
         case .outsideMainAreas, .outsideScope: return "Nicht mitgezählt"
+        case .unsorted:
+            // Not „Unsortiert“ right above the albums the photo is in: the areas it lacks an
+            // album of („Noch in keinem Album für „Reisen““), the rule of the status itself.
+            let missing = UnsortedReason.missingAreas(state, primaryAreas: model.resolver.primaryAreas)
+            guard !missing.isEmpty else { return model.resolver.overall(state).label }
+            let open = Locale.current.quotationBeginDelimiter ?? "\"", close = Locale.current.quotationEndDelimiter ?? "\""
+            let names = missing.map { open + String(localized: $0.titleResource) + close }
+            return "Noch in keinem Album für \(names.formatted(.list(type: .or)))"
         default: return model.resolver.overall(state).label
         }
     }
@@ -454,7 +462,7 @@ struct AssetDetailView: View {
         case .excluded: return "Dieses Foto ist von der Analyse ausgeschlossen, zum Beispiel weil es ausgeblendet ist."
         default:
             // Outside the chosen year the ring does not count the photo ("Nicht mitgezählt" above).
-            // Only for photos that are not sorted: a sorted photo needs no "Warum nicht sortiert?" (review 18.11.).
+            // Only for photos that are not sorted: a sorted photo needs no "Warum unsortiert?" (review 18.11.).
             if case .year(let year) = model.analysisScope,
                model.resolver.ringPart(state, inScope: model.analysisScope.includes(facts, calendar: .sortlyDefault)) == .outsideScope {
                 return "Albumist zählt gerade nur Fotos aus \(String(year))."

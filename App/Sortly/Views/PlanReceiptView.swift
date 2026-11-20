@@ -82,8 +82,9 @@ struct PlanReceiptView: View {
             receipt = loaded.plan
             undos = loaded.undos
             let inventory = model.inventory
+            let removal = isRemoval
             let text = await Task.detached(priority: .userInitiated) {
-                ReceiptText.text(loaded.plan, undo: loaded.undos.first, inventory: inventory)
+                ReceiptText.text(loaded.plan, undo: loaded.undos.first, inventory: inventory, isRemoval: removal)
             }.value
             // A newer load (after an undo) or a closed screen keeps its own text.
             guard !Task.isCancelled else { return }
@@ -108,8 +109,12 @@ struct PlanReceiptView: View {
 
     // MARK: Sections
 
+    /// A removal from "Alben von Albumist" (or its retry): its receipt says "entfernt" where
+    /// one that created albums says "angelegt" (review P3-09: "umgesetzt" was a third word).
+    private var isRemoval: Bool { plan.reverts == nil && !plan.removalSources.isEmpty }
+
     /// The state now comes first: a plan that was taken back says so at the top instead of
-    /// "Vollständig umgesetzt" (Fuchs 15.11.: "Finde die Nachricht oben etwas komisch").
+    /// "Vollständig angelegt" (Fuchs 15.11.: "Finde die Nachricht oben etwas komisch").
     private func header(_ receipt: PlanReceipt) -> some View {
         Section {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -123,18 +128,19 @@ struct PlanReceiptView: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else if receipt.isComplete {
-                        Label("Vollständig umgesetzt", systemImage: "checkmark.seal.fill")
+                        Label(isRemoval ? LocalizedStringKey("Vollständig entfernt") : LocalizedStringKey("Vollständig angelegt"), systemImage: "checkmark.seal.fill")
                             .foregroundStyle(Theme.accent)
                     } else {
-                        Label("Teilweise umgesetzt", systemImage: "exclamationmark.circle.fill")
+                        Label(isRemoval ? LocalizedStringKey("Teilweise entfernt") : LocalizedStringKey("Teilweise angelegt"), systemImage: "exclamationmark.circle.fill")
                             .foregroundStyle(Theme.tint(for: .documents))
                     }
                 }
                 .font(.headline)
                 if let undo, !receipt.isUndo {
-                    Text("Umgesetzt am \(receipt.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                    let started = receipt.startedAt.formatted(date: .abbreviated, time: .shortened)
+                    Text(isRemoval ? LocalizedStringKey("Entfernt am \(started)") : LocalizedStringKey("Angelegt am \(started)"))
                         .font(.subheadline).foregroundStyle(.noteText)
-                    Text("Zurückgenommen am \(undo.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                    Text("Rückgängig gemacht am \(undo.startedAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.subheadline).foregroundStyle(.noteText)
                 } else {
                     Text(receipt.startedAt.formatted(date: .long, time: .shortened))
@@ -292,7 +298,7 @@ struct PlanReceiptView: View {
         let visible = showAllAlbums ? receipt.albums : Array(receipt.albums.prefix(collapsedCount))
         return Section {
             ForEach(visible) { album in
-                ReceiptAlbumRow(album: album, title: title(album))
+                ReceiptAlbumRow(album: album, title: title(album), isRemoval: isRemoval)
             }
             if receipt.albums.count > collapsedCount {
                 Button {
@@ -309,7 +315,7 @@ struct PlanReceiptView: View {
             Text("Alben")
         } footer: {
             if undo != nil {
-                Text("So sah es beim Anlegen aus. Was davon zurückgenommen wurde, steht unten unter „Rückgängig gemacht“.")
+                Text("So sah es beim Anlegen aus. Was davon rückgängig gemacht wurde, steht unten unter „Rückgängig gemacht“.")
             } else {
                 Text("Namen wie beim Anlegen. Was du danach in Fotos geändert hast, respektiert Albumist.")
             }
@@ -326,7 +332,7 @@ struct PlanReceiptView: View {
                 if deleted > 0 { row("rectangle.stack.badge.minus", "Entfernte Alben und Ordner", deleted) }
                 if removed > 0 { row("minus.rectangle", "Aus Alben genommen", removed) }
                 if partlyUndone {
-                    Text("Nicht alles ließ sich zurücknehmen. Du kannst es noch einmal versuchen oder es so lassen.")
+                    Text("Nicht alles ließ sich rückgängig machen. Du kannst es noch einmal versuchen oder es so lassen.")
                         .font(.subheadline).foregroundStyle(.noteText)
                     // Why, in words the user can act on (first iPhone test, 15.11.).
                     ForEach(StepProblemText.texts(undo.problems), id: \.self) { text in
@@ -339,14 +345,14 @@ struct PlanReceiptView: View {
                         .disabled(model.execution.isRunning || retrying || askingUndo)
                         .accessibilityIdentifier("receipt.undoRest")
                 } else if !undo.isComplete {
-                    Text("Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist.")
+                    Text("Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist.")
                         .font(.footnote).foregroundStyle(.noteText)
                 }
             } header: {
                 Text("Rückgängig gemacht")
             } footer: {
                 if partlyUndone {
-                    Text("Nimmt nur zurück, was noch von Albumist ist. Was du inzwischen selbst geändert hast, bleibt.")
+                    Text("Macht nur rückgängig, was noch von Albumist ist. Was du inzwischen selbst geändert hast, bleibt.")
                 }
             }
         } else if !receipt.isUndo && !model.undonePlans.contains(plan.id)
@@ -411,6 +417,8 @@ struct PlanReceiptView: View {
 private struct ReceiptAlbumRow: View {
     let album: PlanReceipt.Album
     let title: String
+    /// The plan removed photos (`PlanReceiptView.isRemoval`): "Nicht vollständig entfernt".
+    let isRemoval: Bool
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = 44
 
     var body: some View {
@@ -426,7 +434,7 @@ private struct ReceiptAlbumRow: View {
                         .font(.footnote).foregroundStyle(.noteText).compactLineLimit(2)
                 }
                 if album.failed {
-                    Text("Nicht vollständig umgesetzt").font(.footnote).foregroundStyle(Theme.tint(for: .documents))
+                    Text(isRemoval ? LocalizedStringKey("Nicht vollständig entfernt") : LocalizedStringKey("Nicht vollständig angelegt")).font(.footnote).foregroundStyle(Theme.tint(for: .documents))
                 } else if album.unconfirmed {
                     Text("Nicht nachgeprüft").font(.footnote).foregroundStyle(.noteText)
                 }
@@ -479,11 +487,15 @@ private struct ReceiptAlbumRow: View {
 
 /// The receipt as plain text for "Beleg teilen": numbers and album names, no photos.
 enum ReceiptText {
-    static func text(_ receipt: PlanReceipt, undo: PlanReceipt?, inventory: CollectionInventory) -> String {
+    static func text(_ receipt: PlanReceipt, undo: PlanReceipt?, inventory: CollectionInventory, isRemoval: Bool = false) -> String {
         var lines: [String] = []
         lines.append(String(localized: "Albumist – Änderungen"))
         lines.append(receipt.startedAt.formatted(date: .long, time: .shortened))
-        lines.append(receipt.isComplete ? String(localized: "Vollständig umgesetzt") : String(localized: "Teilweise umgesetzt"))
+        if isRemoval {
+            lines.append(receipt.isComplete ? String(localized: "Vollständig entfernt") : String(localized: "Teilweise entfernt"))
+        } else {
+            lines.append(receipt.isComplete ? String(localized: "Vollständig angelegt") : String(localized: "Teilweise angelegt"))
+        }
         lines.append("")
         func add(_ label: String.LocalizationValue, _ value: Int, always: Bool = false) {
             if always || value > 0 { lines.append("\(String(localized: label)): \(value.formatted())") }

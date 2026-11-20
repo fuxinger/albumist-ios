@@ -6,7 +6,7 @@ import SortlyTestSupport
 /// One meaning of "sortiert" (decisions Fuchs 18.11.; Fable review P1-05, P1-06):
 /// 1. Ignored photos do not count in the ring: they are neither sorted nor open, so they leave
 ///    "x" and "y" of "x von y sortiert", and the ring can reach 100 %.
-/// 2. The list "Sortiert" in the library tab shows the ring's number, and "Nicht sortiert" the
+/// 2. The list "Sortiert" in the library tab shows the ring's number, and "Unsortiert" the
 ///    rest of its total. Both come from `OrganizationStatusResolver.ringPart`.
 @Suite("Ring and library lists: one meaning of sorted")
 struct RingDefinitionTests {
@@ -152,7 +152,7 @@ struct RingDefinitionTests {
     }
 
     /// For 600 random small libraries: "Sortiert" holds exactly the ring's sorted photos,
-    /// "Nicht sortiert" the rest of its total, "Ignoriert" the ignored ones, and every photo is
+    /// "Unsortiert" the rest of its total, "Ignoriert" the ignored ones, and every photo is
     /// counted once.
     @Test func listSortedShowsTheRingsNumberForManyLibraries() {
         var g = SplitMix(seed: 1811)
@@ -163,7 +163,7 @@ struct RingDefinitionTests {
             let lists = Self.lists(states, resolver: resolver)
             let label = "library \(round): ring \(p.fully) von \(p.total)"
             #expect(lists[.organized].count == p.fully, "\(label), Sortiert \(lists[.organized].count)")
-            #expect(lists[.unorganized].count == p.total - p.fully, "\(label), Nicht sortiert \(lists[.unorganized].count)")
+            #expect(lists[.unorganized].count == p.total - p.fully, "\(label), Unsortiert \(lists[.unorganized].count)")
             #expect(lists[.ignored].count == p.ignored, "\(label), Ignoriert \(lists[.ignored].count)")
             #expect(p.total == p.fully + p.partially + p.unorganized + p.pending, "\(label)")
             #expect(p.allPhotos == states.count, "\(label)")
@@ -183,7 +183,7 @@ struct RingDefinitionTests {
     }
 
     /// The ring counts only the chosen part of the library ("Nur 2026"); a photo outside it is
-    /// neither in "Sortiert" nor in "Nicht sortiert", but stays in "Ignoriert" when ignored, so
+    /// neither in "Sortiert" nor in "Unsortiert", but stays in "Ignoriert" when ignored, so
     /// it can be brought back.
     @Test func photosOutsideTheChosenPartAreOnlyInAll() {
         #expect(Self.resolver.buckets(Self.sorted("s"), inScope: false) == [.all])

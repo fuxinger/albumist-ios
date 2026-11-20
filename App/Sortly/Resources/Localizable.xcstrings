@@ -951,7 +951,7 @@
         }
       }
     },
-    "%lld Schritte konnten nicht ausgeführt werden. Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist." : {
+    "%lld Schritte konnten nicht ausgeführt werden. Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist." : {
       "localizations" : {
         "de" : {
           "variations" : {
@@ -959,13 +959,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld Schritt konnte nicht ausgeführt werden. Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist."
+                  "value" : "%lld Schritt konnte nicht ausgeführt werden. Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist."
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld Schritte konnten nicht ausgeführt werden. Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist."
+                  "value" : "%lld Schritte konnten nicht ausgeführt werden. Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist."
                 }
               }
             }
@@ -977,13 +977,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld step could not be completed. Whatever Albumist could not take back stays as it is."
+                  "value" : "%lld step could not be completed. Whatever Albumist could not undo stays as it is."
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld steps could not be completed. Whatever Albumist could not take back stays as it is."
+                  "value" : "%lld steps could not be completed. Whatever Albumist could not undo stays as it is."
                 }
               }
             }
@@ -1591,22 +1591,22 @@
         }
       }
     },
-    "Alle Fotos aus %@ liegen in deinen Hauptbereichen." : {
+    "Alle gezählten Fotos aus %@ liegen in passenden Alben." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "All photos from %@ are in your main areas."
+            "value" : "Every counted photo from %@ is in a matching album."
           }
         }
       }
     },
-    "Alle Fotos liegen in deinen Hauptbereichen." : {
+    "Alle gezählten Fotos liegen in passenden Alben." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "All photos are in your main areas."
+            "value" : "Every counted photo is in a matching album."
           }
         }
       }
@@ -1751,22 +1751,12 @@
         }
       }
     },
-    "Aufheben" : {
+    "Machst du eine Änderung rückgängig, erkennt Albumist diese Reisen wieder selbst." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Undo"
-          }
-        }
-      }
-    },
-    "Aufheben lässt Albumist diese Reisen wieder selbst erkennen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Undo lets Albumist detect these trips on its own again."
+            "value" : "If you undo a change, Albumist detects these trips on its own again."
           }
         }
       }
@@ -2051,7 +2041,7 @@
         }
       }
     },
-    "Deine Änderung ist aufgehoben." : {
+    "Deine Änderung ist rückgängig gemacht." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2231,7 +2221,7 @@
         }
       }
     },
-    "Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen." : {
+    "Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Rückgängig machen kannst du es hier an der Reise oder in den Einstellungen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2251,16 +2241,6 @@
         }
       }
     },
-    "Die ganze Mediathek" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The whole library"
-          }
-        }
-      }
-    },
     "Die Geschichte konnte gerade nicht geschrieben werden. Versuch es gleich noch einmal." : {
       "localizations" : {
         "en" : {
@@ -2271,12 +2251,12 @@
         }
       }
     },
-    "Die markierten Bereiche zählen als deine Hauptsortierung. Du kannst das später jederzeit ändern." : {
+    "Für die markierten Bereiche macht Albumist Vorschläge. Du kannst das später jederzeit ändern." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The selected areas count as your main sorting. You can change this at any time."
+            "value" : "Albumist makes suggestions for the selected areas. You can change this at any time."
           }
         }
       }
@@ -2531,16 +2511,6 @@
         }
       }
     },
-    "Erst ein Probelauf?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Try a test run first?"
-          }
-        }
-      }
-    },
     "Erzähl meine Geschichte" : {
       "localizations" : {
         "en" : {
@@ -2777,16 +2747,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Split: new trip from %@"
-          }
-        }
-      }
-    },
-    "Gezählt werden deine Hauptbereiche: %@." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Counted are your main areas: %@."
           }
         }
       }
@@ -3381,22 +3341,32 @@
         }
       }
     },
-    "Nicht sortiert" : {
+    "Unsortiert" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Not sorted"
+            "value" : "Unsorted"
           }
         }
       }
     },
-    "Nicht vollständig umgesetzt" : {
+    "Nicht vollständig angelegt" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Not fully applied"
+            "value" : "Not fully created"
+          }
+        }
+      }
+    },
+    "Nicht vollständig entfernt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not fully removed"
           }
         }
       }
@@ -4131,12 +4101,22 @@
         }
       }
     },
-    "Teilweise umgesetzt" : {
+    "Teilweise angelegt" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Partly Applied"
+            "value" : "Partly Created"
+          }
+        }
+      }
+    },
+    "Teilweise entfernt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partly Removed"
           }
         }
       }
@@ -4221,12 +4201,22 @@
         }
       }
     },
-    "Vollständig umgesetzt" : {
+    "Vollständig angelegt" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fully Applied"
+            "value" : "Fully Created"
+          }
+        }
+      }
+    },
+    "Vollständig entfernt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fully Removed"
           }
         }
       }
@@ -4241,12 +4231,12 @@
         }
       }
     },
-    "Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist." : {
+    "Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "What Albumist could not take back stays as it is."
+            "value" : "What Albumist could not undo stays as it is."
           }
         }
       }
@@ -4451,12 +4441,22 @@
         }
       }
     },
-    "Warum nicht sortiert?" : {
+    "Warum unsortiert?" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Why isn’t it sorted?"
+            "value" : "Why unsorted?"
+          }
+        }
+      }
+    },
+    "Noch in keinem Album für %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not yet in an album for %@"
           }
         }
       }
@@ -4931,32 +4931,32 @@
         }
       }
     },
-    "Tippe auf ein Album, um Albumists Änderungen daran zurückzunehmen. Fotos, die du selbst hinzugefügt hast, bleiben drin. Deine Originale bleiben immer in der Mediathek." : {
+    "Tippe auf ein Album, um Albumists Änderungen daran rückgängig zu machen. Fotos, die du selbst hinzugefügt hast, bleiben drin. Deine Originale bleiben immer in der Mediathek." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Tap an album to take back Albumist's changes. Photos you added yourself stay in it. Your originals always stay in your library."
+            "value" : "Tap an album to undo Albumist's changes to it. Photos you added yourself stay in it. Your originals always stay in your library."
           }
         }
       }
     },
-    "Änderungen von Albumist zurücknehmen" : {
+    "Änderungen von Albumist rückgängig machen" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Take back Albumist's changes"
+            "value" : "Undo Albumist's changes"
           }
         }
       }
     },
-    "„%@“ zurücknehmen?" : {
+    "„%@“ rückgängig machen?" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Take back “%@”?"
+            "value" : "Undo “%@”?"
           }
         }
       }
@@ -7143,12 +7143,12 @@
         }
       }
     },
-    "Nicht alles ließ sich zurücknehmen. Du kannst es noch einmal versuchen oder es so lassen." : {
+    "Nicht alles ließ sich rückgängig machen. Du kannst es noch einmal versuchen oder es so lassen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Not everything could be taken back. You can try again or leave it as it is."
+            "value" : "Not everything could be undone. You can try again or leave it as it is."
           }
         }
       }
@@ -7163,12 +7163,12 @@
         }
       }
     },
-    "Nimmt nur zurück, was noch von Albumist ist. Was du inzwischen selbst geändert hast, bleibt." : {
+    "Macht nur rückgängig, was noch von Albumist ist. Was du inzwischen selbst geändert hast, bleibt." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Only takes back what is still Albumist's. What you changed yourself in the meantime stays."
+            "value" : "Only undoes what is still Albumist's. What you changed yourself in the meantime stays."
           }
         }
       }
@@ -7183,12 +7183,32 @@
         }
       }
     },
-    "Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast." : {
+    "Das unterbrochene Anlegen zählt, sobald du oben entschieden hast." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The interrupted run counts once you have decided above."
+            "value" : "The interrupted album creation counts once you have decided above."
+          }
+        }
+      }
+    },
+    "Das unterbrochene Entfernen zählt, sobald du oben entschieden hast." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The interrupted removal counts once you have decided above."
+          }
+        }
+      }
+    },
+    "Das unterbrochene Rückgängigmachen zählt, sobald du oben entschieden hast." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The interrupted undo counts once you have decided above."
           }
         }
       }
@@ -7313,16 +7333,6 @@
         }
       }
     },
-    "Anfangen mit" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Start with"
-          }
-        }
-      }
-    },
     "Die erste Analyse kann bei großen Mediatheken eine Weile dauern. Du kannst die App dabei verlassen: Solange iOS es erlaubt, läuft sie weiter und zeigt den Fortschritt auf dem Sperrbildschirm, sonst geht sie beim nächsten Öffnen genau dort weiter. Wenn du magst, sagt Albumist dir Bescheid, sobald sie fertig ist." : {
       "localizations" : {
         "en" : {
@@ -7399,6 +7409,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Last checked %@"
+          }
+        }
+      }
+    },
+    "Gerade eben geprüft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checked just now"
           }
         }
       }
@@ -7673,12 +7693,12 @@
         }
       }
     },
-    "Probelauf: nur Fotos aus %@" : {
+    "Albumist arbeitet nur mit Fotos aus %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Test run: only photos from %@"
+            "value" : "Albumist only works with photos from %@"
           }
         }
       }
@@ -7773,22 +7793,32 @@
         }
       }
     },
-    "Umgesetzt am %@" : {
+    "Angelegt am %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Applied on %@"
+            "value" : "Created on %@"
           }
         }
       }
     },
-    "Zurückgenommen am %@" : {
+    "Entfernt am %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Taken back on %@"
+            "value" : "Removed on %@"
+          }
+        }
+      }
+    },
+    "Rückgängig gemacht am %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undone on %@"
           }
         }
       }
@@ -7913,12 +7943,12 @@
         }
       }
     },
-    "Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Zurücknehmen kannst du das in den Einstellungen." : {
+    "Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Rückgängig machen kannst du das in den Einstellungen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Stays at this place will no longer be trips, in every new analysis too. Instead Albumist suggests one album for the place. You can take this back in Settings."
+            "value" : "Stays at this place will no longer be trips, in every new analysis too. Instead Albumist suggests one album for the place. You can undo this in Settings."
           }
         }
       }
@@ -8243,12 +8273,12 @@
         }
       }
     },
-    "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: %@." : {
+    "Gezählt werden nur Fotos, die zu %@ passen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Only photos that fit your main areas are counted: %@."
+            "value" : "Only photos that fit %@ are counted."
           }
         }
       }
@@ -8353,12 +8383,12 @@
         }
       }
     },
-    "Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit zurücknehmen." : {
+    "Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit rückgängig machen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist no longer suggests ignored photos. The photo itself stays unchanged, and you can take it back at any time."
+            "value" : "Albumist no longer suggests ignored photos. The photo itself stays unchanged, and you can undo it at any time."
           }
         }
       }
@@ -8558,7 +8588,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Finish the Interrupted Run First"
+            "value" : "Finish Creating Albums First"
           }
         }
       }
@@ -8673,7 +8703,7 @@
         }
       }
     },
-    "Alles zurücknehmen?" : {
+    "Alles rückgängig machen?" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8683,22 +8713,12 @@
         }
       }
     },
-    "Alles zurücknehmen" : {
+    "Alles rückgängig machen" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Undo Everything"
-          }
-        }
-      }
-    },
-    "Rest zurücknehmen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Take Back the Rest"
           }
         }
       }
@@ -9563,7 +9583,7 @@
         }
       }
     },
-    "%lld Fotos außerhalb deiner Hauptbereiche" : {
+    "%lld Fotos außerhalb dieser Bereiche" : {
       "localizations" : {
         "de" : {
           "variations" : {
@@ -9571,13 +9591,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld Foto außerhalb deiner Hauptbereiche"
+                  "value" : "%lld Foto außerhalb dieser Bereiche"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld Fotos außerhalb deiner Hauptbereiche"
+                  "value" : "%lld Fotos außerhalb dieser Bereiche"
                 }
               }
             }
@@ -9589,13 +9609,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld photo outside your main areas"
+                  "value" : "%lld photo outside these areas"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld photos outside your main areas"
+                  "value" : "%lld photos outside these areas"
                 }
               }
             }
@@ -10453,12 +10473,12 @@
         }
       }
     },
-    "So sah es beim Anlegen aus. Was davon zurückgenommen wurde, steht unten unter „Rückgängig gemacht“." : {
+    "So sah es beim Anlegen aus. Was davon rückgängig gemacht wurde, steht unten unter „Rückgängig gemacht“." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This is how it looked when the albums were created. What was taken back is listed below under “Undone”."
+            "value" : "This is how it looked when the albums were created. What was undone is listed below under “Undone”."
           }
         }
       }
@@ -10513,17 +10533,27 @@
         }
       }
     },
-    "Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt zurückgenommen." : {
+    "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt rückgängig gemacht." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Undoing earlier changes was interrupted. Decide on the overview how to go on. Then you can continue here, and nothing is taken back twice."
+            "value" : "Undoing earlier changes was interrupted. Decide on the overview how to go on. Then you can continue here, and nothing is undone twice."
           }
         }
       }
     },
     "Erst das unterbrochene Zurücknehmen abschließen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish the Interrupted Undo First"
+          }
+        }
+      }
+    },
+    "Erst das unterbrochene Rückgängigmachen abschließen" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -11483,12 +11513,12 @@
         }
       }
     },
-    "Im Probelauf sieht Albumist nur Fotos aus %@. Nimm die ganze Mediathek dazu." : {
+    "Albumist arbeitet nur mit Fotos aus %@. Nimm die ganze Mediathek dazu." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "In the test run Albumist only sees photos from %@. Add the whole library."
+            "value" : "Albumist only works with photos from %@. Add the whole library."
           }
         }
       }
@@ -11653,7 +11683,7 @@
         }
       }
     },
-    "Albumist ändert gerade Alben oder ein Umsetzen wurde unterbrochen. Schließe das zuerst ab, dann kannst du die Beispielfotos entfernen." : {
+    "Albumist ändert gerade Alben, oder ein Vorgang wurde unterbrochen. Schließe das zuerst ab, dann kannst du die Beispielfotos entfernen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -12613,7 +12643,7 @@
         }
       }
     },
-    "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als zurückgenommen. Sobald Fotos wieder reagiert, kannst du in der Übersicht fortsetzen." : {
+    "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als rückgängig gemacht. Sobald Fotos wieder reagiert, kannst du in der Übersicht fortsetzen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {

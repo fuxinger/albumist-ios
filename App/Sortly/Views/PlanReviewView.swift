@@ -276,10 +276,10 @@ struct PlanReviewView: View {
             Card {
                 // Names what was cut off: creating albums or taking them back.
                 let isUndo = model.interruptedPlan?.reverts != nil
-                Label(isUndo ? LocalizedStringKey("Erst das unterbrochene Zurücknehmen abschließen") : LocalizedStringKey("Erst das unterbrochene Anlegen abschließen"),
+                Label(isUndo ? LocalizedStringKey("Erst das unterbrochene Rückgängigmachen abschließen") : LocalizedStringKey("Erst das unterbrochene Anlegen abschließen"),
                       systemImage: "pause.circle").font(.headline)
                 Text(isUndo
-                     ? LocalizedStringKey("Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt zurückgenommen.")
+                     ? LocalizedStringKey("Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt rückgängig gemacht.")
                      : LocalizedStringKey("Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt."))
                     .font(.subheadline).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -530,7 +530,7 @@ struct ResultCard: View {
                 if failed > 0 {
                     Group {
                         if isUndo {
-                            Text("\(failed) Schritte konnten nicht ausgeführt werden. Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist.")
+                            Text("\(failed) Schritte konnten nicht ausgeführt werden. Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist.")
                         } else {
                             Text("\(failed) Schritte konnten nicht ausgeführt werden. Die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
                         }

@@ -150,8 +150,8 @@ struct TripWorkshopView: View {
         }
     }
 
-    /// What the user changed at this trip before, each with "Aufheben". `saysWhy`: no merge
-    /// rows follow, so this footer says why "Aufheben" waits.
+    /// What the user changed at this trip before, each with "Rückgängig machen" (P3-09: "Aufheben"
+    /// was a fourth word for it). `saysWhy`: no merge rows follow, so this footer says why it waits.
     @ViewBuilder
     private func changesSection(saysWhy: Bool) -> some View {
         let changes = model.tripChanges(around: proposal)
@@ -168,7 +168,7 @@ struct TripWorkshopView: View {
                         Button {
                             perform(.undone) { await model.undoTripChange(change) }
                         } label: {
-                            Text("Aufheben")
+                            Text("Rückgängig machen")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(minWidth: 44, minHeight: 44)
                                 .contentShape(Rectangle())
@@ -184,8 +184,8 @@ struct TripWorkshopView: View {
             } footer: {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     if saysWhy { TripChangeWaitNote() }
-                    Text("Aufheben lässt Albumist diese Reisen wieder selbst erkennen.")
-                    // During a Pause "Aufheben" starts the analysis again (decision 18.11.2026).
+                    Text("Machst du eine Änderung rückgängig, erkennt Albumist diese Reisen wieder selbst.")
+                    // During a Pause the undo starts the analysis again (decision 18.11.2026).
                     if model.analysis.isPausedByUser {
                         Text("Die pausierte Analyse läuft dann weiter.")
                     }
@@ -329,7 +329,7 @@ struct TripWorkshopView: View {
                         switch outcome {
                         case .split: Text("Aus einer Reise sind zwei geworden.")
                         case .merged: Text("Die zwei Reisen sind jetzt eine.")
-                        case .undone: Text("Deine Änderung ist aufgehoben.")
+                        case .undone: Text("Deine Änderung ist rückgängig gemacht.")
                         }
                     }
                     .font(.headline)
@@ -338,7 +338,7 @@ struct TripWorkshopView: View {
                         if outcome == .undone {
                             Text("Albumist erkennt diese Reisen wieder selbst. Die Vorschläge sind schon angepasst.")
                         } else {
-                            Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen.")
+                            Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Rückgängig machen kannst du es hier an der Reise oder in den Einstellungen.")
                         }
                     }
                     .font(.subheadline).foregroundStyle(.noteText)

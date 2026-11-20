@@ -34,7 +34,7 @@ struct SearchView: View {
     /// Shown only before the library is analysed (afterwards the library's own starting points).
     /// Translated (design review W6: English devices saw "Strand 2024"); the search understands
     /// both languages, see `SearchExampleTests`.
-    private let examples: [LocalizedStringResource] = ["Strand 2024", "Italien", "Rechnungen", "Videos", "Nicht sortiert", "Screenshots Bestellung"]
+    private let examples: [LocalizedStringResource] = ["Strand 2024", "Italien", "Rechnungen", "Videos", "Unsortiert", "Screenshots Bestellung"]
 
     private var isEmptyQuery: Bool { query.trimmingCharacters(in: .whitespaces).isEmpty }
 

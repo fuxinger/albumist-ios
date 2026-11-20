@@ -7,7 +7,7 @@ Ordnerstruktur bringen – privat, nachvollziehbar und umkehrbar.
 ## Nutzerabläufe
 1. **Erster Start:** Versprechen (lokal, keine Originale verändert, alles prüfbar, vorhandene
    Alben werden erkannt) → Bereiche wählen → Fotozugriff (voll / begrenzt / abgelehnt mit
-   Weg in die Einstellungen) → optionaler **Probelauf** auf ein Jahr → Analyse startet.
+   Weg in die Einstellungen) → „Albumist arbeitet mit“: optional nur ein Jahr → Analyse startet.
 2. **Analyse:** läuft im Vordergrund in Etappen (Inventar, Reisen, Orte, Inhalte, Text,
    Gruppen, Vorschläge), pausiert bei Wärme, Stromsparmodus oder niedrigem Akku und setzt
    genau dort fort. Nachts beim Laden verfeinert ein Hintergrundlauf Orte und Texte.
@@ -16,16 +16,16 @@ Ordnerstruktur bringen – privat, nachvollziehbar und umkehrbar.
    „Album anlegen“, „X Fotos ergänzen“, „Album so lassen“), anpassen (Name, anderes
    Album) oder „Nicht jetzt“. „Alle sicheren übernehmen“ nimmt nur wahrscheinliche,
    nicht sensible Vorschläge ohne Namenspflicht.
-4. **Umsetzen:** Zusammenfassung (neue Ordner/Alben, ergänzte Alben, betroffene Fotos,
+4. **Vorschau und Anlegen:** Zusammenfassung (neue Ordner/Alben, ergänzte Alben, betroffene Fotos,
    Zuordnungen), Garantie „0 Originale gelöscht, 0 Kopien“, Konflikte. Ausführung mit
    Fortschritt, danach Ergebnis und **Rückgängig**.
-5. **Mediathek:** Fotos nach Status (nicht sortiert, Vorschläge, unsicher, sortiert,
+5. **Mediathek:** Fotos nach Status (unsortiert, Vorschläge, unsicher, sortiert,
    ignoriert, alle); Fotos können ignoriert werden.
 6. **Alben:** vorhandene Ordner und Alben; Hinweis auf sehr ähnliche Alben mit Plan zum
    Zusammenführen (das größte Album wird ergänzt, keine Alben werden gelöscht).
 7. **Suche:** natürliche Eingabe („Strand 2024“, „Rechnungen“, „Italien“) inkl. Text auf
    Screenshots.
-8. **Einstellungen:** Bereiche, Hauptbereiche, Sprache der Albumnamen, Hauptordner,
+8. **Einstellungen:** Bereiche, „Zählt als sortiert“, „Albumist arbeitet mit“, Sprache der Albumnamen, Hauptordner,
    Datenschutz (ausgeblendete Fotos, Online-Ortsbestimmung, iCloud-Downloads, Mobilfunk),
    Verlauf mit Rückgängig, Analyse neu aufbauen, Vollversion.
 

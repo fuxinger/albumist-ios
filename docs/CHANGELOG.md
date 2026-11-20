@@ -50,6 +50,18 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Geändert
+- 20.11. (P3-09, P3-18, Entscheidung Fuchs 17.11. „Unsortiert“): Ein Wort für eine Sache.
+  „Rückgängig machen“ für alles, was Albumist angelegt hat („Alles rückgängig machen“, „Rest
+  rückgängig machen“, in der Reise-Werkstatt statt „Aufheben“), „Widerrufen“ nur im kurzen
+  Hinweis direkt danach; Belege sagen „Vollständig angelegt“, „Angelegt am“ (beim Entfernen
+  „entfernt“) statt „umgesetzt“; „Unsortiert“ statt „Nicht sortiert“ (Liste, Foto-Info, Suche);
+  die Einstellung heißt nur noch „Zählt als sortiert“, die Übersicht nennt die Bereiche selbst
+  („Gezählt werden nur Fotos, die zu „Länder und Orte“ und „Reisen“ passen.“); die Wahl des Jahres
+  heißt in Einführung und Einstellungen „Albumist arbeitet mit“. Die Einführung sagt richtig,
+  was die Schalter tun („Für die markierten Bereiche macht Albumist Vorschläge.“). Nach einer
+  Prüfung steht „Gerade eben geprüft“ statt „Zuletzt geprüft jetzt“. Die Foto-Info sagt bei
+  einem unsortierten Foto, warum („Noch in keinem Album für „Länder und Orte“ oder „Reisen““).
+  Englisch entsprechend („Undo Everything“, „Created on“, „Unsorted“, „Checked just now“).
 - 18.11. (Entscheidungen Fuchs 1 und 2, Fable P1-05/P1-06): Eine Bedeutung für „sortiert“.
   Ignorierte Fotos zählen im Ring nicht mehr mit (weder sortiert noch offen); der Ring erreicht
   100 %, sobald alles nicht Ignorierte sortiert ist, und „Ignorieren“ vergrößert nie die Zahl

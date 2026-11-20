@@ -16,9 +16,7 @@ struct CardShelf<Content: View>: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        // `count` cards and the spaces between them fill the shelf's width (without its
-        // margins), each 5 pt narrower than its share so the next one peeks in from the edge.
-        let shown = CGFloat(max(count, 1)), spacing = self.spacing
+        let count = self.count, spacing = self.spacing
         if typeSize.isAccessibilitySize {
             LazyVStack(alignment: .leading, spacing: spacing) {
                 content
@@ -29,7 +27,7 @@ struct CardShelf<Content: View>: View {
                 LazyHStack(alignment: .top, spacing: spacing) {
                     ForEach(subviews: content) { card in
                         card.containerRelativeFrame(.horizontal) { width, _ in
-                            max(1, ((width - spacing * (shown - 1) - 5) / shown).rounded(.down))
+                            CardShelfMetrics.cardWidth(container: width, count: count, spacing: spacing)
                         }
                     }
                 }
@@ -39,5 +37,16 @@ struct CardShelf<Content: View>: View {
             .scrollIndicators(.hidden)
             .contentMargins(.horizontal, Theme.Spacing.l, for: .scrollContent)
         }
+    }
+}
+
+/// The widths of a `CardShelf`'s cards, apart from the view so they can be checked in tests.
+enum CardShelfMetrics {
+    /// The width of each card: `count` cards and the spaces between them fill `container` (the
+    /// shelf's width without its margins), each 5 pt narrower than its share so the next one
+    /// peeks in from the edge; whole points, at least one.
+    static func cardWidth(container: CGFloat, count: Int, spacing: CGFloat) -> CGFloat {
+        let shown = CGFloat(max(count, 1))
+        return max(1, ((container - spacing * (shown - 1) - 5) / shown).rounded(.down))
     }
 }

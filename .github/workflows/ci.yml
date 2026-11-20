@@ -59,6 +59,10 @@ jobs:
       - name: Spinner rule
         # A bare spinner is an element with no description (accessibility audit, VoiceOver).
         run: python3 .github/scripts/spinner_rule.py .
+      - name: Secondary text rule
+        # Small grey text (footnote, caption, subheadline) uses .secondaryText (Theme.secondaryText,
+        # 8.5:1 and more), not the system grey .secondary (3.4:1 on a white card; review P3-14).
+        run: python3 .github/scripts/secondary_text_rule.py .
       - name: Every UI string has English
         run: python3 .github/scripts/check_strings.py .
       - name: Code map lists every Swift file

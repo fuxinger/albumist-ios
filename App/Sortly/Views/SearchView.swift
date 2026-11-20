@@ -47,7 +47,7 @@ struct SearchView: View {
                     if !suggestions.isEmpty { suggestionList }
                     if let rewrite = model.lastSearchRewrite, !searching {
                         Label("Verstanden als: \(rewrite)", systemImage: "apple.intelligence")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(.secondaryText)
                     }
                     if !result.tokens.isEmpty {
                         FlowLayout(spacing: Theme.Spacing.xs) {
@@ -156,7 +156,7 @@ struct SearchView: View {
                             .foregroundStyle(.primary)
                         Spacer()
                         Text(suggestion.count.formatted())
-                            .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                            .font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
                     }
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
@@ -179,7 +179,7 @@ struct SearchView: View {
             Image(systemName: "info.circle")
         }
         .font(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.secondaryText)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("search.relaxed")
     }
@@ -223,7 +223,7 @@ struct SearchView: View {
             .scrollIndicators(.hidden)
         }
         HStack {
-            Text("\(result.ids.count.formatted()) Treffer").font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+            Text("\(result.ids.count.formatted()) Treffer").font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
                 .accessibilityIdentifier("search.count")
             Spacer()
             // The search becomes an album in Photos (through the normal preview).

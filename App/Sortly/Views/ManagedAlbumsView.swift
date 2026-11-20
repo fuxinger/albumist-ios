@@ -80,7 +80,7 @@ struct ManagedAlbumsView: View {
                         Text("Ergänzt · \(state.addedBySortly.count) Fotos von Albumist")
                     }
                 }
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.secondaryText)
             }
             Spacer(minLength: 0)
         }

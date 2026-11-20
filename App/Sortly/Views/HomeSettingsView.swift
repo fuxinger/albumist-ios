@@ -127,7 +127,7 @@ struct HomeSettingsView: View {
                    GeoMath.distance(detected.center, chosen.center) > HomeText.radiusMeters {
                     Text("Deine neuesten Fotos sprechen für \(HomeText.area(detected.components)).")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondaryText)
                 }
                 changeLink(Text("Ändern"))
             case .none:
@@ -150,7 +150,7 @@ struct HomeSettingsView: View {
                         // No name yet: nothing to confirm that the user could recognise.
                         Text("Albumist kennt die Orte dort noch nicht. Sobald sie bekannt sind, kannst du dein Zuhause bestätigen.")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondaryText)
                     }
                     changeLink(Text("Ändern"))
                 } else {
@@ -160,7 +160,7 @@ struct HomeSettingsView: View {
                             .font(.headline)
                         Text("Albumist erkennt dein Zuhause an Fotos mit Ort, die über mehrere Wochen in derselben Gegend entstehen. Dafür reicht es noch nicht, oder die Analyse ist noch nicht so weit.")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.vertical, Theme.Spacing.xs)
@@ -193,7 +193,7 @@ struct HomeSettingsView: View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.body.weight(.semibold))
-                detail.font(.subheadline).foregroundStyle(.secondary)
+                detail.font(.subheadline).foregroundStyle(.secondaryText)
             }
         } icon: {
             Image(systemName: symbol).foregroundStyle(Theme.accent)
@@ -258,7 +258,7 @@ struct HomeSettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(HomeText.title(answer, placeName: placeName))
                         if answer.kind != nil || answer.label != nil, let placeName {
-                            Text(placeName).font(.subheadline).foregroundStyle(.secondary)
+                            Text(placeName).font(.subheadline).foregroundStyle(.secondaryText)
                         }
                     }
                 } icon: {
@@ -321,7 +321,7 @@ struct HomePlacePicker: View {
             if busy {
                 Text("Während die Analyse oder das Anlegen läuft, kannst du hier nichts ändern.")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
             }
             if purpose == .current && query.isEmpty {
                 Section {
@@ -357,7 +357,7 @@ struct HomePlacePicker: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(HomeText.short(candidate.components)).foregroundStyle(.primary)
-                            Text(detail(candidate)).font(.subheadline).foregroundStyle(.secondary)
+                            Text(detail(candidate)).font(.subheadline).foregroundStyle(.secondaryText)
                         }
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
@@ -389,7 +389,7 @@ struct HomePlacePicker: View {
             Label {
                 VStack(alignment: .leading, spacing: 2) {
                     title.foregroundStyle(.primary)
-                    detail.font(.subheadline).foregroundStyle(.secondary)
+                    detail.font(.subheadline).foregroundStyle(.secondaryText)
                 }
             } icon: {
                 Image(systemName: symbol).foregroundStyle(Theme.accent)
@@ -580,7 +580,7 @@ struct HomeChangeCard: View {
                 }
                 Text("An deinen Alben in Fotos hat sich nichts geändert.")
             }
-            .font(.subheadline).foregroundStyle(.secondary)
+            .font(.subheadline).foregroundStyle(.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
             Button("OK") { model.dismissHomeChangeNotice() }
                 .buttonStyle(SecondaryButtonStyle())

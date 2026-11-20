@@ -105,7 +105,7 @@ struct SortingShow: View {
                 .foregroundStyle(.secondary)
             Text("\(counted) Fotos einsortiert")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .monospacedDigit()
                 .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(counted)))
         }
@@ -404,7 +404,7 @@ private struct AlbumStack: View {
                 .frame(maxWidth: 200)
             Text("\(count) Fotos")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .monospacedDigit()
         }
     }

@@ -114,7 +114,7 @@ struct ProposalRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.userTitles[proposal.id] ?? proposal.title).font(.body.weight(.medium)).lineLimit(typeSize.isAccessibilitySize ? 5 : 2)
                 // "Fotos" everywhere, not "Aufnahmen", "Bilder" or "Medien" (design review W4).
-                Text("\(proposal.assetIDs.count - (model.removedFromProposals[proposal.id]?.count ?? 0)) Fotos").font(.footnote).foregroundStyle(.secondary)
+                Text("\(proposal.assetIDs.count - (model.removedFromProposals[proposal.id]?.count ?? 0)) Fotos").font(.footnote).foregroundStyle(.secondaryText)
                 if proposal.requiresUserName && model.userTitles[proposal.id] == nil {
                     // A place only the user can name: says what is missing instead of
                     // "Neues Album" (first device test 15.11.: 44 "Häufiger Ort N").
@@ -139,7 +139,7 @@ struct ProposalRow: View {
             Label("Nicht jetzt", systemImage: "xmark.circle")
                 .labelStyle(CompactLabelStyle())
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
         case .some(let d) where d.isAccepted:
             Label("Ausgewählt", systemImage: "checkmark.circle.fill")
                 .labelStyle(CompactLabelStyle())
@@ -310,7 +310,7 @@ struct ProposalDetailView: View {
                     }
                     if proposal.isSensitive {
                         Label("Persönlicher Inhalt: wird nie automatisch ausgewählt.", systemImage: "lock")
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(.secondaryText)
                     }
                 }
 
@@ -347,7 +347,7 @@ struct ProposalDetailView: View {
                     // Why it waits, as on the question card.
                     if let reason = oftenHereWaitReason(askedOnTheCard: false) {
                         Text(reason)
-                            .font(.footnote).foregroundStyle(.secondary)
+                            .font(.footnote).foregroundStyle(.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -403,7 +403,7 @@ struct ProposalDetailView: View {
             Text("Name für das Album")
                 .font(.footnote)
                 .textCase(.uppercase)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .padding(.horizontal, Theme.Spacing.l)
                 // The field carries the same words as its label; VoiceOver says them once.
                 .accessibilityHidden(true)
@@ -436,7 +436,7 @@ struct ProposalDetailView: View {
                 }
             nameFootnote
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, Theme.Spacing.l)
         }
@@ -461,7 +461,7 @@ struct ProposalDetailView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text("Bist du hier öfter, etwa Zweitwohnsitz, Arbeit oder Familie?").font(.headline)
                 Text("Du warst \(question.stayCount)-mal hier, zuletzt \(question.lastVisit.formatted(.dateTime.month(.wide).year())).")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(.secondaryText)
             }
             Button("Ja, hier bin ich öfter") { answerOftenHere(true) }
                 .buttonStyle(SecondaryButtonStyle())
@@ -477,7 +477,7 @@ struct ProposalDetailView: View {
             // without a word why): "Ja" plans the trips anew, "Nein" changes nothing.
             if let reason = oftenHereWaitReason(askedOnTheCard: true) {
                 Text(reason)
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -528,7 +528,7 @@ struct ProposalDetailView: View {
                         .foregroundStyle(match.status.tint)
                 }
                 ForEach(Array(shownReasons(match).enumerated()), id: \.offset) { _, reason in
-                    Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(.secondary)
+                    Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(.secondaryText)
                 }
                 if let choice = chosenAlbumText {
                     Label(choice, systemImage: "hand.point.up.left")
@@ -843,7 +843,7 @@ struct AdjustProposalView: View {
                     } label: {
                         VStack(alignment: .leading) {
                             Text(candidate.albumTitle)
-                            Text("\(candidate.metrics.intersection) gemeinsame Fotos").font(.footnote).foregroundStyle(.secondary)
+                            Text("\(candidate.metrics.intersection) gemeinsame Fotos").font(.footnote).foregroundStyle(.secondaryText)
                         }
                     }
                     .foregroundStyle(.primary)

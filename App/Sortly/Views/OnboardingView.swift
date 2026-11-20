@@ -69,7 +69,7 @@ struct OnboardingView: View {
 
     private var welcome: some View {
         page {
-            Text("Albumist").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            Text("Albumist").font(.subheadline.weight(.semibold)).foregroundStyle(.secondaryText)
             Text("Deine Fotos, endlich sortiert.").font(.largeTitle.weight(.bold))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, Theme.Spacing.s)
@@ -114,7 +114,7 @@ struct OnboardingView: View {
                 // Why the button is grey (design review N6).
                 if model.settings.enabledAreas.isEmpty {
                     Text("Wähle mindestens einen Bereich.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(.secondaryText)
                         .multilineTextAlignment(.center)
                         .accessibilityIdentifier("onboarding.areasHint")
                 }
@@ -134,7 +134,7 @@ struct OnboardingView: View {
                     IconTile(systemName: area.symbol, tint: area.tint)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(area.title).font(.body.weight(.medium))
-                        Text(area.explanation).font(.footnote).foregroundStyle(.secondary)
+                        Text(area.explanation).font(.footnote).foregroundStyle(.secondaryText)
                     }
                 }
             }
@@ -157,7 +157,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Städte als eigene Alben").font(.subheadline.weight(.medium))
                 Text("Zum Beispiel Rom und Florenz zusätzlich zu Italien.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.secondaryText)
             }
         }
     }
@@ -241,7 +241,7 @@ struct OnboardingView: View {
             .frame(minHeight: 52)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
             Text("Die erste Analyse kann bei großen Mediatheken eine Weile dauern. Du kannst die App dabei verlassen: Solange iOS es erlaubt, läuft sie weiter und zeigt den Fortschritt auf dem Sperrbildschirm, sonst geht sie beim nächsten Öffnen genau dort weiter. Wenn du magst, sagt Albumist dir Bescheid, sobald sie fertig ist.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         } footer: {
             Button("Analyse starten") {

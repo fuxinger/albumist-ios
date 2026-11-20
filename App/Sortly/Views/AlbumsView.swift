@@ -44,7 +44,7 @@ struct AlbumsView: View {
                                     Text(suggestion.albumIDs.compactMap { model.inventory[$0]?.title }.formatted(.list(type: .and)))
                                         .font(.body.weight(.medium)).foregroundStyle(.primary)
                                     Text("\(suggestion.albumIDs.count) Alben mit vielen gleichen Fotos · \(suggestion.distinctAssetCount) Fotos insgesamt")
-                                        .font(.footnote).foregroundStyle(.secondary)
+                                        .font(.footnote).foregroundStyle(.secondaryText)
                                 }
                                 Spacer(minLength: 8)
                                 if preparing == suggestion.albumIDs {
@@ -92,7 +92,7 @@ struct AlbumsView: View {
                         // iOS shows an app no albums at all while only some photos are shared.
                         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                             Text("Deine Alben sind nicht sichtbar, solange du Albumist nur ausgewählte Fotos freigibst. So regelt iOS das.")
-                                .font(.subheadline).foregroundStyle(.secondary)
+                                .font(.subheadline).foregroundStyle(.secondaryText)
                                 .fixedSize(horizontal: false, vertical: true)
                             if let url = URL(string: UIApplication.openSettingsURLString) {
                                 Button("Alle Fotos erlauben") { openURL(url) }
@@ -205,7 +205,7 @@ struct CollectionRow: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(collection.title).font(.body)
-                detail.font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                detail.font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
             }
         }
     }
@@ -239,7 +239,7 @@ struct AlbumDetailView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 if !album.isEditableAlbum {
                     Label("Dieses Album kann Albumist nicht verändern.", systemImage: "lock")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(.secondaryText)
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
                     ForEach(ids, id: \.self) { id in

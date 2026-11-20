@@ -23,10 +23,10 @@ struct RootView: View {
                     .buttonStyle(.borderedProminent)
                 if AppModel.safetyBackupDate() != nil {
                     Text("Albumist beginnt dann neu und holt deine Entscheidungen aus der Sicherung zurück. Deine Fotos, Alben und dein Kauf bleiben, wie sie sind.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(.secondaryText)
                 } else {
                     Text("Albumist beginnt dann neu. Deine Fotos, Alben und dein Kauf bleiben, wie sie sind.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(.secondaryText)
                 }
             }
         case .onboarding:
@@ -66,7 +66,7 @@ struct NoPhotoAccessView: View {
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("access.settings")
                 Text("Einstellungen › Apps › Albumist › Fotos › Voller Zugriff")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.secondaryText)
             }
         }
     }

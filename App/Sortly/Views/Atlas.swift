@@ -342,7 +342,7 @@ extension AtlasView {
             .controlSize(.large)
             .disabled(writing)
             Text("Geschrieben von Apple Intelligence auf deinem Gerät, nur aus Zahlen, Orten und Themen.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.secondaryText)
         }
     }
 
@@ -385,7 +385,7 @@ struct AtlasContent: View {
                     }
                     // Locale percent with two significant digits: one country is not "0 %" (N11).
                     Text("\(atlas.worldShare.formatted(TravelAtlas.worldShareStyle)) der Welt · \(atlas.continents.count) von 7 Kontinenten")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.subheadline).foregroundStyle(.secondaryText)
                     if atlas.year != nil && !atlas.newCountryCodes.isEmpty {
                         Label {
                             Text("\(atlas.newCountryCodes.count) zum ersten Mal besucht")
@@ -491,7 +491,7 @@ struct AtlasContent: View {
         VStack(alignment: .leading, spacing: 4) {
             Image(systemName: symbol).foregroundStyle(Theme.accent).font(.subheadline)
             Text(value).font(.title2.weight(.bold)).monospacedDigit()
-            Text(label).font(.footnote).foregroundStyle(.secondary)
+            Text(label).font(.footnote).foregroundStyle(.secondaryText)
             if let detail {
                 // Where the longest trip went: flag and country.
                 Text(verbatim: detail).font(.footnote.weight(.semibold)).compactLineLimit(2)
@@ -526,7 +526,7 @@ struct AtlasTeaser: View {
                             Text("Dein Reise-Atlas").font(.headline)
                             Text(Counted.join([String(localized: "\(atlas.countryCodes.count) Länder"), String(localized: "\(atlas.cityCount) Städte"),
                                                String(localized: "\(atlas.tripCount) Reisen")]))
-                                .font(.subheadline).foregroundStyle(.secondary)
+                                .font(.subheadline).foregroundStyle(.secondaryText)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)

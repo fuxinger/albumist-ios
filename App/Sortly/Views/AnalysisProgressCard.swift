@@ -103,7 +103,7 @@ struct AnalysisProgressCard: View {
             // says itself what it waits for.
             if case .running(let p, _, _, _) = state, p?.step == .places, !model.analysis.refining {
                 Text("Städtenamen kommen von Apple, das braucht etwas Zeit. Was jetzt nicht fertig wird, holt Albumist nach, wenn dein iPhone das nächste Mal lädt.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             alreadyDone
@@ -188,7 +188,7 @@ struct AnalysisProgressCard: View {
             AnalysisBar(widths: model.analysis.widths, grey: state.isGrey, working: state.isWorking,
                         runningStep: position?.step)
             Text(stepLine)
-                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                .font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
         }
         .accessibilityRepresentation {
             ProgressView(value: spokenOverall) { Text(title) }
@@ -272,7 +272,7 @@ struct AnalysisProgressCard: View {
                 .font(.title.weight(.semibold))
                 .contentTransition(.numericText(value: Double(position.completed)))
             Text(AnalysisText.ofTotal(position.total, position.step.unit))
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.subheadline).foregroundStyle(.secondaryText)
         }
         .monospacedDigit()
         .animation(reduceMotion ? nil : .snappy, value: position.step)
@@ -332,7 +332,7 @@ struct AnalysisProgressCard: View {
                 EmptyView()
             }
         }
-        .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+        .font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit()
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -370,7 +370,7 @@ struct AnalysisProgressCard: View {
         if !done.isEmpty, !isPaused {
             let row = HStack(spacing: Theme.Spacing.s) {
                 Text("Schon fertig: \(Text(AnalysisText.alreadyDone(done)).foregroundStyle(Color.primary))")
-                    .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                    .font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 // Opened from the overview's root (`MainTabs`, route `.proposals`): this row goes
@@ -421,7 +421,7 @@ struct AnalysisProgressCard: View {
             }
             .accessibilityHidden(true)
             .transition(.opacity)
-            Text("Gerade angesehen").font(.subheadline).foregroundStyle(.secondary)
+            Text("Gerade angesehen").font(.subheadline).foregroundStyle(.secondaryText)
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: model.analysisRecent)
     }
@@ -609,7 +609,7 @@ struct AnalysisFinishedView: View {
             }
             // How many photos are analysed says the plain card under it ("Alle 246 Fotos analysiert").
             Text(String(localized: "\(proposals) Vorschläge warten auf dich."))
-                .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                .font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             if proposals > 0 {
                 // Opened from the overview's root, as "Ansehen" above: the finish moment goes
@@ -648,7 +648,7 @@ struct AnalysisDetailsSheet: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     TimelineView(.periodic(from: .now, by: 15)) { context in
                         Text(summary(now: context.date))
-                            .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                            .font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit()
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .accessibilityIdentifier("analysis.details.summary")
@@ -660,7 +660,7 @@ struct AnalysisDetailsSheet: View {
                     }
                     Label("Alles passiert auf deinem iPhone. Nur für Städtenamen fragt Albumist bei Apple nach.", systemImage: "lock")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(Theme.Spacing.m)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -744,11 +744,11 @@ struct AnalysisDetailsSheet: View {
                     }
                 }
                 Text(step.explanation)
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 if standing == .running, model.analysis.isRunning, let left = model.analysisStepRemaining {
                     Text("noch etwa \(AnalysisText.left(left))")
-                        .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                        .font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
                         .accessibilityLabel(Text("noch etwa \(AnalysisText.left(left, width: .wide))"))
                 }
             }
@@ -767,7 +767,7 @@ struct AnalysisDetailsSheet: View {
     private func status(_ step: AnalysisStep, _ standing: Standing) -> some View {
         switch standing {
         case .done:
-            Text("fertig").font(.subheadline).foregroundStyle(.secondary)
+            Text("fertig").font(.subheadline).foregroundStyle(.secondaryText)
         case .running:
             if let p = model.analysis.position ?? model.analysis.stoppedAt, p.hasCount {
                 Text("\(p.completed.formatted()) von \(p.total.formatted())")

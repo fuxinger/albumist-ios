@@ -131,7 +131,7 @@ struct OverviewView: View {
                             }
                         }
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondaryText)
                         .monospacedDigit()
                     }
                     .accessibilityElement(children: .combine)
@@ -156,7 +156,7 @@ struct OverviewView: View {
                             // read as one going back.
                             Text("Neu gezählt: Zuvor waren es \(note.held.formatted()) sortiert. Die neue Zahl zählt alles, was sich seitdem geändert hat, etwa Fotos mit Themen oder Dokumenten, die jetzt auch ein passendes Album brauchen.")
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.secondaryText)
                                 .monospacedDigit()
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityIdentifier("overview.recountNote")
@@ -167,18 +167,18 @@ struct OverviewView: View {
                         }
                         Text(primaryAreasText)
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondaryText)
                         if let leftOutText {
                             Text(leftOutText)
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.secondaryText)
                         }
                         if model.interruptedPlan != nil {
                             // The unfinished run counts only once the user has decided above
                             // (unknown is not done), so "0 sortiert" next to "39 of 61 steps" is explained.
                             Text("Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.")
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.secondaryText)
                         }
                     }
                 }
@@ -237,7 +237,7 @@ struct OverviewView: View {
             } else if let reason = model.analysis.lastReport?.pausedBecause {
                 // Ended by the device, iOS or the photo access: the reason and the way on.
                 Text(reason.label).font(.headline)
-                Text("Die Analyse setzt genau dort fort, wo sie aufgehört hat.").font(.subheadline).foregroundStyle(.secondary)
+                Text("Die Analyse setzt genau dort fort, wo sie aufgehört hat.").font(.subheadline).foregroundStyle(.secondaryText)
                 Button("Fortsetzen") { model.startAnalysis(cause: .tap) }.buttonStyle(SecondaryButtonStyle())
             } else {
                 finishedAnalysis
@@ -272,9 +272,9 @@ struct OverviewView: View {
                 // UI runs read how the image requests ended (all demo photos were unreadable there).
                 .accessibilityValue(UITestSupport.isRunning ? "image loads: \(ImageLoadStats.summary)" : "")
                 if let date = model.analysis.lastRun {
-                    Text("Zuletzt geprüft \(date.formatted(.relative(presentation: .named)))").font(.subheadline).foregroundStyle(.secondary)
+                    Text("Zuletzt geprüft \(date.formatted(.relative(presentation: .named)))").font(.subheadline).foregroundStyle(.secondaryText)
                 } else {
-                    Text("Neue Fotos erkennt Albumist von selbst.").font(.subheadline).foregroundStyle(.secondary)
+                    Text("Neue Fotos erkennt Albumist von selbst.").font(.subheadline).foregroundStyle(.secondaryText)
                 }
             }
             if !typeSize.isAccessibilitySize { Spacer() }
@@ -295,28 +295,28 @@ struct OverviewView: View {
                     Text("Beim Prüfen keine neuen Fotos gefunden.")
                 }
             }
-            .font(.footnote).foregroundStyle(.secondary)
+            .font(.footnote).foregroundStyle(.secondaryText)
         }
         if counts.labelsMissing > 0 {
             // Analysed before "Themen" or "Dokumente" was turned on and still without their image
             // labels (no run yet, or a read that failed waits for its retry): said apart, the
             // count above stays (second review of the labels fix, finding 6).
             Label("Für die neuen Bereiche fehlen noch \(counts.labelsMissing) Fotos.", systemImage: "hourglass")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
         if counts.unreadable > 0 {
             Label("\(counts.unreadable) Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal.", systemImage: "exclamationmark.icloud")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
         if let pending = model.analysis.lastReport?.placesPendingOnline, pending > 0 {
             Label("\(pending) Orte werden später genauer bestimmt.", systemImage: "moon.zzz")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.secondaryText)
         }
         if let waiting = model.analysis.lastReport?.textWaitingForOriginal, waiting > 0 {
             Label("\(waiting) Dokumente liegen nur in iCloud und werden später gelesen.", systemImage: "icloud")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.secondaryText)
         }
     }
 
@@ -347,7 +347,7 @@ struct OverviewView: View {
                 .textCase(.uppercase)
                 .accessibilityAddTraits(.isHeader)
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .padding(.top, Theme.Spacing.s)
                 .padding(.leading, Theme.Spacing.xs)
             VStack(spacing: 0) {
@@ -388,7 +388,7 @@ struct OverviewView: View {
                     Text(summary)
                 }
             }
-            .font(.footnote).foregroundStyle(.secondary)
+            .font(.footnote).foregroundStyle(.secondaryText)
         }
         let chevron = Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
         return Group {
@@ -472,7 +472,7 @@ struct RestoredFromBackupCard: View {
                     Text("Albumist hat deine Entscheidungen und Einstellungen aus der Sicherung vom \(date) übernommen. Die Sicherung stammt aus einer anderen Mediathek, darum beginnt der Verlauf hier neu. Deine Alben in Fotos bleiben, wie sie sind.")
                 }
             }
-            .font(.subheadline).foregroundStyle(.secondary)
+            .font(.subheadline).foregroundStyle(.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
             Button("OK") { model.restoredFromBackup = nil }
                 .buttonStyle(SecondaryButtonStyle())
@@ -492,10 +492,10 @@ struct RecheckedSuggestionsCard: View {
         Card {
             Label("Vorschläge neu geprüft", systemImage: "checklist").font(.headline)
             Text("\(count) Vorschläge neu geprüft: bitte noch einmal ansehen.")
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.subheadline).foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Text("Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert.")
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.subheadline).foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Button("OK") { model.dismissRecheckNotice() }
                 .buttonStyle(SecondaryButtonStyle())
@@ -537,7 +537,7 @@ struct InterruptedPlanCard: View {
             .font(.headline)
             .accessibilityAddTraits(.isHeader)
             Text("Erledigt: \(done) von \(plan.steps.count) Schritten")
-                .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                .font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             if model.execution.isRunning {
                 ExecutionProgressBar()
@@ -583,7 +583,7 @@ struct InterruptedPlanCard: View {
                         Text("Deine Fotos bleiben in jedem Fall unverändert.")
                     }
                 }
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             }
             if let failure = model.execution.failure {
@@ -614,7 +614,7 @@ struct StarterSetCard: View {
             Card {
                 Text("Dein Startpaket").font(.headline).accessibilityAddTraits(.isHeader)
                 Text("Die \(set.count) besten Alben aus deiner Mediathek, fertig zum Anlegen. Du siehst vorher genau, was passiert.")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(.secondaryText)
                 HStack(spacing: -14) {
                     ForEach(Array(set.prefix(5).enumerated()), id: \.element.id) { index, proposal in
                         CoverThumbnail(id: model.coverID(for: proposal), side: 64)
@@ -627,7 +627,7 @@ struct StarterSetCard: View {
                 .accessibilityHidden(true)
                 Text(ListFormatter.localizedString(byJoining: set.prefix(3).map { model.userTitles[$0.id] ?? $0.title })
                      + (set.count > 3 ? " …" : ""))
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.secondaryText)
                     .compactLineLimit(2)
                 Button {
                     onStart(set)
@@ -655,12 +655,12 @@ struct LimitedAccessCard: View {
         Card {
             Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline).accessibilityAddTraits(.isHeader)
             Text("Albumist sieht nur die \(model.progress.allPhotos) Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff.")
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.subheadline).foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             #if targetEnvironment(simulator)
             if DemoLibrary.shared.isDone {
                 Text("Die Beispielfotos zählen mit: Fotos, die eine App selbst gespeichert hat, gibt iOS automatisch für sie frei.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             #endif

@@ -100,7 +100,7 @@ struct CountryPhotosView: View {
             IconTile(systemName: "rectangle.stack.badge.plus", tint: Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Album „\(model.userTitles[proposal.id] ?? proposal.title)“ anlegen").font(.body.weight(.medium))
-                Text("Vorschlag mit \(proposal.assetIDs.count) Fotos").font(.footnote).foregroundStyle(.secondary)
+                Text("Vorschlag mit \(proposal.assetIDs.count) Fotos").font(.footnote).foregroundStyle(.secondaryText)
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)

@@ -69,7 +69,7 @@ struct ScanShow: View {
             if !trips.isEmpty {
                 Text("Schon gefunden")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
                     .textCase(.uppercase)
             }
             ForEach(Array(trips)) { trip in
@@ -82,7 +82,7 @@ struct ScanShow: View {
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
                         Text("\(trip.assetIDs.count) Aufnahmen")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(.secondaryText)
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "airplane")

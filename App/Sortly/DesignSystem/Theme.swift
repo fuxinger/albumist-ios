@@ -38,12 +38,16 @@ enum Theme {
     static var buttonShape: RoundedRectangle { RoundedRectangle(cornerRadius: 25, style: .continuous) }
     static let background = Color(uiColor: .systemGroupedBackground)
     static let card = Color(uiColor: .secondarySystemGroupedBackground)
-    /// Secondary text that has to hold 4.5:1 where the system grey does not: on the photo
-    /// colour wash (suggestion and country headers). The system `secondaryLabel` is 3.4:1 on
-    /// white and drops below 3:1 on a tinted wash ("Contrast failed" in the audit). This grey:
-    /// light 9.5:1 on white, 8.5:1 on the grouped background, 4.7:1 on the strongest wash;
-    /// dark 12.5:1 on black, 10.1:1 on cards, 5.4:1 on the strongest wash; Increase Contrast
-    /// (no wash) 11.6:1 and 14.5:1. Still a grey, so the hierarchy stays calm.
+    /// Secondary text that has to hold 4.5:1 where the system grey does not: every small grey
+    /// text (footnote, caption, subheadline) on cards, list rows and the grouped background
+    /// (review P3-14, as `.foregroundStyle(.secondaryText)`), and on the photo colour wash
+    /// (suggestion and country headers). The system `secondaryLabel` is 3.4:1 on white and
+    /// 3.3:1 on the grouped background in light mode, and drops below 3:1 on a tinted wash
+    /// ("Contrast failed" in the audit). This grey:
+    /// light 9.5:1 on white, 8.5:1 on the grouped background, 8.3:1 on a fill chip, 4.7:1 on the
+    /// strongest wash; dark 12.5:1 on black, 10.1:1 on cards, 8.3:1 on cards in a sheet, 6.4:1 on
+    /// a fill chip there, 5.4:1 on the strongest wash; Increase Contrast (no wash) 11.6:1 and
+    /// 14.5:1. Still a grey, so the hierarchy stays calm. CI: `secondary_text_rule.py`.
     static let secondaryText = Color(uiColor: UIColor { traits in
         let high = traits.accessibilityContrast == .high
         if traits.userInterfaceStyle == .dark {
@@ -79,6 +83,15 @@ enum Theme {
 }
 
 enum OrganizationAreaStyle { case trips, places, documents, neutral }
+
+extension ShapeStyle where Self == Color {
+    /// The one style for small secondary text: `Theme.secondaryText` (4.5:1 and more on every
+    /// card and background, light and dark) instead of the system grey `.secondary` (3.4:1 on
+    /// a white card). Use it wherever `.footnote`, `.caption`, `.caption2` or `.subheadline`
+    /// text is grey: `.font(.footnote).foregroundStyle(.secondaryText)`. Works on `Text` too,
+    /// so it keeps a `Text` a `Text`. CI: `.github/scripts/secondary_text_rule.py`.
+    static var secondaryText: Color { Theme.secondaryText }
+}
 
 /// White rounded card on the grouped background.
 struct Card<Content: View>: View {

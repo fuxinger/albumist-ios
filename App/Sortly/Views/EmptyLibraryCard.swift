@@ -49,7 +49,7 @@ struct EmptyLibraryCard: View {
                     ProgressView(value: Double(samples.added), total: Double(max(samples.total, 1)))
                         .tint(Theme.accent)
                     Text("Beispielfotos werden angelegt: \(samples.added) von \(samples.total)")
-                        .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                        .font(.footnote).foregroundStyle(.secondaryText).monospacedDigit()
                 } else if offersSamples {
                     Button("Mit Beispielfotos ausprobieren") { confirmAdd = true }
                         .buttonStyle(PrimaryButtonStyle())

@@ -240,6 +240,31 @@ final class SortlyFlowUITests: XCTestCase {
         return (step, done, total)
     }
 
+    /// The card's "Details" during the analysis, for one screenshot (review P3-08: the step, the
+    /// photos just looked at, whether it runs in the background and the note on town names went
+    /// there from the card), then closed again. Skipped with a note when the row is not on
+    /// screen: nothing here checks the analysis.
+    private func lookAtAnalysisDetails() {
+        let details = app.buttons["analysis.details"]
+        guard details.exists, details.isHittable else {
+            print("UI_FACT analysis details not on screen")
+            return
+        }
+        details.tap()
+        let sheet = app.navigationBars["So läuft die Analyse"]
+        guard sheet.waitForExistence(timeout: 10) else {
+            print("UI_FACT analysis details did not open")
+            return
+        }
+        shot("60a-analysis-details")
+        let done = sheet.buttons["Fertig"]
+        if done.exists { done.tap() } else { app.swipeDown() }
+        if !waitGone(sheet, timeout: 10) {
+            app.swipeDown()
+            XCTAssertTrue(waitGone(sheet, timeout: 10), "The analysis details did not close")
+        }
+    }
+
     // MARK: Setup for tests that run alone
 
     /// Every test except test1 may be the first on a fresh simulator: the onboarding counts as
@@ -1524,6 +1549,7 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(inContent, "The analysis did not reach the image step")
         record("before leaving")
         shot("60-analysis-running"); audit("analysis running")
+        lookAtAnalysisDetails()
 
         // In the foreground the count moves (run 43743310212 printed only "0/246" while the
         // app was away, which says nothing about the foreground).

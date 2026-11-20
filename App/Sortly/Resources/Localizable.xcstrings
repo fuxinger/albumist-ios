@@ -10743,12 +10743,12 @@
         }
       }
     },
-    "Läuft auch im Hintergrund" : {
+    "Läuft im Hintergrund weiter, dort aber langsamer" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Also runs in the background"
+            "value" : "Keeps running in the background, but more slowly"
           }
         }
       }

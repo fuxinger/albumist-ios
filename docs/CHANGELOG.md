@@ -196,6 +196,11 @@
   wiederkommen; „Ergänzen …“ öffnet nichts mehr auf einem Stapel, den man verlassen hat. Eine Karte, die gerade
   anlegt, sagt das VoiceOver; eine nach dem Kaufblatt angelegte zeigt „Angelegt“; „Was heißt sortiert?“ scrollt bei
   sehr großer Schrift.
+- 21.11.: Schnell-Anlegen (Fable-Prüfung von Welle 1): „Anlegen“ legt ein Album nur noch dort sofort an, wo das
+  Banner mit „Widerrufen“ erscheint; in einem Blatt über den Tabs öffnet es den Vorschlag oder die Vorschau. Eine Karte
+  unter „Nicht jetzt“ bleibt beim Anlegen dort, und „Widerrufen“ legt den Vorschlag wieder zurück. Nach dem Kauf legt
+  Albumist nur einen Vorschlag an, den es noch gibt. „Widerrufen“ lässt sich nicht von einem neuen „Anlegen“
+  unterbrechen, und die Bewertungsfrage verdeckt das Banner nicht.
 - 20.11.: Größte Schrift (P3-18): Das Mosaik eines Vorschlags zeigt „+24“ statt „+…“; die Zahl wächst nur bis
   zur ersten Bedienungshilfe-Größe, steht in einer Zeile und wird eher etwas
   kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht

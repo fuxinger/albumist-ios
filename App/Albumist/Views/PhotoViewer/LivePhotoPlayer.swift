@@ -155,12 +155,14 @@ extension LiveAudio {
 
     /// A video's sound in the photo view (design wave 3, DS-16, `VideoSound`). On: as in Photos
     /// the video's sound stops the user's music and plays with the silent switch on
-    /// (`.playback`). Off, and when the photo view closes: the app's sound mixes and follows the
-    /// switch again (`.ambient`), and the user's music is told it may go on
-    /// (`.notifyOthersOnDeactivation`). Off the main thread, as `prepare` (synchronous calls to
-    /// the audio server), one change after the other. A Live Photo's short motion waits
-    /// meanwhile and while the sound is on (`isReady`); it may move again once `.ambient` is set,
-    /// and if that failed, `prepare` sets it when the photo view opens next.
+    /// (`.playback`). Off: the app's sound mixes and follows the switch again (`.ambient`); the
+    /// session stays active, as the video plays on (ended under its player, it would stop the
+    /// video too: iOS ends it even when it says it is busy, review F, F1). The user's music is
+    /// told it may go on when the photo view closes (`videoSoundEnded`). Off the main thread, as
+    /// `prepare` (synchronous calls to the audio server), one change after the other. A Live
+    /// Photo's short motion waits meanwhile and while the sound is on (`isReady`); it may move
+    /// again once `.ambient` is set, and if that failed, `prepare` sets it when the photo view
+    /// opens next.
     static func videoSound(_ on: Bool) {
         isReady = false
         let previous = soundChange
@@ -173,11 +175,24 @@ extension LiveAudio {
                 try? session.setActive(true)
             } else {
                 done = (try? session.setCategory(.ambient, mode: .default, options: [])) != nil
-                // Fails while a player still runs (it went a moment ago): the user's music then
-                // waits for their own tap, nothing else changes.
-                try? session.setActive(false, options: .notifyOthersOnDeactivation)
             }
             await LiveAudio.videoSoundSet(on: on, done: done)
+        }
+    }
+
+    /// The photo view closed after a video's sound stopped the user's music
+    /// (`VideoSound.interruptedOthers`), and its player is gone (`ViewerVideo.close` stops it
+    /// first): the app's sound mixes again (`.ambient`) and the session ends, telling the user's
+    /// music it may go on (`.notifyOthersOnDeactivation`). In turn with the other changes.
+    static func videoSoundEnded() {
+        isReady = false
+        let previous = soundChange
+        soundChange = Task.detached(priority: .userInitiated) {
+            await previous?.value
+            let session = AVAudioSession.sharedInstance()
+            let done = (try? session.setCategory(.ambient, mode: .default, options: [])) != nil
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            await LiveAudio.videoSoundSet(on: false, done: done)
         }
     }
 

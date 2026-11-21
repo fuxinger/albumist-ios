@@ -133,11 +133,16 @@ public struct VideoSound: Equatable, Sendable {
     }
 
     public private(set) var isOn = false
+    /// The sound was on in this photo view, so the user's music was stopped: it is told it may go
+    /// on when the photo view closes, after the video's player is gone. "Ton aus" alone does not
+    /// tell it: the end of the app's audio session under a running player stops the video too.
+    public private(set) var interruptedOthers = false
 
     public init() {}
 
     public mutating func toggle() {
         isOn.toggle()
+        if isOn { interruptedOthers = true }
     }
 
     public var session: Session { isOn ? .interruptsOthers : .mixesWithOthers }

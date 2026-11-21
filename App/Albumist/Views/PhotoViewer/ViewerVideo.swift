@@ -88,12 +88,13 @@ final class ViewerVideo {
         stop()
     }
 
-    /// The photo view closes: the video stops, and the app's sound mixes with the user's again
-    /// (their music may go on).
+    /// The photo view closes: the video stops and lets its player go; then, if its sound stopped
+    /// the user's music, the app's sound mixes again and the music is told it may go on
+    /// (`LiveAudio.videoSoundEnded`, only now: under a running player it would stop the video).
     func close() {
         stop()
-        if sound.isOn {
-            LiveAudio.videoSound(false)
+        if sound.interruptedOthers {
+            LiveAudio.videoSoundEnded()
         }
         sound = VideoSound()
     }

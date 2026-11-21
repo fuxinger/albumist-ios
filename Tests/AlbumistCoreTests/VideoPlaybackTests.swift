@@ -169,6 +169,21 @@ struct VideoPlaybackTests {
         #expect(!VideoSound().isOn)
     }
 
+    /// Once "Ton an" stopped the user's music, the music is told it may go on when the photo view
+    /// closes, after the video's player is gone; "Ton aus" alone does not tell it (told under a
+    /// running player, the end of the app's audio session would stop the video too, review F,
+    /// F1). Music the photo view never stopped is told nothing.
+    @Test func theUsersMusicIsToldToGoOnWhenThePhotoViewCloses() {
+        var sound = VideoSound()
+        #expect(!sound.interruptedOthers)
+        sound.toggle()
+        #expect(sound.interruptedOthers)
+        sound.toggle()
+        #expect(!sound.isOn)
+        #expect(sound.interruptedOthers, "\"Ton aus\": the music is still to be told")
+        #expect(!VideoSound().interruptedOthers)
+    }
+
     // MARK: Only what is on the iPhone
 
     /// Photos' answer to the request for a video with the network off says where it is: a player

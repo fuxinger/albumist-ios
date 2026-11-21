@@ -129,20 +129,35 @@ struct VideoViewerSourceTests {
     }
 
     /// A video starts without sound; "Ton an" gives it sound, which stops the user's music and
-    /// plays with the silent switch on, as in Photos; off, and when the photo view closes, the
-    /// app's sound mixes again and the user's music may go on. The audio server is called off the
-    /// main thread, one change after the other, beside H8's `LiveAudio` and never against it.
+    /// plays with the silent switch on, as in Photos; "Ton aus" lets the app's sound mix again,
+    /// and once the photo view closes, after its player is gone, the user's music is told it may
+    /// go on (never under a running player: that would stop the video, review F, F1). The audio
+    /// server is called off the main thread, one change after the other, beside H8's `LiveAudio`
+    /// and never against it.
     @Test func aVideosSoundIsTheUsersChoice() throws {
         let model = try Self.file("ViewerVideo.swift")
         let toggle = try #require(AppSource.body(of: "func toggleSound(", in: model))
         #expect(Self.inOrder(["sound.toggle()", "isMuted = !sound.isOn", "LiveAudio.videoSound(sound.isOn)"], in: toggle))
         let close = try #require(AppSource.body(of: "func close(", in: model))
-        #expect(Self.inOrder(["stop()", "if sound.isOn", "LiveAudio.videoSound(false)", "sound = VideoSound()"], in: close))
+        #expect(Self.inOrder(["stop()", "if sound.interruptedOthers", "LiveAudio.videoSoundEnded()", "sound = VideoSound()"], in: close),
+                "the music told to go on while the player still runs")
         let audio = try Self.file("LivePhotoPlayer.swift")
         let sound = try #require(AppSource.body(of: "static func videoSound(", in: audio))
         #expect(Self.inOrder(["isReady = false", "Task.detached(", "await previous?.value", "setCategory(.playback",
-                              "setActive(true)", "setCategory(.ambient", "setActive(false, options: .notifyOthersOnDeactivation)",
-                              "await LiveAudio.videoSoundSet("], in: sound), "\(sound)")
+                              "setActive(true)", "setCategory(.ambient", "await LiveAudio.videoSoundSet("], in: sound), "\(sound)")
+        #expect(!sound.contains("setActive(false"), "\"Ton aus\" ends the session under the running player")
+        let ended = try #require(AppSource.body(of: "static func videoSoundEnded(", in: audio))
+        #expect(Self.inOrder(["isReady = false", "Task.detached(", "await previous?.value", "setCategory(.ambient",
+                              "setActive(false, options: .notifyOthersOnDeactivation)", "await LiveAudio.videoSoundSet("], in: ended),
+                "\(ended)")
+        // The session ends there only, and only when the photo view closes.
+        for path in AppSource.swiftFiles(under: "App/Albumist") {
+            let code = try Self.code(path)
+            let ends = Self.count(#"session\.setActive\(false"#, in: code)
+            #expect(ends == (path.hasSuffix("/LivePhotoPlayer.swift") ? 1 : 0), "\(path): \(ends) ends of the session")
+            let told = AppSource.calls(of: "LiveAudio.videoSoundEnded(", in: code).count
+            #expect(told == (path.hasSuffix("/ViewerVideo.swift") ? 1 : 0), "\(path): the music told \(told) times")
+        }
         #expect(Self.squeezed(try #require(AppSource.body(of: "private static func videoSoundSet(", in: audio))).contains("isReady=!on&&done"))
         // The photo view's own setting when it opens takes its turn too: "Ton an" right after it
         // is never undone by it.

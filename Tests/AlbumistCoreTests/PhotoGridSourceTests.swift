@@ -276,6 +276,18 @@ struct PhotoGridSourceTests {
         #expect(try Self.code(Self.scrolling).contains("private static var calibration = PhotoGridAutoScroll.Calibration()"))
     }
 
+    /// Scrolling by itself steps with the screen, up to 120 times a second on a ProMotion iPhone
+    /// (review L13): the frame clock asks for it, and the app's Info.plist lets an iPhone give a
+    /// display link more than 60 Hz (`CADisableMinimumFrameDurationOnPhone`, only that key).
+    @Test func scrollingByItselfStepsWithTheScreen() throws {
+        let start = Self.squeezed(try Self.body(["final class PhotoGridTicker", "func start("], in: Self.state))
+        #expect(start.contains("link.preferredFrameRateRange=CAFrameRateRange(minimum:60,maximum:120,preferred:120)"), "\(start)")
+        let project = try AppSource.read("App/project.yml")
+        let info = try #require(project.range(of: "      path: Albumist/Resources/Info.plist\n"), "the app's Info.plist")
+        let settings = try #require(project.range(of: "    settings:", range: info.upperBound..<project.endIndex))
+        #expect(project[info.upperBound..<settings.lowerBound].contains("        CADisableMinimumFrameDurationOnPhone: true\n"))
+    }
+
     // MARK: Pinch to zoom
 
     /// Two fingers change the photos in a row by a step (`PhotoGridZoom.Pinch`), UIKit's pinch
@@ -340,8 +352,12 @@ struct PhotoGridSourceTests {
                               + "step(zoomingIn:true,on:id,columns:columns)}}if!disabled,PhotoGridZoom.more(than:columns)!=nil{"
                               + "Button(\"Verkleinern\"){step(zoomingIn:false,on:id,columns:columns)}}}"), "\(cell)")
         let said = try Self.body(["struct PhotoGrid: View", "private func step(zoomingIn"], in: Self.grid)
-        #expect(Self.squeezed(said).hasPrefix("{guard!disabled,letnext=zoomingIn?PhotoGridZoom.fewer(than:columns):"
-                                              + "PhotoGridZoom.more(than:columns)else{return}"), "not while the grid waits: \(said)")
+        #expect(Self.squeezed(said).hasPrefix("{guard!disabledelse{return}"), "not while the grid waits: \(said)")
+        // At the largest or smallest size VoiceOver's zoom stays and says the size it stays at
+        // (review L13), rather than nothing.
+        #expect(Self.squeezed(said).contains("letnext=(zoomingIn?PhotoGridZoom.fewer(than:columns):PhotoGridZoom.more(than:columns))"
+                                             + "??columnsifnext!=columns{step(to:next,from:columns,keeping:photo,anchor:{_in0.5},around:nil)}"),
+                "\(said)")
         #expect(said.contains("AccessibilityNotification.Announcement(String(localized: \"\\(next) \\(next.formatted()) Fotos pro Reihe\")).post()"),
                 "\(said)")
         let catalog = try StringCatalogTests.catalog()

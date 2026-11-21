@@ -337,6 +337,9 @@ final class PhotoGridTicker: NSObject {
         guard link == nil else { return }
         last = nil
         let link = CADisplayLink(target: self, selector: #selector(step(_:)))
+        // Up to the screen's own rate: 120 Hz on a ProMotion iPhone (the app's Info.plist allows
+        // it, `CADisableMinimumFrameDurationOnPhone`), never below 60 (review L13).
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
         self.link = link
     }

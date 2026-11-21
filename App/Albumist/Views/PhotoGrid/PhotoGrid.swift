@@ -254,11 +254,15 @@ struct PhotoGrid: View {
     }
 
     /// A step without two fingers (VoiceOver's zoom, "Vergrößern", "Verkleinern") on `photo`:
-    /// it stays in the middle of the screen, and the new size is said. Not while the grid waits,
-    /// as the pinch.
+    /// it stays in the middle of the screen, and the new size is said. At the largest or smallest
+    /// size VoiceOver's zoom stays, and says the size it stays at (review L13). Not while the grid
+    /// waits, as the pinch.
     private func step(zoomingIn: Bool, on photo: AssetID, columns: Int) {
-        guard !disabled, let next = zoomingIn ? PhotoGridZoom.fewer(than: columns) : PhotoGridZoom.more(than: columns) else { return }
-        step(to: next, from: columns, keeping: photo, anchor: { _ in 0.5 }, around: nil)
+        guard !disabled else { return }
+        let next = (zoomingIn ? PhotoGridZoom.fewer(than: columns) : PhotoGridZoom.more(than: columns)) ?? columns
+        if next != columns {
+            step(to: next, from: columns, keeping: photo, anchor: { _ in 0.5 }, around: nil)
+        }
         AccessibilityNotification.Announcement(String(localized: "\(next) \(next.formatted()) Fotos pro Reihe")).post()
     }
 }

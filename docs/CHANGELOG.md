@@ -2,6 +2,13 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. „Unsortiert“ nach Tagen wie in Fotos (Design-Welle 3, DS-21 und DS-06b, noch in keinem Build): in allen
+  drei Filtern je Tag eine Überschrift mit der Zahl der Fotos, der neueste Tag oben, Fotos ohne Datum zuletzt; jedes
+  Foto an dem Tag, den seine Foto-Ansicht nennt. „Unsortiert“ und die Fotos eines Vorschlags teilen sich ein Raster:
+  beim Auswählen hakt ein seitlich über die Fotos gezogener Finger alle dazwischen ab (über Reihen und Tage, am Rand
+  läuft die Seite weiter), zwei Finger zeigen drei, fünf oder sieben Fotos pro Reihe, das Foto unter den Fingern
+  bleibt, die Größe bleibt gemerkt; für VoiceOver, Schalter- und Sprachsteuerung „Vergrößern“ und „Verkleinern“.
+  Beim Laden eine ruhige Zeile statt Kreisel.
 - 21.11. Suche, Reise-Werkstatt, Verlauf und Beleg mit Fotos (Design-Welle 3, DS-13 bis DS-15, noch in keinem
   Build): Die leere Suche zeigt bis zu sechs Vorschläge als Foto-Kacheln wie im Tab „Alben“ (die zwei Städte mit
   den meisten Fotos, eine Reise, das neueste Jahr, ein Thema, eine Art), jede mit einem eigenen Foto vom iPhone;

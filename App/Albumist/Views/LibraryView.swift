@@ -4,6 +4,11 @@ import AlbumistEngine
 
 /// The tab "Unsortiert" (design W1, tabs 6B): what is not sorted yet, unsure or ignored
 /// (`LibraryBuckets.unsortedTabFilters`), with ignore. Suggestions have a tab of their own.
+///
+/// The photos by day, as Photos shows its days (design wave 3, DS-21, `InboxDays`): the newest
+/// day first, as an inbox of what is left to sort, each day's photos in the order they were
+/// taken, the photos without a date last; in the photo grid a suggestion's photos have too
+/// (`PhotoGrid`, DS-06b: drag to select, pinch to zoom).
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
     @State private var bucket: InboxBucket = .unorganized
@@ -16,14 +21,16 @@ struct LibraryView: View {
     @State private var addingToAlbum: [AssetID]?
     /// "Einstellungen öffnen" in an empty list when no main area counts (as on the overview).
     @State private var showSettings = false
-    /// Thumbnails shown so far; more on request, so large libraries stay smooth and every
-    /// photo can still be reached.
+    /// Photos asked for so far: the grid shows whole days up to this many, more on request, so
+    /// large libraries stay smooth and every photo can still be reached.
     @State private var shown = Self.page
+    /// The shown area's photos by day, made off the main thread (`AppModel.inboxDays`), and the
+    /// area they are of: while an area's days are made anew its days before stay.
+    @State private var days = InboxDays()
+    @State private var daysBucket: InboxBucket?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private static let page = 3_000
-    /// The side a photo's thumbnail is asked for, and its long press lifts that image.
-    private static let photoSide: CGFloat = 110
 
     var body: some View {
         let _ = MainThreadWatch.shared.count("library body")
@@ -32,27 +39,22 @@ struct LibraryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 bucketPicker
+                    .padding(.horizontal, Theme.Spacing.l)
                 if let members {
                     content(members)
                 } else {
-                    // The first pass over all photos (a moment in a very large library). Not
-                    // "Alles sortiert" or "0 Fotos": that would not be true yet.
-                    HStack(spacing: Theme.Spacing.s) {
-                        ProgressView()
-                            .accessibilityHidden(true)
-                        Text("Fotos werden zusammengestellt …")
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(.noteText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("library.preparing")
+                    preparing
                 }
             }
-            .padding(.horizontal, Theme.Spacing.l)
             .padding(.bottom, Theme.Spacing.xl)
         }
+        // The grid scrolls the page while a finger selects at an edge, and keeps its place
+        // when it zooms.
+        .photoGridScrolling()
         .background(Theme.background)
+        .task(id: DaysKey(bucket: bucket, members: members, words: model.proposalWords, today: Self.today())) {
+            await makeDays(of: members, in: bucket)
+        }
         .onAppear { model.showLibraryBuckets() }
         .onDisappear { model.hideLibraryBuckets() }
         .navigationTitle("Unsortiert")
@@ -93,106 +95,144 @@ struct LibraryView: View {
         .refreshable { await model.refreshDerived() }
     }
 
-    /// One area's count and its photos.
+    /// One area's count and its photos by day.
     @ViewBuilder
     private func content(_ members: [LibraryBuckets.Item]) -> some View {
         // Numbers as plural strings (design review W5: "1 Fotos und Videos").
         Text("\(members.count) \(members.count.formatted()) Fotos und Videos")
             .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+            .padding(.horizontal, Theme.Spacing.l)
 
         if members.isEmpty {
-            if SortedCountCard.EmptyList.make(bucket, settings: model.settings) == .noMainAreaChosen {
-                // Nothing counts as sorted: the way to change that, as on the overview's card.
-                ContentUnavailableView {
-                    Label(emptyTitle, systemImage: "circle.dashed")
-                } description: {
-                    Text(emptyDescription)
-                } actions: {
-                    Button("Einstellungen öffnen") { showSettings = true }
-                        .accessibilityIdentifier("library.openSettings")
+            Group {
+                if SortedCountCard.EmptyList.make(bucket, settings: model.settings) == .noMainAreaChosen {
+                    // Nothing counts as sorted: the way to change that, as on the overview's card.
+                    ContentUnavailableView {
+                        Label(emptyTitle, systemImage: "circle.dashed")
+                    } description: {
+                        Text(emptyDescription)
+                    } actions: {
+                        Button("Einstellungen öffnen") { showSettings = true }
+                            .accessibilityIdentifier("library.openSettings")
+                    }
+                } else {
+                    ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
+                                           description: Text(emptyDescription))
                 }
-            } else {
-                ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
-                                       description: Text(emptyDescription))
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+        } else if daysBucket == bucket, !days.sections.isEmpty {
+            // Whole days, so a day's header never counts photos that are not shown yet.
+            let shownDays = days.shownDays(forPhotos: shown)
+            grid(days.sections.prefix(shownDays))
+            if shownDays < days.sections.count {
+                moreComing(after: days.photos(inFirst: shownDays))
             }
         } else {
-            grid(members)
-            if members.count > shown {
-                // The next photos load by themselves when the end of the grid comes
-                // into view (design review N10: a button every 3,000 photos).
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Theme.Spacing.m)
-                    .accessibilityLabel(Text("Weitere Fotos werden geladen"))
-                    .onScrollVisibilityChange(threshold: 0.1) { visible in
-                        if visible { shown += Self.page }
-                    }
-                    .accessibilityLabel(Text("Weitere Fotos werden geladen"))
-                    .accessibilityIdentifier("library.loadingMore")
-            }
+            // Another area's days, or the days of the area while it was empty, are being made
+            // anew (a moment in a very large library).
+            preparing
         }
     }
 
-    private func grid(_ members: [LibraryBuckets.Item]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
-            ForEach(members.prefix(shown)) { item in
-                cell(item, in: members)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
-    }
-
-    /// One photo: a tap opens it, or ticks it while selecting; the long press lifts it with what
-    /// "Unsortiert" offers for it (DS-06a), none while selecting.
-    private func cell(_ item: LibraryBuckets.Item, in members: [LibraryBuckets.Item]) -> some View {
-        let id = item.id
-        // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
-        return Button {
-            guard selecting else {
-                open(id, in: members)
-                return
-            }
-            if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
-        } label: {
-            thumbnail(id)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(item.date?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
-        .accessibilityAddTraits(selecting && selection.contains(id) ? .isSelected : [])
-        .photoMenu(id, place: .unsorted, side: Self.photoSide, selecting: selecting) { action in
-            perform(action, on: id, in: members)
+    private func grid(_ days: ArraySlice<PhotoGridSection>) -> some View {
+        PhotoGrid(sections: days, place: .unsorted, selecting: selecting, selection: $selection, pinsHeaders: true,
+                  zoom: zoom, identifier: "library.photo") { id in
+            open(id, in: days)
+        } perform: { item, id in
+            perform(item, on: id, in: days)
         }
     }
 
-    private func thumbnail(_ id: AssetID) -> some View {
-        AssetThumbnail(id: id, side: Self.photoSide)
-            .aspectRatio(1, contentMode: .fill)
-            .matchedTransitionSource(id: id, in: zoom)
-            .overlay(alignment: .bottomTrailing) {
-                if selecting {
-                    Image(systemName: selection.contains(id) ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(.white, selection.contains(id) ? Theme.accent : Color.black.opacity(0.3))
-                        .padding(6)
-                }
-            }
-            .contentShape(Rectangle())
+    /// The first pass over all photos, and an area whose days are being made: a calm line, no
+    /// spinner (DS-18). Not "Alles sortiert" or "0 Fotos": that would not be true yet.
+    private var preparing: some View {
+        Text("Fotos werden zusammengestellt …")
+            .font(.footnote)
+            .foregroundStyle(.noteText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.Spacing.l)
+            .accessibilityIdentifier("library.preparing")
     }
 
-    /// The photo large, the list's photos shown so far to swipe through.
-    private func open(_ id: AssetID, in members: [LibraryBuckets.Item]) {
-        viewing = PhotoViewer.Start(id: id, ids: members.prefix(shown).map(\.id))
+    /// Below the days shown so far (`photos` photos): the next days come by themselves when this
+    /// line comes into view (design review N10: a button every 3,000 photos).
+    private func moreComing(after photos: Int) -> some View {
+        Text("Weitere Fotos werden geladen")
+            .font(.footnote)
+            .foregroundStyle(.noteText)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.m)
+            .onScrollVisibilityChange(threshold: 0.1) { visible in
+                if visible { shown = photos + Self.page }
+            }
+            .accessibilityIdentifier("library.loadingMore")
+    }
+
+    /// The photo large, the photos shown so far in the grid's order to swipe through.
+    private func open(_ id: AssetID, in days: ArraySlice<PhotoGridSection>) {
+        viewing = PhotoViewer.Start(id: id, ids: days.flatMap { $0.entries.map(\.id) })
     }
 
     /// An item of the photo's long press, the way "Unsortiert" goes it: "Ansehen" as a tap,
     /// "Zu Album hinzufügen …" the sheet the selection opens (then the preview).
-    private func perform(_ action: PhotoMenu.Item, on id: AssetID, in members: [LibraryBuckets.Item]) {
+    private func perform(_ action: PhotoMenu.Item, on id: AssetID, in days: ArraySlice<PhotoGridSection>) {
         switch action {
-        case .view: open(id, in: members)
+        case .view: open(id, in: days)
         case .addToAlbum: addingToAlbum = [id]
         // Ignoring is the model's, the same everywhere (`PhotoMenuItems`); a suggestion's own.
         case .ignore, .stopIgnoring, .removeFromSuggestion: break
         }
+    }
+
+    // MARK: The days
+
+    /// What the shown area's days are made of: the area, its photos as the model handed them
+    /// over (the same array, not equal contents: comparing 100,000 photos at every draw would
+    /// cost what grouping them off the main thread saves), the app's language, and which day is
+    /// "Heute".
+    private struct DaysKey: Equatable {
+        var bucket: InboxBucket
+        var members: [LibraryBuckets.Item]?
+        var words: ProposalWords
+        var today: Int
+
+        static func == (a: DaysKey, b: DaysKey) -> Bool {
+            guard a.bucket == b.bucket, a.words == b.words, a.today == b.today else { return false }
+            switch (a.members, b.members) {
+            case (nil, nil): return true
+            case let (x?, y?): return LibraryView.same(x, y)
+            default: return false
+            }
+        }
+    }
+
+    /// The same array (its storage), whatever its contents.
+    nonisolated private static func same<T>(_ a: [T], _ b: [T]) -> Bool {
+        guard a.count == b.count else { return false }
+        if a.isEmpty { return true }
+        return a.withUnsafeBufferPointer { pa in b.withUnsafeBufferPointer { pb in pa.baseAddress == pb.baseAddress } }
+    }
+
+    /// Today's number on the iPhone's clock (`LocalTime.day`): the days say "Heute" and "Gestern".
+    private static func today() -> Int {
+        LocalTime.day(LocalTime.wallClock(Date(), in: .current))
+    }
+
+    /// Groups the area's photos by day off the main thread. Given up when a newer area comes
+    /// (the task's id changes) or the tab goes; an empty area has no days to make.
+    private func makeDays(of members: [LibraryBuckets.Item]?, in bucket: InboxBucket) async {
+        guard let members else { return }
+        let made: InboxDays?
+        if members.isEmpty {
+            made = InboxDays()
+        } else {
+            made = await model.inboxDays(members)
+        }
+        guard let made, !Task.isCancelled else { return }
+        days = made
+        daysBucket = bucket
     }
 
     /// The tab's filters as chips; at the largest text sizes a menu, so every filter stays

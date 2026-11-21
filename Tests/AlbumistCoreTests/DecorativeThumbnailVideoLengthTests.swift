@@ -30,9 +30,8 @@ struct DecorativeThumbnailVideoLengthTests {
     /// grid or turns the length off.
     @Test func everyThumbnailShowsALengthOnlyInAGridOfPhotos() throws {
         let grids: Set<String> = [
-            "App/Albumist/Views/LibraryView.swift",                // "Unsortiert"
+            "App/Albumist/Views/PhotoGrid/PhotoGrid.swift",        // "Unsortiert" and a suggestion's photos
             "App/Albumist/Views/AlbumsView.swift",                 // an album's photos
-            "App/Albumist/Views/ProposalViews.swift",              // a suggestion's photos
             "App/Albumist/Views/SearchView.swift",                 // the search's hits
             "App/Albumist/Views/CountryPhotosView.swift",          // a country's photos
             "App/Albumist/Views/Trips/TripTimelineViews.swift",    // a day's photos on a trip's timeline
@@ -48,7 +47,7 @@ struct DecorativeThumbnailVideoLengthTests {
                         "\(path): a thumbnail outside a grid of photos says a video's length: \(thumbnail.prefix(120))")
             }
         }
-        #expect(callers.count > 6, "no thumbnails found: \(callers.sorted())")
+        #expect(callers.count > 5, "no thumbnails found: \(callers.sorted())")
         #expect(grids.isSubset(of: callers), "a listed grid has no thumbnail any more: \(grids.subtracting(callers).sorted())")
     }
 

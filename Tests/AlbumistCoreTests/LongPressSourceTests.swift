@@ -14,6 +14,8 @@ struct LongPressSourceTests {
     static let start = "App/Albumist/Views/Start/StartSections.swift"
     static let suggestions = "App/Albumist/Views/ProposalViews.swift"
     static let library = "App/Albumist/Views/LibraryView.swift"
+    /// The grid of "Unsortiert" and of a suggestion's photos (design wave 3, DS-06b).
+    static let photoGrid = "App/Albumist/Views/PhotoGrid/PhotoGrid.swift"
     static let search = "App/Albumist/Views/SearchView.swift"
     static let albums = "App/Albumist/Views/AlbumsView.swift"
     static let suggestionItems = "App/Albumist/Views/Menus/SuggestionMenuItems.swift"
@@ -388,11 +390,26 @@ struct LongPressSourceTests {
     /// Every grid of photos has the long press, at its place, off while it selects; the
     /// country's photos (the map's) are not touched here.
     @Test func everyPhotoGridHasTheLongPress() throws {
+        // "Unsortiert" and a suggestion's photos are one grid (`PhotoGrid`, design wave 3,
+        // DS-06b): its photo has the long press at the page's place, off while it selects, and
+        // lifts the image the photo asked for, at the side it is shown at (three, five or seven
+        // in a row), never at a second side.
+        let shared = try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.photoGrid)
+        #expect(shared.contains(".photoMenu(id, place: place, side: side, selecting: selecting, available: available)"), "\(shared)")
+        #expect(shared.contains("AssetThumbnail(id: id, side: side)"), "\(shared)")
+        let gridCode = try Self.code(Self.photoGrid)
+        #expect(gridCode.components(separatedBy: "AssetThumbnail(").count - 1 == 1, "a second thumbnail in the grid")
+        #expect(Self.count(#"AssetThumbnail\(id: id, side: \d"#, in: gridCode) == 0, "a side in numbers")
+        let library = Self.squeezed(try Self.body(["struct LibraryView"], in: Self.library))
+        #expect(library.contains("place:.unsorted,selecting:selecting,"), "\(library)")
+        let suggestion = Self.squeezed(try Self.body(["struct ProposalPhotosView"], in: Self.suggestions))
+        #expect(suggestion.contains("place:.suggestion,selecting:selecting,") && suggestion.contains("available:!disabled&&isCurrent,"),
+                "\(suggestion)")
+        for (path, type) in [(Self.library, "struct LibraryView"), (Self.suggestions, "struct ProposalPhotosView")] {
+            let page = try Self.body([type], in: path)
+            #expect(!page.contains("AssetThumbnail(") && !page.contains(".photoMenu("), "\(path): photos of its own")
+        }
         let grids: [(path: String, declaration: [String], call: String, side: Int, photo: String)] = [
-            (Self.library, ["struct LibraryView", "private func cell("],
-             ".photoMenu(id, place: .unsorted, side: Self.photoSide, selecting: selecting)", 110, "id"),
-            (Self.suggestions, ["struct ProposalPhotosView", "private func tile("],
-             ".photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled && isCurrent)", 140, "id"),
             (Self.albums, ["struct AlbumScreen", "private func tile("], ".photoMenu(photo, place: .album, side: Self.photoSide)", 110,
              "photo"),
             (Self.search, ["struct SearchView", "private func thumbnail("],
@@ -520,7 +537,7 @@ struct LongPressSourceTests {
         }
         // The tap and "Ansehen" open the photo the same way; "Zu Album hinzufügen …" the sheet.
         let places: [(path: String, type: String, perform: String, tap: String)] = [
-            (Self.library, "struct LibraryView", "private func perform(", "open(id, in: members)"),
+            (Self.library, "struct LibraryView", "private func perform(", "open(id, in: days)"),
             (Self.search, "struct SearchView", "private func perform(", "open(id, from: key)"),
             (Self.albums, "struct AlbumScreen", "private func perform(", "open(photo, ids: ids)"),
         ]
@@ -561,8 +578,10 @@ struct LongPressSourceTests {
     @Test func nothingIsTakenOutOfASuggestionThatWent() throws {
         let photos = try Self.body(["struct ProposalPhotosView"], in: Self.suggestions)
         #expect(photos.contains("    var isCurrent: Bool\n"), "\(photos)")
-        let tile = try Self.body(["struct ProposalPhotosView", "private func tile("], in: Self.suggestions)
-        #expect(tile.contains("available: !disabled && isCurrent)"), "\(tile)")
+        let grid = try Self.body(["struct ProposalPhotosView", "var body: some View"], in: Self.suggestions)
+        #expect(grid.contains("available: !disabled && isCurrent,"), "\(grid)")
+        let cell = try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.photoGrid)
+        #expect(cell.contains("available: available)"), "\(cell)")
         let detail = Self.squeezed(try Self.body(["struct ProposalDetailView", "var body: some View"], in: Self.suggestions))
         #expect(detail.contains("ProposalPhotosView(days:days,selecting:selecting,selected:$selected,hidden:photosHidden,"
                                 + "disabled:busy,isCurrent:isCurrent)"), "\(detail)")

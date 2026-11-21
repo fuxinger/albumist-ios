@@ -638,12 +638,17 @@ struct ProposalDetailView: View {
                 } askToRemove: { id in
                     removingPhoto = id
                 }
-                .padding(.top, Theme.Spacing.xl)
+                // With the space above a day's title (`PhotoGridHeader`), 24 pt below the cards.
+                .padding(.top, Theme.Spacing.m)
             }
             .padding(.bottom, Theme.Spacing.l)
         }
         // The cover reaches up under the status bar and the bar's glass buttons (draft E2).
         .ignoresSafeArea(edges: .top)
+        // The grid scrolls the page while a finger selects at an edge, and keeps its place when
+        // it zooms (`PhotoGrid`, design wave 3, DS-06b). Here, after the cover reaches up: from
+        // here it reads where the bars end, as the measurement below does.
+        .photoGridScrolling()
         // Where the bar ends: measured, as status bar and navigation bar differ upright, across
         // and on an iPad.
         .onGeometryChange(for: CGFloat.self) { proxy in
@@ -1704,11 +1709,13 @@ struct AlbumPickerView: View {
     }
 }
 
-/// The photos of one suggestion by day, as Photos shows its days (design E2): a header with the
-/// day and its count, then the day's photos edge to edge, three in a row on every iPhone with
-/// 2 pt between them as in the draft; photos without a date last. A tap opens a photo large, zooming out of its tile and back
-/// (`PhotoViewer`); while the suggestion picks photos ("Auswählen") a tap ticks it. Photos taken
-/// out of a suggestion stay in the library and in other suggestions.
+/// The photos of one suggestion by day, as Photos shows its days (design E2), in the grid
+/// "Unsortiert" has too (`PhotoGrid`, design wave 3, DS-06b): a header with the day and its
+/// count, then the day's photos edge to edge with 2 pt between them, three in a row until two
+/// fingers or VoiceOver's zoom change that; photos without a date last. A tap opens a photo
+/// large, zooming out of its tile and back (`PhotoViewer`); while the suggestion picks photos
+/// ("Auswählen") a tap ticks it, and a finger drawn sideways ticks the photos it crosses.
+/// Photos taken out of a suggestion stay in the library and in other suggestions.
 struct ProposalPhotosView: View {
     @Environment(AppModel.self) private var model
     /// The suggestion's photos by day (`AppModel.proposalPhotoDays`).
@@ -1730,10 +1737,8 @@ struct ProposalPhotosView: View {
     var askToRemove: (AssetID) -> Void
     @State private var viewing: PhotoViewer.Start?
     @Namespace private var zoom
-    /// Three in a row from the narrowest iPhone (375 pt) to the widest (440 pt); more on an iPad.
-    private let columns = [GridItem(.adaptive(minimum: 110), spacing: 2)]
-    /// The side a photo's thumbnail is asked for, and its long press lifts that image.
-    private static let photoSide: CGFloat = 140
+    /// The days as the grid's sections, made again only when the page hands over other days.
+    @State private var grid = PhotoGridSectionsCache()
 
     var body: some View {
         Group {
@@ -1745,24 +1750,30 @@ struct ProposalPhotosView: View {
                         .buttonStyle(CardActionButtonStyle())
                 }
                 .padding(.horizontal, Theme.Spacing.l)
+                // As far below the page's cards as a day's title is (`PhotoGridHeader`).
+                .padding(.top, Theme.Spacing.m)
             } else {
-                LazyVStack(alignment: .leading, spacing: Theme.Spacing.l) {
-                    ForEach(days) { day in
-                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                            header(day)
-                            LazyVGrid(columns: columns, spacing: 2) {
-                                ForEach(day.ids, id: \.self) { id in
-                                    tile(id)
-                                }
-                            }
-                        }
-                    }
+                PhotoGrid(sections: sections[...], place: .suggestion, selecting: selecting, selection: $selected,
+                          available: !disabled && isCurrent, disabled: disabled, zoom: zoom,
+                          identifier: "proposalPhotos.photo") { id in
+                    open(id)
+                } perform: { item, id in
+                    perform(item, on: id)
                 }
             }
         }
         .fullScreenCover(item: $viewing) { start in
             PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
                 .navigationTransition(.zoom(sourceID: start.id, in: zoom))
+        }
+    }
+
+    /// The days with each photo's date and time on the clock where it was taken, as its day's
+    /// header says it (what VoiceOver says of a photo).
+    private var sections: [PhotoGridSection] {
+        grid.sections(for: days) {
+            let facts = model.factsByID
+            return PhotoGridSection.sections(days) { facts[$0]?.wallClock(or: .current) }
         }
     }
 
@@ -1781,69 +1792,6 @@ struct ProposalPhotosView: View {
         // Not offered for a suggestion's photos (`PhotoMenu`): they stay behind "Ansehen" › "Info".
         case .addToAlbum, .ignore, .stopIgnoring: break
         }
-    }
-
-    /// "Samstag, 12. Oktober" with "3 Fotos" at the end of the line; below each other at the
-    /// accessibility text sizes. A heading for VoiceOver's rotor.
-    private func header(_ day: PhotoDay) -> some View {
-        AdaptiveStack(verticalAlignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
-            Text(verbatim: day.title)
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(verbatim: day.countText)
-                .font(.subheadline)
-                .foregroundStyle(.noteText)
-        }
-        .padding(.horizontal, Theme.Spacing.l)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    /// A real button with the photo's date as its name, like the library grid (design review
-    /// D3: the tile had only a tap gesture and no name, so VoiceOver and Voice Control could
-    /// not pick photos to take out of the suggestion).
-    private func tile(_ id: AssetID) -> some View {
-        let isSelected = selected.contains(id)
-        return Button {
-            // Outside "Auswählen" a tap opens the photo large (first device test 15.11.).
-            guard selecting else {
-                open(id)
-                return
-            }
-            if isSelected { selected.remove(id) } else { selected.insert(id) }
-        } label: {
-            AssetThumbnail(id: id, side: Self.photoSide)
-                .aspectRatio(1, contentMode: .fill)
-                .clipped()
-                .matchedTransitionSource(id: id, in: zoom)
-                .overlay(alignment: .bottomTrailing) {
-                    if selecting {
-                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                            .font(.title3)
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, isSelected ? Theme.accent : Color.black.opacity(0.25))
-                            .padding(5)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .opacity(selecting && !isSelected ? 0.85 : 1)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .accessibilityLabel(Text(spokenDate(id)))
-        .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
-        .accessibilityIdentifier("proposalPhotos.photo")
-        // The long press (DS-06a): the photo larger, "Ansehen" and "Aus Vorschlag entfernen".
-        .photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled && isCurrent) { item in
-            perform(item, on: id)
-        }
-    }
-
-    /// The photo's date and time on the clock where it was taken, as its day's header says it.
-    private func spokenDate(_ id: AssetID) -> String {
-        guard let wall = model.factsByID[id]?.wallClock(or: .current) else { return String(localized: "Foto") }
-        return wall.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: .gmt))
     }
 }
 

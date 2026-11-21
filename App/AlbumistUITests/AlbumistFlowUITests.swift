@@ -513,7 +513,25 @@ final class AlbumistFlowUITests: XCTestCase {
         // shows; no element says it is written, and the launch below ends the app.
         sleep(2)
         launch(extra)
+        startsAfterPlan(what)
         return done
+    }
+
+    /// The start right after a plan: the tabs within 15 s, as every other start. UI run
+    /// 44862187776 still showed "Albumist wird geladen" 56 s after the start in test 1c, and the
+    /// tests after it found the trips made that 1c takes back. The wait goes on up to 120 s, so a
+    /// slow start is a finding of its own with its time and picture, and the test still takes
+    /// back what it made.
+    private func startsAfterPlan(_ what: String) {
+        let started = Date()
+        let ready = app.tabBars.firstMatch.waitForExistence(timeout: 120)
+        let seconds = Date().timeIntervalSince(started)
+        print("UI_TIMING tabs after the start following the plan for \(what) \(String(format: "%.1f", seconds)) s")
+        guard !ready || seconds > 15 else { return }
+        let loading = app.activityIndicators["Albumist wird geladen"].exists
+        print("UI_FACT start after the plan for \(what): tabs \(ready), still loading \(loading), state \(app.state.rawValue)")
+        shot("x-slow-start-after-plan-for-" + what.replacingOccurrences(of: " ", with: "-"))
+        XCTFail("Albumist needed \(Int(seconds)) s to start after the plan for \(what)\(ready ? "" : " and did not start")")
     }
 
     // MARK: Tests

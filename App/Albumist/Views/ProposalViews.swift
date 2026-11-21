@@ -114,7 +114,9 @@ struct ProposalListView: View {
         }
         .quickCreateMomentScrollTrail() // Design W2 H6: scroll trail
         .background(Theme.background)
-        .navigationTitle(area?.title ?? "Vorschläge")
+        // The words of the start page's row that opens it, never the start page's own title:
+        // "Vorschläge" twice read as nothing happening (UI run 44862187776).
+        .navigationTitle(area?.title ?? "Alle Vorschläge")
         // While ticking, "Alle auswählen" takes the place of Back, as in Photos and Files.
         .navigationBarBackButtonHidden(selecting)
         .toolbar {

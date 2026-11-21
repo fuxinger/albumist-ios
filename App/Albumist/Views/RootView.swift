@@ -89,6 +89,10 @@ struct MainTabs: View {
         ? "rectangle.portrait.on.rectangle.portrait.angled" : "rectangle.on.rectangle.angled"
 
     var body: some View {
+        // Read here, in `body`, which SwiftUI tracks: read only inside the sheet's binding, a new
+        // request is not sure to redraw the tabs, and the purchase sheet did not come (locked UI
+        // test 8, run 44862187776).
+        let purchase = model.quickCreatePurchase
         TabView(selection: $tab) {
             // Every tab shows the banner after "Anlegen" above the tab bar (decision 7B), so on
             // the tabs' stacks "Anlegen" makes the album at once (`quickCreateAtOnce`); a sheet's
@@ -154,8 +158,9 @@ struct MainTabs: View {
         }
         // "Anlegen" found the free albums used up: the purchase sheet instead of the album. Once
         // Albumist is unlocked, the album is made as tapped; closed without buying, the
-        // suggestion stays open.
-        .sheet(item: Binding(get: { model.quickCreatePurchase }, set: { model.quickCreatePurchase = $0 })) { request in
+        // suggestion stays open. Shows what `body` read (`purchase` above), so a new request
+        // redraws the tabs.
+        .sheet(item: Binding(get: { purchase }, set: { model.quickCreatePurchase = $0 })) { request in
             UnlockSheet(reason: .quickCreate) {
                 Task { await model.continueQuickCreate(after: request) }
             }

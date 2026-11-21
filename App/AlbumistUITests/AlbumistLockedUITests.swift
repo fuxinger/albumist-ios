@@ -394,7 +394,14 @@ final class AlbumistLockedUITests: XCTestCase {
         guard UITestScreens.Cards.tapAction(of: card, in: app, "Anlegen without free albums (locked)") else { return }
 
         // The sheet instead of the album, saying why and that the suggestion stays.
-        guard UITestWait.appears(UITestScreens.Purchase.sheet(app), "purchase sheet after Anlegen (locked)", timeout: 15) else { return }
+        guard UITestWait.appears(UITestScreens.Purchase.sheet(app), "purchase sheet after Anlegen (locked)", timeout: 15) else {
+            // What came instead (UI run 44862187776 left no picture of it): a message, the
+            // suggestion's page, or the start page as it was.
+            let alert = app.alerts.firstMatch
+            print("UI_FACT locked: after Anlegen \(alert.exists ? "the message '\(alert.label)'" : "no message"), screen '\(app.navigationBars.firstMatch.identifier)'")
+            shot("x-no-purchase-sheet-after-anlegen")
+            return
+        }
         shot("77-locked-card-purchase-sheet")
         let why = anything("kostenlosen Alben sind angelegt").waitForExistence(timeout: 3)
         print(why ? "UI_STEP_OK the sheet says the free albums are used up" : "UI_STEP_MISSING the sheet says the free albums are used up")

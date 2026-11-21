@@ -73,7 +73,11 @@ struct SettingsView: View {
                     TextField("Kein Ordner", text: $model.settings.rootFolderTitle)
                         .multilineTextAlignment(typeSize.isAccessibilitySize ? .leading : .trailing)
                 } label: {
+                    // Wraps at the largest text sizes, whatever the row proposes: it was cut to
+                    // one line there ("Ordner für ne…", UI run 44862187776).
                     Text("Ordner für neue Alben")
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("settings.rootFolder.label")
                 }
                 .labeledContentStyle(FieldRowStyle())

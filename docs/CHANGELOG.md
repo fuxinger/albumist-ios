@@ -210,6 +210,13 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 21.11. (voller UI-Lauf 44862187776 der Design-Wellen 1 und 2): „Anlegen“ ohne freie Alben öffnete das Kaufblatt
+  nicht. Die Tabs lasen die Anfrage nur in der Bindung des Blatts; jetzt liest `body` sie, was SwiftUI verfolgt, so
+  zeichnet eine neue Anfrage die Tabs sicher neu (der nächste Lauf zeigt mit Bild, ob das die ganze Ursache war). Die Liste aller Vorschläge heißt „Alle Vorschläge“ wie ihre Zeile auf der
+  Startseite, nicht mehr „Vorschläge“ wie die Startseite selbst. „Ordner für neue Alben“ bricht bei der größten Schrift
+  um, statt abgeschnitten zu werden. Der UI-Test misst den Start direkt nach einem Plan (im Lauf zeigte die App nach
+  56 s noch „Albumist wird geladen“, Ursache offen) und nimmt danach trotzdem zurück, was er angelegt hat: die
+  Tests danach fanden sonst alle Reisen angelegt.
 - 21.11. (UI-Tests, erster voller UI-Lauf von Design-Welle 1, 44852630315): drei Fehler lagen in den Testhilfen,
   nicht in der App. Ein Schritt las die Taste „Alle N“ erst nach dem Tippen, als die Liste sie schon verdeckt hatte
   (fünf Abläufe brachen ab). test6 suchte nur „Alle Jahre“; seit Welle 1 steht auf dem iPhone 18 Pro „Ganze

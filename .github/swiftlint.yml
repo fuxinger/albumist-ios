@@ -8,3 +8,7 @@
 
 # The folders are named on the command line (ci.yml). A wrong folder must not read as "clean".
 allow_zero_lintable_files: false
+
+# The statically linked Linux binary does not use SourceKit ("Skipping enabled rule
+# 'statement_position' because it requires SourceKit", first run 21.11.2026): of the default
+# rules only statement_position is left out that way. Everything else runs on SwiftSyntax.

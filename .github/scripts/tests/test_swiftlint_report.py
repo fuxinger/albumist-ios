@@ -84,6 +84,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("actions/cache", job)
         self.assertNotIn("continue-on-error", job)
         self.assertNotRegex(text, r"needs:[^\n]*swiftlint")
+        self.assertIn("persist-credentials: false", job)
+        self.assertIn("| tee -a \"$GITHUB_STEP_SUMMARY\"", job)
+        self.assertIn("shell: bash", job)  # GitHub's "bash" runs with -o pipefail
 
 
 if __name__ == "__main__":

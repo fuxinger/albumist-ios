@@ -65,6 +65,7 @@ jobs:
           tail -2 ../build/periphery/build-log.txt
       - name: Scan (report only)
         run: |
+          set -o pipefail
           set +e
           periphery scan \
             --project App/Albumist.xcodeproj \
@@ -77,7 +78,8 @@ jobs:
             --quiet > build/periphery/findings.json
           status=$?
           set -e
-          python3 .github/scripts/periphery_report.py --status "$status" build/periphery/findings.json >> "$GITHUB_STEP_SUMMARY"
+          # Also in the log: the job summary cannot be read through the API, the log can.
+          python3 .github/scripts/periphery_report.py --status "$status" build/periphery/findings.json | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload the report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

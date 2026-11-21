@@ -100,6 +100,9 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A downloaded tool runs here: it never sees a token in .git/config.
+          persist-credentials: false
       - name: Install Python
         run: bash .github/scripts/apt_install.sh python3
       - name: Install the pinned SwiftLint
@@ -112,7 +115,8 @@ jobs:
             --write-baseline swiftlint/baseline.json App Sources Tests Package.swift > swiftlint/findings.json
           status=$?
           set -e
-          python3 .github/scripts/swiftlint_report.py --status "$status" swiftlint/findings.json >> "$GITHUB_STEP_SUMMARY"
+          # Also in the log: the job summary cannot be read through the API, the log can.
+          python3 .github/scripts/swiftlint_report.py --status "$status" swiftlint/findings.json | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload the report and the baseline
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

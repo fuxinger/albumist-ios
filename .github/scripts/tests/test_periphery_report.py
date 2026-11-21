@@ -97,6 +97,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("continue-on-error", text)
         self.assertNotIn("mac-queue", text)
         self.assertIn("persist-credentials: false", text)
+        # The report goes to the log too, and its exit status is not lost in the pipe (macOS
+        # runs "bash -e" without pipefail).
+        self.assertIn("| tee -a \"$GITHUB_STEP_SUMMARY\"", text)
+        self.assertIn("set -o pipefail", text)
 
 
 if __name__ == "__main__":

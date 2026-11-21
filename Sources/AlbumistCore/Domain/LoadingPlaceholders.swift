@@ -1,18 +1,5 @@
 import Foundation
 
-/// A picture's size in pixels.
-public struct PixelSize: Equatable, Sendable {
-    public var width: Double
-    public var height: Double
-
-    public init(width: Double, height: Double) {
-        self.width = width
-        self.height = height
-    }
-
-    var isEmpty: Bool { !(width >= 1 && height >= 1) }
-}
-
 /// What one page of the photo view shows of its photo or video's still (design wave 3, DS-18:
 /// "ruhige Platzhalter beim Laden statt grauer Flächen und Kreisel"), as in Photos: while the
 /// picture comes, the thumbnail the grid showed, from memory, fitted as the picture will be (the
@@ -56,6 +43,19 @@ public enum ViewerPicture: Equatable, Sendable {
         guard let original, !original.isEmpty else { return false }
         return picture.width >= original.width * sharpShare && picture.height >= original.height * sharpShare
     }
+}
+
+/// A picture's size in pixels.
+public struct PixelSize: Equatable, Sendable {
+    public var width: Double
+    public var height: Double
+
+    public init(width: Double, height: Double) {
+        self.width = width
+        self.height = height
+    }
+
+    var isEmpty: Bool { !(width >= 1 && height >= 1) }
 }
 
 /// How a grid's thumbnail shows its photo once it is there (DS-18): one that was in memory, or

@@ -1349,9 +1349,19 @@ def run_group(args) -> int:
     global MTC_DYLIB, MTC_PROBE_ON
     os.makedirs(args.out, exist_ok=True)
     gate = load_gate()
-    MTC_DYLIB = mtc_dylib()
+    MTC_DYLIB = ""
+    if gate["main_thread_checker"].get("inject", True):
+        found = mtc_dylib(args.udid)
+        if not found:
+            print("::warning title=UI Main Thread Checker::library of the simulator runtime not found: "
+                  "this group runs without the checker", flush=True)
+        elif not mtc_preflight(args.udid, found):
+            print(f"::warning title=UI Main Thread Checker::{found} stopped a test launch: this group runs without "
+                  "the checker", flush=True)
+        else:
+            MTC_DYLIB = found
     MTC_PROBE_ON = bool(gate["main_thread_checker"].get("probe"))
-    print(f"UI_MTC_DYLIB {MTC_DYLIB or 'not found (the app runs without the Main Thread Checker)'}", flush=True)
+    print(f"UI_MTC_DYLIB {MTC_DYLIB or 'none (the app runs without the Main Thread Checker)'}", flush=True)
     CONSOLES.clear()
     chosen = selection(args.only, args.skip)
     if args.increase_contrast:
@@ -1457,6 +1467,12 @@ MTC_START = re.compile(r"Main Thread Checker: (.+?)\s*$")
 MTC_FRAME = re.compile(r"^\s*\d+\s+(\S+)\s+0x[0-9a-fA-F]+\s+(.*?)\s*$")
 MTC_PROBE = "MainThreadCheckerProbe"
 OWN_IMAGES = ("Albumist", "Albumist.debug.dylib")
+HANG_KINDS = ("app", "test", "start", "inactive", "starved", "system", "unknown")
+# The app's ping goes out up to one watch tick (50 ms, MainThreadWatch.tick) after the main thread
+# last answered, so a wait is measured up to 50 ms short: a line from limit - 50 ms counts.
+MAIN_HANG_SLACK_MS = 50
+# A system app the preflight launches with the checker inserted (always on the simulator).
+PREFLIGHT_APP = "com.apple.Preferences"
 
 
 def load_gate(path: str = "") -> dict:
@@ -1464,15 +1480,17 @@ def load_gate(path: str = "") -> dict:
     directory); a missing or broken file means 'report' for both (never red by accident)."""
     path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", GATE_FILE)
     default = {"hangs": {"mode": "report", "limit_ms": 250, "known": []},
-               "main_thread_checker": {"mode": "report", "probe": True, "known": []}}
+               "main_thread_checker": {"mode": "report", "inject": True, "probe": True, "known": []}}
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
+        if not isinstance(data, dict) or not all(isinstance(data.get(k, {}), dict) for k in default):
+            raise ValueError("not an object of objects")
     except (OSError, ValueError) as error:
         print(f"::warning::{path} not readable ({error}): hang watch and Main Thread Checker only report", flush=True)
         return default
     for key, value in default.items():
-        data.setdefault(key, value)
+        data.setdefault(key, {})
         for field, fallback in value.items():
             data[key].setdefault(field, fallback)
     return data
@@ -1505,13 +1523,13 @@ def hang_report(name: str, log_path: str, gate: dict, summary: str | None = None
     settings = gate["hangs"]
     try:
         with open(log_path, encoding="utf-8", errors="replace") as f:
-            hangs = parse_hangs(f.read(), int(settings["limit_ms"]))
+            hangs = parse_hangs(f.read(), int(settings["limit_ms"]) - MAIN_HANG_SLACK_MS)
     except OSError:
         hangs = []
     kinds: dict[str, list[int]] = {}
     for hang in hangs:
         kinds.setdefault(hang["kind"], []).append(hang["ms"])
-    for kind in ("app", "test", "start", "inactive", "system"):
+    for kind in HANG_KINDS:
         values = kinds.get(kind, [])
         print(f"UI_HANG_COUNT {name} {kind} {len(values)}" + (f" (longest {max(values)} ms, total {sum(values)} ms)" if values else ""),
               flush=True)
@@ -1543,7 +1561,7 @@ def hang_report(name: str, log_path: str, gate: dict, summary: str | None = None
               "code (report only; UI_HANG_APP lines)", flush=True)
     path = summary if summary is not None else os.environ.get("GITHUB_STEP_SUMMARY")
     if path:
-        counts = ", ".join(f"{k} {len(kinds.get(k, []))}" for k in ("app", "test", "start", "inactive", "system"))
+        counts = ", ".join(f"{k} {len(kinds.get(k, []))}" for k in HANG_KINDS)
         with open(path, "a", encoding="utf-8") as out:
             out.write(f"\n**Hangs ≥ {settings['limit_ms']} ms ({name}, mode {settings['mode']}):** {counts}\n")
             if rows:
@@ -1595,8 +1613,9 @@ def main_thread_checker_report(name: str, console_text: str, system_log: str, ga
     warnings = []
     if states.count("not active"):
         warnings.append(f"{states.count('not active')} launch(es) without the Main Thread Checker")
-    if settings.get("probe") and states.count("active") and not probes:
-        warnings.append("the checker's deliberate probe report never reached the console file: its reports may be lost")
+    if settings.get("probe") and len(probes) < states.count("active"):
+        warnings.append(f"only {len(probes)} of {states.count('active')} launches' deliberate probe reports reached the console "
+                        "file: reports of the other launches may be lost")
     places: dict[str, dict] = {}
     for r in real:
         place = places.setdefault(f"{r['api']} @ {mtc_place(r)}", {"count": 0, "api": r["api"], "stack": mtc_place(r)})
@@ -1627,17 +1646,49 @@ def main_thread_checker_report(name: str, console_text: str, system_log: str, ga
     return new
 
 
-def mtc_dylib(run=sh, exists=os.path.exists) -> str:
-    """The Main Thread Checker library for the simulator on this Mac ('' when there is none)."""
-    status, developer = run(["xcode-select", "-p"], timeout=30, quiet=True)
-    developer = developer.strip().splitlines()[-1] if status == 0 and developer.strip() else ""
-    if not developer:
+def mtc_dylib(udid: str, run=sh, exists=os.path.exists) -> str:
+    """The Main Thread Checker library of the simulator runtime `udid` runs on ('' when there is
+    none): <runtimeRoot>/usr/lib/libMainThreadChecker.dylib, the copy Xcode itself inserts into a
+    simulator app (the macOS one in Xcode's usr/lib would stop every launch)."""
+    status, devices = run(["xcrun", "simctl", "list", "devices", "-j"], timeout=60, quiet=True)
+    status2, runtimes = run(["xcrun", "simctl", "list", "runtimes", "-j"], timeout=60, quiet=True)
+    if status or status2:
         return ""
-    for candidate in (f"{developer}/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libMainThreadChecker.dylib",
-                      f"{developer}/usr/lib/libMainThreadChecker.dylib"):
-        if exists(candidate):
-            return candidate
-    return ""
+    try:
+        runtime = next(key for key, items in json.loads(devices).get("devices", {}).items()
+                       if any(d.get("udid") == udid for d in items))
+        root = next(r.get("runtimeRoot", "") for r in json.loads(runtimes).get("runtimes", [])
+                    if r.get("identifier") == runtime)
+    except (ValueError, StopIteration, AttributeError):
+        return ""
+    candidate = f"{root}/usr/lib/libMainThreadChecker.dylib" if root else ""
+    return candidate if candidate and exists(candidate) else ""
+
+
+def mtc_preflight(udid: str, dylib: str, run=sh, sleep=time.sleep) -> bool:
+    """Launches a system app with the checker inserted and sees it still running after 5 s: a
+    library that cannot load stops every process it is inserted into, and the UI tests would
+    then fail at every launch, looking like a simulator failure. False: run without it."""
+    env_name = "SIMCTL_CHILD_DYLD_INSERT_LIBRARIES"
+    previous = os.environ.get(env_name)
+    os.environ[env_name] = dylib
+    try:
+        status, out = run(["xcrun", "simctl", "launch", "--terminate-running-process", udid, PREFLIGHT_APP],
+                          timeout=90, quiet=True)
+    finally:
+        if previous is None:
+            os.environ.pop(env_name, None)
+        else:
+            os.environ[env_name] = previous
+    match = re.search(r":\s*(\d+)\s*$", out.strip())
+    if status or not match:
+        print(f"UI_MTC_PREFLIGHT launch failed ({out.strip()[-300:]})", flush=True)
+        return False
+    sleep(5)
+    alive, _ = run(["ps", "-p", match.group(1)], timeout=30, quiet=True)
+    run(["xcrun", "simctl", "terminate", udid, PREFLIGHT_APP], timeout=60, quiet=True)
+    print(f"UI_MTC_PREFLIGHT {PREFLIGHT_APP} with the checker {'kept running' if alive == 0 else 'ended at once'}", flush=True)
+    return alive == 0
 
 
 def collect_console(udid: str, out: str, name: str, label: str, run=sh) -> str:

@@ -44,27 +44,34 @@ jobs:
   linux:
     name: Thread Sanitizer, core (Linux)
     runs-on: ubuntu-24.04
-    container: swift:6.2-noble
-    # Measured on a 4-core container (21.11.): build about 6 min, tests about 20 min.
+    # Measured on a 4-core container (21.11.): build about 6 min, tests about 20-24 min.
     timeout-minutes: 60
-    defaults:
-      run:
-        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Address space for TSan
+        # TSan's shadow memory needs the kernel's mmap randomization at 28 bits; the Ubuntu 24.04
+        # runners use 32, and TSan then stops at once ("FATAL: ThreadSanitizer: unexpected memory
+        # mapping"). A host setting, so this job runs the swift container itself (below) instead
+        # of `container:`, whose steps could not change it. Not a test result: machinery.
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+      - name: Start the swift container
+        # The same image as the other Linux jobs (swift:6.2-noble), kept running for the steps below.
+        run: docker run -d --name swift -e TSAN_OPTIONS -v "$PWD:/work" -w /work swift:6.2-noble sleep infinity
       - name: Install SQLite headers
-        run: bash .github/scripts/apt_install.sh libsqlite3-dev python3
+        run: docker exec swift bash .github/scripts/apt_install.sh libsqlite3-dev python3
       - name: Core tests with Thread Sanitizer
         id: tests
         continue-on-error: true
         timeout-minutes: 50
         run: |
-          python3 .github/scripts/swift_test_watch.py --minutes 45 --log tsan-core.log -- \
+          docker exec swift python3 .github/scripts/swift_test_watch.py --minutes 45 --log tsan-core.log -- \
             swift test --sanitize=thread --parallel
       - name: Thread Sanitizer reports
-        if: always()
+        # Not when the tests never started (a cancelled job, a failed step before): no log, and
+        # no finding to report; that failure shows in its own step.
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         env:
           TESTS: ${{ steps.tests.outcome }}
         run: python3 .github/scripts/sanitizer_report.py --tests "$TESTS" tsan-core.log >> "$GITHUB_STEP_SUMMARY"
@@ -97,7 +104,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 50
         run: |
-          set -o pipefail
+          set +e
           mkdir -p build
           UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --role default)
           [ -n "$UDID" ] || { echo "::error::pinned simulator not found"; exit 1; }
@@ -115,7 +122,7 @@ jobs:
           grep -aE "error:|Executed|\*\* |ThreadSanitizer:" ../build/tsan-app.log | grep -v "/SourcePackages/" | head -200
           exit $status
       - name: Thread Sanitizer reports
-        if: always()
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         env:
           TESTS: ${{ steps.tests.outcome }}
         run: |

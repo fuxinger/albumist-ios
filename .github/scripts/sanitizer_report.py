@@ -118,7 +118,7 @@ def escape(text: str) -> str:
 
 CRASH = re.compile(r"Exited with (?:unexpected )?signal|Fatal error|error: Exited with|TEST_HANG |"
                    r"Test crashed with signal|Restarting after unexpected exit|\bSIGSEGV\b|\bSIGABRT\b|\bSIGILL\b")
-FAILED_TEST = re.compile(r"(?:✘ Test (.+?) (?:recorded an issue|failed)|Test Case '(.+?)' failed)")
+FAILED_TEST = re.compile(r"(?:✘ Test (?!run with )(.+?) (?:recorded an issue|failed)|Test Case '(.+?)' failed)")
 
 
 def test_findings(logs: dict[str, str]) -> tuple[list[str], list[str]]:

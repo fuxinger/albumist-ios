@@ -25,7 +25,9 @@ SYSTEM_LOG = "\n".join([
     PREFIX + "UI_MAIN_HANG 410 ms app in [plan review: order]: Albumist.debug.dylib PlanReviewView.order()",
     PREFIX + "UI_MAIN_HANG 2400 ms test in [unmarked]: XCTAutomationSupport x | Albumist.debug.dylib V.body",
     PREFIX + "UI_MAIN_HANG 3100 ms start in [unmarked]: libsystem_kernel.dylib mach_msg2_trap",
-    PREFIX + "UI_MAIN_HANG 249 ms app in [unmarked]: Albumist.debug.dylib Tiny.work()",
+    PREFIX + "UI_MAIN_HANG 190 ms app in [unmarked]: Albumist.debug.dylib Tiny.work()",
+    PREFIX + "UI_MAIN_HANG 210 ms app in [unmarked]: Albumist.debug.dylib Near.work()",
+    PREFIX + "UI_MAIN_HANG 700 ms starved in [unmarked]: Albumist.debug.dylib V.body",
     PREFIX + "UI_FACT main thread checker not active",
 ])
 # As libMainThreadChecker prints a report to the app's stderr.
@@ -66,30 +68,34 @@ class HangReportTests(unittest.TestCase):
 
     def test_counts_by_kind_and_only_app_hangs_count(self):
         (new, total), out, summary = self.run_report(gate())
-        self.assertEqual((new, total), (3, 3))  # 249 ms is under the limit
-        self.assertIn("UI_HANG_COUNT g app 3 (longest 905 ms, total 1627 ms)", out)
+        # 210 ms counts (measured up to 50 ms short, MAIN_HANG_SLACK_MS), 190 ms does not.
+        self.assertEqual((new, total), (4, 4))
+        self.assertIn("UI_HANG_COUNT g app 4 (longest 905 ms, total 1837 ms)", out)
+        self.assertIn("UI_HANG_COUNT g starved 1", out)
+        self.assertIn("UI_HANG_COUNT g unknown 0", out)
         self.assertIn("UI_HANG_COUNT g test 1", out)
         self.assertIn("UI_HANG_COUNT g start 1", out)
         self.assertIn("UI_HANG_COUNT g system 0", out)
-        self.assertIn("app 3, test 1, start 1, inactive 0, system 0", summary)
+        self.assertIn("app 4, test 1, start 1, inactive 0, starved 1, system 0, unknown 0", summary)
 
     def test_one_line_per_place_longest_first(self):
         _, out, summary = self.run_report(gate())
         lines = [l for l in out.splitlines() if l.startswith("UI_HANG_APP")]
-        self.assertEqual(len(lines), 2)
+        self.assertEqual(len(lines), 3)
         self.assertTrue(lines[0].startswith("UI_HANG_APP g 2x longest 905 ms (new) in [overview body, unmarked]"))
         self.assertIn("PlanReviewView.order()", lines[1])
+        self.assertIn("Near.work()", lines[2])
         self.assertIn("| 2 | 905 ms | new |", summary)
 
     def test_report_mode_warns_and_fail_mode_errors(self):
         _, out, _ = self.run_report(gate())
-        self.assertIn("::warning title=UI g hangs::3 hang(s)", out)
+        self.assertIn("::warning title=UI g hangs::4 hang(s)", out)
         _, out, _ = self.run_report(gate(hangs="fail"))
-        self.assertIn("::error title=UI g hangs::3 hang(s)", out)
+        self.assertIn("::error title=UI g hangs::4 hang(s)", out)
 
     def test_known_places_do_not_count_as_new(self):
         (new, total), out, _ = self.run_report(gate(hangs="fail", known_hangs=[{"stack": "PlanReviewView.order()", "why": "N-09"}]))
-        self.assertEqual((new, total), (2, 3))
+        self.assertEqual((new, total), (3, 4))
         self.assertIn("(known: N-09)", out)
 
     def test_no_log_means_nothing_found(self):
@@ -128,7 +134,12 @@ class MainThreadCheckerTests(unittest.TestCase):
         self.assertIn("1 launch(es) without the Main Thread Checker", out)
         new, out = self.run_report("")
         self.assertEqual(new, 0)
-        self.assertIn("probe report never reached the console file", out)
+        self.assertIn("only 0 of 1 launches' deliberate probe reports", out)
+
+    def test_fewer_probes_than_launches_with_the_checker_is_said(self):
+        two = SYSTEM_LOG + "\n" + PREFIX + "UI_FACT main thread checker active"
+        _, out = self.run_report(CONSOLE, system_log=two)
+        self.assertIn("only 1 of 2 launches' deliberate probe reports", out)
 
     def test_known_reports_do_not_count(self):
         new, out = self.run_report(CONSOLE, settings=gate(mtc="fail", known_mtc=[{"api": "applicationState", "why": "N-10"}]))
@@ -193,14 +204,48 @@ class GateTests(unittest.TestCase):
 
 
 class MacSideTests(unittest.TestCase):
-    def test_the_simulators_library_first(self):
-        run = lambda cmd, **kw: (0, "/Applications/Xcode_27.app/Contents/Developer\n")
-        sim = "/Applications/Xcode_27.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libMainThreadChecker.dylib"
-        mac = "/Applications/Xcode_27.app/Contents/Developer/usr/lib/libMainThreadChecker.dylib"
-        self.assertEqual(ui_tests.mtc_dylib(run, exists=lambda p: p in (sim, mac)), sim)
-        self.assertEqual(ui_tests.mtc_dylib(run, exists=lambda p: p == mac), mac)
-        self.assertEqual(ui_tests.mtc_dylib(run, exists=lambda p: False), "")
-        self.assertEqual(ui_tests.mtc_dylib(lambda cmd, **kw: (127, "no xcode-select"), exists=lambda p: True), "")
+    def test_the_library_of_the_devices_runtime(self):
+        devices = json.dumps({"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-26-0": [{"udid": "OTHER"}],
+                                          "com.apple.CoreSimulator.SimRuntime.iOS-27-0": [{"udid": "U"}]}})
+        runtimes = json.dumps({"runtimes": [
+            {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-0", "runtimeRoot": "/R26"},
+            {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-0", "runtimeRoot": "/R27"}]})
+        run = lambda cmd, **kw: (0, devices if cmd[3] == "devices" else runtimes)
+        self.assertEqual(ui_tests.mtc_dylib("U", run, exists=lambda p: True), "/R27/usr/lib/libMainThreadChecker.dylib")
+        self.assertEqual(ui_tests.mtc_dylib("U", run, exists=lambda p: False), "")
+        self.assertEqual(ui_tests.mtc_dylib("NONE", run, exists=lambda p: True), "")
+        self.assertEqual(ui_tests.mtc_dylib("U", lambda cmd, **kw: (1, "no simctl"), exists=lambda p: True), "")
+        self.assertEqual(ui_tests.mtc_dylib("U", lambda cmd, **kw: (0, "not json"), exists=lambda p: True), "")
+
+    def test_the_preflight_keeps_the_checker_only_when_an_app_survives_it(self):
+        calls = []
+
+        def run(alive):
+            def inner(cmd, **kw):
+                calls.append((cmd, os.environ.get("SIMCTL_CHILD_DYLD_INSERT_LIBRARIES")))
+                if cmd[:3] == ["xcrun", "simctl", "launch"]:
+                    return 0, "com.apple.Preferences: 4711\n"
+                if cmd[0] == "ps":
+                    return (0 if alive else 1), ""
+                return 0, ""
+            return inner
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(ui_tests.mtc_preflight("U", "/R/lib.dylib", run(True), sleep=lambda s: None))
+            self.assertFalse(ui_tests.mtc_preflight("U", "/R/lib.dylib", run(False), sleep=lambda s: None))
+            self.assertFalse(ui_tests.mtc_preflight("U", "/R/lib.dylib", lambda cmd, **kw: (1, "error"), sleep=lambda s: None))
+        launch = [c for c in calls if c[0][:3] == ["xcrun", "simctl", "launch"]][0]
+        self.assertEqual(launch[1], "/R/lib.dylib")  # inserted into the launched app only
+        self.assertNotIn("SIMCTL_CHILD_DYLD_INSERT_LIBRARIES", os.environ)
+        self.assertEqual([c[0][1] for c in calls if c[0][0] == "ps"], ["-p", "-p"])
+
+    def test_a_gate_file_with_the_wrong_shape_only_reports(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            f.write('{"hangs": "fail"}')
+        with contextlib.redirect_stdout(io.StringIO()):
+            loaded = ui_tests.load_gate(f.name)
+        os.unlink(f.name)
+        self.assertEqual(loaded["hangs"]["mode"], "report")
+        self.assertTrue(loaded["main_thread_checker"]["inject"])
 
     def test_the_runner_hands_the_checker_to_the_tests(self):
         old = ui_tests.MTC_DYLIB, ui_tests.MTC_PROBE_ON
@@ -233,7 +278,7 @@ class MacSideTests(unittest.TestCase):
         with open(os.path.join(ROOT, "App", "AlbumistUITests", "UITestAppEnd.swift"), encoding="utf-8") as f:
             tests = f.read()
         self.assertIn(f'"{ui_tests.CONSOLE_FILE}"', app)
-        self.assertIn('"UI_MAIN_HANG \\(Int(waited * 1000)) ms \\(kind.rawValue) in [\\(names)]: ', app)
+        self.assertIn('"UI_MAIN_HANG \\(Int(waited * 1000)) ms \\(kind.rawValue) in [\\(hangNames)]: ', app)
         self.assertIn("UI_FACT main thread checker \\(active ? \"active\" : \"not active\")", app)
         self.assertIn("enum " + ui_tests.MTC_PROBE, app)
         self.assertIn('environment["ALBUMIST_MTC_DYLIB"]', tests)

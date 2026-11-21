@@ -230,15 +230,25 @@ final class MainThreadWatch: @unchecked Sendable {
     private let frameBuffer = UnsafeMutablePointer<UInt>.allocate(capacity: MainThreadWatch.maxFrames)
     /// Watch thread only: when the current ping's next stack is taken (seconds waited).
     private var nextStackAt: Double = 2
-    /// The main thread's stack 200 ms into the current ping's wait (symbolized), for the
-    /// `UI_MAIN_HANG` line; set by the watch thread under `lock`.
-    private var hangStack: [String]?
+    /// The main thread's return addresses 150 ms into the current ping's wait, for the
+    /// `UI_MAIN_HANG` line; stored by the watch thread under `lock` right after they are taken
+    /// (symbolized only in `answered`, so a hang that ends just after keeps its stack).
+    private var hangStack: [UInt]?
+    /// The marked sections seen from 150 ms into the current ping (the hang line's, at most 4;
+    /// `seenInStall` keeps its 0.5 s for the stall lines as before).
+    private var hangSections: [String] = []
+    /// The watch's own sleep overran while the current ping waited: the whole process got no
+    /// time (a busy Mac), so the stack says nothing (`HangKind.starved`).
+    private var starvedInPing = false
     /// The app has been foreground-active at least once (a hang before is part of the start).
     private var wasActive = false
     /// The watch's tick: a hang of 250 ms is seen within 50 ms (it was 0.2 s before
     /// the 250-ms watch; a ping costs one main-queue block).
     static let tick = 0.05
     /// A stall of this length or more is a hang (Apple's limit, as in Xcode's hang reports).
+    /// A ping goes out up to one tick after the main thread last answered, so a wait is measured
+    /// up to 50 ms short: every wait from `hangLimit - tick` on is written (`ui_tests.py` counts
+    /// from there too, MAIN_HANG_SLACK_MS), and the stack is taken a tick before that.
     static let hangLimit = 0.25
 
     @MainActor
@@ -364,12 +374,19 @@ final class MainThreadWatch: @unchecked Sendable {
                 workInPing = [:]
                 inactiveInStall = !active
                 hangStack = nil
+                hangSections = []
+                starvedInPing = false
+            } else if slept >= Self.tick + 0.15 {
+                starvedInPing = true
             }
             let needsHangStack = pending != nil && hangStack == nil
             let waited = pending.map { Self.seconds(from: $0, to: now) } ?? 0
-            if waited >= Self.hangLimit {
-                let path = sections.isEmpty ? "unmarked" : sections.map { $0.name }.joined(separator: ">")
+            let path = sections.isEmpty ? "unmarked" : sections.map { $0.name }.joined(separator: ">")
+            if waited >= 0.5 {
                 if !seenInStall.contains(path) && seenInStall.count < 4 { seenInStall.append(path) }
+            }
+            if waited >= Self.hangLimit - 2 * Self.tick {
+                if !hangSections.contains(path) && hangSections.count < 4 { hangSections.append(path) }
             }
             let stuck = pending != nil && waited >= nextStuckReport
             if stuck { nextStuckReport *= 2 }
@@ -378,10 +395,9 @@ final class MainThreadWatch: @unchecked Sendable {
             let current = sections.last.map { "\($0.name) running for \(Self.text(Self.seconds(from: $0.began, to: now))) s" } ?? "no marked section"
             let inactive = inactiveInStall
             lock.unlock()
-            if needsHangStack, waited >= Self.hangLimit - Self.tick, let stack = captureMainStack() {
-                let frames = stack.enumerated().map { Self.symbol($0.element, isReturnAddress: $0.offset > 0) }
+            if needsHangStack, waited >= Self.hangLimit - 2 * Self.tick, let stack = captureMainStack() {
                 lock.lock()
-                if askedAt == pending { hangStack = frames }
+                if askedAt == pending { hangStack = stack }
                 lock.unlock()
             }
             if pending != nil, waited >= nextStackAt, stacksInPing < Self.maxStacks {
@@ -411,14 +427,17 @@ final class MainThreadWatch: @unchecked Sendable {
         if stress, waited > 1 { longestStall = max(longestStall, waited) }
         let longest = longestStall
         let work = workInPing
-        let stack = hangStack ?? []
+        let addresses = hangStack ?? []
+        let hangNames = hangSections.isEmpty ? "unmarked" : hangSections.joined(separator: ", ")
+        let starved = starvedInPing
         let started = wasActive
         hangStack = nil
         lock.unlock()
         guard asked != nil else { return }
-        if waited >= Self.hangLimit {
-            let kind = HangKind(frames: stack, inactive: inactive, beforeFirstActive: !started)
-            note("UI_MAIN_HANG \(Int(waited * 1000)) ms \(kind.rawValue) in [\(names)]: \(HangKind.shortStack(stack))")
+        if waited >= Self.hangLimit - Self.tick {
+            let frames = addresses.enumerated().map { Self.symbol($0.element, isReturnAddress: $0.offset > 0) }
+            let kind = HangKind(frames: frames, inactive: inactive, beforeFirstActive: !started, starved: starved)
+            note("UI_MAIN_HANG \(Int(waited * 1000)) ms \(kind.rawValue) in [\(hangNames)]: \(HangKind.shortStack(frames))")
         }
         // Written only here, on the main thread.
         if waited > 0.5, let file {
@@ -596,13 +615,26 @@ enum MainThreadCheckerProbe {
         }
         MainThreadWatch.shared.report("UI_FACT main thread checker \(active ? "active" : "not active")")
         guard active, ProcessInfo.processInfo.environment["ALBUMIST_MTC_PROBE"] == "1" else { return }
-        Thread.detachNewThread { fireFromBackground() }
+        // Once the app is up (second review 21.11.: not while UIKit starts), once per launch.
+        _ = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil,
+                                                   queue: .main) { _ in
+            guard !fired else { return }
+            fired = true
+            // Made here on the main thread; only the layout call goes to the background thread.
+            guard let type = NSClassFromString("UIView") as? NSObject.Type else { return }
+            nonisolated(unsafe) let view = type.init()
+            Thread.detachNewThread { fireFromBackground(view) }
+        }
     }
 
-    /// The deliberate report: a UIKit call off the main thread (harmless on a view nobody shows).
+    /// Main thread only (the observer above).
+    nonisolated(unsafe) private static var fired = false
+
+    /// The deliberate report: `-[UIView setNeedsLayout]` off the main thread, on a view nobody
+    /// shows. Called through the Objective-C runtime, because Swift 6 rightly refuses a main-actor
+    /// call from a background thread at compile time; the checker watches the method itself.
     @inline(never)
-    static func fireFromBackground() {
-        let view = UIView()
-        view.setNeedsLayout()
+    static func fireFromBackground(_ view: NSObject) {
+        _ = view.perform(NSSelectorFromString("setNeedsLayout"))
     }
 }

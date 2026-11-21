@@ -30,11 +30,37 @@ struct HangKindTests {
         #expect(HangKind(frames: [ours, snapshot], inactive: true, beforeFirstActive: true) == .start)
     }
 
-    @Test func onlySystemFramesOrNoStackIsTheSystems() {
+    @Test func onlySystemFramesAreTheSystems() {
         #expect(HangKind(frames: [kernel, swiftUI], inactive: false, beforeFirstActive: false) == .system)
-        #expect(HangKind(frames: [], inactive: false, beforeFirstActive: false) == .system)
         // An image whose name only starts like ours is not ours.
         #expect(HangKind(frames: ["AlbumistWidgets x + 1"], inactive: false, beforeFirstActive: false) == .system)
+    }
+
+    @Test func theEntryPointAtTheBottomOfEveryStackIsNotOurs() {
+        // Second review 21.11.: every main-thread stack ends in our `main`; without this every
+        // hang of iOS alone counted as ours, all under one place.
+        let bottom = ["Albumist.debug.dylib static AlbumistApp.$main() + 40", "Albumist.debug.dylib __debug_main_executable_dylib_entry_point + 12",
+                      "Albumist main + 8", "dyld start + 2840"]
+        #expect(HangKind(frames: [kernel, swiftUI] + bottom, inactive: false, beforeFirstActive: false) == .system)
+        #expect(HangKind(frames: ["Albumist.debug.dylib MainThreadWatch.section<A>(_:_:) + 9"] + bottom,
+                         inactive: false, beforeFirstActive: false) == .system)
+        #expect(HangKind(frames: [ours] + bottom, inactive: false, beforeFirstActive: false) == .app)
+        #expect(HangKind.shortStack([kernel] + bottom) == "libsystem_kernel.dylib mach_msg2_trap | Albumist.debug.dylib static AlbumistApp.$main() | Albumist.debug.dylib __debug_main_executable_dylib_entry_point | Albumist main")
+        // An app frame without a symbol is still ours.
+        #expect(HangKind(frames: ["Albumist.debug.dylib +0x1f2c"] + bottom, inactive: false, beforeFirstActive: false) == .app)
+    }
+
+    @Test func ourCodeCallingTheAccessibilityRuntimeStaysOurs() {
+        // Our code (caller, higher index) posts to the accessibility runtime (callee, lower index).
+        #expect(HangKind(frames: [axRuntime, ours, swiftUI], inactive: false, beforeFirstActive: false) == .app)
+        // XCTest's snapshot (caller) ran our body (callee): the test's.
+        #expect(HangKind(frames: [ours, axRuntime, snapshot], inactive: false, beforeFirstActive: false) == .test)
+    }
+
+    @Test func aStarvedProcessOrAMissingStackSaysNothingAboutUs() {
+        #expect(HangKind(frames: [ours], inactive: false, beforeFirstActive: false, starved: true) == .starved)
+        #expect(HangKind(frames: [], inactive: false, beforeFirstActive: false) == .unknown)
+        #expect(HangKind(frames: [ours], inactive: true, beforeFirstActive: false, starved: true) == .inactive)
     }
 
     @Test func theShortStackShowsOurFramesAndWhatTheyWaitedIn() {

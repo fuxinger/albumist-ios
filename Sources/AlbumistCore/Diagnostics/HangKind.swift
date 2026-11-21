@@ -19,17 +19,33 @@ public enum HangKind: String, Sendable, CaseIterable {
     /// The app was in the background or behind a system alert in the hang: iOS may hold back a
     /// main thread then.
     case inactive
-    /// Only iOS frames (drawing, layout, a system call) or no stack at all.
+    /// The whole process got no time in the hang (the watch's own sleep overran: a busy Mac),
+    /// so the main thread's stack says nothing about who blocked it.
+    case starved
+    /// Only iOS frames (drawing, layout, a system call).
     case system
+    /// No stack: the hang ended before the watch could take one.
+    case unknown
 
-    public init(frames: [String], inactive: Bool, beforeFirstActive: Bool) {
+    /// `inactive` and `start` win over the stack by design: work of ours in `willResignActive`,
+    /// behind a system alert or at launch is not counted (Apple measures launch time on its own,
+    /// and iOS may hold back a main thread in the background).
+    public init(frames: [String], inactive: Bool, beforeFirstActive: Bool, starved: Bool = false) {
+        let own = frames.firstIndex(where: Self.isAppFrame)
+        // XCTest only when it is a caller of our code (or there is none of ours): our code that
+        // calls into the accessibility runtime itself (posts a notification) stays ours.
+        let test = frames.indices.contains { Self.isTestFrame(frames[$0]) && (own == nil || $0 > own!) }
         if beforeFirstActive {
             self = .start
         } else if inactive {
             self = .inactive
-        } else if frames.contains(where: Self.isTestFrame) {
+        } else if starved {
+            self = .starved
+        } else if frames.isEmpty {
+            self = .unknown
+        } else if test {
             self = .test
-        } else if frames.contains(where: Self.isAppFrame) {
+        } else if own != nil {
             self = .app
         } else {
             self = .system
@@ -41,10 +57,15 @@ public enum HangKind: String, Sendable, CaseIterable {
         frame.split(separator: " ", maxSplits: 1).first ?? ""
     }
 
-    /// Albumist's executable or, in a debug build, its debug dylib.
+    /// Albumist's executable or, in a debug build, its debug dylib; not the entry point at the
+    /// bottom of every main-thread stack (`main`, `AlbumistApp.$main()`), and not the watch itself.
     static func isAppFrame(_ frame: String) -> Bool {
-        let image = image(frame)
-        return image == "Albumist" || image == "Albumist.debug.dylib"
+        let parts = frame.split(separator: " ", maxSplits: 1)
+        guard let image = parts.first, image == "Albumist" || image == "Albumist.debug.dylib" else { return false }
+        let symbol = parts.count > 1 ? withoutOffset(String(parts[1])) : ""
+        let entry = symbol == "main" || symbol.contains("$main") || symbol.contains("entry_point")
+            || symbol.contains("MainThreadWatch")
+        return !entry
     }
 
     /// XCTest and the accessibility runtime it reads the screen with.

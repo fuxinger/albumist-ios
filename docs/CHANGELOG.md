@@ -2,6 +2,14 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. Videos und ruhige Platzhalter (Design-Welle 3, DS-16 und DS-18, noch in keinem Build): Videos spielen in
+  der Foto-Ansicht wie in Fotos: von selbst und in Schleife, wo Bewegung erwünscht ist (nicht mit „Bewegung
+  reduzieren“ oder ohne automatische Videovorschau), stumm, bis „Ton an“ die Musik anhält; darunter „Abspielen“,
+  ein Regler mit Zeiten und der Ton, die mit den Leisten gehen. Videos kommen nur vom iPhone; liegt eines nur in
+  iCloud, sagt die Foto-Ansicht ruhig, warum es nicht spielt. Miniaturen von Videos zeigen ihre Dauer („0:15“),
+  VoiceOver sagt „Video, 15 Sekunden“; wo ein Foto nur schmückt (Cover, Mosaike, die Schau der ersten Analyse),
+  steht keine Dauer. Beim Laden stehen ruhige, getönte Flächen statt grauer Kacheln und Kreisel; die Foto-Ansicht
+  zeigt bis zum scharfen Bild die Miniatur aus dem Raster und nie ein großes unscharfes Bild.
 - 21.11. App-Icon im Ebenen-Format von iOS 26 (DS-20, noch in keinem Build): „Glass Stack“ als
   Icon-Composer-Datei, Milchglas auf der vorderen Karte, hell, dunkel, klar und getönt aus einer Datei;
   das alte Bild-Icon ist entfernt. Neue Prüfung in CI: höchstens ein farbiger Hauptknopf pro Seite

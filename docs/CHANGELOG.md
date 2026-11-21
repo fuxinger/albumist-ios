@@ -190,6 +190,12 @@
   Namen, VoiceOver sagt es ohne Symbol. Die Knöpfe eines offenen Vorschlags nennen für VoiceOver das Album und sind
   gleich hoch; nur die eigene Vorschau schließt einen Vorschlag, und der Knopf einer Karte wartet, solange die Liste
   auswählt.
+- 21.11.: Startseite (Fable-Prüfung von Welle 1): Die Titelbilder der Karten werden nicht bei jedem Zeichnen neu
+  gesucht, das hält die Seite auch in großen Mediatheken flüssig. „Dein Startpaket“ bietet nie mehr Alben an, als
+  frei sind. Wer langsam aus einer Vorschau zurückwischt, sieht das Startpaket nicht mehr verschwinden und
+  wiederkommen; „Ergänzen …“ öffnet nichts mehr auf einem Stapel, den man verlassen hat. Eine Karte, die gerade
+  anlegt, sagt das VoiceOver; eine nach dem Kaufblatt angelegte zeigt „Angelegt“; „Was heißt sortiert?“ scrollt bei
+  sehr großer Schrift.
 - 20.11.: Größte Schrift (P3-18): Das Mosaik eines Vorschlags zeigt „+24“ statt „+…“; die Zahl wächst nur bis
   zur ersten Bedienungshilfe-Größe, steht in einer Zeile und wird eher etwas
   kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht

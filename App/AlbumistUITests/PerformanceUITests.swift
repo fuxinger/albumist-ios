@@ -112,18 +112,26 @@ final class PerformanceUITests: XCTestCase {
             throw XCTSkip("Quick UI run (ALBUMIST_UI_QUICK): the analysis is measured only in a full UI run")
         }
         prepare("perf analysis")
-        let began = Date()
-        launch(["-AlbumistUITestRebuildDatabase"])
+        // The clock starts right before the launch, after `UITestAppEnd.launch` has ended the app
+        // of `prepare` (that end can take up to a minute on a busy Mac and is no analysis).
+        var began = Date()
+        app = XCUIApplication()
+        app.launchArguments = Self.arguments + ["-AlbumistUITestRebuildDatabase"]
+        UITestAppEnd.launch(app) { began = Date() }
         // The analysis starts at launch with this switch; until its card shows "Pause" the idle
         // check would see the overview of a moment before it began.
         let pause = app.buttons["Pause"]
         let started = UITestWait.holds(timeout: 30) { pause.exists }
         if !started { print("UI_FACT perf analysis: no Pause within 30 s (a very quick analysis or a late card)") }
         let done = waitIdle(timeout: 1200)
-        let seconds = Date().timeIntervalSince(began)
+        // `waitIdle` needs three idle checks two seconds apart: the analysis ended about 4 s
+        // before it says so.
+        let seconds = max(0, Date().timeIntervalSince(began) - 4)
         print(done ? "UI_STEP_OK perf analysis done" : "UI_STEP_MISSING perf analysis done")
         XCTAssertTrue(done, "The analysis of the demo library did not finish within 20 min")
-        if done {
+        // Only a measured analysis is a value: without "Pause" the idle check may have seen the
+        // overview before the analysis began, and the time would look like a fast analysis.
+        if done && started {
             print("UI_PERF analysis \(String(format: "%.1f", seconds)) s")
         }
     }

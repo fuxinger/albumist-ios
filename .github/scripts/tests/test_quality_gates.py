@@ -184,10 +184,16 @@ class GateTests(unittest.TestCase):
                     self.assertTrue(ui_tests.quality_gates("g", log, CONSOLE, gate(hangs="fail")))
                     self.assertTrue(ui_tests.quality_gates("g", log, CONSOLE, gate(mtc="fail")))
                     self.assertFalse(ui_tests.quality_gates("g", log, "", gate(mtc="fail")))
-                    # In fail mode a group without the checker is red, never a silent green.
-                    ui_tests.MTC_DYLIB = ""
-                    self.assertTrue(ui_tests.quality_gates("g", log, "", gate(mtc="fail")))
                     self.assertFalse(ui_tests.quality_gates("g", log, "", gate()))
+                # In fail mode a group without the checker is loud (warning, UI_MTC_UNCHECKED) but
+                # not red: a preflight hiccup must not block an upload through release-smoke or stress.
+                ui_tests.MTC_DYLIB = ""
+                with contextlib.redirect_stdout(io.StringIO()) as out:
+                    self.assertFalse(ui_tests.quality_gates("g", log, "", gate(mtc="fail")))
+                self.assertIn("UI_MTC_UNCHECKED g", out.getvalue())
+                self.assertIn("WITHOUT the checker", out.getvalue())
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertTrue(ui_tests.quality_gates("g", log, CONSOLE, gate(mtc="fail")))
             finally:
                 ui_tests.MTC_DYLIB = old
                 os.environ.clear()
@@ -334,6 +340,10 @@ class PerfReportTests(unittest.TestCase):
 
     def test_unrecognised_xctest_lines_are_printed_raw(self):
         text = "Test Case '-[AlbumistUITests.PerformanceUITests test1_LaunchTime]' passed\nsome new measured format 1.2 s\nUI_PERF analysis 150.0 s"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            # flow-other names the class only in its skip list (xcodebuild echoes the command).
+            ui_tests.perf_report("flow-other", "-skip-testing:AlbumistUITests/PerformanceUITests\nx measured y", summary="")
+        self.assertNotIn("UI_PERF_RAW", out.getvalue())
         with contextlib.redirect_stdout(io.StringIO()) as out:
             ui_tests.perf_report("flow-full", text, summary="")
         self.assertIn("UI_PERF_RAW some new measured format 1.2 s", out.getvalue())

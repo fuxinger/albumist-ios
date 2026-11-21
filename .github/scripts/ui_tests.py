@@ -1774,7 +1774,8 @@ def perf_report(name: str, text: str, summary: str | None = None) -> list[dict]:
     """UI_PERF_VALUE lines and a table in the job summary. Report only (owner 16.11.: generous
     limits or none): nothing here makes the run red."""
     values = perf_values(text)
-    if "PerformanceUITests" in text and not any(v["test"] != "own" for v in values):
+    ran = re.search(r"Test [Cc]ase '[^']*PerformanceUITests[ .]test", text)
+    if ran and not any(v["test"] != "own" for v in values):
         # XCTest's own values were not recognised (UI run 44875998902: only the analysis time
         # came through): the raw lines, so the next run shows their format.
         raw = [line.strip() for line in text.splitlines() if " measured " in line or "XCTMetric" in line][:12]
@@ -1810,11 +1811,15 @@ def quality_gates(name: str, system_log_path: str, console: str, gate: dict) -> 
         print(f"::warning title=UI {name}::hang and Main Thread Checker report failed: {error!r}", flush=True)
         return False
     checker = gate["main_thread_checker"]
-    # In fail mode a group that ran without the checker has no verdict on it: red, never a silent green.
-    unchecked = checker["mode"] == "fail" and checker.get("inject", True) and not MTC_DYLIB
-    if unchecked:
-        print(f"::error title=UI {name} Main Thread Checker::the group ran without the checker (UI_MTC_DYLIB)", flush=True)
-    red = (gate["hangs"]["mode"] == "fail" and new_hangs > 0) or (checker["mode"] == "fail" and new_mtc > 0) or unchecked
+    # A group that ran without the checker (its library not found, or the preflight launch failed
+    # twice on a settling simulator) has no verdict on it. Loud, but not red: making it red let a
+    # simulator hiccup block a TestFlight upload through release-smoke and stress, which run the
+    # same groups code (second review 21.11.). UI_MTC_UNCHECKED counts such groups.
+    if checker["mode"] == "fail" and checker.get("inject", True) and not MTC_DYLIB:
+        print(f"UI_MTC_UNCHECKED {name}", flush=True)
+        print(f"::warning title=UI {name} Main Thread Checker::the group ran WITHOUT the checker (UI_MTC_DYLIB): "
+              "its launches were not checked", flush=True)
+    red = (gate["hangs"]["mode"] == "fail" and new_hangs > 0) or (checker["mode"] == "fail" and new_mtc > 0)
     if red:
         print(f"UI_QUALITY_GATE {name} red (hangs {new_hangs}, Main Thread Checker {new_mtc})", flush=True)
     return red

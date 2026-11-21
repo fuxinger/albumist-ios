@@ -136,7 +136,10 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// Polls until `condition` held on `stableChecks` checks in a row (2 s apart).
     @discardableResult
-    private func waitStable(_ what: String, timeout: TimeInterval, stableChecks: Int = 3, _ condition: () -> Bool) -> Bool {
+    /// `whileUnmet`: seconds between checks while the condition does not hold (2 s by default);
+    /// once it holds, the next checks come every 2 s, so "`stableChecks` in a row" keeps its meaning.
+    private func waitStable(_ what: String, timeout: TimeInterval, stableChecks: Int = 3, whileUnmet: UInt32 = 2,
+                            _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
         UITestOnboarding.clock("wait start \(what)")
@@ -149,7 +152,7 @@ final class DeviceConditionUITests: XCTestCase {
             if streak >= stableChecks { return true }
             // pacing: the poll's interval, kept: "`stableChecks` in a row" means the state held
             // over that many 2 s steps (prepare: about four seconds, not only between two batches).
-            sleep(2)
+            sleep(met ? 2 : whileUnmet)
         }
         print("UI_STEP_MISSING \(what) (timeout \(Int(timeout)) s)")
         return false
@@ -1465,8 +1468,15 @@ final class DeviceConditionUITests: XCTestCase {
         prepare()
         let started = Date()
         start(["-AlbumistUITestLargeLibrary", "3000"])
-        let analysed = waitStable("large library created and analysed", timeout: 1800, stableChecks: 2) {
-            guard let counts = analysedPhotos() else { return false }
+        // pacing: every 15 s while the library is still being made and analysed. The test asked every
+        // 2 s for 20.8 min in UI run 44828248004 (about 300 queries, 25 of them took 5 s), and each
+        // query needs the busy app's main thread. Each check logs the counts, so the log shows how
+        // long creating and how long analysing takes (the run gave only the sum, 1,250 s).
+        let analysed = waitStable("large library created and analysed", timeout: 1800, stableChecks: 2, whileUnmet: 15) {
+            let counts = analysedPhotos()
+            let shown = counts.map { "\($0.analysed) of \($0.total) analysed" } ?? "card: \(progressText() ?? "no count")"
+            print("UI_FACT large library after \(Int(Date().timeIntervalSince(started))) s: \(shown)")
+            guard let counts else { return false }
             return counts.total >= 3200 && counts.analysed == counts.total && !analysisRunning
         }
         print("UI_TIMING large library create and analyse \(Int(Date().timeIntervalSince(started))) s")

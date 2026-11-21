@@ -295,7 +295,7 @@ kurzer Beschreibung; jeder Fund bekommt einen Test.
   die Lösch-Frage über 5 Minuten offen lassen: nach 10 s sagt eine Karte, worauf Albumist wartet
   (G10).
 - **Kauf:** Kauf in TestFlight (Sandbox) und Wiederherstellen auf einem zweiten Gerät (D2–D5).
-- **VoiceOver:** ein ganzer Durchgang (A14); Rotor „Überschriften“ in der Übersicht (W10); beim
+- **VoiceOver:** ein ganzer Durchgang (A14); Rotor „Überschriften“ auf der Seite „Vorschläge“ (W10); beim
   Start sagt VoiceOver „Albumist wird geladen“ (N2).
 - **Zuhause:** „Stimmt“, „Ändern“ mit „Seit wann“, „Kein Zuhause“: die Vorschläge ändern sich,
   Karte „Zuhause geändert“ (G2); „Bist du hier öfter?“ während einer Analyse (N8).
@@ -328,11 +328,11 @@ Design-Prüfung, nicht die Kauf-Fälle D1–D6 oben.
 | W7/W18 Grauer Suchbegriff und „REISEN · SICHER“ auf der Fotofarbe in `Theme.secondaryText` | ✅ | Kontrast-Audit Suche und Vorschlag (AccessibilityUITests, scheitert bei Befund) | Lücke G5-06; bekannt: englisch „SAFE“ für „sicher“ missverständlich (G3-10) |
 | W8 Lange Suchbegriffe brechen bei großer Schrift im Chip um | ⚪ | Baum-Prüfung „Text läuft aus dem Bildschirm“ (AccessibilityUITests, größte Schrift) | offen: eine Anfrage mit langem Zeitraum tippt kein UI-Test (Barrierefreiheit sucht „Rom“). Sperrt nicht: Darstellung |
 | W9 Tippflächen 44 pt (Mediathek-Filter, Atlas-Jahre, Zuverlässigkeit, Kauf wiederherstellen/Code, Verlaufszeile) | ✅ | `hitRegion`-Audit (AccessibilityUITests, scheitert bei Befund) auf Mediathek, Atlas, Einstellungen und Verlauf | Lücke G5-06 |
-| W10 Überschriften für VoiceOver („Bereiche“ als Text, Kartentitel) | 📱 | — | 📱 VoiceOver-Rotor „Überschriften“: springt in der Übersicht zu „Bereiche“ und zu den Kartentiteln (kein Test prüft Überschriften) |
+| W10 Überschriften für VoiceOver (Abschnitte der Seite „Vorschläge“, „Dein Startpaket“, unterbrochener Vorgang; bis Welle 1 „Bereiche“ in der Übersicht) | 📱 | — | 📱 VoiceOver-Rotor „Überschriften“: springt auf der Seite „Vorschläge“ von Abschnitt zu Abschnitt (kein Test prüft Überschriften) |
 | W11 Großansicht mit System-Toolbar, nach unten wischen schließt, Datum/Ort für VoiceOver, „nicht verfügbar“ statt Endlos-Kreis | ⚪ | UI test1 „pull down closes the photo“; AccessibilityUITests „photo viewer“ | offen: „nicht verfügbar“ statt Endlos-Kreis bei einem Foto nur in iCloud zeigt kein Test (Gerät test04 hat den Schalter `-SortlyUITestICloudOnly`, öffnet aber kein Foto). Sperrt nicht: nur Ansehen. 📱 ohne Netz ein Foto öffnen, das nur in iCloud liegt |
 | W12 Tippen öffnet überall die Großansicht, Infos hinter „i“; Album zeigt alle Fotos | ✅ | UI test1b („photo info“, „album photo opens large“, Assert), test3 (ein Foto aus der Suche öffnet groß, Assert) | ein Foto im Land öffnet kein Test (die Länderseite zeigt Fotos, Assert) |
 | W13 Einführung mit Zurück (Navigation) | ✅ | UI test1 „onboarding back to areas“ | — |
-| W16 Einstellungen: „Verlauf und Rückgängig“ als erste Zeile, „Zählt als sortiert“, „Ordner für neue Alben“ | ⚪ | UI test1, test4, test5 über `settings.history`; AccessibilityUITests „history“ | offen: Reihenfolge („Verlauf und Rückgängig“ als erste Zeile) und die Beschriftungen „Zählt als sortiert“, „Ordner für neue Alben“ prüft kein Assert; bekannt: „Ordner für neue Al…“ abgeschnitten (G3-08), das Audit meldet abgeschnittenen Text bei normaler Schrift nur als Warnung. Sperrt nicht: Darstellung |
+| W16 „Verlauf und Rückgängig“ im Tab „Alben“ (seit Welle 1 immer dort, vorher erste Zeile der Einstellungen); in den Einstellungen „Zählt als sortiert“, „Ordner für neue Alben“ | ⚪ | UI test1, test4, test5 über `albums.history` (`UITestScreens.Albums.openHistory`); AccessibilityUITests „history“; AlbumTabDesignTests.theHistoryRowIsAlwaysThereSimilarAlbumsOnlyWithASuggestion | offen: die Beschriftungen „Zählt als sortiert“, „Ordner für neue Alben“ prüft kein Assert; bekannt: „Ordner für neue Al…“ abgeschnitten (G3-08), das Audit meldet abgeschnittenen Text bei normaler Schrift nur als Warnung. Sperrt nicht: Darstellung |
 | N1 Tab „Alben“ mit `rectangle.stack` wie in Fotos | ⚪ | — | offen: Sichtprüfung am Bildschirmfoto des UI-Laufs. Sperrt nicht: ein Symbol |
 | N2 Startbildschirm: VoiceOver sagt „Albumist wird geladen“ | ⚪ | — | offen: kein Test liest den Startbildschirm. Sperrt nicht: er steht nur kurz. 📱 mit VoiceOver starten: „Albumist wird geladen“ |
 | N3 „Animation überspringen“ als normaler Zweitknopf statt Glas im Inhalt | ⚪ | — | offen: Sichtprüfung. Sperrt nicht: Aussehen eines Knopfs |

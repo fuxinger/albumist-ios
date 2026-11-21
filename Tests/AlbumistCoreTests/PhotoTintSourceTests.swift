@@ -224,4 +224,25 @@ struct PhotoTintSourceTests {
         #expect(settings[icon.upperBound..<about.lowerBound].contains("Text(verbatim: AppInfo.name)"))
         #expect(!settings[icon.upperBound..<about.lowerBound].contains("Section {"), "the icon is not in the section „Über“")
     }
+
+    /// UI test 3 knows the page's colour from any other ground (verification review V9): besides
+    /// "not the grouped background" it asserts pale in light mode (each channel at least 215)
+    /// and deep in dark mode (each at most 80), bounds every tint keeps
+    /// (`PhotoTintTests.everyTintIsPaleInLightAndDeepInDark`), so the pale tint shown in dark mode
+    /// fails it. It waits up to 25 s for the colour: the reader alone waits up to 6 s for the
+    /// cover, and a busy Mac takes longer.
+    @Test func theUITestKnowsAPaleOrDeepGround() throws {
+        let test = AppSource.code(try AppSource.read("App/AlbumistUITests/ShowAndHandwritingUITests.swift"), keepStrings: true)
+        let calm = try Self.body(["final class ShowAndHandwritingUITests", "private static func isCalmGround("], in: test)
+        #expect(calm.contains("dark ? colour.allSatisfy { $0 <= 80 } : colour.allSatisfy { $0 >= 215 }"), "\(calm)")
+        let wait = try Self.body(["final class ShowAndHandwritingUITests", "private func waitForTint("], in: test)
+        #expect(wait.contains("UITestWait.holds(timeout: 25)"), "\(wait)")
+        #expect(wait.contains("zip(now, neutral).map { abs($0 - $1) }.reduce(0, +) >= 4"), "not neutral is no longer asked: \(wait)")
+        let open = try Self.body(["final class ShowAndHandwritingUITests", "private func openTintedTrip("], in: test)
+        let tinted = try #require(open.range(of: "if tinted {"), "\(open)")
+        let asked = try #require(open.range(of: "XCTAssertTrue(calm, "), "the colour's bounds are not asserted: \(open)")
+        let found = try #require(open.range(of: "return name"), "\(open)")
+        #expect(tinted.upperBound < asked.lowerBound && asked.upperBound < found.lowerBound, "\(open)")
+        #expect(open.contains("let calm = ground.map { Self.isCalmGround($0, dark: dark) } == true"), "\(open)")
+    }
 }

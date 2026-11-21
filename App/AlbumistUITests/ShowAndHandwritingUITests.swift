@@ -307,6 +307,14 @@ final class ShowAndHandwritingUITests: XCTestCase {
         dark ? [0, 0, 0] : [242, 242, 247]
     }
 
+    /// The page's colour as the core makes it (verification review V9): pale in light mode, each
+    /// channel at least 215, and deep in dark mode, each at most 80 (every tint keeps well inside,
+    /// about 228 and 27 at the extremes: `PhotoTintTests.everyTintIsPaleInLightAndDeepInDark`).
+    /// The pale tint shown in dark mode is not.
+    private static func isCalmGround(_ colour: [Int], dark: Bool) -> Bool {
+        dark ? colour.allSatisfy { $0 <= 80 } : colour.allSatisfy { $0 >= 215 }
+    }
+
     /// The colour of the screen at `point` (in points), in sRGB 0–255, the mean of 3 × 3 pixels
     /// of a new screenshot. Nil when it cannot be read.
     private func pixel(at point: CGPoint) -> [Int]? {
@@ -340,13 +348,15 @@ final class ShowAndHandwritingUITests: XCTestCase {
     /// The open suggestion page's ground took its cover's colour: it differs from the grouped
     /// background (by at least 4 in the three channels together; a pale tint differs by 5 or
     /// more, a picture of the plain background by at most 3) and holds still from one look to
-    /// the next (the 0.45 s cross-fade has ended). Not a failure by itself: a cover without a
-    /// colour of its own has no tint. The last colour seen, for the report.
+    /// the next (the 0.45 s cross-fade has ended), within 25 s (the reader alone waits up to 6 s
+    /// for the cover, and a busy Mac takes longer; verification review V9). Not a failure by
+    /// itself: a cover without a colour of its own has no tint. The last colour seen, which the
+    /// caller checks for pale or deep (`isCalmGround`).
     private func waitForTint(_ what: String, dark: Bool) -> (tinted: Bool, ground: [Int]?) {
         let neutral = Self.neutralGround(dark: dark)
         var last: [Int]?
         let start = Date()
-        let tinted = UITestWait.holds(timeout: 12) {
+        let tinted = UITestWait.holds(timeout: 25) {
             guard let now = pageGround() else {
                 last = nil
                 return false
@@ -390,6 +400,11 @@ final class ShowAndHandwritingUITests: XCTestCase {
             let colour = ground.map { "rgb(\($0.map(String.init).joined(separator: ", ")))" } ?? "not read"
             if tinted {
                 print("UI_STEP_OK \(what): the page of '\(name)' takes its cover's colour, \(colour) (grouped background \(Self.neutralGround(dark: dark)))")
+                // Pale in light mode, deep in dark mode: not only away from the plain ground.
+                let calm = ground.map { Self.isCalmGround($0, dark: dark) } == true
+                let kind = dark ? "deep (each channel at most 80)" : "pale (each channel at least 215)"
+                print(calm ? "UI_STEP_OK \(what): \(colour) is \(kind)" : "UI_STEP_MISSING \(what): \(colour) is \(kind)")
+                XCTAssertTrue(calm, "\(what): the page of '\(name)' is \(colour), not \(kind)")
                 return name
             }
             print("UI_FACT \(what): the page of '\(name)' kept \(colour), no colour of its own")
@@ -406,7 +421,9 @@ final class ShowAndHandwritingUITests: XCTestCase {
     /// DS-11: a suggestion's page takes its cover's calm colour as its ground, pale in light
     /// mode and deep in dark mode (`PhotoTintGround`), and stays readable: screenshots and the
     /// accessibility audit of the page in both (dark mode as the other tests force it,
-    /// `-AlbumistUITestDark`). The colour is read from the screenshot beside the facts line.
+    /// `-AlbumistUITestDark`). The colour is read from the screenshot beside the facts line: away
+    /// from the grouped background, and pale in light mode (each channel at least 215), deep in
+    /// dark mode (each at most 80).
     func test3_SuggestionPageTakesItsCoversCalmColour() {
         continueAfterFailure = true
         prepare("tint light")

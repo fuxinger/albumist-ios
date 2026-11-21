@@ -2,6 +2,11 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. App-Icon im Ebenen-Format von iOS 26 (DS-20, noch in keinem Build): „Glass Stack“ als
+  Icon-Composer-Datei, Milchglas auf der vorderen Karte, hell, dunkel, klar und getönt aus einer Datei;
+  das alte Bild-Icon ist entfernt. Neue Prüfung in CI: höchstens ein farbiger Hauptknopf pro Seite
+  (DS-04b). Sie fand einen Fall: Die Startseite bot „Mit Beispielfotos ausprobieren“ unter „Rest
+  anlegen“ eines unterbrochenen Vorgangs an; das Angebot wartet jetzt, bis der Vorgang erledigt ist.
 - 21.11. Zwei Momente (Design-Welle 2, Entwürfe E3 und E6, noch in keinem Build): Nach dem Umsetzen legen sich die
   Cover der neuen Alben gefächert über die Zahl, das Hauptcover zuletzt und mit dem einen Erfolgs-Tap (spätestens
   1,5 s nach dem Ergebnis; ohne geladenes Cover sofort das Symbol); nur ergänzte Alben des Nutzers heißen „12 Fotos

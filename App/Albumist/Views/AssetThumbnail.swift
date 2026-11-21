@@ -135,6 +135,13 @@ final class ThumbnailCache {
         return await ThumbnailRequest.load(asset, size: pixels, manager: manager, contentMode: .aspectFit)
     }
 
+    /// The PhotoKit asset of `id` for the photo view's Live Photo and its sharing (DS-10,
+    /// `LivePhotoLoader`, `PhotoShare`): the thumbnails' own lookup, so it costs no second read
+    /// of the Photos database. Nil when Photos does not know the photo or did not answer in time.
+    func asset(for id: AssetID) async -> ThumbnailRequest.Asset? {
+        await photoAsset(for: id)
+    }
+
     /// The PhotoKit asset of `id`, looked up once and then kept. The lookup never runs on the
     /// main thread: it reads the Photos database, and while Photos writes to it (new photos,
     /// the albums of a plan) each lookup waits. On the main actor every thumbnail on screen

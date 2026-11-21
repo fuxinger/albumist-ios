@@ -15300,6 +15300,26 @@
           }
         }
       }
+    },
+    "Live Photo abspielen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play Live Photo"
+          }
+        }
+      }
+    },
+    "Das ganze Foto liegt nur in iCloud. Teilen kannst du es in der Fotos-App." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The full photo is only in iCloud. You can share it from the Photos app."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

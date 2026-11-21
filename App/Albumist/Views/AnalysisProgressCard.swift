@@ -792,6 +792,7 @@ struct AnalysisDetailsSheet: View {
                 HStack(spacing: 4) {
                     ForEach(model.analysisRecent, id: \.self) { id in
                         AssetThumbnail(id: id, side: 30)
+                            .environment(\.thumbnailShowsVideoLength, false) // only seen: no "0:15"
                             .frame(width: 30, height: 30)
                             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }

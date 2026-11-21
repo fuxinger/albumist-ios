@@ -50,17 +50,20 @@ final class AlbumistFlowUITests: XCTestCase {
         return app.navigationBars["Vorschläge"].exists && settings.exists
     }
 
-    /// The search tab (`Tab(role: .search)`) carries the system's own label.
+    /// The search tab (`Tab(role: .search)`): the system's round button at the bar's end
+    /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
-        for label in ["Suchen", "Suche", "Search"] where app.tabBars.buttons[label].exists {
-            return tabButton(label)
-        }
-        return app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
+        UITestScreens.Search.button(app, tabButton: tabButton)
     }
 
     /// A tab bar button; the iOS 26 tab bar shrinks while scrolling, so it is expanded first.
+    /// While the search is active iOS folds the other tabs into one button beside its field
+    /// (DS-12a): the search is left first.
     private func tabButton(_ name: String) -> XCUIElement {
         let button = app.tabBars.buttons[name]
+        if !button.exists, app.searchFields.firstMatch.exists {
+            UITestScreens.Search.leave(app, "tab \(name)")
+        }
         var tries = 0
         while !(button.exists && button.isHittable) && tries < 3 {
             // Minimized bar: scroll back up first, then tap the bar itself to expand it.
@@ -1896,16 +1899,12 @@ final class AlbumistFlowUITests: XCTestCase {
         } else {
             print("UI_SWEEP_SKIP Suchen › \(label) › photo (not hittable)")
         }
-        // Leave the search: "Abbrechen", or on iOS 26 the field's "Schließen" (UI run
-        // 43964816778: the search stayed open with its keyboard, and the tap on the tab
-        // "Vorschläge" after the sweep left the app on "Suchen").
-        for label in ["Abbrechen", "Schließen"] where app.buttons[label].exists && app.buttons[label].isHittable {
-            let leave = app.buttons[label]
-            leave.tap()
-            // The search is left: its button has gone (not asserted: the caller checks the overview).
-            _ = UITestWait.holds(timeout: 5) { !leave.exists }
-            break
-        }
+        // Leave the search: the field's "Schließen" (or "Abbrechen"), so the other tabs are back
+        // (UI run 43964816778: the search stayed open with its keyboard, and the tap on the tab
+        // "Vorschläge" after the sweep left the app on "Suchen"; since DS-12a iOS folds the
+        // other tabs into one button while the search is active). Not asserted here: the caller
+        // checks the start page.
+        UITestScreens.Search.leave(app, "sweep")
         return reached
     }
 
@@ -2006,6 +2005,7 @@ final class AlbumistFlowUITests: XCTestCase {
         let startPage = app.navigationBars["Vorschläge"]
         let gear = app.buttons["Einstellungen"]
         var tries = 0
+        UITestScreens.Search.leave(app, "sweep, back to the start page")
         repeat {
             tabButton("Vorschläge").tap()
             // Up to the second of the old pause, then the three of the loop's check, as before.
@@ -2307,6 +2307,14 @@ final class AlbumistFlowUITests: XCTestCase {
             let idle = waitStable("check finished", timeout: 120) { analysisIdle }
             let said = idle && UITestScreens.Analysis.openSheet(app) && anything("keine neuen Fotos").waitForExistence(timeout: 5)
             print(said ? "UI_STEP_OK check says no new photos" : "UI_STEP_MISSING check says no new photos")
+            // Sheets in a fitting size (DS-12b): at the standard text size a short sheet like
+            // "Analyse" opens half high, its "Fertig" in the lower part of the screen.
+            let sheetDone = app.buttons["analysis.summary.done"]
+            if said, sheetDone.exists {
+                let top = sheetDone.frame.minY
+                print("UI_FACT sheet Analyse: Fertig at y \(Int(top)) of \(Int(app.frame.height))")
+                XCTAssertGreaterThan(top, app.frame.height * 0.4, "The sheet \"Analyse\" does not open half high at the standard text size")
+            }
             shot("64-check-again")
             UITestScreens.Analysis.closeSheet(app)
         }

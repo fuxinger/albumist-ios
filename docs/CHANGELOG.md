@@ -2,6 +2,12 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. Feinschliff für iOS 26 (Design-Welle 3, DS-12 und H14, noch in keinem Build): Die Suche ist ein eigener
+  runder Knopf am Ende der Tab-Leiste wie in Apples Apps (Entwurf E1); ein Tipp öffnet das Suchfeld mit Tastatur,
+  alles andere der Suche bleibt, wie es war. Blätter öffnen in passender Größe: kurze Erklärungen und kleine
+  Formulare halb hoch, ganze Seiten ganz, bei sehr großer Schrift jedes Blatt ganz. „Widerrufen“ und „Alle Fotos
+  erlauben“ lassen sich auf 44 pt treffen. VoiceOver sagt „Analyse fertig“ jetzt bei jeder Analyse, die man in der
+  App zu Ende verfolgt, nicht nur bei der ersten.
 - 21.11. Raster in „Unsortiert“ und in Vorschlägen nach der zweiten Prüfung (Design-Welle 3, noch in keinem
   Build): Ziehen zum Auswählen findet die Fotos auch nach einem Tab-Wechsel, hakt unter einer angehefteten
   Tagesüberschrift nichts ab, zieht über nachgeladene Fotos weiter und lässt den Wisch vom linken Rand

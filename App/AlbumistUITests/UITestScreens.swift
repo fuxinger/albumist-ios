@@ -51,6 +51,66 @@ enum UITestScreens {
         query.allElementsBoundByIndex.first(where: \.isHittable) ?? query.firstMatch
     }
 
+    // MARK: Search
+
+    /// The search (DS-12a, design wave 3): `Tab(role: .search)` with its field on the tab view,
+    /// Apple's search tab. It carries the system's own name and is a round button at the
+    /// trailing end of the tab bar, which on iOS 27 may lie outside `app.tabBars`. While its
+    /// field is active, iOS folds the other tabs into one button beside it; they are back once
+    /// the search is left ("Schließen" on the field).
+    @MainActor
+    enum Search {
+        /// The system's names of the search tab.
+        static let labels = ["Suchen", "Suche", "Search"]
+        /// What leaves an active search: the field's "Schließen" (iOS 26 and later), else
+        /// "Abbrechen".
+        static let leaveLabels = ["Schließen", "Abbrechen", "Close", "Cancel"]
+
+        /// The search button: the tab bar's (through the test's `tabButton`, which expands a
+        /// shrunk bar), else one outside the tab bar by its name while no keyboard is up (the
+        /// keyboard's return key says "Suchen" too). Never another tab: when neither shows, even
+        /// after the bar was expanded, the tab bar's buttons are printed and the element
+        /// returned does not exist, so the caller's tap reports the search tab missing.
+        static func button(_ app: XCUIApplication, tabButton: (String) -> XCUIElement) -> XCUIElement {
+            func found() -> XCUIElement? {
+                if let label = labels.first(where: { app.tabBars.buttons[$0].exists }) { return tabButton(label) }
+                let outside = app.buttons.matching(NSPredicate(format: "label IN %@", labels)).firstMatch
+                return !app.keyboards.firstMatch.exists && outside.exists ? outside : nil
+            }
+            if let button = found() { return button }
+            // A shrunk tab bar shows only the chosen tab: asking for the button expands it.
+            _ = tabButton(labels[0])
+            if let button = found() { return button }
+            let shown = app.tabBars.buttons.allElementsBoundByIndex.map(\.label)
+            print("UI_FACT no search button named \(labels) in or beside the tab bar (keyboard up: \(app.keyboards.firstMatch.exists)); the tab bar shows \(shown)")
+            return app.tabBars.buttons[labels[0]]
+        }
+
+        /// Leaves an active search, so the other tabs are back in the tab bar and the tab chosen
+        /// before shows again. True when no search field is left or the tabs are back; at most
+        /// two taps (the first may close a photo opened from the results).
+        @discardableResult
+        static func leave(_ app: XCUIApplication, _ what: String) -> Bool {
+            let tabs = [Tabs.german.suggestions, Tabs.english.suggestions].map { app.tabBars.buttons[$0] }
+            func tabsBack() -> Bool { tabs.contains { $0.exists && $0.isHittable } }
+            for _ in 0..<2 {
+                guard app.searchFields.firstMatch.exists, !tabsBack() else { return true }
+                let leaving = app.buttons.matching(NSPredicate(format: "label IN %@", leaveLabels))
+                guard let button = leaving.allElementsBoundByIndex.first(where: \.isHittable) else {
+                    let shown = app.buttons.allElementsBoundByIndex.prefix(16).map(\.label)
+                    print("UI_FACT \(what): a search field shows, but none of \(leaveLabels) can be tapped; buttons \(shown)")
+                    return false
+                }
+                print("UI_STEP_OK \(what): leave the search")
+                button.tap()
+                if UITestWait.holds(timeout: 5, tabsBack) { return true }
+            }
+            let back = !app.searchFields.firstMatch.exists || tabsBack()
+            if !back { print("UI_FACT \(what): the tabs are not back after leaving the search: \(app.tabBars.buttons.allElementsBoundByIndex.map(\.label))") }
+            return back
+        }
+    }
+
     // MARK: Cards
 
     @MainActor

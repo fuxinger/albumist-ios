@@ -1543,8 +1543,8 @@ final class DeviceConditionUITests: XCTestCase {
             // Back on the start page (not asserted: the search tab below is looked up either way).
             _ = UITestWait.holds(timeout: 5) { !atlasBar.exists }
         }
-        let searchTab = ["Suchen", "Suche", "Search"].map { app.tabBars.buttons[$0] }.first(where: \.exists)
-            ?? app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
+        // The search: the system's round button at the bar's end, never another tab.
+        let searchTab = UITestScreens.Search.button(app, tabButton: tabButton)
         searchTab.tap()
         let field = app.searchFields.firstMatch
         if field.waitForExistence(timeout: 10) {

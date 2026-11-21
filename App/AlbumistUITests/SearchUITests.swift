@@ -27,12 +27,10 @@ final class AlbumistSearchUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
-    /// The search tab (`Tab(role: .search)`) carries the system's own label.
+    /// The search tab (`Tab(role: .search)`): the system's round button at the bar's end
+    /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
-        for label in ["Suchen", "Suche", "Search"] where app.tabBars.buttons[label].exists {
-            return tabButton(label)
-        }
-        return app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
+        UITestScreens.Search.button(app, tabButton: tabButton)
     }
 
     /// A tab bar button; the iOS 26 tab bar shrinks while scrolling, so it is expanded first.
@@ -297,5 +295,15 @@ final class AlbumistSearchUITests: XCTestCase {
 
         // Close the keyboard.
         field.typeText("\n")
+
+        // DS-12a: while the search is active iOS folds the other tabs into one button beside its
+        // field; leaving the search brings them back. Which tab is chosen then (the one before,
+        // with `.searchTabSelection`) is the system's: said, not asserted.
+        let left = UITestScreens.Search.leave(app, "search")
+        XCTAssertTrue(left, "Leaving the search does not bring the other tabs back")
+        let before = app.tabBars.buttons["Vorschläge"]
+        let backOnIt = UITestWait.holds(timeout: 3) { before.exists && before.isSelected }
+        print("UI_FACT search left, back on \"Vorschläge\": \(backOnIt); tabs \(app.tabBars.buttons.allElementsBoundByIndex.map(\.label))")
+        shot("s7-search-left")
     }
 }

@@ -306,6 +306,22 @@ final class AccessibilityUITests: XCTestCase {
             app.swipeDown(); app.swipeDown(); app.swipeDown(); app.swipeDown()
             UITestWait.screenAtRest(app, "\(tag) start page back at the top")
         }
+        // Sheets in a fitting size (DS-12b): at the largest text size every sheet opens full
+        // height (half a screen would show two lines); "Analyse" from the start page's line.
+        if tag == "xxxl" {
+            if UITestScreens.Analysis.openSheet(app) {
+                let done = app.buttons["analysis.summary.done"]
+                let top = done.exists ? done.frame.minY : -1
+                print("UI_FACT \(tag) sheet Analyse: its done button at y \(Int(top)) of \(Int(app.frame.height))")
+                XCTAssertTrue(done.exists && top < app.frame.height * 0.2, "At the largest text size the sheet \"Analyse\" does not open full height")
+                shot("\(tag)-sheet-analysis")
+                UITestScreens.Analysis.closeSheet(app)
+                app.swipeDown(); app.swipeDown()
+                UITestWait.screenAtRest(app, "\(tag) start page back at the top after the sheet")
+            } else {
+                XCTFail("\(tag): the sheet \"Analyse\" did not open from the start page")
+            }
+        }
 
         // An area's suggestions ("Alle N": photo cards since wave 1) and one suggestion
         // A tap that landed elsewhere (on a bar) fails here by its name, not steps later.
@@ -1153,11 +1169,10 @@ final class AccessibilityUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
     }
 
+    /// The search tab (`Tab(role: .search)`): the system's round button at the bar's end
+    /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
-        for label in ["Suchen", "Suche", "Search"] where app.tabBars.buttons[label].exists {
-            return tabButton(label)
-        }
-        return app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
+        UITestScreens.Search.button(app, tabButton: tabButton)
     }
 
     private func tabButton(_ name: String) -> XCUIElement {

@@ -113,6 +113,20 @@ final class FrameUITests: XCTestCase {
             // In the design's order, the search after them.
             let places = wanted.compactMap { names.firstIndex(of: $0) }
             XCTAssertEqual(places, places.sorted(), "The tabs (\(language)) are not in the order \(wanted): \(names)")
+            // The search (DS-12a): Apple's search tab, a round button at the trailing end of the
+            // bar (or, behind `MainTabs.searchField`, a fourth tab in the row). That it is there
+            // and after "Alben" is asserted; its shape and gap are said for the screenshots until
+            // the owner has chosen between the two.
+            let search = UITestScreens.Search.button(app, tabButton: tabButton)
+            let searchShown = search.waitForExistence(timeout: 5)
+            XCTAssertTrue(searchShown, "The tab bar (\(language)) has no search button")
+            let albums = bar.buttons[tabs.albums]
+            if searchShown, albums.exists {
+                let frame = search.frame
+                let gap = frame.minX - albums.frame.maxX
+                print("UI_FACT search button (\(language)): \(Int(frame.width)) x \(Int(frame.height)) pt at \(Int(frame.minX)),\(Int(frame.minY)); round \(abs(frame.width - frame.height) < 8); \(Int(gap)) pt after \"\(tabs.albums)\"; in the tab bar \(bar.buttons[search.label].exists)")
+                XCTAssertGreaterThan(frame.midX, albums.frame.midX, "The search button (\(language)) is not after \"\(tabs.albums)\"")
+            }
             shot("tabs-\(english ? "en" : "de")")
         }
     }
@@ -237,7 +251,15 @@ final class FrameUITests: XCTestCase {
         print(saysMade ? "UI_STEP_OK the card says Angelegt" : "UI_STEP_MISSING the card says Angelegt")
         XCTAssertTrue(saysMade, "While the banner shows, the card '\(made.name)' does not say \"Angelegt\"")
 
-        guard tap(UITestScreens.QuickCreate.undo(app), "Widerrufen in the banner", timeout: 5) else { return }
+        // Its 44 pt sit on the button's label, where the tap lands (H14): before, the button was
+        // only as large as its word, and the space around it took no tap.
+        let undo = UITestScreens.QuickCreate.undo(app)
+        if undo.waitForExistence(timeout: 5) {
+            let size = undo.frame.size
+            print("UI_FACT Widerrufen in the banner: \(Int(size.width)) x \(Int(size.height)) pt")
+            XCTAssertTrue(size.width >= 43.5 && size.height >= 43.5, "\"Widerrufen\" in the banner is less than 44 x 44 pt to tap: \(size)")
+        }
+        guard tap(undo, "Widerrufen in the banner", timeout: 5) else { return }
         // Albumist made the album and nothing else is in it: it is deleted, and iOS asks first.
         let asked = UITestScreens.QuickCreate.answerDeleteQuestion(app, timeout: 30) { !banner.exists }
         print("UI_FACT quick create undo asked by iOS: \(asked)")

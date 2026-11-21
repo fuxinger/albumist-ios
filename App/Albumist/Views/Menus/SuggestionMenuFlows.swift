@@ -93,8 +93,11 @@ private struct SuggestionMenuFlows: ViewModifier {
     }
 
     /// "Keine Reise, hier bin ich öfter", answered as in the open suggestion: the suggestions are
-    /// made again, and the trips there become one album of the place.
+    /// made again, and the trips there become one album of the place. For the suggestion as it
+    /// is now: the question can stay open while the analysis goes on (review C of design wave
+    /// 2, H1).
     private func answer(_ proposal: AlbumProposal) {
-        Task { _ = await model.answerRecurringPlace(true, for: proposal) }
+        guard let current = model.currentSuggestion(proposal) else { return }
+        Task { _ = await model.answerRecurringPlace(true, for: current) }
     }
 }

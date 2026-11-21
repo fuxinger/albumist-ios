@@ -228,6 +228,9 @@ struct StartSections: View {
     @Environment(\.quickCreateAtOnce) private var quickCreateAtOnce
 
     private func perform(_ action: ProposalCardAction, on proposal: AlbumProposal) {
+        // The suggestion as the analysis has it now: the card's menu stays open while it may
+        // change, or go, which is said then (review C of design wave 2, H1).
+        guard let proposal = model.currentSuggestion(proposal) else { return }
         switch action {
         case .create:
             // 7B: made at once, then the banner "„Name“ angelegt · Widerrufen" (`createNow`).

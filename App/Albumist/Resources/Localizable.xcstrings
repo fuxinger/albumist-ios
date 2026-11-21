@@ -1191,6 +1191,16 @@
         }
       }
     },
+    "Albumist hat die Vorschläge eben aktualisiert. Angelegt oder geändert wurde nichts; den neuen Stand siehst du auf der Seite „Vorschläge“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist just updated its suggestions. Nothing was created or changed; you’ll see the latest on the Suggestions page."
+          }
+        }
+      }
+    },
     "Die Fotos bleiben in deiner Mediathek." : {
       "localizations" : {
         "en" : {

@@ -204,8 +204,14 @@ struct ProposalListView: View {
     /// "Ergänzen …" opens the preview (an album of the user's is changed only after a look,
     /// Punkt 5), "Benennen …" and "Ansehen …" open the suggestion.
     private func act(_ action: ProposalCardAction, on proposal: AlbumProposal) {
+        // The suggestion as the analysis has it now: the card's menu stays open while it may
+        // change, or go, which is said then (review C of design wave 2, H1).
+        guard let proposal = model.currentSuggestion(proposal) else { return }
         switch action {
         case .create:
+            // One album at a time, as the button waits: the menu's word and VoiceOver reach this
+            // too, and the card would say "✓ Angelegt" before it is taken back (L1).
+            guard model.quickCreating == nil else { return }
             // Where no banner shows (a sheet's own stack), the suggestion opens instead, as for
             // a card that needs a look; its "Album anlegen" goes through the preview there.
             guard quickCreateAtOnce else {

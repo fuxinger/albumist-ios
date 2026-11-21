@@ -21,6 +21,7 @@ struct LongPressSourceTests {
     static let flows = "App/Albumist/Views/Menus/SuggestionMenuFlows.swift"
     static let photoMenu = "App/Albumist/Views/Menus/PhotoMenuItems.swift"
     static let model = "App/Albumist/Model/AppModel+LongPress.swift"
+    static let quickCreate = "App/Albumist/Model/AppModel+QuickCreate.swift"
 
     /// The code of `path` (comments blanked, strings kept).
     static func code(_ path: String) throws -> String {
@@ -99,10 +100,9 @@ struct LongPressSourceTests {
         #expect(!items.contains("@Environment("))
         #expect(items.contains("Button(action: act)"), "the word runs the card's own action")
         #expect(items.contains("Label(card.action.title"), "the word as the card shows it")
-        #expect(items.contains("SuggestionMenuFlow(kind: .adjust"))
-        #expect(items.contains("SuggestionMenuFlow(kind: .reshapeTrip"))
-        #expect(items.contains("SuggestionMenuFlow(kind: .notATrip"))
-        #expect(items.contains("model.setDecision(.reject, for: proposal)"))
+        #expect(items.contains("open(.adjust)") && items.contains("open(.reshapeTrip)") && items.contains("open(.notATrip)"))
+        #expect(items.contains("openFlow.open(SuggestionMenuFlow(kind: kind, proposal: current))"))
+        #expect(items.contains("model.setDecision(.reject, for: current)"))
         let notNow = try Self.body(["struct ProposalDetailView", "private func notNowButton("], in: Self.suggestions)
         #expect(notNow.contains("model.setDecision(.reject, for: proposal)"), "the suggestion's own „Nicht jetzt“")
         for bypass in ["createNow(", "execute(", "answerRecurringPlace(", "removeFromProposal(", "selectForPreview("] {
@@ -119,10 +119,68 @@ struct LongPressSourceTests {
         #expect(flows.contains("TripWorkshopView(proposal: proposal)"))
         #expect(flows.contains(".confirmationDialog(\"Keine Reise?\""))
         #expect(flows.contains("Button(\"Keine Reise, hier bin ich öfter\")"))
-        #expect(flows.contains("model.answerRecurringPlace(true, for: proposal)"))
+        #expect(flows.contains("model.answerRecurringPlace(true, for: current)"))
         // The question's words are the open suggestion's.
         let message = "Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse."
         #expect(flows.contains(message) && detail.contains(message))
+    }
+
+    // MARK: The suggestion as it is now (review C of design wave 2, H1, L1, L2)
+
+    /// A menu can stay open while the analysis goes on: every item acts on the suggestion as the
+    /// analysis has it at the tap, found by its id (`currentSuggestion`, `SuggestionMenu.current`),
+    /// never on the copy the card was drawn with. One that went meanwhile is said ("Der Vorschlag
+    /// hat sich geändert"), and nothing is made, opened, answered or set aside for it.
+    @Test func everyItemActsOnTheSuggestionAsItIsNow() throws {
+        let now = Self.squeezed(try Self.body(["func currentSuggestion(_ proposal: AlbumProposal) -> AlbumProposal?"], in: Self.model))
+        #expect(now.contains("SuggestionMenu.current(proposal,in:proposals)"), "\(now)")
+        #expect(now.contains("message=.suggestionChanged"), "\(now)")
+        let said = Self.squeezed(try Self.body(["static var suggestionChanged: AppMessage"], in: Self.model))
+        #expect(said.contains("title:String(localized:\"DerVorschlaghatsichgeändert\")"), "\(said)")
+        // "Anlegen", wherever it is tapped (a card, its menu, the suggestion, after the purchase
+        // sheet): the first thing `createNow` does, in the lines marked for this strand.
+        let create = try Self.body(["func createNow("], in: Self.quickCreate)
+        let resolved = try #require(create.range(of: "guard let proposal = currentSuggestion(proposal) else { return .notNow }"))
+        let turn = try #require(create.range(of: "let state = QuickCreateState.shared"))
+        #expect(resolved.lowerBound < turn.lowerBound, "resolved after the turn is taken")
+        #expect(try AppSource.read(Self.quickCreate).contains("// Design W2 H7: current suggestion."))
+        // The card's action, from its button or its menu's word: the page's way, first of all.
+        let start = Self.squeezed(try Self.body(["struct StartSections", "private func perform("], in: Self.start))
+        #expect(start.hasPrefix("{guardletproposal=model.currentSuggestion(proposal)else{return}"), "\(start)")
+        let list = Self.squeezed(try Self.body(["struct ProposalListView", "private func act("], in: Self.suggestions))
+        #expect(list.hasPrefix("{guardletproposal=model.currentSuggestion(proposal)else{return}"), "\(list)")
+        // The menu's other items, and the answer to "Keine Reise?" (the question can stay open too).
+        let open = Self.squeezed(try Self.body(["struct SuggestionMenuItems", "private func open("], in: Self.suggestionItems))
+        #expect(open.hasPrefix("{guardletcurrent=model.currentSuggestion(proposal)else{return}"), "\(open)")
+        let notNow = Self.squeezed(try Self.body(["struct SuggestionMenuItems", "private func setAside("], in: Self.suggestionItems))
+        #expect(notNow.hasPrefix("{guardletcurrent=model.currentSuggestion(proposal)else{return}"), "\(notNow)")
+        let answer = Self.squeezed(try Self.body(["private func answer("], in: Self.flows))
+        #expect(answer.hasPrefix("{guardletcurrent=model.currentSuggestion(proposal)else{return}"), "\(answer)")
+        // Nothing in the menu or its ways acts on the drawn copy any more.
+        let items = try Self.code(Self.suggestionItems)
+        #expect(!items.contains("for: proposal)") && !items.contains("proposal: proposal)"), "the drawn copy acted on")
+    }
+
+    /// The list's "Anlegen" waits while another album is made, as its button does, before the
+    /// card says "✓ Angelegt": the menu's word and VoiceOver reach it too (L1).
+    @Test func theListsAnlegenWaitsForTheOneBeingMade() throws {
+        let act = try Self.body(["struct ProposalListView", "private func act("], in: Self.suggestions)
+        let create = try #require(act.range(of: "case .create:"))
+        let waits = try #require(act.range(of: "guard model.quickCreating == nil else { return }"))
+        let made = try #require(act.range(of: "made[proposal.id] = proposal"))
+        #expect(create.lowerBound < waits.lowerBound && waits.lowerBound < made.lowerBound)
+    }
+
+    /// "Nicht jetzt" from a card's menu is said to VoiceOver as its button is named ("Nicht jetzt:
+    /// „Kyoto, Oktober 2024“"): the card leaves the start page (in the list it moves), and the
+    /// focus with it (L2).
+    @Test func nichtJetztIsSaidToVoiceOver() throws {
+        let notNow = try Self.body(["struct SuggestionMenuItems", "private func setAside("], in: Self.suggestionItems)
+        let set = try #require(notNow.range(of: "model.setDecision(.reject, for: current)"))
+        let said = try #require(notNow.range(of: "AccessibilityNotification.Announcement(String(localized: \"Nicht jetzt: „\\(card.title)“\")).post()"))
+        #expect(set.lowerBound < said.lowerBound)
+        let labels = try Self.code("App/Albumist/Views/Proposal/ProposalCardLabels.swift")
+        #expect(labels.contains("var spokenNotNow: Text { Text(\"Nicht jetzt: „\\(title)“\") }"), "the button's name, the same words")
     }
 
     /// What the menu offers is read where the open suggestion reads it: "Keine Reise" from one
@@ -267,6 +325,10 @@ struct LongPressSourceTests {
             "Foto aus diesem Vorschlag entfernen?": "Remove Photo from This Suggestion?",
             "Es kommt nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleibt es.":
                 "It won’t go into this album. It stays in your library and in other suggestions.",
+            "Albumist hat die Vorschläge eben aktualisiert. Angelegt oder geändert wurde nichts; den neuen Stand siehst du auf der Seite „Vorschläge“.":
+                "Albumist just updated its suggestions. Nothing was created or changed; you’ll see the latest on the Suggestions page.",
+            "Der Vorschlag hat sich geändert": "The Suggestion Has Changed",
+            "Nicht jetzt: „%@“": "Not Now: “%@”",
         ]
         for (german, en) in expected {
             #expect(english(german) == en, "\(german): \(english(german) ?? "missing")")

@@ -14,6 +14,11 @@ import AlbumistCore
 ///   the question before "Keine Reise", which waits and says why as it does there.
 /// - "Nicht jetzt" sets the suggestion aside as its button does; photos and albums stay.
 ///
+/// The menu stays open as long as the user leaves it, while the analysis may change the
+/// suggestion or make it anew: every item acts on the suggestion as it is at the tap
+/// (`AppModel.currentSuggestion`; the word through the page's action, which looks it up first),
+/// and on one that went meanwhile not at all, which is said (review C of design wave 2, H1).
+///
 /// Reads the model only when the menu is drawn, so a card is as cheap to build as before. The
 /// card hands in the model and the page's ways: what a menu shows is read from nothing of the
 /// environment's (the system draws the menu, and VoiceOver reads its items, apart from the card).
@@ -77,7 +82,7 @@ struct SuggestionMenuItems: View {
 
     private var adjustItem: some View {
         Button {
-            openFlow.open(SuggestionMenuFlow(kind: .adjust, proposal: proposal))
+            open(.adjust)
         } label: {
             Label("Anpassen", systemImage: "slider.horizontal.3")
         }
@@ -86,7 +91,7 @@ struct SuggestionMenuItems: View {
 
     private var reshapeItem: some View {
         Button {
-            openFlow.open(SuggestionMenuFlow(kind: .reshapeTrip, proposal: proposal))
+            open(.reshapeTrip)
         } label: {
             Label("Reise teilen oder zusammenlegen", systemImage: "scissors")
         }
@@ -97,7 +102,7 @@ struct SuggestionMenuItems: View {
     /// suggestion's words: a second Text in the label is the item's second line.
     private var notATripItem: some View {
         Button {
-            openFlow.open(SuggestionMenuFlow(kind: .notATrip, proposal: proposal))
+            open(.notATrip)
         } label: {
             Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
             if let reason = ProposalDetailView.oftenHereWaitReason(model, askedOnTheCard: false) {
@@ -111,11 +116,26 @@ struct SuggestionMenuItems: View {
     /// from "Nicht jetzt" any time).
     private var notNowItem: some View {
         Button {
-            model.setDecision(.reject, for: proposal)
+            setAside()
         } label: {
             Label("Nicht jetzt", systemImage: "xmark.circle")
         }
         .accessibilityIdentifier("suggestionMenu.notNow")
+    }
+
+    /// What the open suggestion's "…" opens, on the page, for the suggestion as it is now.
+    private func open(_ kind: SuggestionMenuFlow.Kind) {
+        guard let current = model.currentSuggestion(proposal) else { return }
+        openFlow.open(SuggestionMenuFlow(kind: kind, proposal: current))
+    }
+
+    /// "Nicht jetzt" as its button does it, then said to VoiceOver in the button's words
+    /// (`ProposalCardText.spokenNotNow`): the card leaves the start page, or moves to "Nicht
+    /// jetzt" in the list, and the focus with it (review C of design wave 2, L2).
+    private func setAside() {
+        guard let current = model.currentSuggestion(proposal) else { return }
+        model.setDecision(.reject, for: current)
+        AccessibilityNotification.Announcement(String(localized: "Nicht jetzt: „\(card.title)“")).post()
     }
 }
 

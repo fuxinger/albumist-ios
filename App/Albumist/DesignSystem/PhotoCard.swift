@@ -51,7 +51,10 @@ enum PhotoCardStyle: Sendable {
 ///   VoiceOver, Switch Control, Voice Control and Full Keyboard Access do not stop on (second
 ///   review of wave 1). A card with a menu still passes its actions first (`{}` when it has
 ///   none): the first trailing closure is always `actions`. `menuOffered(false)` switches the
-///   long press off the documented way, an empty menu closure (no lift, no menu, no actions);
+///   long press off by a menu closure that returns nothing, as Apple documents it for
+///   `contextMenu(menuItems:)` (no lift, no menu, no actions): only for a card that lifts
+///   itself, as beside a preview of its own that is not documented to lift nothing (review C2
+///   of design wave 2, N1); no card with a preview of its own is switched off.
 ///   `menuAccessibilityActions(_:)` gives the body other actions than the menu's items, such as
 ///   all but the card's own button (review C of design wave 2, M4, L3).
 /// - Dark mode: the card colour of the system; Increase Contrast: the card gets an edge (as
@@ -113,14 +116,17 @@ struct PhotoCard<Actions: View, MenuItems: View, MenuPreview: View>: View {
             shaped
         } else if hasMenuPreview {
             // On the card, so a long press lifts what was pressed (the body is a clear button
-            // behind cover and texts); assistive technologies get the items on the body. A menu
-            // closure that returns nothing is how SwiftUI switches a context menu off.
+            // behind cover and texts); assistive technologies get the items on the body. Beside
+            // a preview of its own, a menu closure that returns nothing is not documented to
+            // lift nothing (review C2 of design wave 2, N1): no such card is switched off.
             shaped.contextMenu {
                 if isMenuOffered { menuItems }
             } preview: {
                 menuPreview
             }
         } else {
+            // A menu closure that returns nothing switches the long press off, as Apple
+            // documents it for `contextMenu(menuItems:)`.
             shaped.contextMenu {
                 if isMenuOffered { menuItems }
             }
@@ -338,10 +344,12 @@ extension PhotoCard {
         return card
     }
 
-    /// Whether the long press is offered now: without it the menu's closure returns nothing,
-    /// the documented way to switch a context menu off, so a long press lifts nothing and the
-    /// body has no actions (a card made a moment ago, one whose album is made, a list that
-    /// selects; review C of design wave 2, M4).
+    /// Whether the long press is offered now: without it the menu's closure returns nothing, as
+    /// Apple documents it to switch `contextMenu(menuItems:)` off, so a long press lifts nothing
+    /// and the body has no actions (a card made a moment ago, one whose album is made, a list
+    /// that selects; review C of design wave 2, M4). Only for a card that lifts itself (`menu:`
+    /// without `preview:`): beside a preview of its own that is not documented (review C2 of
+    /// design wave 2, N1).
     func menuOffered(_ offered: Bool) -> Self {
         var card = self
         card.isMenuOffered = offered

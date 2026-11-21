@@ -363,7 +363,8 @@ struct StartProposalCard: View {
     var style: PhotoCardStyle
     var onOpen: () -> Void
     var onAction: () -> Void
-    /// For the long press's menu, which reads them only when it is drawn.
+    /// For the long press's menu and the body's actions, which read the model in their own
+    /// bodies, not in the card's (`SuggestionMenuItems`).
     @Environment(AppModel.self) private var model
     @Environment(\.openSuggestionMenuFlow) private var openFlow
 

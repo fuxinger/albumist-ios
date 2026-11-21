@@ -19,12 +19,17 @@ import AlbumistCore
 /// (`AppModel.currentSuggestion`; the word through the page's action, which looks it up first),
 /// and on one that went meanwhile not at all, which is said (review C of design wave 2, H1).
 ///
-/// Reads the model only when the menu is drawn, so a card is as cheap to build as before. The
-/// card hands in the model and the page's ways: what a menu shows is read from nothing of the
-/// environment's (the system draws the menu, and VoiceOver reads its items, apart from the card).
-/// The card's body has the items as actions for VoiceOver, Voice Control and Switch Control
-/// (`forVoiceOver`, `PhotoCard.menuAccessibilityActions`): all that can be done now but the
-/// card's word, which is the card's own button there (review C of design wave 2, L1, L3).
+/// Reads the model in its own body, not in the card's: the card reads none of it, so it is as
+/// cheap to build as before. SwiftUI evaluates these items to show the menu, and to give the
+/// card's actions to an assistive technology (VoiceOver, Voice Control, Switch Control) or a UI
+/// test that asks for them: while one of those is on, every card follows what its items read
+/// (the decisions, the albums; for a trip its facts, and where "Keine Reise" is offered the
+/// analysis; review C2 of design wave 2, N3). The card hands in the model and the page's ways:
+/// what a menu shows is read from nothing of the environment's (the system draws the menu, and
+/// VoiceOver reads its items, apart from the card). The card's body has the items as actions for
+/// VoiceOver, Voice Control and Switch Control (`forVoiceOver`,
+/// `PhotoCard.menuAccessibilityActions`): all that can be done now but the card's word, which is
+/// the card's own button there (review C of design wave 2, L1, L3).
 struct SuggestionMenuItems: View {
     var model: AppModel
     /// The page's sheets and question (`suggestionMenuFlows(_:)`); nil on a page without them.

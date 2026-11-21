@@ -69,8 +69,12 @@ private struct PhotoLongPress: ViewModifier {
 
 /// The items of a photo's long press (`PhotoMenu`) in their groups, or, for VoiceOver, its
 /// actions: every item but "Ansehen", the photo's own (a double tap opens it). Reads the model,
-/// handed in by the photo, only when the menu is drawn: nothing from the environment (the
-/// system draws the menu apart from the grid).
+/// handed in by the photo, in its own body, not in the cell's, and nothing from the environment
+/// (the system draws the menu apart from the grid). SwiftUI evaluates these items to show the
+/// menu, and to give the photo's actions to an assistive technology or a UI test that asks for
+/// them: while one of those is on, every photo on screen follows the photos the user ignored
+/// and the analysis' states (`isIgnored`), which a recount sets anew (review C2 of design wave
+/// 2, N3).
 struct PhotoMenuItems: View {
     var model: AppModel
     var id: AssetID
@@ -131,8 +135,9 @@ struct PhotoMenuItems: View {
 /// most 320 × 427 pt). So never an empty surface where the cell shows a photo, never a blurry
 /// enlargement, nothing loaded from iCloud, and no lift counted as a cover (`CoverStats` counts
 /// the cards' covers). Gone from memory (a memory warning) while its cell still shows it: as
-/// large as its cell, asked for again as the cell asks. Worked out in its own body, when the
-/// long press shows it; gets everything handed in (the system draws it apart from the screen).
+/// large as its cell, asked for again as the cell asks. Worked out in its own body, when SwiftUI
+/// draws the preview, not in the cell's; gets everything handed in (the system draws it apart
+/// from the screen).
 /// Decorative: the menu says what can be done with it.
 struct PhotoPreview: View {
     var id: AssetID

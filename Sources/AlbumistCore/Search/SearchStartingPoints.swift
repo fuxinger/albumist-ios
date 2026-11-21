@@ -35,7 +35,8 @@ public struct SearchStartingPoint: Hashable, Sendable, Identifiable {
 ///   pictures may not be shown at all, is left out, so a small library offers fewer, never an
 ///   empty box.
 public enum SearchStartingPoints {
-    /// Starting points the page offers at most: two rows of tiles on the smallest iPhone.
+    /// Starting points the page offers at most: one of each kind it takes first (two places, a
+    /// trip, the newest year, a topic, a kind), three rows of two tiles on an iPhone.
     public static let limit = 6
 
     /// The media types that are no starting point (see above).

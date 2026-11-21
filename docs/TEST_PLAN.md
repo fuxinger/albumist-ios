@@ -565,8 +565,8 @@ keinen Stand wie die Abdeckung oben: die Karte ist noch in keinem Build.
 | Regel oder Fall (Konzept) | Test (Linux) |
 |---|---|
 | Alles zusammen: Island mit Flug und drei Fensterfotos über Großbritannien, Portugal, Passau, Straubing unter 50 km; Reihenfolge, Namen, Orte | MapSummaryTests.tripsInTheirOrderWithTheirNamesAndPlaces, theSameLibraryInAnyOrderGivesTheSameSummary |
-| 50.000 Fotos (§9: unter 300 ms), Zeit steht als `MAP_PERF` im Log | MapSummaryLoadTests.fiftyThousandPhotos; je Teil: AirborneFilterTests.fiftyThousandPhotosAreJudgedQuickly, TripGeometryTests.aTripOfFiveThousandPhotosBuildsQuickly, MapHomeTests.aBusyLibraryIsQuick, MapNumbersTests.twoThousandTripsOfTwentyPlacesAreFast |
-| Flugzeugfotos zählen nicht (§5): schneller als 400 km/h auf beiden Seiten und auf dem Weg, oder über 6.000 m; Züge, Zickzack geteilter Mediatheken und einzelne falsche Orte bleiben am Boden | AirborneFilterTests (alle), TripGeometryTests.photosInFlightAreLeftOutAndCounted, MapCountriesTests.photosInFlightCountForNothing, MapSummaryTests.photosTakenInFlightCountForNothing |
+| 50.000 Fotos (§9: unter 300 ms), Zeit steht als `MAP_PERF` im Log; Release-Build in der Cloud (Linux, 21.11.2026): 210 bis 223 ms, davon Flug-Filter 21 bis 25 ms; die Messung am iPhone kommt mit Welle 1 | MapSummaryLoadTests.fiftyThousandPhotos; je Teil: AirborneFilterTests.fiftyThousandPhotosAreJudgedQuickly, aDenseLibraryIsJudgedQuickly, TripGeometryTests.aTripOfFiveThousandPhotosBuildsQuickly, aTripOfFiftyThousandPhotosBuildsQuickly, thirtyThousandPlacesMergeQuickly, MapHomeTests.aBusyLibraryIsQuick, MapNumbersTests.twoThousandTripsOfTwentyPlacesAreFast |
+| Flugzeugfotos zählen nicht (§5): über 6.000 m; oder beide Wege 400 bis 1.500 km/h, auf dem Weg, ohne Aufenthalt und ohne Umkehr (Wege bis 20 Stunden: Langstrecke mit einem Foto alle zweieinhalb Stunden); oder vier Fotos in Folge über 500 km/h, gleichmäßig und gerade; oder das erste und letzte Fensterfoto bis 10 Minuten (über 500 km/h bis 15) neben einem solchen; nie, wenn der Ort binnen fünf Minuten auf 3 km zurückkommt. Flughäfen, ein Umstieg mit mehreren Fotos, zwei Personen einer geteilten Mediathek, München, Florenz und Rom zur selben Zeit, ein falscher Ort, Züge bis 350 km/h, die Autobahn und ein springender Ort drinnen bleiben am Boden; im Stapel mit 50.000 Fotos und 104 Flügen ist kein Foto vom Boden dabei | AirborneFilterTests (alle), TripGeometryTests.photosInFlightAreLeftOutAndCounted, MapCountriesTests.photosInFlightCountForNothing, MapSummaryTests.photosTakenInFlightCountForNothing, MapSummaryLoadTests.fiftyThousandPhotos |
 | Tagesorte (mindestens 3 Fotos, 3 km), Orte über Tage, Route höchstens 200 Punkte, Strecke „ohne Fotos“ über 100 km und 3 Stunden; „vor Ort“ zählt jede Strecke vor dem Kürzen, eine gekürzte Strecke ist „ohne Fotos“, wenn es die meisten ihrer Meter waren; Fotos zur selben Zeit an zwei Orten (zweite Kamera einer geteilten Mediathek, schneller als 1.500 km/h) sind kein Zickzack; Fotos pro Tag sind die auf der Karte | TripGeometryTests.icelandRingRoad, aCityDaySpreadOverFourKilometresIsOnePlace, thereAndBackInOneDayIsThreeRoutePoints, moreThanTwoHundredVisitsAreSimplified, simplificationKeepsAnExcursionThereAndBack, legsWithoutPhotos, kilometresOnSiteCountEveryLegBeforeTheRouteIsCut, aLegOfTheCutRouteInheritsWhatMostOfItsMetresWere, photosTakenAtTheSameTimeInTwoPlacesAreNoZigZag, placesMergedOnAGridAreThoseOfComparingEach, photosPerDayAreThePhotosOnTheMap |
 | Ein Foto, das die Mediathek doppelt nennt, zählt einmal (von zwei Ständen gewinnt der „zu Hause“); Fotos einer Reise zu Hause (Kofferpacken) zeichnen nichts, zählen aber im Album und in den Tagen der Reise; jede Reihenfolge gibt dieselbe Form | MapSummaryTests.aPhotoListedTwiceCountsOnce, aTripsPhotosAtHomeAreNeverDrawn; TripGeometryTests.onePhotoListedThreeTimesCountsOnce, photosAtHomeAreNeverDrawn, shuffledInputGivesTheSameGeometry; MapCountriesTests.aPhotoListedTwiceCountsOnce |
 | Höhe eines Orts nur, wenn die Höhen zusammenpassen: Mittel der höchsten Gruppe von mindestens 3 Fotos innerhalb 150 m, nichts über 6.000 m; ein Gipfel behält seine Höhe | TripGeometryTests.placeAltitude, aSummitKeepsItsAltitude |
@@ -595,7 +595,21 @@ Offen bis Welle 1 (App): alle Fälle aus §11 mit Bedienungstest, Bildschirmfoto
 (keine Fotos mit Ort, ausgewählte Fotos, Zugriff entzogen, Fotos nur in iCloud, ohne Internet,
 langsames Netz, Apples Karte aus, Stromsparmodus und Hitze, Speicherwarnung, Unterbrechungen,
 Neustart, zweiter Aufruf, VoiceOver, rechts nach links, quer, größte Schrift), die Messungen am
-iPhone (§9) und der Vorschlag „zweites Zuhause“ (§15, nicht gebaut). Bekannte Grenze des
-Flugzeug-Filters: Fensterfotos ohne Foto in den zwei Stunden davor oder danach (Langstrecke) und
-Fensterfotos, die in einer geteilten Mediathek zeitlich zwischen Fotos am Boden liegen, findet
-nur die Höhe; die speichert die Analyse noch nicht (Welle 1).
+iPhone (§9) und der Vorschlag „zweites Zuhause“ (§15, nicht gebaut). Bekannte Grenzen des
+Flugzeug-Filters, solange die Analyse keine Höhe speichert (Welle 1; die Höhe fängt sie): er
+übersieht Flüge mit zwei Fotos und Serien von drei, wenn die Wege zum Flughafen langsam sind, das
+erste oder letzte Fensterfoto mehr als 15 Minuten vor dem nächsten (Fotos alle 20 Minuten; Dubai
+nach Los Angeles mit dem letzten Foto 27 Minuten vor der Landung), Fotos im Warteschleifen-Kreis
+und Fotos, deren Ort das iPhone im Flugzeug nicht erneuert hat. Die meisten kosten höchstens eine
+Stadt in der Städtezahl; eine Serie von drei Fotos aber wird ein Ort in den Wolken und, über einem
+sonst nicht besuchten Land, ein Land. Darum speichert Welle 1 die Höhe der Fotos. Für ein
+Flugzeugfoto halten kann er ein einzelnes Foto beim Umstieg zwischen zwei Langstrecken (seine Stadt
+fehlt, wenn sie kein anderes Foto hat; sie von einem Fensterfoto einer Langstrecke mit seltenen
+Fotos zu unterscheiden, braucht die Höhe), einmal ein Foto auf der Linie München–Rom eine halbe
+Stunde von beiden Enden, drei Fotos, die ohne Foto ringsum gerade weiterspringen, und Streuung über
+3 km (28 von 200.000 Fotos bei 1 bis 5 km, jedes eines unter Hunderten am selben Ort). Bekannte
+Grenze der Route: zwei Kameras einer geteilten Mediathek an zwei Orten erkennt sie nur, wenn
+zwischen ihren Fotos niemand hätte hinkommen können (schneller als 1.500 km/h); liegen Stunden
+dazwischen (über Nacht), zeichnet sie den Weg hin und her. Fotos der geteilten Mediathek zählen
+wie eigene; geteilte Alben liest die App nie (`PhotoKitLibrary`: nur die eigene Mediathek und
+über iTunes geladene Fotos).

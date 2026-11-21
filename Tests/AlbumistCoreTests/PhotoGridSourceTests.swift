@@ -164,6 +164,9 @@ struct PhotoGridSourceTests {
     /// edge or lifts, and the frame clock is let go.
     @Test func nearAnEdgeThePageScrollsOnByItself() throws {
         let state = try Self.code(Self.state)
+        // In the part the user sees: below the bars, also where the cover reaches up under them.
+        let speed = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func edgeSpeed("], in: Self.state))
+        #expect(speed.contains("letarea=scroller.seenArea"), "\(speed)")
         #expect(state.contains("PhotoGridAutoScroll.speed(y: Double(current.inScrollView.y), top: area.lowerBound, bottom: area.upperBound)"))
         #expect(state.contains("scroller.scroll(by: PhotoGridAutoScroll.step(speed: speed, seconds: seconds))"))
         #expect(state.contains("extend(to: CGPoint(x: current.inGrid.x, y: current.inGrid.y + CGFloat(scroller.offset - current.offset)))"))
@@ -257,8 +260,16 @@ struct PhotoGridSourceTests {
         #expect(host.contains(".onScrollGeometryChange(for:ScrollGeometry.self){geometryingeometry}action:{_,geometryinscroller.reported(geometry)}"),
                 "\(host)")
         #expect(host.contains(".environment(\\.photoGridScroller,scroller)"), "\(host)")
+        // Where the bars end, also on a page whose content reaches up under them (the
+        // suggestion's cover): its scroll view has no content inset at the top.
+        #expect(host.contains(".onGeometryChange(for:PhotoGridSafeEdges.self){proxyin"
+                              + "PhotoGridSafeEdges(top:proxy.safeAreaInsets.top,bottom:proxy.safeAreaInsets.bottom)"
+                              + "}action:{edgesinscroller.reported(safeArea:edges)}"), "\(host)")
+        let seen = Self.squeezed(try Self.body(["final class PhotoGridScroller", "var seenArea:"], in: Self.scrolling))
+        #expect(seen.contains("PhotoGridAutoScroll.seenArea(height:Double(geometry.containerSize.height),"), "\(seen)")
         let scroller = try Self.code(Self.scrolling)
         #expect(scroller.contains("@ObservationIgnored private var geometry: ScrollGeometry?"), "every frame of scrolling observed")
+        #expect(scroller.contains("@ObservationIgnored private var safeArea = PhotoGridSafeEdges()"), "the safe area observed")
         let library = Self.squeezed(try Self.body(["struct LibraryView", "var body: some View"], in: Self.library))
         #expect(library.contains("}.photoGridScrolling().background(Theme.background)"), "\(library)")
     }

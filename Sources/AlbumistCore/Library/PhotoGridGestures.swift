@@ -182,6 +182,18 @@ public enum PhotoGridAutoScroll {
         return 0
     }
 
+    /// The part of a scroll view `height` points high that the user sees, from top to bottom in
+    /// its own space, where the edges' zones are: below what covers its top and above what covers
+    /// its bottom, at each edge the larger of the scroll view's content inset and its safe area.
+    /// A page whose content reaches up under the bars (a suggestion's cover) has no content inset
+    /// at the top, and the bars cover it all the same. Nil when nothing is seen.
+    public static func seenArea(height: Double, insetTop: Double, insetBottom: Double,
+                                safeTop: Double, safeBottom: Double) -> ClosedRange<Double>? {
+        let top = max(insetTop, safeTop, 0)
+        let bottom = height - max(insetBottom, safeBottom, 0)
+        return top < bottom ? top...bottom : nil
+    }
+
     /// One frame's step in points: `speed` for the frame's `seconds`, at most `longestFrame`.
     public static func step(speed: Double, seconds: Double) -> Double {
         speed * min(max(seconds, 0), longestFrame)

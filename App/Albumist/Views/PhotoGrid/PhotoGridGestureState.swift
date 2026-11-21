@@ -176,9 +176,10 @@ final class PhotoGridGestureState {
         ticker.start { [weak self] seconds in self?.scrollStep(seconds) ?? false }
     }
 
-    /// The speed for where the finger is now; 0 in the middle, and without a scroll view to move.
+    /// The speed for where the finger is now, in the part of the scroll view the user sees (below
+    /// the bars); 0 in the middle, and without a scroll view to move.
     private func edgeSpeed() -> Double {
-        guard let current = drag, let scroller = current.scroller, let area = scroller.visibleArea else { return 0 }
+        guard let current = drag, let scroller = current.scroller, let area = scroller.seenArea else { return 0 }
         return PhotoGridAutoScroll.speed(y: Double(current.inScrollView.y), top: area.lowerBound, bottom: area.upperBound)
     }
 

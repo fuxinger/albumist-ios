@@ -5,8 +5,9 @@ extension View {
     /// Lets the photo grid in this scroll view move it (`PhotoGrid`, design wave 3, DS-06b): on
     /// by itself while a finger selects near its top or bottom edge, and to the photo two fingers
     /// hold after a zoom step. Set on the page's `ScrollView`, which the grid cannot reach from
-    /// inside it. Without it the grid still selects and zooms; it then neither scrolls by itself
-    /// nor keeps its place when it zooms.
+    /// inside it; where the scroll view reaches up under the bars (`ignoresSafeArea`), after that
+    /// modifier, so it reads where the bars end. Without it the grid still selects and zooms; it
+    /// then neither scrolls by itself nor keeps its place when it zooms.
     func photoGridScrolling() -> some View {
         modifier(PhotoGridScrollHost())
     }
@@ -29,6 +30,12 @@ private struct PhotoGridScrollHost: ViewModifier {
             } action: { _, geometry in
                 scroller.reported(geometry)
             }
+            // Where the bars end, also on a page whose content reaches up under them.
+            .onGeometryChange(for: PhotoGridSafeEdges.self) { proxy in
+                PhotoGridSafeEdges(top: proxy.safeAreaInsets.top, bottom: proxy.safeAreaInsets.bottom)
+            } action: { edges in
+                scroller.reported(safeArea: edges)
+            }
             .environment(\.photoGridScroller, scroller)
     }
 }
@@ -49,6 +56,9 @@ final class PhotoGridScroller {
     /// The scroll view as it reported itself last, at every frame while it moves: not observed,
     /// nothing is drawn again for it.
     @ObservationIgnored private var geometry: ScrollGeometry?
+    /// The scroll view's safe area as the page lays it out: a page whose content reaches up under
+    /// its bars (`ignoresSafeArea`, a suggestion's cover) has no content inset there.
+    @ObservationIgnored private var safeArea = PhotoGridSafeEdges()
     /// The offsets asked for while the grid scrolls by itself.
     @ObservationIgnored private var target = PhotoGridAutoScroll.Target()
 
@@ -57,8 +67,9 @@ final class PhotoGridScroller {
         Double(geometry?.contentOffset.y ?? 0)
     }
 
-    /// The part of the scroll view not under its bars, from top to bottom in its own space
-    /// (`.scrollView`); nil before it reported itself.
+    /// The part of the scroll view inside its content insets, from top to bottom in its own space
+    /// (`.scrollView`): where `show` lines a photo up (`scrollTo(id:anchor:)` aligns in it). Nil
+    /// before it reported itself.
     var visibleArea: ClosedRange<Double>? {
         guard let geometry else { return nil }
         let top = Double(geometry.contentInsets.top)
@@ -66,9 +77,24 @@ final class PhotoGridScroller {
         return top < bottom ? top...bottom : nil
     }
 
+    /// The part of the scroll view the user sees, from top to bottom in its own space: below the
+    /// bars, also where the page's content reaches up under them. The edges' zones of scrolling
+    /// by itself are in it. Nil before it reported itself.
+    var seenArea: ClosedRange<Double>? {
+        guard let geometry else { return nil }
+        return PhotoGridAutoScroll.seenArea(height: Double(geometry.containerSize.height),
+                                            insetTop: Double(geometry.contentInsets.top),
+                                            insetBottom: Double(geometry.contentInsets.bottom),
+                                            safeTop: Double(safeArea.top), safeBottom: Double(safeArea.bottom))
+    }
+
     func reported(_ geometry: ScrollGeometry) {
         self.geometry = geometry
         target.reported(Double(geometry.contentOffset.y))
+    }
+
+    func reported(safeArea: PhotoGridSafeEdges) {
+        self.safeArea = safeArea
     }
 
     /// One frame's step of scrolling by itself, `step` points (negative: up), within the content.
@@ -91,6 +117,12 @@ final class PhotoGridScroller {
         anchor = point
         position.scrollTo(id: photo, anchor: point)
     }
+}
+
+/// What covers the top and the bottom of the scroll view, from its safe area.
+struct PhotoGridSafeEdges: Equatable, Sendable {
+    var top: CGFloat = 0
+    var bottom: CGFloat = 0
 }
 
 private struct PhotoGridScrollerKey: EnvironmentKey {

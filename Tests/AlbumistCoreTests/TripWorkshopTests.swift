@@ -248,12 +248,22 @@ struct TripWorkshopTests {
         let mergeLabel = code(try #require(AppSource.body(of: "struct MergeRowLabel", in: workshop)))
         let mergeLooksDisabled = mergeLabel.contains("@Environment(\\.isEnabled)") && mergeLabel.contains("isEnabled ?")
         #expect(mergeLooksDisabled, "the merge rows keep their accent colour while disabled")
-        // The merge rows sit at the ends of the timeline (design wave 3, DS-14), each a neighbour's
-        // row with the note right under it; every merge row is one of them.
-        let neighbourNode = code(try #require(AppSource.body(of: "func neighbourNode(", in: workshop)))
-        let underTheMergeRow = neighbourNode.components(separatedBy: "mergeButton(other, side: side)").dropFirst().joined()
-        let noteUnderTheMergeRow = underTheMergeRow.contains("TripChangeWaitNote()")
-        #expect(noteUnderTheMergeRow, "the merge rows wait without the note under them")
+        // The merge rows sit at the ends of the timeline (design wave 3, DS-14), each in a section
+        // of its own; why they wait is said once, one element with one identifier, under the first
+        // one shown (review G4: with a trip on both sides the note and VoiceOver said it twice),
+        // and under the changes when there is none. Every merge row is a neighbour's.
+        let neighbourSection = code(try #require(AppSource.body(of: "func neighbourSection(", in: workshop)))
+        let footer = neighbourSection.components(separatedBy: "footer:").dropFirst().joined()
+        let noteUnderTheMergeRows = footer.contains("if explains {") && footer.contains("TripChangeWaitNote()")
+        #expect(noteUnderTheMergeRows, "the merge rows wait without the note under them")
+        let body = code(try #require(AppSource.body(of: ["struct TripWorkshopView", "var body"], in: workshop)))
+        let firstExplains = body.contains("neighbourSection(before, side: .before, gap: timeline.quietDaysFromBefore, explains: true)")
+            && body.contains("neighbourSection(after, side: .after, gap: timeline.quietDaysToAfter, explains: around.before == nil)")
+        #expect(firstExplains, "the note is said under both merge rows, or under none")
+        let underTheChanges = body.contains("changesSection(saysWhy: !mergeShown)")
+        #expect(underTheChanges, "the changes say why they wait also when a merge row says it")
+        let notes = AppSource.callSites(of: "TripChangeWaitNote(", in: workshop).count
+        #expect(notes == 3, "the note under the changes, under the first merge row and in the split bar, nowhere else")
         let mergeRows = AppSource.callSites(of: "mergeButton(", in: workshop).count
         #expect(mergeRows == 1, "a merge row that is not a neighbour's, without the note under it")
         let catalog = try StringCatalogTests.catalog()

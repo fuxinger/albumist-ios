@@ -1,25 +1,26 @@
 import SwiftUI
 import AlbumistCore
 
-// "Reise anpassen" as a timeline (design wave 3, DS-14): the pieces the sheet draws its days,
-// the days without photos and the neighbouring trips with. What each day shows is worked out
-// in the core (`TripTimeline`); `TripWorkshopView` decides what a tap does.
+// "Reise anpassen" as a timeline (design wave 3, DS-14): the pieces the sheet draws its days and
+// the days without photos with. What each day shows and how the line runs is worked out in the
+// core (`TripTimeline`); `TripWorkshopView` decides what a tap does. The neighbouring trips are
+// sections of their own (review G3), not on the line.
 
 /// The sizes the timeline's rows share.
 enum TripTimelineMetrics {
-    /// Above and below the words of a day or a neighbour.
+    /// Above and below the words of a day.
     static let verticalPadding: CGFloat = 12
     /// Between the photos of a day.
     static let photoSpacing: CGFloat = 4
 }
 
 /// The line down the left of the timeline and its mark: a dot for a day, scissors where the new
-/// trip begins, a ring for a neighbouring trip. Solid between the days of the trip, dotted over
-/// days without photos and towards another trip; none above where the trip is cut. With
-/// Increase Contrast the line is in the full accent. Decorative: the rows say what it shows.
+/// trip begins. Solid between the days of the trip, dotted over days without photos; none
+/// between the two trips a split makes (`TripTimeline.lines`). With Increase Contrast the line is
+/// in the full accent. Decorative: the rows say what it shows.
 struct TripTimelineGutter: View {
-    enum Mark { case day, cut, neighbour, none }
-    enum Line { case solid, dotted }
+    enum Mark { case day, cut, none }
+    typealias Line = TripTimeline.Stroke
 
     var mark: Mark
     /// The mark's centre from the top of the row; nil: the middle.
@@ -67,10 +68,6 @@ struct TripTimelineGutter: View {
             Image(systemName: "scissors")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.accent)
-        case .neighbour:
-            Circle()
-                .strokeBorder(Theme.accent, lineWidth: 2)
-                .frame(width: dot + 3, height: dot + 3)
         case .none:
             EmptyView()
         }
@@ -166,13 +163,15 @@ struct TripTimelineDayRow: View {
     }
 }
 
-/// Days without photos on the timeline: between two days of the trip ("1 Tag ohne Fotos"), or
-/// between the trip and a neighbour ("3 Tage dazwischen"), on a dotted line.
+/// Days without photos between two days of the trip on the timeline ("1 Tag ohne Fotos"), on a
+/// dotted line; on none where the second trip of a split begins after them.
 struct TripTimelineGapRow: View {
     var text: Text
+    /// The line through it (`TripTimeline.Lines.gap`).
+    var line: TripTimelineGutter.Line?
 
     var body: some View {
-        TripTimelineRow(mark: .none, markY: nil, above: .dotted, below: .dotted) {
+        TripTimelineRow(mark: .none, markY: nil, above: line, below: line) {
             text
                 .font(.footnote)
                 .foregroundStyle(.noteText)

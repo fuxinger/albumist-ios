@@ -68,6 +68,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("No new findings.", out)
         self.assertIn("3 fewer than the baseline allows", out)
+        self.assertIn("::warning title=SwiftLint baseline::3 findings fewer", err)
         self.assertEqual(self.counts["files"], {"A.swift": {"line_length": 2}, "B.swift": {"force_try": 1}})
 
     def test_one_more_finding_fails(self):
@@ -79,7 +80,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn("| A.swift | line_length | 2 | 1 |", out)
         self.assertIn("| New.swift | nesting | 1 | 0 |", out)
         # Every finding of an over-count file and rule is marked: the count cannot say which is new.
-        self.assertEqual(err.count("::error file=A.swift,line=1,title=SwiftLint line_length (2 in this file, baseline 1)"), 2)
+        self.assertEqual(err.count("::error file=A.swift,line=1,title=SwiftLint line_length (2 in this file; baseline 1)"), 2)
         self.assertIn("::error file=New.swift", err)
         self.assertIn("SWIFTLINT findings=3 new=2", err)
 
@@ -184,6 +185,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("2> swiftlint/stderr.txt", job)
         self.assertIn("--stderr swiftlint/stderr.txt", job)
         self.assertIn("--baseline .github/swiftlint-baseline.json", job)
+        # Every folder with Swift code is linted; leaving one out would lower the counts unseen.
+        self.assertIn("--reporter json \\\n            App Sources Tests Package.swift > swiftlint/findings.json", job)
 
 
 if __name__ == "__main__":

@@ -151,7 +151,7 @@ def annotations(findings: list[dict], over: list[tuple[str, str, int, int]]) -> 
             n, allowed = keys[key]
             reason = str(f.get("reason", "")).replace("\n", " ")
             out.append(f"::error file={key[0]},line={f.get('line') or 1},title=SwiftLint {key[1]} "
-                       f"({n} in this file, baseline {allowed})::{reason}")
+                       f"({n} in this file; baseline {allowed})::{reason}")
     return out
 
 
@@ -208,6 +208,10 @@ def main(argv: list[str]) -> int:
     elif args.baseline:
         print(f"::warning title=SwiftLint::no baseline at {args.baseline}: report only", file=sys.stderr)
     print(f"SWIFTLINT findings={len(findings)} new={sum(n - a for _, _, n, a in over or [])}", file=sys.stderr)
+    if over == [] and fewer:
+        # Slack: a fixed finding leaves room for a new one of the same rule in that file.
+        print(f"::warning title=SwiftLint baseline::{fewer} findings fewer than the baseline allows; lower it "
+              "(swiftlint_report.py --decode-log)", file=sys.stderr)
     if args.write_counts:
         with open(args.write_counts, "w", encoding="utf-8") as f:
             f.write(baseline_file(counts))

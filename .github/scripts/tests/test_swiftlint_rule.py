@@ -130,6 +130,38 @@ class CheckTests(unittest.TestCase):
         self.commit()
         self.assertEqual(self.check()[0], 0)
 
+    def test_a_disable_comment_in_code_needs_an_entry(self):
+        self.write("Sources/X/A.swift", "let a = 1\n")
+        base = self.commit()
+        self.write("Sources/X/A.swift", "// swiftlint:disable:next force_try\nlet a = try! f()\n")
+        self.commit()
+        code, out = self.check(base)
+        self.assertEqual(code, 1)
+        self.assertIn("disable comment added in Sources/X/A.swift (NO ENTRY)", out)
+        self.entry("| 🔜 | SwiftLint gelockert: A.swift, try! in einem Testhelfer |")
+        self.commit()
+        self.assertEqual(self.check(base)[0], 0)
+
+    def test_a_disable_comment_outside_swift_code_needs_nothing(self):
+        self.write("docs/NOTES.md", "swiftlint:disable is how a rule is switched off in code\n")
+        self.commit()
+        self.assertEqual(self.check()[0], 0)
+
+    def test_the_counting_and_the_pinned_version_need_a_line(self):
+        for path, name in ((".github/scripts/swiftlint_report.py", "swiftlint_report.py"),
+                           (".github/lint-tools.json", "lint-tools.json")):
+            with self.subTest(path):
+                self.write(path, f"changed {name}\n")
+                base = git(self.root, "rev-parse", "HEAD")
+                self.commit()
+                code, out = self.check(base)
+                self.assertEqual(code, 1)
+                self.assertIn(f"{path} changed (NO ENTRY)", out)
+                self.write(path, f"changed {name} again\n")
+                self.entry(f"| ✅ | {name}: neue Version, die Regeln ... |")
+                self.commit()
+                self.assertEqual(self.check(git(self.root, "rev-parse", "HEAD~1"))[0], 0)
+
     def test_an_unknown_base_is_red(self):
         self.assertEqual(self.check("0" * 40)[0], 1)
 

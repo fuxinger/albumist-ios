@@ -199,6 +199,16 @@ extension LiveAudio {
     private static func videoSoundSet(on: Bool, done: Bool) {
         isReady = !on && done
     }
+
+    /// Returns once the app's sound has no change left to make (`prepare`, `videoSound`,
+    /// `videoSoundEnded`), also one asked for while it waited. A video starts only then (review
+    /// F, F2): under iOS's default session even a muted one would stop the user's music.
+    static func settled() async {
+        while let pending = soundChange {
+            await pending.value
+            if soundChange == pending { return }
+        }
+    }
 }
 
 /// A photo's Live Photo for the photo view: only when its motion is on the iPhone (never from

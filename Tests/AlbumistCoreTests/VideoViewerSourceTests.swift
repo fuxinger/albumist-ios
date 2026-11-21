@@ -159,6 +159,24 @@ struct VideoViewerSourceTests {
             #expect(told == (path.hasSuffix("/ViewerVideo.swift") ? 1 : 0), "\(path): the music told \(told) times")
         }
         #expect(Self.squeezed(try #require(AppSource.body(of: "private static func videoSoundSet(", in: audio))).contains("isReady=!on&&done"))
+        // A video plays only in the session meant for it (review F, F2). One that starts by
+        // itself waits for the pending change and starts only once the app's sound mixes with
+        // the user's (or the user turned the sound on), as a Live Photo's short motion waits:
+        // under iOS's default session even a muted start stops the user's music. "Abspielen"
+        // waits for the pending change too, then plays even if it failed: the user asked.
+        let settled = try #require(AppSource.body(of: "static func settled() async", in: audio))
+        #expect(Self.inOrder(["while let pending = soundChange", "await pending.value", "if soundChange == pending { return }"],
+                             in: settled), "\(settled)")
+        let open = try #require(AppSource.body(of: "func open(", in: model))
+        #expect(Self.inOrder(["start.byItself", "Task.sleep(for: .milliseconds(350))", "await LiveAudio.settled()",
+                              "guard !Task.isCancelled, self.id == id, sound.isOn || LiveAudio.isReady else { return }", "play()"],
+                             in: open), "\(open)")
+        let tap = try #require(AppSource.body(of: "func togglePlay(", in: model))
+        #expect(Self.squeezed(tap) == "{ifisPlaying{pause()}else{playAfterSoundChange()}}", "\(tap)")
+        let asked = try #require(AppSource.body(of: "private func playAfterSoundChange(", in: model))
+        #expect(Self.inOrder(["guard let asked = player else { return }", "isPlaying = true", "Task {", "await LiveAudio.settled()",
+                              "guard player == asked, isPlaying else { return }", "play()"], in: asked), "\(asked)")
+        #expect(!asked.contains("isReady"), "\"Abspielen\" does nothing after a change that failed")
         // The photo view's own setting when it opens takes its turn too: "Ton an" right after it
         // is never undone by it.
         let prepare = try #require(AppSource.body(of: "static func prepare(", in: audio))

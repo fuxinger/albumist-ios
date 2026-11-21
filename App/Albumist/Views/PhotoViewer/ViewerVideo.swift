@@ -74,7 +74,10 @@ final class ViewerVideo {
             make(item.value)
             guard start.byItself else { return }
             try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled, self.id == id else { return }
+            // Only once the app's sound mixes with the user's music (`LiveAudio`), or with the
+            // sound the user turned on: before, even this muted start would stop their music.
+            await LiveAudio.settled()
+            guard !Task.isCancelled, self.id == id, sound.isOn || LiveAudio.isReady else { return }
             play()
         case .missing(let found):
             if found == .onlyInICloud { onlyInICloud.insert(id) }
@@ -102,10 +105,24 @@ final class ViewerVideo {
     // MARK: Playing
 
     func togglePlay() {
-        if isPlaying { pause() } else { play() }
+        if isPlaying { pause() } else { playAfterSoundChange() }
     }
 
-    func play() {
+    /// "Abspielen": after the change of the app's sound that may still run (`LiveAudio.settled`),
+    /// so a tap right after the photo view opened or after "Ton an" plays in the session meant
+    /// for it; then it plays even if that change failed, as the user asked. The button says
+    /// "Anhalten" at once; a second tap meanwhile keeps the video still.
+    private func playAfterSoundChange() {
+        guard let asked = player else { return }
+        isPlaying = true
+        Task {
+            await LiveAudio.settled()
+            guard player == asked, isPlaying else { return }
+            play()
+        }
+    }
+
+    private func play() {
         guard let player else { return }
         // At its end (a video that does not loop) it plays from the start again.
         if let item = player.value.currentItem, item.duration.seconds.isFinite,

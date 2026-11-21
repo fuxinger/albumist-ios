@@ -290,12 +290,18 @@ struct PlanRequest {
 /// A navigation stack with a path of `AppScreen`s, their destinations and its `Navigator` in
 /// the environment. Each stack owns its navigator (a sheet starts empty every time it opens);
 /// the overview tab passes its own, which Siri, Shortcuts and Spotlight push onto.
+///
+/// `quickCreate`: "Anlegen" makes the album at once on this stack (`quickCreateAtOnce`). Only
+/// the tabs pass true, which show the banner with "Widerrufen"; every other stack (a sheet's, a
+/// cover's) says false for itself instead of inheriting the yes of the tab under it.
 struct NavigationRoot<Root: View>: View {
     @State private var navigator: Navigator
+    private let quickCreate: Bool
     private let root: Root
 
-    init(_ navigator: Navigator? = nil, @ViewBuilder root: () -> Root) {
+    init(_ navigator: Navigator? = nil, quickCreate: Bool = false, @ViewBuilder root: () -> Root) {
         _navigator = State(initialValue: navigator ?? Navigator())
+        self.quickCreate = quickCreate
         self.root = root()
     }
 
@@ -304,6 +310,7 @@ struct NavigationRoot<Root: View>: View {
             root.navigationDestination(for: AppScreen.self) { $0.destination }
         }
         .environment(navigator)
+        .environment(\.quickCreateAtOnce, quickCreate)
         // The stack as a whole: another tab chosen, the sheet closed (`Navigator.showing`).
         .onAppear { navigator.appeared() }
         .onDisappear { navigator.disappeared() }

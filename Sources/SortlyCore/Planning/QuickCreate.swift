@@ -115,3 +115,49 @@ public struct QuickCreateBanner: Identifiable, Hashable, Sendable {
     /// "Widerrufen" can be tapped (not while it is being taken back).
     public var canUndo: Bool { phase == .shown }
 }
+
+/// The suggestions made with "Anlegen" while "Nicht jetzt" had set them aside, as long as their
+/// banner shows (review B of design wave 1, findings 4 and 9). Their pick, and then their album,
+/// would move their card to its area under the finger: the suggestion list keeps it under "Nicht
+/// jetzt" instead, from the tap until the banner ends. A completed "Widerrufen" sets the
+/// suggestion aside again, as it was before the tap; a banner that goes by itself leaves the
+/// album, and the lifted rejection, as they are. One memory for both, kept by the app with the
+/// banner.
+public struct QuickCreateSetAside: Hashable, Sendable {
+    private var proposals: [SortlyID: AlbumProposal] = [:]
+
+    public init() {}
+
+    /// Its card stays under "Nicht jetzt": made, or being made, from there.
+    public func contains(_ id: SortlyID) -> Bool {
+        proposals[id] != nil
+    }
+
+    /// "Anlegen" is making `proposal`'s album; `setAside`: "Nicht jetzt" had set it aside
+    /// (noted before the pick takes the decision's place).
+    public mutating func begin(_ proposal: AlbumProposal, setAside: Bool) {
+        proposals[proposal.id] = setAside ? proposal : nil
+    }
+
+    /// Nothing was made: the suggestion's decision says again where its card is.
+    public mutating func notMade(_ id: SortlyID) {
+        proposals[id] = nil
+    }
+
+    /// The banner for the suggestion `id` shows. The banner it replaces can no longer be taken
+    /// back, so only `id` is remembered (one album is made at a time).
+    public mutating func bannerShown(for id: SortlyID) {
+        proposals = proposals.filter { $0.key == id }
+    }
+
+    /// The banner for the suggestion `id` went by itself: its album stays.
+    public mutating func bannerGone(for id: SortlyID) {
+        proposals[id] = nil
+    }
+
+    /// "Widerrufen" took the album of the suggestion `id` back: the suggestion to set aside
+    /// again, nil if "Nicht jetzt" had not set it aside. Once.
+    public mutating func undone(_ id: SortlyID) -> AlbumProposal? {
+        proposals.removeValue(forKey: id)
+    }
+}

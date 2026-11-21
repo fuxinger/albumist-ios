@@ -1181,6 +1181,16 @@
         }
       }
     },
+    "Der Vorschlag hat sich geändert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Suggestion Has Changed"
+          }
+        }
+      }
+    },
     "Die Fotos bleiben in deiner Mediathek." : {
       "localizations" : {
         "en" : {
@@ -5697,6 +5707,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suggestions rechecked"
+          }
+        }
+      }
+    },
+    "Während des Kaufs hat Albumist die Vorschläge aktualisiert. Angelegt wurde nichts; den neuen Stand siehst du auf der Seite „Vorschläge“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist updated its suggestions during the purchase. Nothing was created; you’ll see the latest on the Suggestions page."
           }
         }
       }

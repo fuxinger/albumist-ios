@@ -152,7 +152,9 @@ final class SortlyFlowUITests: XCTestCase {
         // Hittable once the pushed page has come to rest, not in the first look after the push.
         let menu = UITestWait.until("\(what) has the \"…\" menu to tap", timeout: 5) { more.exists && more.isHittable }
         let onPage = Self.menuActions.filter { app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", $0)).firstMatch.exists }
-        let notNow = app.buttons.matching(NSPredicate(format: "label == %@", "Nicht jetzt")).firstMatch.exists
+        // By its identifier: VoiceOver hears it with the album it sets aside ("Nicht jetzt:
+        // „Kyoto, Oktober 2024“", review B of design wave 1).
+        let notNow = app.buttons["proposal.notNow"].exists
         let shown = onPage.isEmpty && menu && notNow
         print(shown ? "UI_STEP_OK \(what) shows two actions and the menu"
                     : "UI_STEP_MISSING \(what) shows two actions and the menu (on the page \(onPage), menu \(menu), Nicht jetzt \(notNow))")
@@ -2265,10 +2267,13 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(focused, "\"Namen eingeben\" did not put the keyboard in the name field")
         guard focused else { return }
         field.typeText("Bei Oma")
-        let create = app.buttons["Album anlegen"]
-        let ready = create.waitForExistence(timeout: 5) && create.isEnabled
-        print(ready ? "UI_STEP_OK named place offers Album anlegen" : "UI_STEP_MISSING named place offers Album anlegen")
-        XCTAssertTrue(ready, "With a name the suggestion does not offer an enabled \"Album anlegen\"")
+        // The main button (`proposal.create`) shows "Album anlegen" now; VoiceOver hears the
+        // album with it ("Album „Bei Oma“ anlegen", review B of design wave 1).
+        let create = app.buttons["proposal.create"]
+        let ready = UITestWait.holds(timeout: 5) { create.exists && create.isEnabled && create.label == "Album „Bei Oma“ anlegen" }
+        print(ready ? "UI_STEP_OK named place offers Album anlegen"
+                    : "UI_STEP_MISSING named place offers Album anlegen (\(create.exists ? create.label : "no main button"))")
+        XCTAssertTrue(ready, "With a name the suggestion does not offer an enabled \"Album anlegen\" (spoken \"Album „Bei Oma“ anlegen\")")
         XCTAssertFalse(app.buttons["Namen eingeben"].exists, "\"Namen eingeben\" stayed although a name was typed")
         shot("71-personal-place-named")
 

@@ -514,6 +514,25 @@ struct AirborneFilterTests {
         #expect(AirborneFilter.airborne(photos(vienna: [0])) == ["vie-0"])
     }
 
+    /// Finding 2.5 of the third review: three window photos within six seconds whose location the
+    /// iPhone did not update (one fix for all three), between a gate photo 50 minutes before and
+    /// the arrival photo. Both legs are flown (940 and 641 km/h), and five seconds of photos that
+    /// did not move on looked like a stay: they made France a country, a place and two records.
+    /// No plane lands 783 km from the gate within 50 minutes and takes off again
+    /// (`landingDuration`): no stay, so they are in flight (rule 2). Each with its own fix, they
+    /// are found too; the layover at Vienna stays on the ground
+    /// (`aQuickSeriesAtAShortHaulLayoverStaysOnTheGround`).
+    @Test func windowPhotosOnOneFixBetweenTwoFlownLegsAreInFlight() {
+        let window: Set<AssetID> = ["window-0", "window-1", "window-2"]
+        #expect(AirborneFilter.airborne(Self.lisbonLibrary(gateSecondsBefore: 3_000, windowAt: [0, 3, 6]).facts.map(\.asset)) == window)
+        let frozen = Self.lisbonLibrary(gateSecondsBefore: 3_000, windowAt: [0, 3, 6], fix: { _ in 0 })
+        #expect(AirborneFilter.airborne(frozen.facts.map(\.asset)) == window)
+        let summary = MapSummary.build(frozen)
+        #expect(!summary.countries.map(\.code).contains("FR"))
+        #expect(!summary.trips.contains { $0.geometry.places.contains { $0.name == "Wolken" } })
+        #expect(summary.numbers.record(.northernmost)?.placeName != "Wolken")
+    }
+
     // MARK: Maybe in flight: only the ground counts
 
     /// `FlightJudgement`: a photo with exactly one flown leg that shows no stay is maybe taken in
@@ -877,11 +896,18 @@ struct AirborneFilterTests {
             while j + step >= 0 && j + step < n && abs(t[j + step] - t[i]) <= window { j += step }
             return j
         }
-        func stays(_ i: Int, _ before: Int?, _ after: Int?, moving: Double = AirborneFilter.maximumGroundSpeed) -> Bool {
+        func landable(_ a: Int, _ b: Int) -> Bool {
+            !fast(a, b) || meters(a, b) <= plane * (t[b] - t[a] - AirborneFilter.landingDuration)
+        }
+        func stays(_ i: Int, _ before: Int?, _ after: Int?, moving: Double = AirborneFilter.maximumGroundSpeed, landing: Bool = false) -> Bool {
             let first = before.map { $0 + 1 } ?? edge(i, -1), last = after.map { $0 - 1 } ?? edge(i, 1)
             guard first < last else { return false }
             let span = t[last] - t[first]
             guard span >= AirborneFilter.shortestStay else { return false }
+            if landing && c[first] == c[last] && t[i] - t[first] < stay && t[last] - t[i] < stay {
+                if let before, !landable(before, first) { return false }
+                if let after, !landable(last, after) { return false }
+            }
             var progress = Double.infinity
             if let before { progress = min(progress, meters(before, last) - meters(before, first)) }
             if let after { progress = min(progress, meters(first, after) - meters(last, after)) }
@@ -907,7 +933,7 @@ struct AirborneFilterTests {
         let high = judged.map { photo in altitudes[photo.id].map { $0 > AirborneFilter.maximumAltitude } ?? false }
         let run = (0..<n).map { i -> Bool in
             guard let b = neighbour(i, -1), let a = neighbour(i, 1), flown(b, i), flown(i, a), onTheWay(b, i, a) else { return false }
-            if stays(i, b, a) { return false }
+            if stays(i, b, a, landing: true) { return false }
             if t[i] - t[b] <= AirborneFilter.runEndLongDuration && staysAt(b, -1) { return false }
             if t[a] - t[i] <= AirborneFilter.runEndLongDuration && staysAt(a, 1) { return false }
             if let p = neighbour(b, -1), fast(p, b), !onTheWay(p, b, i) { return false }

@@ -152,6 +152,18 @@ public enum AirborneFilter {
     /// a row: at 500 km/h, four seconds of flight cover what 400 km/h covers in five. (Slower in
     /// the climb, or with older fixes, a plane's row can look like a stay.)
     static let shortestStay: TimeInterval = 5
+    /// A plane needs at least this long, on top of the time a leg takes at `maximumFlightSpeed`,
+    /// to come down from flying to standing at the gate (approach, landing, taxiing in), or to get
+    /// from the gate into the air (taxiing out, take-off): well over 20 minutes each. So a row of
+    /// photos on one fix between two flown legs, under a minute on either side of the photo, is
+    /// no stay (rule 2) where the leg before it leaves less time to land or the leg after it less
+    /// time to take off: the plane was in the air, and the iPhone did not update the location
+    /// for the row (a fix frozen for seconds in the cabin). The layovers stay: Berlin to Vienna
+    /// in 72 minutes (525 km) leaves time, and so does Vienna to Athens (1,280 km) in an hour and a
+    /// half. Only a row on one fix: photos whose fixes differ show by them how far they moved on,
+    /// and between someone else's photos minutes away (an iCloud Shared Library) or a location
+    /// jumping kilometres indoors, a row that did not move on is the ground.
+    static let landingDuration: TimeInterval = 20 * 60
     /// The location **comes back** when a photo at least `stayDuration` and at most this long
     /// before or after a photo lies closer than `minimumLegMeters` to it. A plane at
     /// `maximumGroundSpeed` and more is 6.7 km on after a minute; to come back within 3 km (with
@@ -460,6 +472,15 @@ struct FlightTrack: Sendable {
         return meters > AirborneFilter.maximumGroundSpeed * seconds && meters <= AirborneFilter.maximumFlightSpeed * seconds
     }
 
+    /// Whether the way from `a` to the later `b` leaves time to land or take off on it
+    /// (`AirborneFilter.landingDuration`): it was no faster than ground transport, or a plane at
+    /// `maximumFlightSpeed` covers it in its time less `landingDuration`.
+    func leavesTimeToLand(_ a: Int, _ b: Int) -> Bool {
+        let meters = meters(a, b), seconds = seconds(a, b)
+        return meters <= AirborneFilter.maximumGroundSpeed * seconds
+            || meters <= AirborneFilter.maximumFlightSpeed * (seconds - AirborneFilter.landingDuration)
+    }
+
     /// `middle` on the way from `from` to `to` (`AirborneFilter.detourFactor`).
     func onTheWay(_ from: Int, _ middle: Int, _ to: Int) -> Bool {
         meters(from, middle) + meters(middle, to) <= AirborneFilter.detourFactor * meters(from, to) + AirborneFilter.detourAllowanceMeters
@@ -534,7 +555,7 @@ struct FlightTrack: Sendable {
         guard before >= 0, flown(before, i) else { return false }
         let after = neighbours.runAfter(i, in: self)
         guard after >= 0, flown(i, after), onTheWay(before, i, after) else { return false }
-        if stays(i, before: before, after: after) { return false }
+        if stays(i, before: before, after: after, landing: true) { return false }
         // A short leg from or to a stay.
         let short = AirborneFilter.runEndLongDuration
         if times[i] - times[before] <= short, staysAt(before, step: -1) { return false }
@@ -610,12 +631,18 @@ struct FlightTrack: Sendable {
     /// further than the stated accuracy of the first and last of them. In a plane such photos lie
     /// under a minute apart and move on at its speed; on the ground they stay within the 6 km the
     /// row can span, however long it lasts. A single photo shows nothing, nor do photos within
-    /// `AirborneFilter.shortestStay`, whose fixes may lag a second's flight behind them.
-    func stays(_ i: Int, before: Int, after: Int, movingSpeed: Double = AirborneFilter.maximumGroundSpeed) -> Bool {
+    /// `AirborneFilter.shortestStay`, whose fixes may lag a second's flight behind them. With
+    /// `landing` (rule 2), a row on one fix lasting under `stayDuration` on either side of the
+    /// photo shows none either where a plane could not have landed after the leg before it, or
+    /// taken off before the leg after it (`AirborneFilter.landingDuration`).
+    func stays(_ i: Int, before: Int, after: Int, movingSpeed: Double = AirborneFilter.maximumGroundSpeed, landing: Bool = false) -> Bool {
         let first = before >= 0 ? before + 1 : windowStart[i], last = after >= 0 ? after - 1 : windowEnd[i]
         guard first < last else { return false }
         let span = times[last] - times[first]
         guard span >= AirborneFilter.shortestStay else { return false }
+        if landing && coordinates[first] == coordinates[last]
+            && times[i] - times[first] < AirborneFilter.stayDuration && times[last] - times[i] < AirborneFilter.stayDuration
+            && ((before >= 0 && !leavesTimeToLand(before, first)) || (after >= 0 && !leavesTimeToLand(last, after))) { return false }
         var progress = Double.infinity
         if before >= 0 { progress = min(progress, meters(before, last) - meters(before, first)) }
         if after >= 0 { progress = min(progress, meters(first, after) - meters(last, after)) }

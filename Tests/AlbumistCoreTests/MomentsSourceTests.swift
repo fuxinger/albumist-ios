@@ -336,8 +336,10 @@ struct MomentsSourceTests {
     /// screens marks its scroll view with one line; the modifier hands over the offset, the
     /// phase and when the screen shows and goes, only on a tab's own stack (a sheet's says no).
     @Test func theCoverFliesOnlyIntoAnOpenTabBar() throws {
-        // One marked line on each screen's scroll view, and no other screen calls it.
-        let chains = [Self.overview: ".navigationTitle(\"Vorschläge\").quickCreateMomentScrollTrail()",
+        // One marked line on each screen's scroll view, and no other screen calls it. On the start
+        // page before the sheets of a card's long press (`suggestionMenuFlows`), so that no scroll
+        // in "Anpassen" or the trip workshop reaches it.
+        let chains = [Self.overview: "}.quickCreateMomentScrollTrail().suggestionMenuFlows(menuFlows).background(Theme.background)",
                       Self.list: "}.quickCreateMomentScrollTrail().background(Theme.background)"]
         for (path, chain) in chains {
             let file = try AppSource.read(path)

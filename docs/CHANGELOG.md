@@ -14,6 +14,12 @@
   Nach „Anlegen“ auf einer Karte fliegt ihr Cover Richtung Tab „Alben“ und verblasst an der Leiste, nur bei offener
   Tab-Leiste; der Erfolgs-Tap kommt wie bisher mit dem Banner. Mit „Bewegung reduzieren“ blenden die Cover des
   Ergebnisses nur ein, nach „Anlegen“ fliegt nichts.
+  Nach der zweiten Prüfung: Die Cover des Ergebnisses laden zu dritt nebeneinander; eine Karte, für die Fotos
+  gerade nicht antwortet, kommt später noch einmal dran, und was ankommt, bleibt beim Ergebnis. Der Fächer beginnt
+  klein und wächst nur, die Zahl darunter springt nicht mehr. Ob die Tab-Leiste offen ist, liest Albumist am
+  Scrollen der Liste: eine Karte, die darüber wächst, Zurückfedern, Ziehen zum Aktualisieren und der Weg zurück
+  von einem Vorschlag schließen sie nicht mehr. „Rückgängig machen“ spricht nach einem Lauf mit einem Album von
+  Albumist nicht mehr von „deinen Alben“.
 - Neue Fortschrittsanzeige der Analyse (Entwurf v3 mit den 5 Punkten vom 15.11.): ein Balken in
   6 Abschnitten nach Zeitanteil, „Fertig gegen 23:40“ für die ganze Analyse, gleitender Balken,
   „Schon fertig: 51 Reisen, 38 Orte · Ansehen“, Fertig-Moment mit Häkchen, Details-Blatt,

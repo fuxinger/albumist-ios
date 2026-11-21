@@ -82,13 +82,15 @@ struct OverviewView: View {
             .padding(.top, Theme.Spacing.s)
             .padding(.bottom, Theme.Spacing.xl)
         }
+        // On the scroll view itself, before the sheets of a card's long press below: no scroll in
+        // "Anpassen" or the trip workshop can reach it.
+        .quickCreateMomentScrollTrail() // Design W2 H6: scroll trail
         // Design W2 H7: what a suggestion card's long press opens ("Anpassen", the trip workshop,
         // "Keine Reise?"), on the scroll view, so the question comes from the screen, not from the
         // middle of all the cards (review C of design wave 2, M1).
         .suggestionMenuFlows(menuFlows)
         .background(Theme.background)
         .navigationTitle("Vorschläge")
-        .quickCreateMomentScrollTrail() // Design W2 H6: scroll trail
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

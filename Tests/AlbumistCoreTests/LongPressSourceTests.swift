@@ -120,7 +120,9 @@ struct LongPressSourceTests {
         // cards (review C of design wave 2, M1).
         #expect(!(try Self.code(Self.start)).contains(".suggestionMenuFlows("), "on the cards' tall stack")
         let overview = Self.squeezed(try Self.body(["struct OverviewView", "var body: some View"], in: Self.overview))
-        #expect(overview.contains("}.suggestionMenuFlows(menuFlows).background(Theme.background).navigationTitle(\"Vorschläge\")"),
+        // Right after the scroll trail of the small moment, which sits on the scroll view itself so
+        // that no scroll inside these sheets can reach it (`MomentsSourceTests`).
+        #expect(overview.contains("}.quickCreateMomentScrollTrail().suggestionMenuFlows(menuFlows).background(Theme.background).navigationTitle(\"Vorschläge\")"),
                 "\(overview)")
         #expect(overview.components(separatedBy: ".suggestionMenuFlows(").count == 2, "once, on the scroll view")
     }

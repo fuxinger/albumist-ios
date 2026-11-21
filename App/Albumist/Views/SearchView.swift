@@ -16,6 +16,8 @@ struct SearchView: View {
     @State private var suggestions: [SearchSuggestion] = []
     /// Starting points for the empty field, from the user's own library.
     @State private var featured: [SearchSuggestion] = []
+    /// The same with a photo each (design wave 3, DS-13): shown as tiles once there are any.
+    @State private var starts: [SearchStartingPoint] = []
     /// A tap opens the photo large, its details behind "i" (design review W12).
     @State private var viewing: PhotoViewer.Start?
     /// The tapped thumbnail (a photo can be in the best hits and in the grid).
@@ -39,6 +41,13 @@ struct SearchView: View {
     private let examples: [LocalizedStringResource] = ["Strand 2024", "Italien", "Rechnungen", "Videos", "Unsortiert", "Screenshots Bestellung"]
 
     private var isEmptyQuery: Bool { query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// What the starting points are made from: the facts, and the analysis that fills them in
+    /// (photos it has looked at become pictures, their topics starting points).
+    private struct StartingPointsInputs: Equatable {
+        var facts: Int
+        var analysis: AppModel.AnalysisCounts
+    }
 
     var body: some View {
         ScrollView {
@@ -91,8 +100,12 @@ struct SearchView: View {
         .searchable(text: $query, isPresented: $searchActive,
                     prompt: SmartAssistant.isAvailable ? Text("z. B. Grillen bei Oma letzten Sommer") : Text("z. B. Hunde Italien 2023"))
         .onAppear { if query.isEmpty { searchActive = true } }
-        // Starting points follow the library (a finished analysis brings places and topics).
-        .task(id: model.facts.count) { featured = await model.featuredSearches() }
+        // Starting points follow the library (a finished analysis brings places and topics, and
+        // the pictures of photos it has looked at since).
+        .task(id: StartingPointsInputs(facts: model.facts.count, analysis: model.analysisCounts)) {
+            featured = await model.featuredSearches()
+            starts = await model.searchStartingPoints()
+        }
         .task(id: query) {
             let text = query
             guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -117,20 +130,30 @@ struct SearchView: View {
 
     // MARK: Parts
 
+    /// What the empty field offers: the library's starting points as photo tiles (DS-13), a tap
+    /// searches a tile's words as its chip did; papers ("Rechnungen") stay words beside them, as
+    /// their pictures are personal. Before the analysis has found anything with a photo, the
+    /// words alone, as before: the library's chips, or the fixed examples.
     private var startingPoints: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             Text("Suche nach Orten, Jahren, Themen oder Text auf Screenshots.")
                 .foregroundStyle(.secondary)
-            FlowLayout(spacing: Theme.Spacing.s) {
-                if featured.isEmpty {
+            if !starts.isEmpty {
+                SearchStartingPointGrid(points: starts) { suggestion in query = suggestion.completion }
+            }
+            let words = starts.isEmpty ? featured : featured.filter { $0.kind == .document }
+            if starts.isEmpty && featured.isEmpty {
+                FlowLayout(spacing: Theme.Spacing.s) {
                     ForEach(examples.map { String(localized: $0) }, id: \.self) { example in
                         Button(example) { query = example }
                             .buttonStyle(.bordered)
                             .buttonBorderShape(.capsule)
                             .accessibilityIdentifier("search.example")
                     }
-                } else {
-                    ForEach(featured) { suggestion in
+                }
+            } else if !words.isEmpty {
+                FlowLayout(spacing: Theme.Spacing.s) {
+                    ForEach(words) { suggestion in
                         Button { query = suggestion.completion } label: {
                             Label(suggestion.label, systemImage: Self.symbol(suggestion.kind))
                         }

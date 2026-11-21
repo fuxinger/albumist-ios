@@ -4,12 +4,19 @@ import AlbumistCore
 /// "Reise anpassen" (I07): a trip Albumist cut wrongly is split at a day or merged with the
 /// trip right before or after it. The change is kept in time, so every later analysis holds
 /// to it; it can be undone here, at the trip, or all at once in the settings.
+///
+/// The trip is shown as a timeline (design wave 3, DS-14): its days from top to bottom, each with
+/// its date, where it was and larger photos, the days without photos between them, and the trips
+/// right before and after it at its ends with the days between, where merging joins them.
 struct TripWorkshopView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// Symbol columns grow with the text size, so a symbol never runs over its text (P3-12).
     @ScaledMetric(relativeTo: .body) private var changeSymbolWidth: CGFloat = 28
+    /// A neighbouring trip's cover beside its merge row.
+    @ScaledMetric(relativeTo: .body) private var neighbourCover: CGFloat = 64
     var proposal: AlbumProposal
     /// Called once a change is stored: the suggestion this sheet came from goes away with the
     /// run that applies it, however the sheet is closed then.
@@ -49,11 +56,11 @@ struct TripWorkshopView: View {
                 let around = model.tripNeighbours(of: proposal)
                 let mergeShown = around.before != nil || around.after != nil
                 header(days)
-                // While the changes wait, why is said once, under the last of these controls.
+                // While the changes wait, why is said once, under the last of these controls; the
+                // neighbours' merge rows say it under themselves.
                 changesSection(saysWhy: !mergeShown)
-                // Merging is one tap and short; the days list can be long, so it comes last.
-                if mergeShown { mergeSection(around) }
-                splitSection(days)
+                // The days, with the trips before and after at the ends of the line (DS-14).
+                timelineSection(days, around: around)
             }
         }
         .navigationTitle("Reise anpassen")
@@ -194,32 +201,108 @@ struct TripWorkshopView: View {
         }
     }
 
+    /// The trip as a timeline (DS-14, `TripTimeline`): the trip before it at the top and the one
+    /// after it at the bottom, each with its merge row and the days between; in between the days,
+    /// each with where it was and its photos, and the days without photos. A tap on a day after
+    /// the first chooses it as the start of the second trip (the bar below says what the split
+    /// makes, "Reise teilen" does it); the line breaks there, with scissors.
     @ViewBuilder
-    private func splitSection(_ days: [TripWorkshop.Day]) -> some View {
-        if days.count > 1 {
-            Section {
-                ForEach(Array(days.enumerated()), id: \.element.id) { index, day in
-                    if index == 0 {
-                        DayRow(day: day, note: String(localized: "Beginn der Reise"), selected: false)
-                    } else {
-                        Button {
-                            withAnimation(.smooth(duration: 0.25)) { splitIndex = splitIndex == index ? nil : index }
-                        } label: {
-                            DayRow(day: day, note: splitIndex == index ? String(localized: "Neue Reise ab hier") : nil,
-                                   selected: splitIndex == index)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("workshop.day")
-                        .accessibilityHint(Text("Neue Reise ab diesem Tag"))
-                        .accessibilityAddTraits(splitIndex == index ? .isSelected : [])
-                    }
+    private func timelineSection(_ days: [TripWorkshop.Day], around: (before: AlbumProposal?, after: AlbumProposal?)) -> some View {
+        let dates = model.creationDates
+        let entries = TripTimeline.days(days, facts: model.factsByID, ranks: model.previewRanks, dates: dates, calendar: .current)
+        let span = TripTimeline.span(of: proposal.assetIDs, dates: dates)
+        Section {
+            if let before = around.before {
+                neighbourNode(before, side: .before)
+                if let gap = quietDays(before: before, span: span), gap > 0 {
+                    TripTimelineGapRow(text: Text("\(gap) \(gap.formatted()) Tage dazwischen"))
+                        .tripTimelineRow()
                 }
-            } header: {
+            }
+            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                if entry.quietDaysBefore > 0 {
+                    TripTimelineGapRow(text: Text("\(entry.quietDaysBefore) \(entry.quietDaysBefore.formatted()) Tage ohne Fotos"))
+                        .tripTimelineRow()
+                }
+                dayRow(entry, index: index, entries: entries, around: around)
+            }
+            if let after = around.after {
+                if let gap = quietDays(after: after, span: span), gap > 0 {
+                    TripTimelineGapRow(text: Text("\(gap) \(gap.formatted()) Tage dazwischen"))
+                        .tripTimelineRow()
+                }
+                neighbourNode(after, side: .after)
+            }
+        } header: {
+            if days.count > 1 {
                 Text("An einem Tag teilen")
-            } footer: {
-                Text("Tippe auf den Tag, an dem die zweite Reise beginnt.")
+            }
+        } footer: {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                if days.count > 1 {
+                    Text("Tippe auf den Tag, an dem die zweite Reise beginnt.")
+                }
+                if around.before != nil || around.after != nil {
+                    Text("Für eine Reise mit Pause, zum Beispiel ein Wochenende zu Hause zwischen zwei Stationen.")
+                }
             }
         }
+    }
+
+    /// One day on the timeline: a button that chooses it as the start of the second trip, except
+    /// the first ("Beginn der Reise"). The line breaks above the chosen day and runs dotted over
+    /// days without photos and towards a neighbour.
+    @ViewBuilder
+    private func dayRow(_ entry: TripTimeline.Day, index: Int, entries: [TripTimeline.Day],
+                        around: (before: AlbumProposal?, after: AlbumProposal?)) -> some View {
+        let selected = splitIndex == index
+        let above = lineAbove(index, entries: entries, hasBefore: around.before != nil)
+        let below = lineBelow(index, entries: entries, hasAfter: around.after != nil)
+        if entry.canStartNewTrip {
+            Button {
+                withAnimation(.smooth(duration: 0.25)) { splitIndex = splitIndex == index ? nil : index }
+            } label: {
+                TripTimelineDayRow(entry: entry, note: selected ? String(localized: "Neue Reise ab hier") : nil,
+                                   selected: selected, above: above, below: below)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("workshop.day")
+            .accessibilityHint(Text("Neue Reise ab diesem Tag"))
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .tripTimelineRow()
+        } else {
+            TripTimelineDayRow(entry: entry, note: String(localized: "Beginn der Reise"), selected: false, above: above, below: below)
+                .tripTimelineRow()
+        }
+    }
+
+    /// The line above day `index`: none where the second trip begins (the cut) or above the first
+    /// day of a trip with nothing before it; dotted after days without photos or from the trip
+    /// before.
+    private func lineAbove(_ index: Int, entries: [TripTimeline.Day], hasBefore: Bool) -> TripTimelineGutter.Line? {
+        if splitIndex == index { return nil }
+        if index == 0 { return hasBefore ? .dotted : nil }
+        return entries[index].quietDaysBefore > 0 ? .dotted : .solid
+    }
+
+    /// The line below day `index`: none before the cut or below the last day of a trip with
+    /// nothing after it; dotted towards days without photos or the trip after.
+    private func lineBelow(_ index: Int, entries: [TripTimeline.Day], hasAfter: Bool) -> TripTimelineGutter.Line? {
+        if index == entries.count - 1 { return hasAfter ? .dotted : nil }
+        if entries[index + 1].quietDaysBefore > 0 { return .dotted }
+        return splitIndex == index + 1 ? nil : .solid
+    }
+
+    /// Days without photos between the trip before and this one.
+    private func quietDays(before other: AlbumProposal, span: DateInterval?) -> Int? {
+        guard let span, let earlier = TripTimeline.span(of: other.assetIDs, dates: model.creationDates) else { return nil }
+        return TripTimeline.quietDays(from: earlier.end, to: span.start, calendar: .current)
+    }
+
+    /// Days without photos between this trip and the one after it.
+    private func quietDays(after other: AlbumProposal, span: DateInterval?) -> Int? {
+        guard let span, let later = TripTimeline.span(of: other.assetIDs, dates: model.creationDates) else { return nil }
+        return TripTimeline.quietDays(from: span.end, to: later.start, calendar: .current)
     }
 
     /// The two trips the chosen split makes, and the button, above the home indicator.
@@ -260,22 +343,20 @@ struct TripWorkshopView: View {
         .padding(.bottom, Theme.Spacing.s)
     }
 
-    private func mergeSection(_ around: (before: AlbumProposal?, after: AlbumProposal?)) -> some View {
-        Section {
-            if let before = around.before {
-                mergeButton(before, side: .before)
-            }
-            if let after = around.after {
-                mergeButton(after, side: .after)
-            }
-        } header: {
-            Text("Zusammenlegen")
-        } footer: {
+    /// A neighbouring trip at an end of the timeline (the one before at the top, the one after at
+    /// the bottom): its cover, its name and photos, and merging with it after the question; why it
+    /// waits right under it while it waits.
+    private func neighbourNode(_ other: AlbumProposal, side: Side) -> some View {
+        TripTimelineRow(mark: .neighbour,
+                        markY: typeSize.isAccessibilitySize ? nil : TripTimelineMetrics.verticalPadding + neighbourCover / 2,
+                        above: side == .after ? .dotted : nil, below: side == .before ? .dotted : nil) {
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                mergeButton(other, side: side)
                 TripChangeWaitNote()
-                Text("Für eine Reise mit Pause, zum Beispiel ein Wochenende zu Hause zwischen zwei Stationen.")
             }
+            .padding(.vertical, TripTimelineMetrics.verticalPadding)
         }
+        .tripTimelineRow()
     }
 
     private func mergeButton(_ other: AlbumProposal, side: Side) -> some View {
@@ -284,7 +365,9 @@ struct TripWorkshopView: View {
             merging = side
         } label: {
             MergeRowLabel(title: side == .before ? "Mit der Reise davor zusammenlegen" : "Mit der Reise danach zusammenlegen",
-                          detail: Text("\(title(other)) · \(photos)"))
+                          detail: Text("\(title(other)) · \(photos)"),
+                          coverIDs: model.proposalCoverIDs(for: other), hidesPreview: model.previewHidden(for: other),
+                          coverSide: neighbourCover)
         }
         .buttonStyle(.plain)
         .disabled(busy)
@@ -428,73 +511,43 @@ private extension TripChange {
     }
 }
 
-/// "Mit der Reise davor/danach zusammenlegen": in the accent while it can be tapped, in the
-/// system's greys while it waits (a plain button keeps the colours it is given).
+/// "Mit der Reise davor/danach zusammenlegen" beside the other trip's cover (DS-14): in the
+/// accent while it can be tapped, in the system's greys while it waits (a plain button keeps the
+/// colours it is given), the cover dimmed then. The cover never shows a sensitive photo
+/// (`proposalCoverIDs`), "Vorschau ausgeblendet" for a trip of nothing but sensitive ones; at the
+/// accessibility text sizes it is a wide strip above the words.
 private struct MergeRowLabel: View {
     var title: LocalizedStringKey
     var detail: Text
+    var coverIDs: [AssetID]
+    var hidesPreview: Bool
+    var coverSide: CGFloat
     @Environment(\.isEnabled) private var isEnabled
-    @ScaledMetric(relativeTo: .title3) private var symbolWidth: CGFloat = 32
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.s) {
-            Image(systemName: "arrow.triangle.merge")
-                .font(.title3)
-                .foregroundStyle(isEnabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
-                .frame(width: symbolWidth)
-                .accessibilityHidden(true)
+        AdaptiveStack(horizontalAlignment: .leading, verticalAlignment: .top, spacing: Theme.Spacing.m) {
+            CoverPhoto(ids: coverIDs, aspectRatio: typeSize.isAccessibilitySize ? 3 : 1, cornerRadius: Theme.Radius.tile,
+                       hidesPreview: hidesPreview, placeholderSymbol: "airplane")
+                .frame(width: typeSize.isAccessibilitySize ? nil : coverSide)
+                .opacity(isEnabled ? 1 : 0.5)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(isEnabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+                Label {
+                    Text(title)
+                } icon: {
+                    Image(systemName: "arrow.triangle.merge")
+                        .accessibilityHidden(true)
+                }
+                .font(.body.weight(.semibold))
+                .foregroundStyle(isEnabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
                 detail
                     .font(.subheadline)
                     .foregroundStyle(isEnabled ? AnyShapeStyle(.noteText) : AnyShapeStyle(.tertiary))
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(minHeight: 44)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
-    }
-}
-
-/// One day of the trip: first photo, date, number of photos, and the split mark.
-private struct DayRow: View {
-    @Environment(AppModel.self) private var model
-    var day: TripWorkshop.Day
-    var note: String?
-    var selected: Bool
-
-    var body: some View {
-        HStack(spacing: Theme.Spacing.s) {
-            // The day's first photo that suits a cover: not the photographed ticket or bank card.
-            CoverThumbnail(id: PreviewPicker.firstSuited(day.assetIDs, count: 1, ranks: model.previewRanks).first, side: 88)
-                .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            // The note sits under the date: on the right it pushed "Dienstag, 1. August" onto two lines.
-            VStack(alignment: .leading, spacing: 2) {
-                Text(day.start.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                let count = Text("\(day.count) \(day.count.formatted()) Fotos")
-                Group {
-                    if let note {
-                        Text("\(count) · \(note)")
-                    } else {
-                        count
-                    }
-                }
-                .font(selected ? .subheadline.weight(.semibold) : .subheadline)
-                .foregroundStyle(selected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.noteText))
-            }
-            Spacer(minLength: Theme.Spacing.s)
-            if selected {
-                Image(systemName: "scissors")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
-                    .accessibilityHidden(true)
-            }
-        }
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
     }
 }
 

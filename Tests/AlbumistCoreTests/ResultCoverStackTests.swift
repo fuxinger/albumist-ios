@@ -471,4 +471,24 @@ struct ResultCoverFanTests {
         #expect(ResultCoverFan.size(1).width == ResultCoverFan.cardWidth)
         #expect(ResultCoverFan.size(1).height == ResultCoverFan.cardHeight)
     }
+
+    /// Until the screen's room is measured the fan is laid out at its smallest size, so once the
+    /// room is known it can only grow: the count and the buttons below it never jump up as the
+    /// result comes (on the 4.7" iPhone it stays as it was laid out; review E2 of design wave 2,
+    /// N7).
+    @Test func theFanOnlyGrowsOnceTheRoomIsKnown() {
+        for count in [1, 2, 3, 5] {
+            let unknown = ResultCoverFan.scale(count: count, width: 361, height: nil)
+            #expect(unknown == ResultCoverFan.minimumScale, "\(count)")
+            for width in [100.0, 343, 361, 600] {
+                #expect(ResultCoverFan.scale(count: count, width: width, height: nil) == unknown, "\(count), \(width)")
+                for height in [0.0, 10, 100, 150, 200, 1000] {
+                    #expect(ResultCoverFan.scale(count: count, width: width, height: height) >= unknown, "\(count), \(width), \(height)")
+                }
+            }
+        }
+        // The 4.7" iPhone at the default size: less room than five covers take at the smallest
+        // size (review E2: 193 pt drawn, 116 pt at the smallest), so the fan stays as it was laid out.
+        #expect(ResultCoverFan.scale(count: 5, width: 343, height: 110) == ResultCoverFan.minimumScale)
+    }
 }

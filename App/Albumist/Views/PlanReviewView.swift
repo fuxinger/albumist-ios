@@ -704,16 +704,17 @@ struct ResultCard: View {
     @State private var room: CGFloat?
     /// The height of everything below the stack: the count, the way to the new albums,
     /// "Fotos-App öffnen", "Alle Änderungen ansehen" and "Rückgängig machen" with its note
-    /// (review E of design wave 2, finding 8).
-    @State private var belowHeight: CGFloat = 0
+    /// (review E of design wave 2, finding 8). Nil until measured.
+    @State private var belowHeight: CGFloat?
     @Environment(\.openURL) private var openURL
 
     private static let spacing = Theme.Spacing.l
 
     /// The height the stack may take: what the screen shows, less its padding above and below
-    /// and everything below the stack. Nil until measured.
+    /// and everything below the stack. Nil until both are measured: the fan is laid out at its
+    /// smallest meanwhile and can only grow (review E2 of design wave 2, N7).
     private var stackRoom: CGFloat? {
-        guard let room else { return nil }
+        guard let room, let belowHeight else { return nil }
         return room - 2 * screenPadding - belowHeight - Self.spacing
     }
 

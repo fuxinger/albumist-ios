@@ -76,6 +76,11 @@ struct MomentsSourceTests {
         #expect(body[..<below.lowerBound].contains("more(undoNote"), "\"Alle Änderungen\" and \"Rückgängig machen\" are not measured")
         let room = try Self.body(["struct ResultCard", "var stackRoom: CGFloat?"], in: file)
         #expect(room.contains("2 * screenPadding") && room.contains("belowHeight"), "\(room)")
+        // Not measured yet is nil, until both the screen and everything below the stack are
+        // measured: the fan is laid out at its smallest size meanwhile and can only grow (review
+        // E2 of design wave 2, N7).
+        #expect(room.contains("guard let room, let belowHeight else { return nil }"), "\(room)")
+        #expect(card.contains("@State private var belowHeight: CGFloat?"), "the block below the stack counts as measured before it is")
         let screen = try Self.body(["struct ResultCard", "var screenHeight: some View"], in: file)
         #expect(screen.contains(/\.containerRelativeFrame\(\s*\.vertical\s*\)/), "\(screen)")
         // The screen hands the result the padding it puts around it, as it does to the show.
@@ -108,6 +113,9 @@ struct MomentsSourceTests {
         #expect(limit.contains("typeSize.isAccessibilitySize ? ResultCoverStack.limitAtLargestText : ResultCoverStack.limit"))
         let scale = try Self.body(["struct ResultCoverMoment", "func fanScale("], in: file)
         #expect(scale.contains("ResultCoverFan.scale(count:") && scale.contains("room"), "\(scale)")
+        // An unmeasured room is the smallest scale (the core's), never the full size (review E2
+        // of design wave 2, N7: the count jumped up as the fan shrank in the first frames).
+        #expect(scale.contains("height: room.map { Double($0) }") && !scale.contains(".infinity"), "\(scale)")
         // No room held for covers that may come: the fan is as high as what it shows (finding 9).
         #expect(!file.contains("heldHeight") && !file.contains("expected"), "the stack still holds room while it loads")
         // No glow, no confetti: a white edge and a soft shadow.

@@ -20,7 +20,8 @@ import AlbumistCore
 /// - Decorative for VoiceOver: the count below ("10 neue Alben") is the heading that is read.
 /// - Room: at most five covers, three at the accessibility text sizes; the fan shrinks to the
 ///   width and to the room `room` leaves (everything below it stays on screen), down to
-///   `ResultCoverFan.minimumScale`; below that the screen scrolls.
+///   `ResultCoverFan.minimumScale`; below that the screen scrolls. Until the room is measured it
+///   is laid out at that smallest size, so it can only grow (review E2, N7).
 /// - Once per result: coming back to the tab shows the covers where they lie.
 struct ResultCoverMoment: View {
     let plan: ChangePlan
@@ -121,10 +122,11 @@ struct ResultCoverMoment: View {
         .scaleEffect(scale)
     }
 
-    /// The scale that fits `count` covers into the width and into the room left above the rest.
+    /// The scale that fits `count` covers into the width and into the room left above the rest;
+    /// the smallest until the room is measured, so the fan can only grow and the count below it
+    /// never jumps up as the result comes (review E2 of design wave 2, N7).
     private func fanScale(_ count: Int) -> CGFloat {
-        let height = room.map { Double($0) } ?? .infinity
-        return CGFloat(ResultCoverFan.scale(count: count, width: Double(width), height: height))
+        CGFloat(ResultCoverFan.scale(count: count, width: Double(width), height: room.map { Double($0) }))
     }
 
     // MARK: Choreography

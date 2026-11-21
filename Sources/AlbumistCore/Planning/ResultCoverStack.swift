@@ -293,8 +293,11 @@ public enum ResultCoverFan {
     }
 
     /// The scale that fits the fan into `width` × `height`: never larger than drawn, never below
-    /// `minimumScale`.
-    public static func scale(count covers: Int, width: Double, height: Double) -> Double {
+    /// `minimumScale`. `height` nil: the room is not measured yet, and the fan is laid out at
+    /// `minimumScale`, so once the room is known it can only grow and what stands below it never
+    /// jumps up as the result comes (review E2 of design wave 2, N7).
+    public static func scale(count covers: Int, width: Double, height: Double?) -> Double {
+        guard let height else { return minimumScale }
         let size = size(covers)
         guard size.width > 0, size.height > 0 else { return 1 }
         return max(minimumScale, min(1, width / size.width, height / size.height))

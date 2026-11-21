@@ -16,11 +16,13 @@ import Foundation
 ///
 /// A first analysis too quick for "Analyse fertig" (a small part of the library, a few photos
 /// shared) leaves it owed for `owedAfterQuickFinish`, seven days from that first completion
-/// (`firstCompleted`), and only a run that analyses the library as a whole can bring it then: the
-/// first full analysis once more of the library is taken in, or "Analyse neu aufbauen" (no
-/// analysis completed since `AnalysisMarker.reset`), never a check for new photos or a catch-up
-/// of new imports, however long it runs. After those seven days it is spent (second review, K7;
-/// the lead's decision on verification review V6).
+/// (`firstCompleted`), and only a run that analyses the library as a whole can bring it then:
+/// the first full analysis once another part of the library is taken in, or "Analyse neu
+/// aufbauen" (no analysis completed since `AnalysisMarker.reset`), and, after a first analysis
+/// of only the photos shared with Albumist ("Ausgewählte Fotos", `sharedOnly`), the first run to
+/// end once every photo is allowed, which analyses the rest of the library. Never a check for new
+/// photos or a catch-up of new imports, however long it runs. After those seven days it is spent
+/// (second review, K7; the lead's decision on verification review V6).
 ///
 /// Exactly once per installation: whether it is still owed is kept in `UserDefaults`
 /// (`FirstAnalysisMomentStore`), written as `spent` the moment it becomes due, so once it was due
@@ -42,6 +44,10 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// `owedAfterQuickFinish` from then for a run of the whole library. Kept next to `kept`; nil
     /// once spent.
     public private(set) var firstCompleted: Date?
+    /// That quick first analysis saw only the photos shared with Albumist ("Ausgewählte Fotos"):
+    /// the first run to end once every photo is allowed analyses the library as a whole too. Kept
+    /// next to `firstCompleted`; false once such a run ended, and once spent.
+    public private(set) var sharedOnly = false
     /// The first full analysis finished on screen then; the card shows the moment from then until
     /// `window` has passed. In memory only.
     public private(set) var dueSince: Date?
@@ -68,14 +74,15 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
 
     /// At launch, before anything resets where the analysis got to (`AnalysisMarker.reset`):
     /// `kept` as stored, `completedBefore` whether an analysis was completed before
-    /// (`AnalysisMarker.completedOnce`), `firstCompleted` as stored. Never stored is the first
+    /// (`AnalysisMarker.completedOnce`), `firstCompleted` and `sharedOnly` as stored. Never stored is the first
     /// launch of a version with the moment: an analysis completed before it was not seen reaching
     /// 100 % here, spent (an update after the analysis, a device backup of such a version). What
     /// was stored stands: owed after a quick first analysis, which completed the analysis without
     /// "Analyse fertig", until its wait is over (`lapse`).
-    public init(kept: Kept?, completedBefore: Bool, firstCompleted: Date? = nil) {
+    public init(kept: Kept?, completedBefore: Bool, firstCompleted: Date? = nil, sharedOnly: Bool = false) {
         self.kept = kept ?? (completedBefore ? .spent : .owed)
         self.firstCompleted = self.kept == .owed ? firstCompleted : nil
+        self.sharedOnly = self.firstCompleted != nil && sharedOnly
     }
 
     /// The wait after a quick first analysis is over (`owedAfterQuickFinish` from
@@ -84,6 +91,7 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
         guard kept == .owed, let firstCompleted, now.timeIntervalSince(firstCompleted) > Self.owedAfterQuickFinish else { return }
         kept = .spent
         self.firstCompleted = nil
+        sharedOnly = false
     }
 
     /// The analysis was completed where no run of the app ended (the overnight refinement, which
@@ -94,28 +102,40 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
         guard first else { return }
         kept = .spent
         firstCompleted = nil
+        sharedOnly = false
     }
 
     /// The end of a run in the app, decided before it waits for the overview. `finished`: it
     /// finished the analysis (`AnalysisRunEnd.isFinished`); `celebrates`: "Analyse fertig" is owed
     /// for it (`AnalysisCardState.celebratesFinish`); `wholeLibrary`: it analysed the library as a
-    /// whole (no analysis completed since `AnalysisMarker.reset`: the first analysis, one of more
-    /// of the library, "Analyse neu aufbauen"), not a check for new photos or a catch-up;
-    /// `onScreen`: Albumist is not in the background as it ends (in front of it Control Center or
-    /// an alert only make the card wait, `claim`). The first celebrated finish of the whole library
-    /// decides: due on screen, spent either way. Any other finish starts the wait after a quick
-    /// first analysis (`firstCompleted`), and it changes nothing once that wait is over.
-    public mutating func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, onScreen: Bool, at now: Date) {
+    /// whole (no analysis completed since `AnalysisMarker.reset`: the first analysis, one of
+    /// another part of the library, "Analyse neu aufbauen"), not a check for new photos or a
+    /// catch-up; `fullAccess`: every photo is allowed as it ends (not only "Ausgewählte Fotos"),
+    /// so after a quick first analysis of only the shared photos (`sharedOnly`) the first such
+    /// run analysed the rest of the library, the library as a whole too; `onScreen`: Albumist is
+    /// not in the background as it ends (in front of it Control Center or an alert only make the
+    /// card wait, `claim`). The first celebrated finish of the whole library decides: due on
+    /// screen, spent either way. Any other finish starts the wait after a quick first analysis
+    /// (`firstCompleted`), and it changes nothing once that wait is over.
+    public mutating func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, fullAccess: Bool, onScreen: Bool,
+                                  at now: Date) {
         guard finished, kept == .owed else { return }
         lapse(at: now)
         guard kept == .owed else { return }
-        guard celebrates, wholeLibrary else {
-            if firstCompleted == nil { firstCompleted = now }
+        let whole = wholeLibrary || (sharedOnly && fullAccess)
+        // Only the first run to end with every photo allowed takes in the rest of the library.
+        if fullAccess { sharedOnly = false }
+        guard celebrates, whole else {
+            if firstCompleted == nil {
+                firstCompleted = now
+                sharedOnly = !fullAccess
+            }
             return
         }
         if onScreen { dueSince = now }
         kept = .spent
         firstCompleted = nil
+        sharedOnly = false
     }
 
     /// Albumist left the screen (the background, the screen locked): a moment not shown yet is not

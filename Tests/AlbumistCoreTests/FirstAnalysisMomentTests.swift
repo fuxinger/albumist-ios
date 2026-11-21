@@ -21,9 +21,9 @@ struct FirstAnalysisMomentTests {
     /// after a wait (`AnalysisCardState.celebratesFinish`). `wholeLibrary`: a run of the whole
     /// library (no analysis completed since `AnalysisMarker.reset`), not a check for new photos.
     static func end(_ moment: inout FirstAnalysisMoment, finished: Bool = true, celebrates: Bool = true,
-                    wholeLibrary: Bool = true, onScreen: Bool = true, after seconds: TimeInterval = 0) {
-        moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, onScreen: onScreen,
-                        at: start.addingTimeInterval(seconds))
+                    wholeLibrary: Bool = true, fullAccess: Bool = true, onScreen: Bool = true, after seconds: TimeInterval = 0) {
+        moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, fullAccess: fullAccess,
+                        onScreen: onScreen, at: start.addingTimeInterval(seconds))
     }
 
     static func at(_ seconds: TimeInterval) -> Date { start.addingTimeInterval(seconds) }
@@ -367,6 +367,49 @@ struct FirstAnalysisMomentTests {
         Self.end(&checked, celebrates: false)
         Self.end(&checked, wholeLibrary: false, onScreen: false, after: 60)
         #expect(checked.kept == .owed)
+    }
+
+    /// A quick first analysis of only the photos shared with Albumist ("Ausgewählte Fotos", K7's
+    /// case): the first run to end once Albumist may read every photo analyses the rest of the
+    /// library, the library as a whole, and brings it when celebrated (the lead's "first full
+    /// analysis after more photos were allowed"). A check among the shared photos before it does
+    /// not; once that first run with every photo ended, the checks after it do not either.
+    @Test func afterAQuickAnalysisOfSharedPhotosEveryPhotoBringsIt() {
+        var moment = Self.fresh()
+        Self.end(&moment, celebrates: false, fullAccess: false)
+        #expect(moment.kept == .owed && moment.sharedOnly)
+        // "Sucht neue Fotos" among the shared photos, long enough for "Analyse fertig": not yet.
+        Self.end(&moment, wholeLibrary: false, fullAccess: false, after: 600)
+        #expect(!moment.isDue(at: Self.at(601)))
+        #expect(moment.kept == .owed && moment.sharedOnly)
+        // Every photo allowed: the run that analyses the rest of the library, celebrated on screen.
+        Self.end(&moment, wholeLibrary: false, fullAccess: true, after: 3600)
+        #expect(moment.isDue(at: Self.at(3601)))
+        #expect(moment.kept == .spent && moment.firstCompleted == nil && !moment.sharedOnly)
+        // That first run with every photo too quick for "Analyse fertig": a check after it never brings it.
+        var quick = Self.fresh()
+        Self.end(&quick, celebrates: false, fullAccess: false)
+        Self.end(&quick, celebrates: false, wholeLibrary: false, fullAccess: true, after: 600)
+        #expect(quick.kept == .owed && !quick.sharedOnly)
+        Self.end(&quick, wholeLibrary: false, fullAccess: true, after: 3600)
+        #expect(!quick.isDue(at: Self.at(3601)) && quick.kept == .owed)
+        // A quick first analysis with every photo readable leaves nothing of the kind.
+        var full = Self.fresh()
+        Self.end(&full, celebrates: false)
+        #expect(!full.sharedOnly)
+        Self.end(&full, wholeLibrary: false, after: 600)
+        #expect(!full.isDue(at: Self.at(601)))
+        // Kept across launches with the wait, and gone with it.
+        let kept = FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: Self.start, sharedOnly: true)
+        #expect(kept.sharedOnly)
+        #expect(!FirstAnalysisMoment(kept: .spent, completedBefore: true, firstCompleted: Self.start, sharedOnly: true).sharedOnly)
+        #expect(!FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: nil, sharedOnly: true).sharedOnly)
+        var lapsed = kept
+        lapsed.lapse(at: Self.at(Self.week + 1))
+        #expect(lapsed.kept == .spent && !lapsed.sharedOnly)
+        var away = kept
+        away.completedAway(first: true)
+        #expect(away.kept == .spent && !away.sharedOnly)
     }
 
     /// Seven days from that first completion: a run of the whole library just inside brings it,

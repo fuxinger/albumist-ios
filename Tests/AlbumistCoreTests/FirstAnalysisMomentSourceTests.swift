@@ -104,9 +104,12 @@ struct FirstAnalysisMomentSourceTests {
         let store = try Self.code(Self.store)
         let tell = try Self.body(["extension AppModel", "func firstAnalysisRunEnded("], in: store)
         #expect(tell.contains("wholeLibrary: !AnalysisMarker.completedOnce"), "\(tell)")
-        let ended = try Self.body(["final class FirstAnalysisMomentStore", "func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, onScreen: Bool)"], in: store)
+        // Every photo readable as the run ends: after a quick first analysis of only the shared
+        // photos, the first such run analyses the rest of the library (K7's case).
+        #expect(tell.contains("fullAccess: access == .full"), "\(tell)")
+        let ended = try Self.body(["final class FirstAnalysisMomentStore", "func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, fullAccess: Bool, onScreen: Bool)"], in: store)
         #expect(ended.contains("guard finished else { return }"), "\(ended)")
-        #expect(ended.contains("moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, onScreen: onScreen, at: Date())"), "\(ended)")
+        #expect(ended.contains("moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, fullAccess: fullAccess, onScreen: onScreen, at: Date())"), "\(ended)")
         let type = try Self.body(["final class FirstAnalysisMomentStore"], in: store)
         #expect(type.contains("private static let firstCompletedKey = \"analysis.firstFinishMoment.firstCompleted\""), "\(type)")
         let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
@@ -117,6 +120,11 @@ struct FirstAnalysisMomentSourceTests {
         let keep = try Self.body(["final class FirstAnalysisMomentStore", "private func keep()"], in: store)
         #expect(keep.contains("UserDefaults.standard.set(since, forKey: Self.firstCompletedKey)"), "\(keep)")
         #expect(keep.contains("UserDefaults.standard.removeObject(forKey: Self.firstCompletedKey)"), "\(keep)")
+        // Whether that quick first analysis saw only the shared photos, kept beside it.
+        #expect(type.contains("private static let sharedOnlyKey = \"analysis.firstFinishMoment.sharedOnly\""), "\(type)")
+        #expect(initializer.contains("let sharedOnly = !fresh && UserDefaults.standard.bool(forKey: Self.sharedOnlyKey)"), "\(initializer)")
+        #expect(keep.contains("UserDefaults.standard.set(true, forKey: Self.sharedOnlyKey)"), "\(keep)")
+        #expect(keep.contains("UserDefaults.standard.removeObject(forKey: Self.sharedOnlyKey)"), "\(keep)")
     }
 
     /// The observers are written `any NSObjectProtocol`, as every existential of the App
@@ -146,8 +154,9 @@ struct FirstAnalysisMomentSourceTests {
         #expect(type.contains("private static let key = \"analysis.firstFinishMoment\""))
         #expect(type.contains("UserDefaults.standard.set(moment.kept.rawValue, forKey: Self.key)"))
         let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
-        #expect(initializer.contains("FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce, firstCompleted: since)"),
+        #expect(initializer.contains("FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce,"),
                 "\(initializer)")
+        #expect(initializer.contains("firstCompleted: since, sharedOnly: sharedOnly)"), "\(initializer)")
         #expect(initializer.contains("UIApplication.didEnterBackgroundNotification") && initializer.contains("self?.leftScreen()"))
         let launched = try Self.body(["final class FirstAnalysisMomentStore", "func launched()"], in: store)
         #expect(launched.trimmingCharacters(in: .whitespacesAndNewlines) == "{}", "\(launched)")

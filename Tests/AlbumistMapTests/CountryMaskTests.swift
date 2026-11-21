@@ -8,17 +8,21 @@ import AlbumistWorldMap
 /// areas cut out, across the antimeridian, from the real offline map and from made-up shapes.
 @Suite("Country mask")
 struct CountryMaskTests {
-    static let map: OfflineWorldMap = try! WorldMapResource.load()
+    /// The offline world map and the shapes made of it, made once for all tests here. A map that
+    /// does not load fails each test that reads them, instead of ending the whole test run.
+    static let loadedMap = Result { try WorldMapResource.load() }
+    static let madeShapes = loadedMap.map { AtlasShapes.make(from: $0, minimumStepDegrees: 0.3) }
+    static let madeCodes = madeShapes.map { shapes in Set(shapes.map(\.code).filter { !$0.isEmpty }) }
     /// The app's shapes (`AtlasOutlines`: 0.3° steps).
-    static let shapes = AtlasShapes.make(from: map, minimumStepDegrees: 0.3)
-    static let everyCode = Set(shapes.map(\.code).filter { !$0.isEmpty })
+    static var shapes: [AtlasShape] { get throws { try madeShapes.get() } }
+    static var everyCode: Set<String> { get throws { try madeCodes.get() } }
 
     func at(_ latitude: Double, _ longitude: Double) -> GeoCoordinate { GeoCoordinate(latitude: latitude, longitude: longitude) }
 
     // MARK: Real map
 
-    @Test func icelandIsTintedAndTheAtlanticIsNot() {
-        let mask = CountryMask.build(shapes: Self.shapes, visited: ["IS"])
+    @Test func icelandIsTintedAndTheAtlanticIsNot() throws {
+        let mask = try CountryMask.build(shapes: Self.shapes, visited: ["IS"])
         #expect(mask.width == 2_048 && mask.height == 1_024 && mask.pixels.count == 2_048 * 1_024)
         for (latitude, longitude) in [(64.8, -18.0), (65.2, -20.0), (64.5, -16.0), (65.5, -15.5), (64.1, -21.5)] {
             let isTinted = mask.isTinted(at(latitude, longitude))
@@ -37,19 +41,19 @@ struct CountryMaskTests {
                 #expect(c.latitude > 63 && c.latitude < 67 && c.longitude > -25 && c.longitude < -13)
             }
         }
-        #expect(CountryMask.build(shapes: Self.shapes, visited: []).tintedPixelCount == 0)
+        #expect(try CountryMask.build(shapes: Self.shapes, visited: []).tintedPixelCount == 0)
     }
 
-    @Test func disputedAreasAreNeverTinted() {
+    @Test func disputedAreasAreNeverTinted() throws {
         let visited: Set<String> = ["RU", "UA", "IN", "PK", "CN", "MA", "IL", "GE", "CY", "RS", "TW", "XK", "EH"]
-        let mask = CountryMask.build(shapes: Self.shapes, visited: visited)
+        let mask = try CountryMask.build(shapes: Self.shapes, visited: visited)
         // Inland places (the shapes' coasts are simplified to 0.3° steps, so a port can lie in the sea).
         let tinted = [("Moskau", 55.7558, 37.6173), ("Kiew", 50.4501, 30.5234), ("Delhi", 28.6139, 77.2090), ("Lahore", 31.5204, 74.3587),
                       ("Peking", 39.9042, 116.4074), ("Fès", 34.0331, -5.0003), ("Be'er Sheva", 31.2518, 34.7913), ("Tiflis", 41.7151, 44.8271),
                       ("Troodos", 34.9361, 32.8636), ("Belgrad", 44.7866, 20.4489)]
         for (name, latitude, longitude) in tinted {
             let isTinted = mask.isTinted(at(latitude, longitude))
-            let filled = AtlasShapes.filledCode(at: at(latitude, longitude), in: Self.shapes, visited: visited)
+            let filled = try AtlasShapes.filledCode(at: at(latitude, longitude), in: Self.shapes, visited: visited)
             #expect(isTinted && filled != nil, "\(name): \(filled ?? "nichts")")
         }
         // Crimea, Western Sahara, the Golan, Abkhazia, Kashmir, Taiwan, Kosovo, Northern Cyprus.
@@ -57,17 +61,17 @@ struct CountryMaskTests {
                         ("Srinagar", 34.0837, 74.7973), ("Taipeh", 25.0330, 121.5654), ("Pristina", 42.6629, 21.1655), ("Kyrenia", 35.3417, 33.3192)]
         for (name, latitude, longitude) in untinted {
             let isTinted = mask.isTinted(at(latitude, longitude))
-            let filled = AtlasShapes.filledCode(at: at(latitude, longitude), in: Self.shapes, visited: visited)
+            let filled = try AtlasShapes.filledCode(at: at(latitude, longitude), in: Self.shapes, visited: visited)
             #expect(!isTinted && filled == nil, "\(name): \(filled ?? "nichts")")
         }
     }
 
-    @Test func russiaAndFijiFillAcrossTheAntimeridian() {
-        let mask = CountryMask.build(shapes: Self.shapes, visited: ["RU", "FJ"])
+    @Test func russiaAndFijiFillAcrossTheAntimeridian() throws {
+        let mask = try CountryMask.build(shapes: Self.shapes, visited: ["RU", "FJ"])
         // Chukotka east of 180°, Wrangel Island on both sides of it, Viti Levu and Vanua Levu.
         let inside = [(66.0, -172.5), (65.5, 176.0), (71.2, 179.5), (71.2, -179.5), (-17.8, 178.0), (-16.5, 179.5)]
         for (latitude, longitude) in inside {
-            #expect(AtlasShapes.filledCode(at: at(latitude, longitude), in: Self.shapes, visited: ["RU", "FJ"]) != nil, "\(latitude), \(longitude)")
+            #expect(try AtlasShapes.filledCode(at: at(latitude, longitude), in: Self.shapes, visited: ["RU", "FJ"]) != nil, "\(latitude), \(longitude)")
             #expect(mask.isTinted(at(latitude, longitude)), "\(latitude), \(longitude)")
         }
         // The far columns hold Russia at Wrangel's latitude, the sea between is not tinted, and no
@@ -84,13 +88,13 @@ struct CountryMaskTests {
 
     /// Pixel by pixel the mask is what the atlas fills (`AtlasShapes.filledCode` at each pixel's
     /// centre), sampled over the whole map with every country visited.
-    @Test func theMaskIsTheAtlasFill() {
-        let mask = CountryMask.build(shapes: Self.shapes, visited: Self.everyCode)
+    @Test func theMaskIsTheAtlasFill() throws {
+        let mask = try CountryMask.build(shapes: Self.shapes, visited: Self.everyCode)
         var compared = 0, different: [String] = []
         for row in stride(from: 3, to: mask.height, by: 9) {
             for column in stride(from: 5, to: mask.width, by: 13) {
                 let c = CountryMask.center(column: column, row: row, width: mask.width, height: mask.height)
-                let atlas = AtlasShapes.filledCode(at: c, in: Self.shapes, visited: Self.everyCode) != nil
+                let atlas = try AtlasShapes.filledCode(at: c, in: Self.shapes, visited: Self.everyCode) != nil
                 if atlas != (mask.value(column: column, row: row) > 0) { different.append("\(c.latitude), \(c.longitude)") }
                 compared += 1
             }
@@ -103,16 +107,17 @@ struct CountryMaskTests {
     }
 
     /// The work grows with the map's edges and the rows they cross, never with rows times points.
-    @Test func theFillDoesLinearWork() {
+    @Test func theFillDoesLinearWork() throws {
         let start = Date()
-        let mask = CountryMask.build(shapes: Self.shapes, visited: Self.everyCode)
+        let mask = try CountryMask.build(shapes: Self.shapes, visited: Self.everyCode)
         let seconds = Date().timeIntervalSince(start)
-        let points = Self.shapes.reduce(0) { $0 + $1.rings.reduce(0) { $0 + $1.count } }
+        let points = try Self.shapes.reduce(0) { $0 + $1.rings.reduce(0) { $0 + $1.count } }
         #expect(mask.work.edges <= points)
         #expect(mask.work.crossings < 40 * points, "\(mask.work.crossings) crossings for \(points) points")
         #expect(mask.work.rows < 1_024 * 80)
         #expect(mask.work.pixelsWritten >= mask.tintedPixelCount)
-        print("Country mask, every country: \(Int(seconds * 1_000)) ms (debug build), \(mask.work.edges) edges, \(mask.work.rows) rows, \(mask.work.crossings) crossings, \(mask.work.pixelsWritten) pixels")
+        print("Country mask, every country: \(Int(seconds * 1_000)) ms (debug build), \(mask.work.edges) edges, \(mask.work.rows) rows, "
+              + "\(mask.work.crossings) crossings, \(mask.work.pixelsWritten) pixels")
     }
 
     // MARK: Made-up shapes

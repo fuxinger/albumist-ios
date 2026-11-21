@@ -350,7 +350,7 @@ struct HistoryRow: View {
                 ChangeCover(mosaic: cover, symbol: PlanReceipt.Kind(plan).coverSymbol)
                 VStack(alignment: .leading, spacing: 2) {
                     Text((plan.confirmedAt ?? plan.createdAt).formatted(date: .abbreviated, time: .shortened))
-                    Text(Counted.historyLine(plan.appliedSummary))
+                    Text(Counted.historyLine(plan))
                         .font(.footnote).foregroundStyle(.noteText)
                     // Below the words, no longer beside them: the cover takes that room.
                     if model.undonePlans.contains(plan.id) {

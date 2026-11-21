@@ -1800,5 +1800,59 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(seen, [70])
 
 
+class VideoToLogTests(unittest.TestCase):
+    """The copy of the sorting show's video in the job log stays small enough for the log to be
+    read through the API (UI run 44878163259: a 20 MB copy hid even the failing test)."""
+
+    def run_video(self, sizes):
+        """`sizes`: the bytes each preset's copy has, in the order tried; None: avconvert fails."""
+        calls = []
+        with tempfile.TemporaryDirectory() as root:
+            video = os.path.join(root, "sorting-show.mp4")
+            with open(video, "wb") as f:
+                f.write(b"v" * 100)
+
+            def fake_sh(command, timeout=300, quiet=False):
+                calls.append(command[command.index("--preset") + 1])
+                size = sizes[len(calls) - 1]
+                if size is None:
+                    return 1, "avconvert failed"
+                with open(command[command.index("--output") + 1], "wb") as f:
+                    f.write(b"s" * size)
+                return 0, ""
+            with mock.patch.object(ui_tests, "sh", fake_sh), contextlib.redirect_stdout(io.StringIO()) as log:
+                ui_tests.video_to_log(video)
+        return calls, log.getvalue()
+
+    def test_a_small_copy_is_printed(self):
+        calls, log = self.run_video([1000, 1000])
+        self.assertEqual(calls, ["Preset960x540"])
+        self.assertIn("UI_VIDEO_B64 1 ", log)
+        self.assertNotIn("UI_VIDEO_NOT_PRINTED", log)
+
+    def test_a_smaller_preset_is_tried_when_the_first_is_too_large(self):
+        calls, log = self.run_video([ui_tests.VIDEO_LOG_LIMIT + 1, 2000])
+        self.assertEqual(calls, ["Preset960x540", "Preset640x480"])
+        self.assertIn("UI_VIDEO_SIZE 2000 (Preset640x480)", log)
+        self.assertIn("UI_VIDEO_B64 1 ", log)
+
+    def test_a_copy_too_large_for_the_log_is_not_printed(self):
+        calls, log = self.run_video([ui_tests.VIDEO_LOG_LIMIT + 1, ui_tests.VIDEO_LOG_LIMIT + 1])
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("UI_VIDEO_B64", log)
+        self.assertIn("UI_VIDEO_NOT_PRINTED", log)
+
+    def test_the_whole_video_is_never_printed_when_no_copy_can_be_made(self):
+        calls, log = self.run_video([None, None])
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("UI_VIDEO_B64", log)
+        self.assertIn("UI_VIDEO_NOT_PRINTED", log)
+
+    def test_the_printed_copy_stays_under_the_limit(self):
+        # Base64 of the largest copy that is printed, in lines of 60,000 characters.
+        lines = -(-((ui_tests.VIDEO_LOG_LIMIT + 2) // 3 * 4) // 60000)
+        self.assertLessEqual(lines * 60000, 4_100_000)
+
+
 if __name__ == "__main__":
     unittest.main()

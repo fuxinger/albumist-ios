@@ -63,7 +63,8 @@ struct QuickCreateBar: View {
 extension View {
     /// The banner after "Anlegen" at the bottom of a tab's screens, above the tab bar (and above
     /// a screen's own bar at the bottom). Without a banner it takes no room. Measures where the
-    /// tab bar begins for the small moment that comes with the banner (`QuickCreateMomentLayer`).
+    /// tab bar begins, and tells the cards which tab they are on, for the small moment that comes
+    /// with the banner (`QuickCreateMomentLayer`).
     func showsQuickCreateBanner() -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) {
             QuickCreateBar()

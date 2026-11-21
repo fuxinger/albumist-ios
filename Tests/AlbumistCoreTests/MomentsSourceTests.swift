@@ -175,6 +175,8 @@ struct MomentsSourceTests {
         let photo = try Self.body(["final class QuickCreateMomentSources", "func photo(for"], in: layer)
         #expect(photo.contains("proposal.isSensitive || model.previewHidden(for: proposal)"), "\(photo)")
         #expect(photo.contains("personal ? nil : keptCover("), "\(photo)")
+        // The card's own suggestion: the made one has left the model's list as its banner shows.
+        #expect(photo.contains("let proposal = source.proposal") && !photo.contains("model.proposals"), "\(photo)")
     }
 
     /// One success tap per run, as before: it waits for the show's end and then for the main
@@ -245,39 +247,64 @@ struct MomentsSourceTests {
 
     // MARK: The small moment (draft E6)
 
-    /// The layer lies over the tabs, where the banner shows: never tapped, hidden from
-    /// VoiceOver, one haptic per album (the success tap with the banner, or the light tap as the
-    /// cover lands), and the tab bar stays open while it flies.
+    /// The layer lies over the tabs, where the banner shows: never tapped, hidden from VoiceOver,
+    /// no haptic of its own. The album's one haptic is the success tap with every banner, given by
+    /// the tabs as before the moment, whether or not the cover flies: never late, never lost
+    /// (review E of design wave 2, finding 6). The cover fades into the bar on its way and never
+    /// lands (finding 4); the tab bar's behaviour is never switched for it (finding 5).
     @Test func theSmallMomentFliesOverTheTabsOnly() throws {
         let tabs = try Self.code(Self.tabs)
         let main = try Self.body(["struct MainTabs", "var body: some View"], in: tabs)
-        #expect(main.contains(".tabBarMinimizeBehavior(UITestSupport.isRunning || momentHoldsTabBar ? .never : .onScrollDown)"), "\(main)")
+        #expect(main.contains(".tabBarMinimizeBehavior(UITestSupport.isRunning ? .never : .onScrollDown)"), "\(main)")
         let overlay = try #require(AppSource.body(of: ".overlay", in: main), "\(main)")
-        #expect(overlay.contains("QuickCreateMomentLayer(holdsTabBar: $momentHoldsTabBar, showsAlbumsTab: tab != .search)"), "\(overlay)")
-        #expect(!main.contains("sensoryFeedback"), "the tabs tap a second time")
+        #expect(overlay.contains("QuickCreateMomentLayer(showsAlbumsTab: tab != .search)"), "\(overlay)")
+        #expect(Self.count(".sensoryFeedback(", in: main) == 1, "\(main)")
+        #expect(main.contains(".sensoryFeedback(.success, trigger: model.quickCreateBanner?.id)"), "the banner's success tap is gone")
+        #expect(main.contains("new != nil && new != old"), "\(main)")
         var layers = 0
         for path in AppSource.swiftFiles(under: "App/Albumist") {
-            layers += AppSource.calls(of: "QuickCreateMomentLayer(", in: try AppSource.read(path)).count
+            let file = try AppSource.read(path)
+            layers += AppSource.calls(of: "QuickCreateMomentLayer(", in: file).count
+            #expect(!file.contains("oldsTabBar"), "\(path) switches the tab bar for the moment")
         }
         #expect(layers == 1, "the moment is drawn somewhere else too")
         let file = try Self.code(Self.layer)
+        #expect(!file.contains("sensoryFeedback"), "the moment has a haptic of its own")
         let layer = try Self.body(["struct QuickCreateMomentLayer", "var body: some View"], in: file)
-        for part in [".allowsHitTesting(false)", ".accessibilityHidden(true)", ".sensoryFeedback(.success, trigger: successes)",
-                     ".sensoryFeedback(.impact(weight: .light), trigger: landings)", ".ignoresSafeArea()"] {
+        for part in [".allowsHitTesting(false)", ".accessibilityHidden(true)", ".ignoresSafeArea()"] {
             #expect(layer.contains(part), "\(part): \(layer)")
         }
-        #expect(Self.count(".sensoryFeedback(", in: file) == 2)
+        #expect(layer.contains(".task(id: pending) { await begin() }"), "\(layer)")
         let begin = try Self.body(["struct QuickCreateMomentLayer", "func begin("], in: file)
-        #expect(begin.contains("switch QuickCreateMoment.haptic(for: kind)"), "\(begin)")
         #expect(begin.contains("QuickCreateMoment.kind(reduceMotion: reduceMotion"), "\(begin)")
-        #expect(begin.contains("holdsTabBar = true"), "\(begin)")
-        let finish = try Self.body(["struct QuickCreateMomentLayer", "func finish()"], in: file)
-        #expect(finish.contains("holdsTabBar = false"), "\(finish)")
+        #expect(begin.contains("barOpen: sources.barOpen"), "\(begin)")
+        // Looked at a moment after the banner came: a list puts the made card back in its place.
+        let look = try #require(begin.range(of: "try? await Task.sleep(for: Self.lookDelay)"), "\(begin)")
+        let lookup = try #require(begin.range(of: "sources.photo(for:"), "\(begin)")
+        #expect(look.upperBound <= lookup.lowerBound, "\(begin)")
+        // A banner without a flight leaves a cover still flying for the one before.
+        #expect(!begin.contains("finish()") && !begin.contains("moment = nil"), "\(begin)")
         let play = try Self.body(["struct QuickCreateMomentLayer", "func play()"], in: file)
-        #expect(play.contains("landings += 1"), "\(play)")
-        let fade = try #require(play.components(separatedBy: "case .fadeAtTab:").dropFirst().first?.components(separatedBy: "case .none:").first,
-                                "\(play)")
-        #expect(fade.contains("withAnimation(.easeOut") && !fade.contains("timingCurve"), "Reduce Motion still flies: \(fade)")
+        #expect(play.contains("QuickCreateMoment.Flight.duration"), "\(play)")
+        #expect(!play.contains("landings") && !play.contains("fading") && !play.contains("fadeAtTab"), "\(play)")
+        let placement = try Self.body(["struct MomentPlacement", "func body(content: Content)"], in: file)
+        #expect(placement.contains(".opacity(flight.opacity(at: t))"), "\(placement)")
+    }
+
+    /// The cover flies only into an open tab bar (review E of design wave 2, finding 5): the cards
+    /// of the tab that shows tell how its content moves (`QuickCreateMoment.BarTrail`), read from
+    /// one card at a time; a new trail as another tab shows, out of sight when no card of the tab
+    /// is left.
+    @Test func theCoverFliesOnlyIntoAnOpenTabBar() throws {
+        let layer = try Self.code(Self.layer)
+        let note = try Self.body(["final class QuickCreateMomentSources", "func note(_ source: Source"], in: layer)
+        #expect(note.contains("trail.moved(by:") && note.contains("anchor"), "\(note)")
+        let forget = try Self.body(["final class QuickCreateMomentSources", "func forget("], in: layer)
+        #expect(forget.contains("trail.lostSight()"), "\(forget)")
+        let show = try Self.body(["final class QuickCreateMomentSources", "func show(place"], in: layer)
+        #expect(show.contains("trail = QuickCreateMoment.BarTrail()"), "\(show)")
+        let open = try Self.body(["final class QuickCreateMomentSources", "var barOpen: Bool"], in: layer)
+        #expect(open.contains("trail.isOpen"), "\(open)")
     }
 
     /// The cover lands on "Alben": the third of three tabs beside the round search button, as
@@ -291,15 +318,16 @@ struct MomentsSourceTests {
         #expect(main.contains("Tab(value: MainTab.search, role: .search)"), "no round search button beside the tabs")
     }
 
-    /// Each card that offers "Anlegen" marks itself with one line, at the cover's own aspect
-    /// ratio; nothing else marks a card.
+    /// Each card that offers "Anlegen" marks itself with one line, with its suggestion (the made
+    /// suggestion has left the model's list by the time its banner shows, while its card stays) and
+    /// the cover's own aspect ratio; nothing else marks a card.
     @Test func eachCardMarksWhereTheMomentStarts() throws {
         let expected = [Self.start: "style == .large ? 2 : 3.0 / 2.0", Self.list: "4.0 / 3.0"]
         for (path, ratio) in expected {
             let lines = try AppSource.read(path).split(separator: "\n").filter { $0.contains(Self.mark) }
             #expect(lines.count == 1, "\(path): \(lines)")
             let line = try #require(lines.first)
-            #expect(line.contains(".quickCreateMomentSource(proposal.id, aspectRatio: \(ratio))"), "\(line)")
+            #expect(line.contains(".quickCreateMomentSource(proposal, aspectRatio: \(ratio))"), "\(line)")
         }
         // The ratios are the ones the cards draw their covers at.
         let start = try Self.code(Self.start)
@@ -322,19 +350,33 @@ struct MomentsSourceTests {
     }
 
     /// Where the tab bar begins is measured on every tab's screen, where the banner shows, and
-    /// only while that tab shows; the cards note where they are while on screen.
+    /// only while that tab shows; the cards note where they are, and on which tab, while on
+    /// screen. Both measures are taken inside the area they ignore: what `ignoresSafeArea()`
+    /// itself reports is the safe frame (review E of design wave 2, finding 2). The tabs' screens
+    /// noted are pruned (finding 14).
     @Test func theTabBarIsMeasuredWhereTheBannerShows() throws {
         let banner = try Self.code(Self.banner)
         let shows = try Self.body(["func showsQuickCreateBanner()"], in: banner)
         #expect(shows.contains(".modifier(QuickCreateMomentBarProbe())"), "\(shows)")
         let layer = try Self.code(Self.layer)
         let probe = try Self.body(["struct QuickCreateMomentBarProbe", "func body(content: Content)"], in: layer)
-        #expect(probe.contains(".onAppear { QuickCreateMomentSources.shared.show(place: token, true) }"), "\(probe)")
+        #expect(probe.contains(".environment(\\.quickCreateMomentPlace, token)"), "\(probe)")
+        #expect(probe.contains("QuickCreateMomentSources.shared.show(place: token, true)"), "\(probe)")
         #expect(probe.contains(".onDisappear { QuickCreateMomentSources.shared.show(place: token, false) }"), "\(probe)")
         let measured = try Self.body(["struct QuickCreateMomentBarProbe", "var probe: some View"], in: layer)
-        #expect(measured.contains(".ignoresSafeArea()") && measured.contains("proxy.safeAreaInsets"), "\(measured)")
+        #expect(measured.contains("proxy.safeAreaInsets"), "\(measured)")
+        let drawn = try Self.body(["struct QuickCreateMomentLayer", "var body: some View"], in: layer)
+        for (name, code) in [("probe", measured), ("layer", drawn)] {
+            let measure = try #require(code.range(of: ".onGeometryChange("), "\(name): \(code)")
+            let ignores = try #require(code.range(of: ".ignoresSafeArea()"), "\(name): \(code)")
+            #expect(measure.lowerBound < ignores.lowerBound, "\(name) measures outside the area it ignores")
+        }
         let source = try Self.body(["struct QuickCreateMomentSource:", "func body(content: Content)"], in: layer)
         #expect(source.contains(".onDisappear { QuickCreateMomentSources.shared.forget(token) }"), "\(source)")
         #expect(source.contains(".onAppear"), "a card back on screen is not noted again: \(source)")
+        let note = try Self.body(["struct QuickCreateMomentSource:", "func note("], in: layer)
+        #expect(note.contains("place: place"), "\(note)")
+        let places = try Self.body(["final class QuickCreateMomentSources", "func note(_ place: Place"], in: layer)
+        #expect(places.contains("keptPlaces"), "the tabs' screens are never pruned: \(places)")
     }
 }

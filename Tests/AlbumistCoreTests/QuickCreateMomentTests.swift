@@ -3,61 +3,115 @@ import Testing
 @testable import AlbumistCore
 
 /// The small moment after "Anlegen" on a card (draft E6, design wave 2): a small copy of the
-/// card's cover flies into the tab "Alben" and lands there as a small album, with one light tap.
-/// What happens when, where the tab is, and the path are decided here (`QuickCreateMoment`); the
-/// app draws it.
+/// card's cover flies towards the tab "Alben" and fades into the tab bar as it reaches it. When it
+/// flies, where the tab is, the path and what the cards say of the tab bar are decided here
+/// (`QuickCreateMoment`); the app draws it. The album's one haptic is the success tap with its
+/// banner, as before the moment (`MomentsSourceTests.theSmallMomentFliesOverTheTabsOnly`).
 @Suite("Quick create moment")
 struct QuickCreateMomentTests {
     typealias Moment = QuickCreateMoment
 
     // MARK: When
 
-    /// It flies only from a card that is on screen and shows a sharp cover from the device: no
-    /// card (the suggestion's page made it), no photo (a placeholder, "Vorschau ausgeblendet"),
-    /// nothing flies.
+    /// It flies only from a card that is on screen and shows a sharp cover from the device, into a
+    /// tab bar that is open: no card (the suggestion's page made it), no photo (a placeholder,
+    /// "Vorschau ausgeblendet") or a bar shrunk while scrolling, and nothing flies.
     @Test func theCoverFliesOnlyFromACardOnScreenWithASharpCover() {
-        #expect(Moment.kind(reduceMotion: false, sourceOnScreen: true, hasSharpCover: true) == .fly)
-        #expect(Moment.kind(reduceMotion: false, sourceOnScreen: false, hasSharpCover: true) == .none)
-        #expect(Moment.kind(reduceMotion: false, sourceOnScreen: true, hasSharpCover: false) == .none)
-        #expect(Moment.kind(reduceMotion: false, sourceOnScreen: false, hasSharpCover: false) == .none)
+        #expect(Moment.kind(reduceMotion: false, sourceOnScreen: true, hasSharpCover: true, barOpen: true) == .fly)
+        #expect(Moment.kind(reduceMotion: false, sourceOnScreen: false, hasSharpCover: true, barOpen: true) == .none)
+        #expect(Moment.kind(reduceMotion: false, sourceOnScreen: true, hasSharpCover: false, barOpen: true) == .none)
+        #expect(Moment.kind(reduceMotion: false, sourceOnScreen: false, hasSharpCover: false, barOpen: true) == .none)
+        #expect(Moment.kind(reduceMotion: false, sourceOnScreen: true, hasSharpCover: true, barOpen: false) == .none)
     }
 
-    /// With Reduce Motion nothing flies: the small album fades in on the tab and out again.
-    @Test func reduceMotionFadesOnTheTabInstead() {
-        #expect(Moment.kind(reduceMotion: true, sourceOnScreen: true, hasSharpCover: true) == .fadeAtTab)
-        #expect(Moment.kind(reduceMotion: true, sourceOnScreen: false, hasSharpCover: true) == .none)
-        #expect(Moment.kind(reduceMotion: true, sourceOnScreen: true, hasSharpCover: false) == .none)
+    /// With Reduce Motion nothing flies, and nothing rests on the tab bar either: the banner and
+    /// its success tap say it, as before the moment (review E of design wave 2, finding 4: no small
+    /// album on a point of the bar that is worked out rather than read).
+    @Test func reduceMotionShowsNothing() {
+        #expect(Moment.kind(reduceMotion: true, sourceOnScreen: true, hasSharpCover: true, barOpen: true) == .none)
+        #expect(Moment.kind(reduceMotion: true, sourceOnScreen: true, hasSharpCover: true, barOpen: false) == .none)
     }
 
-    /// One haptic per album, as before: the success tap with the banner, or, when the cover flies,
-    /// the light tap as it lands instead (never both).
-    @Test func oneHapticPerAlbum() {
-        #expect(Moment.haptic(for: .fly) == .lightTapAtLanding)
-        #expect(Moment.haptic(for: .fadeAtTab) == .successWithBanner)
-        #expect(Moment.haptic(for: .none) == .successWithBanner)
+    // MARK: The tab bar
+
+    /// The bar is open on a tab just chosen; content scrolled down shrinks it to one round button,
+    /// content scrolled back up opens it again (`.tabBarMinimizeBehavior(.onScrollDown)`). No view
+    /// of the system says which, so the movement of the cards does (review E of design wave 2,
+    /// finding 5), and only a clear scroll back up counts as open again.
+    @Test func theCardsTellWhetherTheBarIsOpen() {
+        var trail = Moment.BarTrail()
+        #expect(trail.isOpen, "the bar was open to choose the tab")
+        trail.moved(by: -5)
+        #expect(trail.isOpen, "a few points are no scroll")
+        trail.moved(by: -5)
+        #expect(!trail.isOpen, "scrolled down: the bar may have shrunk")
+        trail.moved(by: 20)
+        #expect(!trail.isOpen, "a little back up is not enough")
+        trail.moved(by: 15)
+        #expect(trail.isOpen, "scrolled back up: open again")
+        trail.moved(by: -30)
+        #expect(!trail.isOpen)
+        // A turn of a few points starts the count anew.
+        trail.moved(by: 30)
+        trail.moved(by: -1)
+        trail.moved(by: 30)
+        #expect(!trail.isOpen, "\(trail)")
+        trail.moved(by: 2)
+        #expect(trail.isOpen)
+    }
+
+    /// A list laid out anew moves its cards in one step (a card came or went, such as the card kept
+    /// after "Anlegen" leaving with its banner): no scroll, either way.
+    @Test func aListLaidOutAnewIsNoScroll() {
+        var trail = Moment.BarTrail()
+        trail.moved(by: -260)
+        #expect(trail.isOpen)
+        trail.moved(by: -40)
+        #expect(!trail.isOpen)
+        trail.moved(by: 260)
+        #expect(!trail.isOpen)
+    }
+
+    /// While no card of the tab is in sight (a screen pushed over them), its content may scroll
+    /// unseen: the bar counts as shrunk until the cards scroll back up or the tab is chosen again.
+    @Test func cardsOutOfSightMayHideAScroll() {
+        var trail = Moment.BarTrail()
+        trail.lostSight()
+        #expect(!trail.isOpen)
+        trail.moved(by: Moment.BarTrail.opensAfter)
+        #expect(trail.isOpen)
     }
 
     // MARK: Where
 
-    /// "Alben" is the third of the three tabs in the bar, left of the round search button (the
-    /// app is iPhone only and portrait only): its place is known from the screen's width.
-    @Test func theAlbumsTabIsTheThirdOfThreeBesideSearch() {
+    /// "Alben" is the third of the three tabs in the bar, left of the round search button (the app
+    /// is iPhone only and portrait only): its place is worked out from the screen's width and where
+    /// the bar begins, as drawn in the drafts. The flight only heads there and fades into the bar
+    /// (`theFlightFadesIntoTheBar`), so a few points do not show; the real bar is a device check.
+    @Test func theAlbumsTabIsTheThirdOfThreeBesideSearch() throws {
         for width in [375.0, 393.0, 402.0, 440.0] {
-            let tab = Moment.TabBar.albumsTab(screenWidth: width, barTop: 769, screenBottom: 852, rightToLeft: false)
+            let tab = try #require(Moment.TabBar.albumsTab(screenWidth: width, barTop: 769, screenBottom: 852, rightToLeft: false))
             let pillEnd = width - Moment.TabBar.margin - Moment.TabBar.searchSide - Moment.TabBar.gap
-            let tabWidth = (pillEnd - Moment.TabBar.margin - 2 * Moment.TabBar.inset) / 3
-            #expect(abs(tab.x - (pillEnd - Moment.TabBar.inset - tabWidth / 2)) < 0.001, "\(width)")
             #expect(tab.x > width / 2 && tab.x < pillEnd, "\(width): \(tab.x)")
             #expect(tab.y > 769 && tab.y < 852 - 21, "\(width): \(tab.y)")
         }
         // The draft's 393 pt screen: the tab's middle 254 pt from the left.
-        #expect(abs(Moment.TabBar.albumsTab(screenWidth: 393, barTop: 769, screenBottom: 852, rightToLeft: false).x - 254.17) < 0.01)
+        let draft = try #require(Moment.TabBar.albumsTab(screenWidth: 393, barTop: 769, screenBottom: 852, rightToLeft: false))
+        #expect(abs(draft.x - 254.17) < 0.01)
         // Right to left the bar is mirrored.
-        let rtl = Moment.TabBar.albumsTab(screenWidth: 393, barTop: 769, screenBottom: 852, rightToLeft: true)
+        let rtl = try #require(Moment.TabBar.albumsTab(screenWidth: 393, barTop: 769, screenBottom: 852, rightToLeft: true))
         #expect(abs(rtl.x - (393 - 254.17)) < 0.01)
         // The 4.7" iPhone without a home indicator: the bar is lower, still inside it.
-        let small = Moment.TabBar.albumsTab(screenWidth: 375, barTop: 618, screenBottom: 667, rightToLeft: false)
+        let small = try #require(Moment.TabBar.albumsTab(screenWidth: 375, barTop: 618, screenBottom: 667, rightToLeft: false))
         #expect(small.y > 618 && small.y < 667)
+    }
+
+    /// A screen that hides the tab bar leaves only the home indicator's room below its content, or
+    /// none: no tab to head for, so nothing flies.
+    @Test func noTabBarNoTab() {
+        #expect(Moment.TabBar.albumsTab(screenWidth: 393, barTop: 818, screenBottom: 852, rightToLeft: false) == nil)
+        #expect(Moment.TabBar.albumsTab(screenWidth: 375, barTop: 667, screenBottom: 667, rightToLeft: false) == nil)
+        #expect(Moment.TabBar.albumsTab(screenWidth: 0, barTop: 769, screenBottom: 852, rightToLeft: false) == nil)
     }
 
     /// The cover is looked up at exactly the size its card asked Photos for (`CoverPhoto`: the
@@ -91,22 +145,31 @@ struct QuickCreateMomentTests {
 
     // MARK: How
 
-    /// It lifts off the card's photo as a faint copy, gets solid on its way, swings down and in,
-    /// and lands as a small album the size of the tab's symbol (draft E6: 60, 44 and 26 pt).
-    @Test func theFlightShrinksIntoASmallAlbum() {
+    /// It lifts off the card's photo as a faint copy, gets solid on its way and swings down towards
+    /// "Alben", ever smaller (draft E6: 60, 44, then 26 pt), and fades out as it reaches the bar: it
+    /// never lands on a point of the bar that is worked out rather than read (review E of design
+    /// wave 2, finding 4).
+    @Test func theFlightFadesIntoTheBar() throws {
         let cover = Moment.Rect(x: 16, y: 362, width: 361, height: 180)
-        let tab = Moment.TabBar.albumsTab(screenWidth: 393, barTop: 769, screenBottom: 852, rightToLeft: false)
+        let tab = try #require(Moment.TabBar.albumsTab(screenWidth: 393, barTop: 769, screenBottom: 852, rightToLeft: false))
         let flight = Moment.Flight(cover: cover, to: tab)
         #expect(flight.start == Moment.Point(x: cover.midX, y: cover.midY))
         #expect(flight.point(at: 0) == flight.start)
         #expect(abs(flight.point(at: 1).x - tab.x) < 0.001 && abs(flight.point(at: 1).y - tab.y) < 0.001)
         #expect(flight.startSide == 60, "a third of the cover's height, as in the draft")
         #expect(flight.side(at: 0) == 60 && flight.side(at: 1) == Moment.Flight.endSide && Moment.Flight.endSide == 26)
-        let sides = stride(from: 0.0, through: 1.0, by: 0.1).map { flight.side(at: $0) }
+        let steps = Array(stride(from: 0.0, through: 1.0, by: 0.01))
+        let sides = steps.map { flight.side(at: $0) }
         #expect(sides == sides.sorted(by: >), "it only gets smaller")
-        #expect(flight.opacity(at: 0) < 0.5 && flight.opacity(at: 0.5) == 1 && flight.opacity(at: 1) == 1)
-        let ys = stride(from: 0.0, through: 1.0, by: 0.1).map { flight.point(at: $0).y }
+        let ys = steps.map { flight.point(at: $0).y }
         #expect(ys == ys.sorted(), "it never rises above the card")
+        // Faint as it lifts off, solid on its way, gone at the end.
+        #expect(flight.opacity(at: 0) < 0.5 && flight.opacity(at: 0.5) == 1 && flight.opacity(at: 1) == 0)
+        let fading = steps.filter { $0 >= Moment.Flight.fadeFrom }.map { flight.opacity(at: $0) }
+        #expect(fading == fading.sorted(by: >), "once it fades it only fades")
+        // At the bar's edge it is mostly gone: a few points there do not show.
+        let atBar = try #require(steps.first { flight.point(at: $0).y >= 769 })
+        #expect(flight.opacity(at: atBar) <= 0.5, "\(atBar): \(flight.opacity(at: atBar))")
         // A small card: never smaller than a thumb's width at the start.
         #expect(Moment.Flight(cover: Moment.Rect(x: 16, y: 600, width: 172, height: 112), to: tab).startSide == 44)
         #expect(Moment.Flight(cover: Moment.Rect(x: 16, y: 300, width: 361, height: 400), to: tab).startSide == 72)

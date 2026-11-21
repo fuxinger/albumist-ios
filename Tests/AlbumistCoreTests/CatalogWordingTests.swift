@@ -210,9 +210,6 @@ struct CatalogWordingTests {
             "the minimum of a trip, a small fixed number",
         "%lld Tage": "the days of one trip",
         "%lld Tage mit Fotos": "HomeSettingsView.swift (other work): switch to „%lld %@ Tage mit Fotos“",
-        "%lld Fotos": "SortingShow.swift (other work): the sorting show still uses it; everything else says „%lld %@ Fotos“",
-        "%lld Fotos einsortiert": "SortingShow.swift (other work)",
-        "%lld von %lld Alben fertig, %lld Fotos einsortiert": "SortingShow.swift (other work)",
         "%lld Fotos ignoriert": "AppModel.swift (other work): the announcement; the note in the library is grouped",
     ]
 

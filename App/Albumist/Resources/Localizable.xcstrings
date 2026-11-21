@@ -811,46 +811,6 @@
         }
       }
     },
-    "%lld Fotos" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld photo"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld photos"
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Foto"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Fotos"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "%lld %@ Fotos" : {
       "localizations" : {
         "en" : {
@@ -2767,6 +2727,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Analysis complete"
+          }
+        }
+      }
+    },
+    "Analyse fertig: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis complete: %@"
           }
         }
       }
@@ -7301,46 +7271,6 @@
         }
       }
     },
-    "%lld Fotos einsortiert" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld photo sorted"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld photos sorted"
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Foto einsortiert"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Fotos einsortiert"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "%lld %@ Fotos einsortiert" : {
       "localizations" : {
         "en" : {
@@ -8471,7 +8401,7 @@
         }
       }
     },
-    "%lld von %lld Alben fertig, %lld Fotos einsortiert" : {
+    "%lld von %lld Alben fertig, %lld %@ Fotos einsortiert" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -8507,13 +8437,13 @@
                   "one" : {
                     "stringUnit" : {
                       "state" : "translated",
-                      "value" : "%arg Foto"
+                      "value" : "%4$@ Foto"
                     }
                   },
                   "other" : {
                     "stringUnit" : {
                       "state" : "translated",
-                      "value" : "%arg Fotos"
+                      "value" : "%4$@ Fotos"
                     }
                   }
                 }
@@ -8555,13 +8485,13 @@
                   "one" : {
                     "stringUnit" : {
                       "state" : "translated",
-                      "value" : "%arg photo"
+                      "value" : "%4$@ photo"
                     }
                   },
                   "other" : {
                     "stringUnit" : {
                       "state" : "translated",
-                      "value" : "%arg photos"
+                      "value" : "%4$@ photos"
                     }
                   }
                 }

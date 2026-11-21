@@ -350,7 +350,8 @@ struct OverviewView: View {
 
     /// The analysis on the ring card: running, waiting, pausing, paused by the user and the
     /// quick check as the analysis card shows them (P3-08: five parts and "Details"); just
-    /// finished as one line with its check mark; ended by the device or iOS with the reason and
+    /// finished as one line with its check mark, the first time on screen with the moment of
+    /// 100 % above it (DS-08); ended by the device or iOS with the reason and
     /// "Fortsetzen"; otherwise one line with a check mark (draft B). The lines open the sheet
     /// "Analyse".
     @ViewBuilder
@@ -358,7 +359,12 @@ struct OverviewView: View {
         Group {
             if let state = model.analysisCard {
                 // Running, waiting, pausing, paused by the user, just finished, quick check.
-                AnalysisProgressCard(state: state) { showAnalysis = true }
+                VStack(alignment: .leading, spacing: 0) {
+                    // The first full analysis reached 100 % on screen: once per installation, above
+                    // "Analyse fertig" (DS-08, `FirstAnalysisMomentHeader`).
+                    if case .finished = state { FirstAnalysisMomentHeader() } // Design W3 H13: the first 100 %
+                    AnalysisProgressCard(state: state) { showAnalysis = true }
+                }
             } else if let reason = model.analysis.lastReport?.pausedBecause {
                 // Ended by the device, iOS or the photo access: the reason and the way on.
                 VStack(alignment: .leading, spacing: 0) {

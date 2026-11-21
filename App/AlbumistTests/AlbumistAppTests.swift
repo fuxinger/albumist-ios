@@ -235,9 +235,12 @@ struct LocalizationTests {
         let bundle = try #require(english, "en.lproj missing; localizations: \(Bundle.main.localizations)")
         #expect(bundle.localizedString(forKey: "Abbrechen", value: nil, table: nil) == "Cancel")
         #expect(bundle.localizedString(forKey: "Deine Fotos, endlich sortiert.", value: nil, table: nil) == "Your photos, finally sorted.")
-        let format = bundle.localizedString(forKey: "%lld Fotos", value: nil, table: nil)
-        #expect(String.localizedStringWithFormat(format, 1) == "1 photo")
-        #expect(String.localizedStringWithFormat(format, 3) == "3 photos")
+        // The grouped count of photos (`"\(n) \(n.formatted()) Fotos"`): the integer picks the
+        // form, the text shows the number (the ungrouped "%lld Fotos" went with the sorting
+        // show's DS-17, its last user).
+        let format = bundle.localizedString(forKey: "%lld %@ Fotos", value: nil, table: nil)
+        #expect(String.localizedStringWithFormat(format, 1, "1") == "1 photo")
+        #expect(String.localizedStringWithFormat(format, 3, "3") == "3 photos")
         let twoArgs = bundle.localizedString(forKey: "%@ von %@", value: nil, table: nil)
         #expect(String(format: twoArgs, "3", "7") == "3 of 7")
     }
@@ -246,12 +249,17 @@ struct LocalizationTests {
     @Test func germanSingulars() throws {
         let path = try #require(Bundle.main.path(forResource: "de", ofType: "lproj"), "de.lproj missing")
         let bundle = try #require(Bundle(path: path))
-        for (key, one, many) in [("%lld Fotos", "1 Foto", "2 Fotos"), ("%lld Reisen", "1 Reise", "2 Reisen"),
+        for (key, one, many) in [("%lld Reisen", "1 Reise", "2 Reisen"),
                                  ("%lld Länder", "1 Land", "2 Länder"), ("%lld Vorschläge", "1 Vorschlag", "2 Vorschläge")] {
             let format = bundle.localizedString(forKey: key, value: nil, table: nil)
             #expect(String.localizedStringWithFormat(format, 1) == one)
             #expect(String.localizedStringWithFormat(format, 2) == many)
         }
+        // Photos are counted with their thousands separator (`"\(n) \(n.formatted()) Fotos"`):
+        // the integer picks the form (the ungrouped "%lld Fotos" went with DS-17).
+        let photos = bundle.localizedString(forKey: "%lld %@ Fotos", value: nil, table: nil)
+        #expect(String.localizedStringWithFormat(photos, 1, "1") == "1 Foto")
+        #expect(String.localizedStringWithFormat(photos, 2, "2") == "2 Fotos")
     }
 
     /// Counts that can pass 999 show the thousands separator (review P3-09): the integer picks

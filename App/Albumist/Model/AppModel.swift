@@ -711,6 +711,7 @@ final class AppModel {
 
     private func load() async {
         guard phase == .loading else { return }
+        FirstAnalysisMomentStore.shared.launched() // Design W3 H13: the first 100 % (DS-08), read before the marker may be reset below
         do {
             if UITestSupport.rebuildsDatabase, let url = try? Self.databaseURL() {
                 AlbumistStore.quarantineDatabase(at: url)
@@ -1279,6 +1280,7 @@ final class AppModel {
             // Owed before the wait below: a run that starts meanwhile (a trip change, new photos,
             // "Neu prüfen") no longer drops "Analyse fertig" (`FinishMoment`).
             finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)
+            firstAnalysisRunEnded(finished: end.isFinished, celebrates: celebrate) // Design W3 H13: the first 100 % (DS-08), before the marker says completed
             // The trips it made are on screen only once its end has refreshed the overview.
             tripChangeLedger.runEnded(generation, madeSuggestions: finished.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true)
             analysis.stoppedAt = analysis.position

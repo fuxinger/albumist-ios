@@ -190,6 +190,15 @@ struct SettingsView: View {
             #endif
 
             Section {
+                // Where the app speaks of itself: its own sign (the Glass Stack, as on the
+                // welcome page and in the purchase sheet; DS-11), never on content.
+                HStack(spacing: Theme.Spacing.m) { // Design W3 H13: app icon
+                    AppIconImage(side: typeSize.isAccessibilitySize ? 64 : 48)
+                    Text(verbatim: AppInfo.name)
+                        .font(.headline)
+                }
+                .padding(.vertical, Theme.Spacing.xs)
+                .accessibilityElement(children: .combine)
                 NavigationLink("Datenschutz") { PrivacyView() }
                 LabeledContent("Version", value: AppInfo.version)
                 DiagnosticShareRow()

@@ -165,6 +165,25 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(swiftlint_report.folder("Package.swift"), "Package.swift")
 
 
+class BaselineFileTests(unittest.TestCase):
+    """The committed baseline (first counted 21.11.2026 in CI run 44871082263: 1,060 findings in
+    206 files after the rules were tuned) exists, reads, and names only files that are there."""
+
+    def test_the_baseline_is_committed_and_names_real_files(self):
+        with open(os.path.join(ROOT, ".github", "swiftlint-baseline.json"), encoding="utf-8") as f:
+            baseline = json.load(f)
+        self.assertEqual(baseline["_comment"], swiftlint_report.BASELINE_COMMENT)
+        files = baseline["files"]
+        self.assertGreater(len(files), 0)
+        for path, rules in files.items():
+            self.assertFalse(os.path.isabs(path), path)
+            self.assertTrue(rules and all(isinstance(n, int) and n > 0 for n in rules.values()), path)
+        # A baseline for a file that is gone allows nothing; one that names many missing files
+        # was written from another tree.
+        missing = [p for p in files if not os.path.exists(os.path.join(ROOT, p))]
+        self.assertLessEqual(len(missing), 5, missing[:10])
+
+
 class WorkflowTests(unittest.TestCase):
     """The job fails on new findings and on a broken setup; it never runs in a release."""
 

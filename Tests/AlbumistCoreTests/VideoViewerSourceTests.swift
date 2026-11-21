@@ -201,6 +201,29 @@ struct VideoViewerSourceTests {
                 "a pause right after the finger lifted is undone")
     }
 
+    /// The automatic start never overrides what came after it was planned (review V2): a pause
+    /// (the button, VoiceOver's two-finger double tap, closing the photo view, the background), a
+    /// finger on the slider or a swipe on in its moment of waiting (350 ms and the change of the
+    /// app's sound) cancels it. Before, a video swiped to and closed at once started during the
+    /// slide away, its sound over the grid, and "Anhalten" in that moment was undone.
+    @Test func theAutomaticStartGivesWayToWhatCameAfterIt() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let open = try #require(AppSource.body(of: "func open(", in: model))
+        #expect(Self.inOrder(["guard start.byItself else { return }", "startsByItself = true", "Task.sleep(for: .milliseconds(350))",
+                              "await LiveAudio.settled()", "guard !Task.isCancelled, self.id == id, startsByItself else { return }",
+                              "startsByItself = false", "guard sound.isOn || LiveAudio.isReady else { return }", "play()"], in: open),
+                "\(open)")
+        for owner in ["func pause(", "func beginScrub(", "private func stop("] {
+            let body = try #require(AppSource.body(of: owner, in: model))
+            #expect(body.contains("startsByItself = false"), "\(owner) leaves the automatic start standing")
+        }
+        // Closing the photo view (the button, the pull, the escape) and the background pause it
+        // first; `close` stops the video.
+        #expect(try #require(AppSource.body(of: "func close(", in: model)).contains("stop()"))
+        let viewer = try Self.code(Self.viewerPath)
+        #expect(Self.inOrder(["video.pause()", "dismiss()"], in: try #require(AppSource.body(of: "private func closeNow(", in: viewer))))
+    }
+
     /// A video its player cannot play (a file it cannot decode) says so calmly, as one Photos
     /// had nothing for, instead of "Anhalten" over its still for good: its player goes, and the
     /// page is not asked again until the user comes back to it (review F, F11).
@@ -261,8 +284,8 @@ struct VideoViewerSourceTests {
                              in: settled), "\(settled)")
         let open = try #require(AppSource.body(of: "func open(", in: model))
         #expect(Self.inOrder(["start.byItself", "Task.sleep(for: .milliseconds(350))", "await LiveAudio.settled()",
-                              "guard !Task.isCancelled, self.id == id, sound.isOn || LiveAudio.isReady else { return }", "play()"],
-                             in: open), "\(open)")
+                              "guard !Task.isCancelled, self.id == id, startsByItself else { return }",
+                              "guard sound.isOn || LiveAudio.isReady else { return }", "play()"], in: open), "\(open)")
         let tap = try #require(AppSource.body(of: "func togglePlay(", in: model))
         #expect(Self.squeezed(tap) == "{ifisPlaying{pause()}else{playAfterSoundChange()}}", "\(tap)")
         let asked = try #require(AppSource.body(of: "private func playAfterSoundChange(", in: model))

@@ -5,8 +5,8 @@ import AlbumistCore
 
 /// The video on screen in the photo view (design wave 3, DS-16), played as Photos plays it:
 ///
-/// - It starts by itself once the swipe has come to rest and starts over at its end, where
-///   motion is welcome; with Reduce Motion or "Auto-Play Video Previews" off it waits for
+/// - It starts by itself once the swipe has come to rest, unless the user paused, scrubbed or
+///   closed meanwhile, and starts over at its end, where motion is welcome; with Reduce Motion or "Auto-Play Video Previews" off it waits for
 ///   "Abspielen" and stops at its end, in Low Power Mode it plays once (`VideoStart`). Looping,
 ///   it lets the iPhone lock after its first play.
 /// - Without sound until the user turns it on; the choice holds for the next videos of this
@@ -59,6 +59,10 @@ final class ViewerVideo {
     @ObservationIgnored private var seekSerial = 0
     /// Videos Photos said are only in iCloud: not asked again while the photo view is open.
     @ObservationIgnored private var onlyInICloud: Set<AssetID> = []
+    /// The start by itself that `open` planned still stands: what comes in its moment of waiting
+    /// cancels it (review V2), a pause (the button, VoiceOver, closing the photo view, the
+    /// background), a finger on the slider, a swipe on.
+    @ObservationIgnored private var startsByItself = false
 
     /// The player of `id`'s page, while it is the video on screen.
     func surface(for id: AssetID) -> Player? {
@@ -93,11 +97,15 @@ final class ViewerVideo {
             availability = .onDevice
             make(item.value)
             guard start.byItself else { return }
+            startsByItself = true
             try? await Task.sleep(for: .milliseconds(350))
             // Only once the app's sound mixes with the user's music (`LiveAudio`), or with the
             // sound the user turned on: before, even this muted start would stop their music.
             await LiveAudio.settled()
-            guard !Task.isCancelled, self.id == id, sound.isOn || LiveAudio.isReady else { return }
+            // Unless the user paused, scrubbed, closed or swiped on meanwhile (review V2).
+            guard !Task.isCancelled, self.id == id, startsByItself else { return }
+            startsByItself = false
+            guard sound.isOn || LiveAudio.isReady else { return }
             play()
         case .missing(let found):
             if found == .onlyInICloud { onlyInICloud.insert(id) }
@@ -157,10 +165,12 @@ final class ViewerVideo {
         isPlaying = true
     }
 
+    /// Also before the video started by itself: it then does not start (review V2).
     func pause() {
         player?.value.pause()
         isPlaying = false
         resumes = false
+        startsByItself = false
     }
 
     func toggleSound() {
@@ -171,8 +181,10 @@ final class ViewerVideo {
 
     // MARK: The slider
 
-    /// The finger is on the slider: the video holds still under it.
+    /// The finger is on the slider: the video holds still under it, and does not start by itself
+    /// meanwhile (review V2).
     func beginScrub() {
+        startsByItself = false
         guard let player, !scrubbing else { return }
         scrubbing = true
         playsAfterScrub = isPlaying
@@ -337,6 +349,7 @@ final class ViewerVideo {
         settling = false
         playsAfterScrub = false
         resumes = false
+        startsByItself = false
         seekSerial += 1
     }
 }

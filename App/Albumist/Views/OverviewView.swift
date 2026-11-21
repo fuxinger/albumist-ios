@@ -383,7 +383,11 @@ struct OverviewView: View {
                         .padding(.bottom, Theme.Spacing.m)
                 }
             } else {
-                doneRow
+                VStack(alignment: .leading, spacing: 0) {
+                    // The first 100 % cut short by a run that replaced "Analyse fertig" (V12).
+                    FirstAnalysisMomentHeader(again: true) // Design W3 H13: the first 100 %
+                    doneRow
+                }
             }
         }
         // A crossfade between states (running, paused, finished …), not with every count.

@@ -166,6 +166,8 @@ struct FirstAnalysisMomentSourceTests {
         let moment = try #require(card.range(of: "if case .finished = state { FirstAnalysisMomentHeader() }"), "\(card)")
         let finished = try #require(card.range(of: "AnalysisProgressCard(state: state) { showAnalysis = true }"))
         #expect(moment.upperBound < finished.lowerBound, "the moment is not above the card")
+        // Besides, only a moment cut short, above the done line (verification review V12).
+        #expect(card.components(separatedBy: "FirstAnalysisMomentHeader(").count - 1 == 2, "\(card)")
         let raw = try AppSource.read(Self.overview)
         #expect(raw.contains("if case .finished = state { FirstAnalysisMomentHeader() } \(Self.mark): the first 100 %"))
         for path in AppSource.swiftFiles(under: "App/Albumist") where !path.hasSuffix("OverviewView.swift") && !path.hasSuffix("Start/RingCard.swift") {
@@ -203,7 +205,7 @@ struct FirstAnalysisMomentSourceTests {
         #expect(claim.upperBound < claimed.lowerBound && claimed.upperBound < said.lowerBound, "said before it was claimed")
         #expect(ring.components(separatedBy: "AccessibilityNotification.Announcement(").count - 1 == 1, "said more than once")
         let view = try Self.body(["struct FirstAnalysisMomentHeader", "var body: some View"], in: ring)
-        #expect(view.contains(".onDisappear {") && view.contains("store.ended()"), "\(view)")
+        #expect(view.contains(".onDisappear {") && view.contains("store.cardWent()"), "\(view)")
         // Shown only while it plays: no gap above "Analyse fertig" while it waits for the screen.
         #expect(view.contains("if store.moment.playing {"), "\(view)")
         // The wide figures; decoration for VoiceOver, found by the UI runs.
@@ -211,6 +213,41 @@ struct FirstAnalysisMomentSourceTests {
         #expect(header.contains(".accessibilityIdentifier(\"analysis.firstFinish\")"))
         #expect(header.contains(".accessibilityHidden(!UITestSupport.isRunning)"))
         #expect(bar.contains("FirstAnalysisMoment.segments(shares: shares, width: Double(rect.width), joined: joined)"))
+    }
+
+    /// Its card going while it plays does not lose it (verification review V12): the header tells
+    /// the store that its card went (`cardWent`), which the rule answers by the time it showed and
+    /// whether VoiceOver said it (`claim` hears that from `UIAccessibility.isVoiceOverRunning`, as
+    /// the header says it right after the claim). Only the fold after its hold ends it.
+    @Test func aCardThatGoesWhileItPlaysDoesNotLoseIt() throws {
+        let ring = try Self.code(Self.ringCard)
+        let view = try Self.body(["struct FirstAnalysisMomentHeader", "var body: some View"], in: ring)
+        let gone = try #require(view.range(of: ".onDisappear {"), "\(view)")
+        let after = view[gone.upperBound...]
+        // Only the header that plays it tells (two places may show it, one goes as the other comes).
+        let own = try #require(after.range(of: "guard let run else { return }"), "\(view)")
+        let told = try #require(after.range(of: "store.cardWent()"), "the card's going ends the moment: \(view)")
+        #expect(own.upperBound < told.lowerBound, "\(view)")
+        #expect(!view.contains("store.ended()"), "the card's going ends the moment: \(view)")
+        // A run that replaced its card leaves the start page on its done line once it ended: the
+        // moment cut short plays there (only then, never one due for the first time).
+        let overview = try Self.code(Self.overview)
+        let done = try #require(overview.range(of: "FirstAnalysisMomentHeader(again: true)"), "the done line cannot play it")
+        let row = try #require(overview[done.upperBound...].range(of: "doneRow"), "not above the done line")
+        #expect(overview[done.upperBound..<row.lowerBound].count < 80, "not right above the done line")
+        let raw = try AppSource.read(Self.overview)
+        #expect(raw.contains("FirstAnalysisMomentHeader(again: true) \(Self.mark)"), "unmarked")
+        let start = try Self.body(["struct FirstAnalysisMomentHeader", "private func start()"], in: ring)
+        let only = try #require(start.range(of: "if again, !store.moment.cutShort { return }"), "\(start)")
+        let claims = try #require(start.range(of: "store.claim(onScreen: model.isOnScreen)"), "\(start)")
+        #expect(only.upperBound < claims.lowerBound, "\(start)")
+        let play = try Self.body(["struct FirstAnalysisMomentHeader", "private func play() async"], in: ring)
+        #expect(play.contains("store.ended()"), "\(play)")
+        let store = try Self.code(Self.store)
+        let claim = try Self.body(["final class FirstAnalysisMomentStore", "func claim(onScreen: Bool)"], in: store)
+        #expect(claim.contains("moment.claim(at: Date(), onScreen: onScreen, announced: UIAccessibility.isVoiceOverRunning)"), "\(claim)")
+        let went = try Self.body(["final class FirstAnalysisMomentStore", "func cardWent()"], in: store)
+        #expect(went.contains("moment.cardWent(at: Date())"), "\(went)")
     }
 
     /// UI runs show it only when a test asks for it (`-AlbumistUITestFirstFinishMoment`), held

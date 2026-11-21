@@ -219,19 +219,76 @@ struct FirstAnalysisMomentTests {
     }
 
     /// The card went before the moment played (a run started meanwhile, off screen): it stays
-    /// due, and the next "Analyse fertig" within the window brings it. Once it played, a card
-    /// that goes ends it.
+    /// due, and the next "Analyse fertig" within the window brings it. Once it played to its end
+    /// and folded away, a card that goes changes nothing.
     @Test func aCardThatGoesBeforeItPlaysLeavesItDue() {
         var moment = Self.fresh()
         Self.end(&moment)
-        moment.ended()
+        moment.cardWent(at: Self.at(30))
         #expect(moment.isDue(at: Self.at(60)))
         let plays = moment.claim(at: Self.at(90), onScreen: true)
         #expect(plays)
         moment.ended()
+        moment.cardWent(at: Self.at(91))
         #expect(!moment.playing && !moment.shows(at: Self.at(91)))
         let again = moment.claim(at: Self.at(92), onScreen: true)
         #expect(!again)
+    }
+
+    /// Its card went while it played, before its hold (a run that starts within the 3.2 s puts
+    /// its own card there, another tab): not lost, the next card within the window plays it from
+    /// the start (verification review V12). Once it was on screen for its hold, or VoiceOver said
+    /// it, a card that goes ends it: it never shows twice.
+    @Test func aCardThatGoesWhileItPlaysBeforeItsHoldLeavesItDue() {
+        typealias T = FirstAnalysisMoment.Timing
+        var cut = Self.fresh()
+        Self.end(&cut)
+        let plays = cut.claim(at: Self.at(1), onScreen: true)
+        #expect(plays)
+        #expect(!cut.cutShort)
+        cut.cardWent(at: Self.at(1 + T.hold - 0.5))
+        #expect(!cut.playing)
+        #expect(cut.isDue(at: Self.at(10)))
+        // Cut short: the done line of the start page may play it too, once that run ended.
+        #expect(cut.cutShort)
+        let again = cut.claim(at: Self.at(20), onScreen: true)
+        #expect(again)
+        #expect(!cut.cutShort)
+        // This time on screen for its hold: over, whatever card comes.
+        cut.cardWent(at: Self.at(20 + T.hold))
+        #expect(!cut.shows(at: Self.at(30)))
+        let third = cut.claim(at: Self.at(31), onScreen: true)
+        #expect(!third)
+        #expect(cut.kept == .spent)
+        // Said by VoiceOver as it came: heard, over when its card goes, however soon.
+        var heard = Self.fresh()
+        Self.end(&heard)
+        let said = heard.claim(at: Self.at(1), onScreen: true, announced: true)
+        #expect(said)
+        heard.cardWent(at: Self.at(1.5))
+        #expect(!heard.shows(at: Self.at(2)))
+        let replayed = heard.claim(at: Self.at(3), onScreen: true)
+        #expect(!replayed)
+        // Cut short at the end of its window: the window counts from the run's end, gone.
+        var late = Self.fresh()
+        Self.end(&late)
+        let started = late.claim(at: Self.at(FirstAnalysisMoment.window - 1), onScreen: true)
+        #expect(started)
+        late.cardWent(at: Self.at(FirstAnalysisMoment.window))
+        let tooLate = late.claim(at: Self.at(FirstAnalysisMoment.window + 1), onScreen: true)
+        #expect(!tooLate)
+        // Cut short by leaving for the background: over, as before.
+        var away = Self.fresh()
+        Self.end(&away)
+        let shown = away.claim(at: Self.at(1), onScreen: true)
+        #expect(shown)
+        away.leftScreen()
+        away.cardWent(at: Self.at(2))
+        #expect(!away.isDue(at: Self.at(3)) && !away.cutShort)
+        // A moment due for the first time is not "cut short": only "Analyse fertig" plays it.
+        var due = Self.fresh()
+        Self.end(&due)
+        #expect(due.isDue(at: Self.at(1)) && !due.cutShort)
     }
 
     // MARK: What finishes the first analysis
@@ -387,6 +444,7 @@ struct FirstAnalysisMomentTests {
         }
         for first in [true, false] { moment.completedAway(first: first) }
         moment.leftScreen()
+        moment.cardWent(at: Self.at(2))
         moment.ended()
         #expect(moment.kept == .spent && !moment.shows(at: Self.at(2)))
     }

@@ -67,16 +67,23 @@ final class FirstAnalysisMomentStore {
     }
 
     /// The card with "Analyse fertig" is there: true once, while due and on screen; it plays
-    /// from now.
+    /// from now. VoiceOver says it right after (`FirstAnalysisMomentHeader.start`): heard then.
     func claim(onScreen: Bool) -> Bool {
         guard moment.dueSince != nil, !UITestSupport.isRunning || UITestSupport.showsFirstFinishMoment else { return false }
-        return moment.claim(at: Date(), onScreen: onScreen)
+        return moment.claim(at: Date(), onScreen: onScreen, announced: UIAccessibility.isVoiceOverRunning)
     }
 
-    /// It folded away, or its card went while it played (another tab, a new run).
+    /// It folded away after its hold.
     func ended() {
         guard moment.playing else { return }
         moment.ended()
+    }
+
+    /// Its card went (another tab, a new run's card): cut short before its hold, the next card
+    /// plays it again (verification review V12, `FirstAnalysisMoment.cardWent`).
+    func cardWent() {
+        guard moment.playing else { return }
+        moment.cardWent(at: Date())
     }
 
     /// Albumist left the screen: not shown later; one that plays ends.

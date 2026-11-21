@@ -45,8 +45,17 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// The first full analysis finished on screen then; the card shows the moment from then until
     /// `window` has passed. In memory only.
     public private(set) var dueSince: Date?
-    /// It plays now: from the card's claim until it folds away (`ended`).
+    /// It plays now: from the card's claim until it folds away (`ended`) or its card goes
+    /// (`cardWent`).
     public private(set) var playing = false
+    /// Due again: its card went while it played, before its hold (`cardWent`). Then the start
+    /// page's done line may play it too, once the run that replaced its card ended. In memory only.
+    public private(set) var cutShort = false
+    /// Since when it plays, whether VoiceOver said it then, and when it became due: a card that
+    /// goes too soon leaves it due again (`cardWent`). In memory only.
+    private var playingSince: Date?
+    private var heard = false
+    private var dueBeforeClaim: Date?
 
     /// How long after the end of the run the card may still bring it: the user looked at another
     /// tab and comes back to "Vorschläge". Later it is no longer "just now".
@@ -112,8 +121,9 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// Albumist left the screen (the background, the screen locked): a moment not shown yet is not
     /// shown later; one that plays ends.
     public mutating func leftScreen() {
+        ended()
         dueSince = nil
-        playing = false
+        cutShort = false
     }
 
     /// Due now: the first full analysis finished on screen, at most `window` ago.
@@ -127,23 +137,46 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     public func shows(at now: Date) -> Bool { playing || isDue(at: now) }
 
     /// The card with "Analyse fertig" is there: true once, while due and on screen; it plays from
-    /// now. A lapsed one is dropped.
-    public mutating func claim(at now: Date, onScreen: Bool) -> Bool {
+    /// now. A lapsed one is dropped. `announced`: VoiceOver says it as it starts (it is heard
+    /// then, `cardWent`).
+    public mutating func claim(at now: Date, onScreen: Bool, announced: Bool = false) -> Bool {
         guard !playing, dueSince != nil else { return false }
         guard isDue(at: now) else {
             dueSince = nil
             return false
         }
         guard onScreen else { return false }
+        dueBeforeClaim = dueSince
         dueSince = nil
+        cutShort = false
         playing = true
+        playingSince = now
+        heard = announced
         return true
     }
 
-    /// It folded away, or its card went while it played (another tab, a new run): over. A card
-    /// that went before it played leaves it due: the next card within `window` brings it.
+    /// It folded away after its hold: over.
     public mutating func ended() {
         playing = false
+        playingSince = nil
+        heard = false
+        dueBeforeClaim = nil
+    }
+
+    /// Its card went (another tab; a run that starts puts its own card there). While it played and
+    /// before its `Timing.hold`, not said by VoiceOver: due again (`cutShort`), and the next card
+    /// within `window` of the run's end plays it from the start: "Analyse fertig", or the done
+    /// line once the run that replaced it ended (verification review V12). Once it was on screen
+    /// for its hold, or VoiceOver said it, over: it never shows twice. A card that went before it
+    /// played leaves it due.
+    public mutating func cardWent(at now: Date) {
+        guard playing else { return }
+        let cutShort = !heard && (playingSince.map { now.timeIntervalSince($0) < Timing.hold } ?? false)
+        let due = dueBeforeClaim
+        ended()
+        guard cutShort else { return }
+        dueSince = due
+        self.cutShort = true
     }
 
     /// How it plays (`FirstAnalysisMomentHeader`): "100 %" and the full bar come with "Analyse

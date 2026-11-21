@@ -55,7 +55,9 @@ struct FirstAnalysisMomentSourceTests {
         }
         #expect(model.components(separatedBy: "firstAnalysisRunEnded(").count - 1 == 1, "told from another place too")
         #expect(model.components(separatedBy: "FirstAnalysisMomentStore.shared.").count - 1 == 2, "told from another place too")
-        #expect(raw.components(separatedBy: Self.mark).count - 1 == 3, "the marked lines of DS-08 in AppModel.swift changed")
+        #expect(raw.components(separatedBy: "\(Self.mark): the first 100 %").count - 1 == 3, "the marked lines of DS-08 in AppModel.swift changed")
+        // And one of the sorting show's "Anlegen" (verification review V13), nothing else of H13.
+        #expect(raw.components(separatedBy: Self.mark).count - 1 == 4, "the marked lines of H13 in AppModel.swift changed")
     }
 
     /// "On screen" as a run ends means not in the background (second review, K7 b): Control

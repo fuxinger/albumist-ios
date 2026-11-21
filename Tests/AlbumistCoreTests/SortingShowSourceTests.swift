@@ -173,6 +173,36 @@ struct SortingShowSourceTests {
         #expect(!albums.contains("resultCoverSources("), "\(albums)")
     }
 
+    /// "Anlegen" never makes the capture dates or the preview ranks on the main actor
+    /// (verification review V13): where they are not kept (before the first refresh, the dates
+    /// after a memory warning), the model makes them off the main thread first, and the result's
+    /// stack and the show read them only after that.
+    @Test func theTapNeverMakesTheTablesOnTheMainActor() throws {
+        let review = try Self.code(Self.review)
+        let button = try Self.body(["struct PlanReviewView", "func applyButton("], in: review)
+        let made = try #require(button.range(of: "await model.makeDatesAndRanksOffMain()"), "the tap reads tables it may make: \(button)")
+        let begin = try #require(button.range(of: "beginMoment(plan, sources: sources)"), "\(button)")
+        let cast = try #require(button.range(of: "await model.sortingShowAlbums(filled, plan: plan, sources: sources)"), "\(button)")
+        #expect(made.upperBound < begin.lowerBound && made.upperBound < cast.lowerBound, "read before they are made: \(button)")
+        // The sources read them too: each card's cover (`proposalCoverIDs`, dates and ranks).
+        let sources = try #require(button.range(of: "let sources = model.resultCoverSources(for: plan)"), "\(button)")
+        #expect(made.upperBound < sources.lowerBound, "the sources read the tables before they are made: \(button)")
+        let covers = try #require(AppSource.body(of: "func proposalCoverIDs(", in: Self.code("App/Albumist/Model/AppModel+ProposalCard.swift")))
+        #expect(covers.contains("let dates = creationDates") && covers.contains("let ranks = previewRanks"), "\(covers)")
+        let raw = try AppSource.read("App/Albumist/Model/AppModel.swift")
+        let model = AppSource.code(raw, keepStrings: true)
+        let function = try #require(AppSource.body(of: "func makeDatesAndRanksOffMain() async", in: model), "no makeDatesAndRanksOffMain")
+        #expect(function.contains("guard datesCache == nil || previewRanksCache == nil else { return }"), "\(function)")
+        let detached = try #require(function.range(of: "Task.detached(priority: .userInitiated)"), "\(function)")
+        for builder in ["DerivedLibrary.creationDates(of: facts)", "PreviewRank.ranks(of: facts)"] {
+            let at = try #require(function.range(of: builder), "\(builder): \(function)")
+            #expect(detached.upperBound < at.lowerBound, "\(builder) on the main actor")
+        }
+        // Kept only for the facts they were made of (a refresh meanwhile brings its own).
+        #expect(function.contains("guard DerivedLibrary.sameFacts(facts, self.facts) else { return }"), "\(function)")
+        #expect(raw.contains("func makeDatesAndRanksOffMain() async { // Design W3 H13"), "unmarked")
+    }
+
     /// Low Power Mode: the calm version. Nothing flies (`flies`), the albums still fill one after
     /// the other with their tap; with Reduce Motion or VoiceOver the albums are riffled through
     /// quietly, as before. The haptic stays the one soft tap at a landing, no more.

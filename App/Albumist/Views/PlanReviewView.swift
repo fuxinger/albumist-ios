@@ -471,14 +471,17 @@ struct PlanReviewView: View {
             // Once: a second tap while the show's albums are cast starts nothing.
             guard !starting else { return }
             starting = true
-            // What the show and the result's stack know of the suggestions, taken once as the
-            // plan starts (second review, K10: each walked the plan's suggestions on the tap).
-            let sources = model.resultCoverSources(for: plan)
-            beginMoment(plan, sources: sources)
             // Its own run does not make the plan stale; one that did not take it leaves it as it was.
             freshness.handOver()
             let filled = facts.filledAlbums
             Task {
+                // The capture dates and preview ranks the cards' covers, the result's stack and the
+                // show read, made off the main thread where they are not kept (verification review
+                // V13); then what the show and the stack know of the suggestions, taken once as the
+                // plan starts (second review, K10: each walked the plan's suggestions on the tap).
+                await model.makeDatesAndRanksOffMain()
+                let sources = model.resultCoverSources(for: plan)
+                beginMoment(plan, sources: sources)
                 // The show's albums, cast off the main thread, before the run starts: the show is
                 // always there before the result.
                 let albums = SortingShow.albums(from: await model.sortingShowAlbums(filled, plan: plan, sources: sources))

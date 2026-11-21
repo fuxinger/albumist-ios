@@ -247,7 +247,7 @@ private struct AppleHandoverMap: UIViewRepresentable {
         let bounds = mapView.bounds
         guard bounds.width > 0, bounds.height > 0 else { return }
         let viewport = camera.viewport(widthPoints: Double(bounds.width), heightPoints: Double(bounds.height))
-        var wanted: [String: MapPin] = [:]
+        var wanted: [String: AlbumistMap.MapPin] = [:]
         for group in MapPins.onGlobe(scene.pins, in: viewport) {
             wanted[group.id] = group.pin
         }
@@ -353,10 +353,10 @@ extension AppleHandoverCoordinator: @preconcurrency MKMapViewDelegate {
 
 /// The shown pin of a group on Apple's map after the handover (`MapPins.onGlobe`).
 final class AppleMapsPinAnnotation: NSObject, MKAnnotation {
-    let pin: MapPin
+    let pin: AlbumistMap.MapPin
     let coordinate: CLLocationCoordinate2D
 
-    init(pin: MapPin) {
+    init(pin: AlbumistMap.MapPin) {
         self.pin = pin
         self.coordinate = AppleMapsBridge.coordinate(pin.coordinate)
         super.init()
@@ -378,7 +378,7 @@ final class AppleMapsHouseAnnotation: NSObject, MKAnnotation {
 @MainActor final class AppleMapsPinAnnotationView: MKAnnotationView {
     static let reuseName = "albumist.apple-maps.pin"
 
-    private var shownPin: MapPin?
+    private var shownPin: AlbumistMap.MapPin?
     private var photoLoad: Task<Void, Never>?
 
     override init(annotation: (any MKAnnotation)?, reuseIdentifier: String?) {
@@ -399,7 +399,7 @@ final class AppleMapsHouseAnnotation: NSObject, MKAnnotation {
         shownPin = nil
     }
 
-    func show(_ pin: MapPin) {
+    func show(_ pin: AlbumistMap.MapPin) {
         shownPin = pin
         image = AppleMapsArt.pin(photo: nil, count: pin.count)
         accessibilityLabel = AppleMapsText.pinLabel(pin)

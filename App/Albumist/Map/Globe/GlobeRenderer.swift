@@ -22,10 +22,10 @@ import AlbumistMap
 /// - Below the handover width it draws the frame of the handover, calls `onHandover` once and
 ///   stops until the controller's `jump(to:)`.
 ///
-/// Measured (`PrototypeMetrics`, counts and times only): each presented frame, the GPU time of
-/// each frame, the first frame with the Earth (from the view's creation), the way back from
-/// Apple's map, shader compile, texture load and mask build, and notes on the texture, the
-/// arcs and the drawable.
+/// Measured (`PrototypeMetrics`, counts and times only): each frame when the GPU finished it
+/// (close to when it reaches the screen), the GPU time of each frame, the first frame with the
+/// Earth (from the view's creation), the way back from Apple's map, shader compile, texture load
+/// and mask build, and notes on the texture, the arcs and the drawable.
 @MainActor
 final class GlobeRenderer: NSObject {
     /// The background of space (sRGB), also shown before the first frame.
@@ -506,19 +506,17 @@ final class GlobeRenderer: NSObject {
         }
         encoder.endEncoding()
 
+        // The frame's time is when the GPU finished it, on the host clock of `CACurrentMediaTime()`:
+        // Xcode 27's SDK offers Swift no presented handler on the drawable (CI 44871403392).
         let frameGate = gate
         let gpuMetrics = metrics
         commandBuffer.addCompletedHandler { @Sendable buffer in
             let seconds = buffer.gpuEndTime - buffer.gpuStartTime
+            let finished = buffer.status == .completed ? buffer.gpuEndTime : 0
             frameGate.signal()
             Task { @MainActor in
                 gpuMetrics.gpuTime(.ownGlobe, seconds: seconds)
-            }
-        }
-        drawable.addPresentedHandler { @Sendable presented in
-            let time = presented.presentedTime
-            Task { @MainActor in
-                self.framePresented(at: time)
+                self.frameFinished(at: finished)
             }
         }
         framesInFlight += 1
@@ -547,8 +545,9 @@ final class GlobeRenderer: NSObject {
         return values
     }
 
-    /// A frame reached the screen (`presentedTime` > 0) or was dropped (0).
-    private func framePresented(at time: Double) {
+    /// The GPU finished a frame at `time` (> 0), the moment it can reach the screen, or the frame
+    /// failed (0).
+    private func frameFinished(at time: Double) {
         framesInFlight = max(0, framesInFlight - 1)
         // After `stop()` the metrics have heard this source's pause: a frame still in flight
         // then would start a run that never ends.

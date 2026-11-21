@@ -112,8 +112,8 @@ extension MetricEvent {
 
     // MARK: What the views report
 
-    /// A frame that reached the screen (`CAMetalDrawable.presentedTime`, or a display link's
-    /// `targetTimestamp` for Apple's maps), in seconds of `CACurrentMediaTime()`'s clock.
+    /// A frame that reached the screen (our globe: when the GPU finished it, `gpuEndTime`; Apple's
+    /// maps: a display link's `targetTimestamp`), in seconds of `CACurrentMediaTime()`'s clock.
     /// Consecutive calls of one source between two `pause(_:)` calls form one run of frames.
     func frame(_ source: MetricSource, presentedAt time: Double) {
         frameLogs[source, default: MapMeasurements.FrameLog()].append(time)

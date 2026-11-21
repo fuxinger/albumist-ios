@@ -69,7 +69,7 @@ enum AppleMapsStyle {
 
 /// What VoiceOver says for a pin: no coordinates, the pin's own words.
 enum AppleMapsText {
-    static func pinLabel(_ pin: MapPin) -> String {
+    static func pinLabel(_ pin: AlbumistMap.MapPin) -> String {
         let count = PlaybackText.grouped(pin.count)
         switch pin.level {
         case .worldRegion:
@@ -90,7 +90,7 @@ enum AppleMapsText {
 /// A pin on Apple's globe: the pin's photo (or a soft gradient) in a white-rimmed circle, with the
 /// count on a small dark badge.
 struct AppleMapsPinBubble: View {
-    let pin: MapPin
+    let pin: AlbumistMap.MapPin
 
     var body: some View {
         AppleMapsPinFace(cover: pin.cover)

@@ -6,9 +6,10 @@ import AlbumistCore
 /// The video on screen in the photo view (design wave 3, DS-16), played as Photos plays it:
 ///
 /// - It starts by itself once the swipe has come to rest, unless the user paused, scrubbed or
-///   closed meanwhile, and starts over at its end, where motion is welcome; with Reduce Motion or "Auto-Play Video Previews" off it waits for
-///   "Abspielen" and stops at its end, in Low Power Mode it plays once (`VideoStart`). Looping
-///   without its sound, it lets the iPhone lock after its first play.
+///   closed meanwhile, and starts over at its end, where motion is welcome; with Reduce Motion
+///   or "Auto-Play Video Previews" off it waits for "Abspielen" and stops at its end, in Low
+///   Power Mode it plays once (`VideoStart`). Looping without its sound, it lets the iPhone lock
+///   after its first play.
 /// - Without sound until the user turns it on; the choice holds for the next videos of this
 ///   photo view (`VideoSound`, `LiveAudio.videoSound`).
 /// - Only from the iPhone (`VideoLoader`): a video only in iCloud is said to be there and not

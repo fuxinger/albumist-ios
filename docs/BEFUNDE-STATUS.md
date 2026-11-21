@@ -1,6 +1,7 @@
 # Befunde: Stand der Arbeit
 
-Stand: **20.11.2026, 20:50 Uhr**, `main` fdf9c30 (PR #12 zusammengeführt nach vollem Mac-Durchgang und 10k-Härtetest, alle grün; Bildschirmfotos aller Phasen angesehen). Build 40 ist hochgeladen (20.11. 21:46 Uhr); die Punkte aus PR #12 sind ✅.
+Stand: **21.11.2026, 02:50 Uhr**, `main` 2e118e9 (PR #13 c2a6f2b und die Umbenennung PR #14, jeweils nach vollem Mac-Durchgang und 10k-Härtetest, alle grün; Bildschirmfotos angesehen). Build 41 ist hochgeladen (21.11. 02:47 Uhr, TestFlight-Lauf 44844600901); die Punkte aus PR #13 sind ✅.
+Davor Build 40 = PR #12 (fdf9c30).
 Davor Build 38 = PR #10 (5f9ad8a).
 
 Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergessen wird:
@@ -15,8 +16,8 @@ Nachgezählt 20.11. 21:50 Uhr nach Build 40. Davor 03:45 Uhr: Die Spalte „Prü
 
 | Status | Große Analyse | Prüfung von außen | Zusammen |
 |---|---:|---:|---:|
-| ✅ erledigt | 59 | 35 | 94 |
-| 🔧 in Arbeit | 4 | 0 | 4 |
+| ✅ erledigt | 60 | 35 | 95 |
+| 🔧 in Arbeit | 3 | 0 | 3 |
 | 📋 geplant (offen, noch nicht begonnen) | 3 | 0 | 3 |
 | ⏸ bewusst verschoben | 0 | 2 | 2 |
 | 👤 braucht Fuchs | 13 | 1 | 14 |
@@ -114,7 +115,7 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 | P4-06 | Speicher: mehrere volle Kopien, keine Reaktion auf Speicherwarnungen | ✅ | fertig und zweitgeprüft, in main seit PR #12 (fdf9c30), in Build 40 |
 | P4-07 | „Pause in unter 1 Sekunde“ gilt nur für die Anzeige, nicht für die Arbeit | ✅ | fertig und zweitgeprüft, in main seit PR #12 (fdf9c30), in Build 40 |
 | P4-08 | Erstes Lesen und Bilderkennung nur im Simulator gemessen (7,3 h für 50.000) | 📱 | braucht Messung am iPhone (kommt mit P4-05) |
-| P4-09 | Weitere Rechnungen über alle Fotos auf dem Haupt-Strang | 🔧 | teilweise in main seit PR #12 (fdf9c30), in Build 40 (Rest offen): Zuhause-Kandidaten erst bei Bedarf, Vorberechnungen abseits des Haupt-Strangs Rest (Jahres-Atlas, Name des Zuhauses nur auf Abruf und abseits) in PR #13. |
+| P4-09 | Weitere Rechnungen über alle Fotos auf dem Haupt-Strang | ✅ | Teil 1 in Build 40 (PR #12, fdf9c30): Zuhause-Kandidaten erst bei Bedarf, Vorberechnungen abseits des Haupt-Strangs. Rest in Build 41 (PR #13, c2a6f2b): Jahres-Atlas, Name des Zuhauses nur auf Abruf und abseits; volle UI-Läufe 44814382842, 44828248004 grün |
 | P4-10 | Schutz gegen veraltete Ergebnisse deckt nur die letzte Zuweisung (= G4-03) | ✅ | `main` 5f9ad8a: c7a21f9 und Folge-Commits (f4ce44e, 00c33c5); Tests `TripChangeLedgerTests` |
 | P4-11 | Foto-Ansicht blättert über bis zu 3.000 Seiten | ✅ | PR #11 (31ec24c): `PageWindow` |
 | P4-12 | Dauer-Animationen: Kosten für Akku und Wärme unbekannt | 📱 | erst am iPhone messen; Akku-Zahl kommt mit `feat/battery` |
@@ -128,7 +129,7 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 | P5-02 | Schalter „force“ lädt ohne Test hoch, Apple-Schlüssel ungeschützt (⊂ G5-02) | ✅ | „force“ weg (51e72f3), Umgebung `testflight-upload` von dir eingerichtet (19.11.), Upload ohne Klick nur von `main`; Beleg: TestFlight-Lauf 44541589587, Build 38 (Tag `build-38`), alle Tore grün beim ersten Versuch |
 | P5-03 | Getestet wird nur die Debug-Fassung, die ausgelieferte Release-Fassung nie | ✅ | Rauchtest des Release-Builds vor dem Upload auf `main` (8304617, d159140); Beleg: TestFlight-Lauf 44541589587, Job „Release build smoke test (UI)“ grün vor dem Upload von Build 38 |
 | P5-04 | Kein Zeitplan läuft (Nachtlauf, Härtetest, Abholen der Abstürze) | ✅ | Zeitpläne laufen auf `main`, alle grün am 20.11.: Nachtlauf (Lauf 44698348676), CodeQL (44705078341), Tages-Build (44732451070), TestFlight-Rückmeldungen seit 19.11. GitHub startet sie aber Stunden später als geplant (Nachtlauf 8:53 statt 2:00 Uhr); von Hand gestartet 5:16 Uhr ebenfalls grün |
-| P5-05 | Bedienungs-Durchgang wartet vor allem, Demo-Mediathek wird in jeder Gruppe neu analysiert | 🔧 | Stufe 2, Teil 1 fertig 20.11. (Zweig `fix/sleeps`, zweite Prüfung bestanden): 61 von 70 festen Pausen in 4 Test-Dateien durch echtes Warten ersetzt; Teil 2 (Geräte-Tests) in Arbeit; Rest und Stufe 1 offen |
+| P5-05 | Bedienungs-Durchgang wartet vor allem, Demo-Mediathek wird in jeder Gruppe neu analysiert | 🔧 | Stufe 2 (feste Pausen durch echtes Warten ersetzt, alle UI-Test-Dateien) in `main` seit PR #13 (c2a6f2b), in Build 41, drei volle UI-Läufe grün. Stufe 1 (Demo-Mediathek nur einmal) am 21.11. neu gemessen (Lauf 44828248004): je Gruppe 48–55 s Anlegen und 3–4 Min. erste Analyse. Die Gruppen laufen gleichzeitig auf eigenen Macs, eine geteilte Mediathek spart also Mac-Minuten (etwa 20 je Lauf), aber kaum Wartezeit; deshalb hinten angestellt. Dazu Gruppen neu verteilt (längste etwa 47 → 36 Min., nächster Pull Request) |
 | P5-06 | 8 von 15 roten Durchgängen waren kein App-Fehler | ✅ | `main` 5f9ad8a: bedingte Wartezeiten (90c79c1), Home-Druck mit drei Wegen, jede Wiederholung gezählt; UI-Lauf 44529147724 auf PR #10 im ersten Versuch grün |
 | P5-07 | Geplanter Umbau bringt nur 60 statt 84 Min. und macht die Bau-Strecke größer | 📋 | Stufe 4 (Tor vereinfachen, rund 1.400 Zeilen weg) offen |
 | P5-08 | Das neue Tor hat eigene Lücken (a bis f) | ✅ | (a) „force“ weg, (b) = G5-04, (c) nur die Dateien der UI-Workflows zählen (IMPROVEMENTS), (d) keine Antwort der Log-Schnittstelle = kein Urteil (PR #11), (e) = P5-02, (f) = P5-03 (Release-Probelauf in jedem TestFlight-Lauf) |
@@ -206,7 +207,7 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 |---|---|---|---|
 | Z1 | Derselbe Ort zweimal vorgeschlagen („Bayern“ und „Häufiger Ort in Zwiesel“) | ✅ | 4778b94, 8329de1, 617a156; `SamePlaceOnceTests` |
 | Z2 | Fester Ort heißt „Bayern“ statt nach der Stadt | ✅ | b8662c7; `RecurringPlaceNameTests` |
-| Z3 | Alter Zweig `claude/sortly-app` startete bei jedem Push einen Upload | ✅ | 20.11. mit deinem OK: gesichert (`albumist-app/backup/claude-albumist-app-2026-11-20.bundle`), PR #1 geschlossen, Zweig von dir gelöscht |
+| Z3 | Alter Zweig `claude/sortly-app` startete bei jedem Push einen Upload | ✅ | 20.11. mit deinem OK: gesichert (<!-- rename:keep-begin: echter Pfad in den Projektdateien -->`sortly-app/backup/claude-sortly-app-2026-11-20.bundle`<!-- rename:keep-end -->), PR #1 geschlossen, Zweig von dir gelöscht |
 
 ## Was braucht Fuchs (alle 👤 auf einen Blick)
 

@@ -9,7 +9,8 @@
     "A change here changes the test fingerprint of the group that changed (ui_groups.py), so that group runs again.",
     "budget_min: minutes for the group's test passes (ui_tests.py budget_check); over it the run shows a warning, never red. Report-only, so not in the fingerprint.",
     "Measured in TestFlight run 44461253154 (19.11.): device 62, flow-full 12, flow-other 52, accessibility 20, contrast 15 min (the step Run UI tests).",
-    "Rebalanced 20.11. (tempo plan): DeviceConditionUITests 05, 07, 08 left other flows and 11 left device conditions for the new group device-flows; quick runs measured before: other flows 55.8, device 43.3 min (job, median since 18.11.)."
+    "Rebalanced 20.11. (tempo plan): DeviceConditionUITests 05, 07, 08 left other flows and 11 left device conditions for the new group device-flows; quick runs measured before: other flows 55.8, device 43.3 min (job, median since 18.11.).",
+    "Rebalanced 21.11. by the full UI run 44828248004 (test minutes): other flows 47.2, device-flows 36.3, accessibility 22.8, device 21.0, contrast 9.3, flow-full 8.7. AlbumistFlowUITests/test1b (11.6) left other flows for flow-full: other flows about 36, flow-full about 20. The small gate (flow-full and contrast) grows by those 11.6 minutes."
   ],
   "groups": [
     {
@@ -32,12 +33,12 @@
     },
     {
       "group": "flow-other",
-      "budget_min": 45,
+      "budget_min": 40,
       "title": "other flows, purchase and search",
       "_why": "Every other UI test except the accessibility tests (flow tests 1b-7, locked purchase, search). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
       "device": "pro",
       "only": "",
-      "skip": "AlbumistFlowUITests/test1_FullFlow AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo"
+      "skip": "AlbumistFlowUITests/test1_FullFlow AlbumistFlowUITests/test1b_AtlasLibrarySearch AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo"
     },
     {
       "group": "accessibility",
@@ -51,11 +52,11 @@
     },
     {
       "group": "flow-full",
-      "budget_min": 20,
-      "title": "full flow and video",
-      "_why": "Onboarding, demo library, plan and the sorting-show video.",
+      "budget_min": 30,
+      "title": "full flow, video, atlas and library",
+      "_why": "Onboarding, demo library, plan and the sorting-show video (test1), then atlas, library and search on the library test1 made (test1b, 11.6 min; it ran after test1 in one group before 16.11.). test1b moved here from other flows on 21.11.: in the full UI run 44828248004 other flows took 47.2 test minutes, the most of any group, this group 8.7.",
       "device": "pro",
-      "only": "AlbumistFlowUITests/test1_FullFlow",
+      "only": "AlbumistFlowUITests/test1_FullFlow AlbumistFlowUITests/test1b_AtlasLibrarySearch",
       "skip": "",
       "video": true
     },

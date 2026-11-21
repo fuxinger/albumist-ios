@@ -82,6 +82,46 @@ jobs:
         # in the job summary, it does not make the app worse.
         run: python3 .github/scripts/test_summary.py map-check
 
+  swiftlint:
+    # Report only (Fuchs 20.11.: SwiftLint, Periphery and Xcode's analyzer after Build 40): the
+    # pinned SwiftLint (.github/lint-tools.json, toolchain.py swiftlint) lints the app, the core
+    # package and the tests with the settings in .github/swiftlint.yml. Its findings go into the
+    # job summary and do not fail the job yet; the job fails only when SwiftLint did not lint
+    # (swiftlint_report.py). The baseline it writes is uploaded, to be committed in a later step so
+    # that only new findings fail. Nothing waits for this job, and a TestFlight run leaves it out.
+    # No cache (rule since the CodeQL incident): --no-cache.
+    name: SwiftLint report
+    if: ${{ !inputs.release }}
+    runs-on: ubuntu-24.04
+    container: swift:6.2-noble
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Python
+        run: bash .github/scripts/apt_install.sh python3
+      - name: Install the pinned SwiftLint
+        run: python3 .github/scripts/toolchain.py swiftlint
+      - name: Lint (report only)
+        run: |
+          mkdir -p swiftlint
+          set +e
+          swiftlint-static lint --config .github/swiftlint.yml --no-cache --quiet --reporter json \
+            --write-baseline swiftlint/baseline.json App Sources Tests Package.swift > swiftlint/findings.json
+          status=$?
+          set -e
+          python3 .github/scripts/swiftlint_report.py --status "$status" swiftlint/findings.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the report and the baseline
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: swiftlint
+          path: swiftlint/
+          if-no-files-found: ignore
+          retention-days: 14
+
   changes:
     # Decides whether the macOS job has to run: it is skipped when only *.md / docs/ changed
     # since the last commit whose iOS tests passed (pull_request path filters cannot do this,

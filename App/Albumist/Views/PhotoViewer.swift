@@ -393,10 +393,12 @@ private struct ZoomablePhoto: View {
 
     // MARK: Gestures
 
-    /// A long press plays a Live Photo whole, as in Photos; a tap hides or shows the bars, a
-    /// double tap zooms. The single tap waits for the second one; a press is no tap.
-    private var touches: some Gesture {
-        hold.exclusively(before: taps)
+    /// A tap hides or shows the bars, a double tap zooms (the single tap waits for the second
+    /// one). On a Live Photo a long press plays it whole, as in Photos, and is no tap; a photo
+    /// that does not move has no long press, so a slow tap stays a tap.
+    private var touches: AnyGesture<Void> {
+        guard live != nil else { return AnyGesture(taps.map { _ in }) }
+        return AnyGesture(hold.exclusively(before: taps).map { _ in })
     }
 
     private var hold: some Gesture {

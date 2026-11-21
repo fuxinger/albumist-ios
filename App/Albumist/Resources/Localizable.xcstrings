@@ -2731,6 +2731,16 @@
         }
       }
     },
+    "Analyse fertig: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis complete: %@"
+          }
+        }
+      }
+    },
     "Analyse läuft" : {
       "localizations" : {
         "en" : {

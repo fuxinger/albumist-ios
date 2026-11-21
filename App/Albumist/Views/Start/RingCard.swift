@@ -155,6 +155,135 @@ extension SortedRing where Inside == EmptyView {
     }
 }
 
+// MARK: - The first 100 % (DS-08)
+
+/// DS-08 (design wave 3): the one quiet moment when the first full analysis of this installation
+/// reaches 100 % on screen (`FirstAnalysisMoment`). Above "Analyse fertig", where the progress
+/// was: "100 %" in the wide figures and the analysis bar the user watched, whose six parts close
+/// into one bar; a few seconds later it folds away and the card is the usual "Analyse fertig".
+/// Once per installation (`FirstAnalysisMomentStore`).
+///
+/// - No haptic of its own: the success tap of "Analyse fertig" (`AnalysisFinishedView`) comes
+///   with it, as it always did. Nothing flies (only the two moments of wave 2 do), nothing glows.
+/// - Reduce Motion (and the UI runs): the bar shows joined, the moment fades in and out.
+/// - VoiceOver: said once ("Analyse fertig: 100 %"). The moment is decoration and hidden; "Analyse
+///   fertig" below stays the element to read and to tap.
+struct FirstAnalysisMomentHeader: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var store = FirstAnalysisMomentStore.shared
+    @State private var joined = false
+    @State private var run: Task<Void, Never>?
+    @ScaledMetric(relativeTo: .body) private var barHeight: CGFloat = 8
+
+    /// Nothing moves: Reduce Motion, and the UI runs (their screenshots find it at rest).
+    private var calm: Bool { reduceMotion || UITestSupport.isRunning }
+
+    var body: some View {
+        // Nothing while it does not play: due but not on screen yet (Control Center, a call), no
+        // gap opens above "Analyse fertig".
+        VStack(alignment: .leading, spacing: 0) {
+            if store.moment.playing {
+                moment
+                    .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear(perform: start)
+        // The card came while Albumist was not on screen: it plays once Albumist is back, unless
+        // it left for the background meanwhile (`FirstAnalysisMoment.leftScreen`).
+        .onChange(of: model.isOnScreen) { _, onScreen in if onScreen { start() } }
+        .onDisappear {
+            run?.cancel()
+            run = nil
+            store.ended()
+        }
+    }
+
+    private var moment: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text(Self.percent)
+                .font(.wideNumber(.largeTitle))
+                .foregroundStyle(Theme.accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            // The bar of the analysis that just finished, all six parts full (`AnalysisBar`).
+            JoiningBar(shares: model.analysis.widths.shares, joined: calm || joined ? 1 : 0)
+                .fill(Theme.accent)
+                .frame(height: min(barHeight, 14))
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+        .padding(.top, Theme.Spacing.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Said once (`start`); UI runs find it by its identifier.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(Self.spoken))
+        .accessibilityIdentifier("analysis.firstFinish")
+        .accessibilityHidden(!UITestSupport.isRunning)
+    }
+
+    /// "100 %" as the locale writes it.
+    private static var percent: String { 1.0.formatted(.percent.precision(.fractionLength(0))) }
+
+    private static var spoken: String { String(localized: "Analyse fertig: \(percent)") }
+
+    /// The card with "Analyse fertig" is there: plays once, while due and on screen. It comes in
+    /// with a fade, as "Analyse fertig" gives its check mark and its success tap.
+    private func start() {
+        typealias T = FirstAnalysisMoment.Timing
+        guard run == nil, model.isOnScreen else { return }
+        let claimed = withAnimation(calm ? .easeInOut(duration: T.fade) : .smooth(duration: T.fade)) {
+            store.claim(onScreen: model.isOnScreen)
+        }
+        guard claimed else { return }
+        var spoken = AttributedString(Self.spoken)
+        spoken.accessibilitySpeechAnnouncementPriority = .low
+        AccessibilityNotification.Announcement(spoken).post()
+        run = Task { await play() }
+    }
+
+    /// The bar joins (not when calm), it stays a few seconds and folds away.
+    private func play() async {
+        typealias T = FirstAnalysisMoment.Timing
+        if !calm {
+            try? await Task.sleep(for: .seconds(T.joinDelay))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: T.join)) { joined = true }
+        }
+        let hold = UITestSupport.isRunning ? T.uiTestHold : T.hold
+        try? await Task.sleep(for: .seconds(calm ? hold : hold - T.joinDelay))
+        guard !Task.isCancelled else { return }
+        withAnimation(calm ? .easeInOut(duration: T.fade) : .smooth(duration: T.fold)) { store.ended() }
+        run = nil
+    }
+}
+
+/// The analysis bar at 100 % as its six parts close into one (DS-08,
+/// `FirstAnalysisMoment.segments`). Animatable, so the join is drawn as a path per frame, not as
+/// a view update.
+struct JoiningBar: Shape {
+    var shares: [Double]
+    var joined: Double
+
+    var animatableData: Double {
+        get { joined }
+        set { joined = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let radius = rect.height / 2
+        for part in FirstAnalysisMoment.segments(shares: shares, width: Double(rect.width), joined: joined) {
+            let frame = CGRect(x: rect.minX + CGFloat(part.x), y: rect.minY, width: CGFloat(part.width), height: rect.height)
+            let corner = min(radius, frame.width / 2)
+            let leading = corner * CGFloat(part.leadingRound), trailing = corner * CGFloat(part.trailingRound)
+            path.addRoundedRect(in: frame, cornerRadii: RectangleCornerRadii(topLeading: leading, bottomLeading: leading,
+                                                                             bottomTrailing: trailing, topTrailing: trailing))
+        }
+        return path
+    }
+}
+
 // MARK: - "Bescheid sagen, wenn fertig"
 
 /// What iOS says about Albumist's notifications, and the question on the card (decision 3B,

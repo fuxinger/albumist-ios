@@ -209,8 +209,8 @@ struct PhotoTitleTests {
 
     // MARK: What is not known
 
-    /// Without a capture date: the place alone, or "Ohne Datum"; without anything Albumist
-    /// knows of the photo (not analyzed yet): "Foto". The words are the catalog's.
+    /// Without a capture date: the place alone, or "Ohne Datum"; without anything known of the
+    /// photo (not analyzed yet, and no date from Photos): "Foto". The words are the catalog's.
     @Test func whatIsNotKnownIsLeftOut() {
         let placeOnly = Self.title(nil)
         #expect(placeOnly.title == "München")
@@ -226,6 +226,32 @@ struct PhotoTitleTests {
         #expect(PhotoTitle(facts: nil, now: Self.now, currentZone: Self.berlin, words: .english).title == "Photo")
         let undated = AssetFacts(asset: AssetSnapshot(id: AssetID("b")))
         #expect(PhotoTitle(facts: undated, now: Self.now, currentZone: Self.berlin).title == "Ohne Datum")
+    }
+
+    /// Without facts (Albumist has not analysed the photo yet, as right after an import) the
+    /// date Photos keeps for it counts, on the iPhone's clock: the day as the title and the time
+    /// below, never just "Foto" while a date exists (review D, M7). Facts win where there are some.
+    @Test func withoutFactsPhotosOwnDateCounts() {
+        let instant = Self.date(2024, 10, 12, 14, 32, in: Self.berlin)
+        let fromPhotos = PhotoTitle(facts: nil, photoDate: instant, now: Self.now, currentZone: Self.berlin)
+        #expect(fromPhotos.title == "12. Oktober 2024")
+        #expect(fromPhotos.subtitle == "14:32")
+        #expect(fromPhotos.spoken() == "12. Oktober 2024, 14:32")
+        // On the iPhone's clock, wherever it is.
+        #expect(PhotoTitle(facts: nil, photoDate: instant, now: Self.now, currentZone: Self.newYork).subtitle == "08:32")
+        let today = PhotoTitle(facts: nil, photoDate: Self.date(2026, 11, 21, 9, 5, in: Self.berlin), now: Self.now,
+                               currentZone: Self.berlin, words: .english)
+        #expect(today.title == "Today")
+        #expect(today.subtitle == "9:05\u{202F}AM")
+        // Facts win: their place and their clock.
+        let place = PlaceComponents(isoCountryCode: "DE", country: "Deutschland", locality: "München")
+        let facts = AssetFacts(asset: AssetSnapshot(id: AssetID("a"), creationDate: instant), place: place,
+                               placeSource: .gpsReverseGeocoded, timeZone: Self.berlin)
+        let known = PhotoTitle(facts: facts, photoDate: Self.now, now: Self.now, currentZone: Self.newYork)
+        #expect(known.title == "München")
+        #expect(known.subtitle == "12. Oktober 2024 · 14:32")
+        // Neither facts nor a date: "Foto".
+        #expect(PhotoTitle(facts: nil, photoDate: nil, now: Self.now, currentZone: Self.berlin).title == "Foto")
     }
 
     @Test func theWordsAreTheCatalogs() throws {
@@ -282,6 +308,41 @@ struct PhotoTitleTests {
         #expect(Self.title(Self.date(2023, 8, 14, 16, 5, in: Self.berlin), place: austria).title == named)
     }
 
+    // MARK: A short form for a narrow bar (review D, L1)
+
+    /// On a narrow iPhone the line below the place was cut, and what was cut was the time. The
+    /// short form says the day in numbers (German) or with the month's short name (English), so
+    /// the time always shows; today, yesterday and the weekdays are short already and stay.
+    /// VoiceOver reads the long form.
+    @Test func theShortFormKeepsTheTime() {
+        let older = Self.title(Self.date(2024, 9, 30, 14, 32, in: Self.berlin))
+        #expect(older.shortTitle == "München")
+        #expect(older.shortSubtitle == "30.09.2024 · 14:32")
+        #expect(older.spoken() == "München, 30. September 2024, 14:32")
+        #expect(Self.title(Self.date(2026, 1, 1, 12, 0, in: Self.berlin)).shortSubtitle == "01.01. · 12:00")
+        let day = Self.title(Self.date(2024, 9, 30, 14, 32, in: Self.berlin), place: nil)
+        #expect(day.shortTitle == "30.09.2024")
+        #expect(day.shortSubtitle == "14:32")
+        #expect(Self.title(Self.date(2026, 11, 21, 9, 5, in: Self.berlin)).shortSubtitle == "Heute · 09:05")
+        #expect(Self.title(Self.date(2026, 11, 20, 9, 5, in: Self.berlin), place: nil).shortTitle == "Gestern")
+        #expect(Self.title(Self.date(2026, 11, 19, 12, 0, in: Self.berlin)).shortSubtitle == "Donnerstag · 12:00")
+        let munich = PlaceComponents(isoCountryCode: "DE", country: "Germany", locality: "Munich")
+        let english = Self.title(Self.date(2024, 9, 30, 14, 32, in: Self.berlin), place: munich, words: .english)
+        #expect(english.shortSubtitle == "Sep 30, 2024 · 2:32\u{202F}PM")
+        #expect(Self.title(Self.date(2026, 3, 12, 9, 5, in: Self.berlin), place: nil, words: .english).shortTitle == "Mar 12")
+        // Nothing to shorten without a date.
+        #expect(Self.title(nil).shortTitle == "München")
+        #expect(Self.title(nil).shortSubtitle == nil)
+        #expect(PhotoTitle(facts: nil, now: Self.now, currentZone: Self.berlin).shortTitle == "Foto")
+        // Never longer than the long form, in any month and both languages.
+        for words in [ProposalWords.german, .english] {
+            for month in 1...12 {
+                let shown = Self.title(Self.date(2024, month, 28, 23, 59, in: Self.berlin), words: words)
+                #expect((shown.shortSubtitle ?? "").count <= (shown.subtitle ?? "").count, "\(month)")
+            }
+        }
+    }
+
     // MARK: English and the clock
 
     /// English as the app's English says dates ("October 12, 2024", `ProposalWords`), with the
@@ -311,6 +372,21 @@ struct PhotoTitleTests {
         #expect(Self.title(Self.date(2024, 10, 12, 23, 59, in: Self.berlin), place: nil, words: .english).subtitle == "11:59\u{202F}PM")
         #expect(Self.title(Self.date(2024, 10, 12, 0, 5, in: Self.berlin), place: nil).subtitle == "00:05")
         #expect(Self.title(Self.date(2024, 10, 12, 14, 32, in: Self.berlin), place: nil, clock: .twelveHour).subtitle == "2:32\u{202F}PM")
+    }
+
+    /// The clock follows the iPhone's hour cycle (Settings › General › Date & Time, else the
+    /// region's own; review D, L2): 0–11 and 1–12 are the 12-hour clock, 0–23 and 1–24 the
+    /// 24-hour clock, and the user's choice wins over the region's.
+    @Test func theClockFollowsTheHourCycle() {
+        #expect(PhotoTitle.Clock(hourCycle: .zeroToEleven) == .twelveHour)
+        #expect(PhotoTitle.Clock(hourCycle: .oneToTwelve) == .twelveHour)
+        #expect(PhotoTitle.Clock(hourCycle: .zeroToTwentyThree) == .twentyFourHour)
+        #expect(PhotoTitle.Clock(hourCycle: .oneToTwentyFour) == .twentyFourHour)
+        #expect(PhotoTitle.Clock(hourCycle: Locale(identifier: "en_US").hourCycle) == .twelveHour)
+        #expect(PhotoTitle.Clock(hourCycle: Locale(identifier: "de_DE").hourCycle) == .twentyFourHour)
+        #expect(PhotoTitle.Clock(hourCycle: Locale(identifier: "en_GB").hourCycle) == .twentyFourHour)
+        #expect(PhotoTitle.Clock(hourCycle: Locale(identifier: "en_US@hours=h23").hourCycle) == .twentyFourHour)
+        #expect(PhotoTitle.Clock(hourCycle: Locale(identifier: "de_DE@hours=h12").hourCycle) == .twelveHour)
     }
 
     /// Photos taken before 2001 (the reference date of the wall clocks) keep their day and time.

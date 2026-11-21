@@ -21,6 +21,13 @@ public struct PhotoTitle: Equatable, Sendable {
     /// clock (German 24 hours, English 12 hours).
     public enum Clock: Equatable, Sendable {
         case twentyFourHour, twelveHour
+
+        /// The clock of an hour cycle (`Locale.current.hourCycle`: the iPhone's choice in
+        /// Settings › General › Date & Time, else its region's; review D, L2): 0–11 and 1–12
+        /// are the 12-hour clock.
+        public init(hourCycle: Locale.HourCycle) {
+            self = hourCycle == .zeroToEleven || hourCycle == .oneToTwelve ? .twelveHour : .twentyFourHour
+        }
     }
 
     /// The bar's first line: the place; else the day; else "Ohne Datum" (no capture date) or
@@ -28,13 +35,22 @@ public struct PhotoTitle: Equatable, Sendable {
     public let title: String
     /// The line below: day and time under a place, the time under a day; nil without a date.
     public let subtitle: String?
+    /// Both in their shortest form, for a bar too narrow for the long one (review D, L1: on a
+    /// 375-point iPhone the line was cut, and what was cut was the time): an older day in
+    /// numbers ("30.09.2024", "01.01.") or with the month's short name ("Sep 30, 2024");
+    /// "Heute", "Gestern", the weekdays and the place stay as they are. The time is never
+    /// shortened. VoiceOver reads the long form (`spoken`).
+    public let shortTitle: String
+    public let shortSubtitle: String?
     /// What VoiceOver reads, in order: place, day, time.
     private let parts: [String]
 
-    private init(title: String, subtitle: String?, parts: [String]) {
+    private init(title: String, subtitle: String?, parts: [String], shortTitle: String? = nil, shortSubtitle: String? = nil) {
         self.title = title
         self.subtitle = subtitle
         self.parts = parts
+        self.shortTitle = shortTitle ?? title
+        self.shortSubtitle = shortSubtitle ?? subtitle
     }
 
     /// - Parameters:
@@ -54,19 +70,28 @@ public struct PhotoTitle: Equatable, Sendable {
         let clockZone = zone ?? currentZone
         let wallClock = LocalTime.wallClock(date, in: clockZone)
         let today = CalendarDay(wallClock: LocalTime.wallClock(now, in: clockZone))
-        let day = Self.day(CalendarDay(wallClock: wallClock), today: today, words: words)
+        let photoDay = CalendarDay(wallClock: wallClock)
+        let day = Self.day(photoDay, today: today, words: words)
+        let shortDay = Self.shortDay(photoDay, today: today, words: words) ?? day
         let time = Self.time(wallClock, clock: clock ?? (words.isGerman ? .twentyFourHour : .twelveHour))
         if let placeName {
-            self.init(title: placeName, subtitle: day + " · " + time, parts: [placeName, day, time])
+            self.init(title: placeName, subtitle: day + " · " + time, parts: [placeName, day, time],
+                      shortSubtitle: shortDay + " · " + time)
         } else {
-            self.init(title: day, subtitle: time, parts: [day, time])
+            self.init(title: day, subtitle: time, parts: [day, time], shortTitle: shortDay)
         }
     }
 
-    /// The title of a photo by what Albumist knows of it; without facts (not analysed yet):
-    /// "Foto", as the photo itself is called.
-    public init(facts: AssetFacts?, now: Date, currentZone: TimeZone, words: ProposalWords = .german, clock: Clock? = nil) {
+    /// The title of a photo by what is known of it. Without facts (Albumist has not analysed it
+    /// yet) the date Photos keeps for it (`photoDate`) counts, on the iPhone's clock (review D,
+    /// M7: such a photo said only "Foto"); with neither: "Foto", as the photo itself is called.
+    public init(facts: AssetFacts?, photoDate: Date? = nil, now: Date, currentZone: TimeZone,
+                words: ProposalWords = .german, clock: Clock? = nil) {
         guard let facts else {
+            if let photoDate {
+                self.init(date: photoDate, zone: nil, place: nil, now: now, currentZone: currentZone, words: words, clock: clock)
+                return
+            }
             let photo = words.t("Foto", "Photo")
             self.init(title: photo, subtitle: nil, parts: [photo])
             return
@@ -103,6 +128,19 @@ public struct PhotoTitle: Equatable, Sendable {
         case 2...6: return words.weekday(day.weekday)
         default: return words.span(from: day, to: day, withYear: day.year != today.year)
         }
+    }
+
+    /// An older day in its short form: "30.09.2024" or "01.01." in this year; "Sep 30, 2024" or
+    /// "Jan 1". Nil for the days of the last week (and later days): their words are short already.
+    private static func shortDay(_ day: CalendarDay, today: CalendarDay, words: ProposalWords) -> String? {
+        guard !(0...6).contains(today.number - day.number), (1...12).contains(day.month) else { return nil }
+        let withYear = day.year != today.year
+        if words.isGerman {
+            func twoDigits(_ n: Int) -> String { n < 10 ? "0\(n)" : "\(n)" }
+            return "\(twoDigits(day.day)).\(twoDigits(day.month))." + (withYear ? "\(day.year)" : "")
+        }
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        return "\(months[day.month - 1]) \(day.day)" + (withYear ? ", \(day.year)" : "")
     }
 
     /// "14:32" / "2:32 PM" (a narrow space before the AM or PM, as iOS writes it).

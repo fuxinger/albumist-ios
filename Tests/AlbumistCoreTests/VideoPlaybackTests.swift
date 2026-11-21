@@ -152,21 +152,40 @@ struct VideoPlaybackTests {
     /// where motion is welcome: not with Reduce Motion, not with "Auto-Play Video Previews" off.
     /// There it waits for "Abspielen" and stops at its end.
     @Test func aVideoStartsByItselfOnlyWhereMotionIsWelcome() {
-        let welcome = VideoStart(reduceMotion: false, autoplayVideos: true)
+        let welcome = VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: false)
         #expect(welcome.byItself)
         #expect(welcome.loops)
-        for (reduceMotion, autoplay) in [(true, true), (false, false), (true, false)] {
-            let calm = VideoStart(reduceMotion: reduceMotion, autoplayVideos: autoplay)
-            #expect(!calm.byItself, "Reduce Motion \(reduceMotion), autoplay \(autoplay)")
-            #expect(!calm.loops, "Reduce Motion \(reduceMotion), autoplay \(autoplay)")
+        for lowPowerMode in [false, true] {
+            for (reduceMotion, autoplay) in [(true, true), (false, false), (true, false)] {
+                let calm = VideoStart(reduceMotion: reduceMotion, autoplayVideos: autoplay, lowPowerMode: lowPowerMode)
+                #expect(!calm.byItself, "Reduce Motion \(reduceMotion), autoplay \(autoplay), Low Power Mode \(lowPowerMode)")
+                #expect(!calm.loops, "Reduce Motion \(reduceMotion), autoplay \(autoplay), Low Power Mode \(lowPowerMode)")
+            }
         }
     }
 
-    /// Low Power Mode keeps a Live Photo's short motion still (it is decoration), not a video the
-    /// user opened to watch.
-    @Test func lowPowerModeDoesNotHoldAVideoBack() {
+    /// Low Power Mode keeps a Live Photo's short motion still (it is decoration). A video the
+    /// user opened to watch still starts by itself, but plays once and stops at its end instead
+    /// of looping for good (review F, F8).
+    @Test func inLowPowerModeAVideoPlaysOnce() {
         #expect(!LiveMotion.playsHint(reduceMotion: false, lowPowerMode: true, autoplayVideos: true))
-        #expect(VideoStart(reduceMotion: false, autoplayVideos: true).byItself)
+        let saving = VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: true)
+        #expect(saving.byItself)
+        #expect(!saving.loops)
+    }
+
+    /// A video keeps the screen on while it plays, as any video the user watches; one that loops
+    /// lets the iPhone lock after its first play, as it may loop on while nobody watches (review
+    /// F, F8: before, an open video kept the iPhone awake for good).
+    @Test func aLoopingVideoLetsTheIPhoneLockAfterItsFirstPlay() {
+        let looping = VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: false)
+        #expect(looping.keepsScreenOn(loopsDone: 0))
+        #expect(!looping.keepsScreenOn(loopsDone: 1))
+        #expect(!looping.keepsScreenOn(loopsDone: 40))
+        for once in [VideoStart(reduceMotion: true, autoplayVideos: true, lowPowerMode: false),
+                     VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: true)] {
+            #expect(once.keepsScreenOn(loopsDone: 0), "\(once)")
+        }
     }
 
     // MARK: Sound

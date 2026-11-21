@@ -7,7 +7,8 @@ import AlbumistCore
 ///
 /// - It starts by itself once the swipe has come to rest and starts over at its end, where
 ///   motion is welcome; with Reduce Motion or "Auto-Play Video Previews" off it waits for
-///   "Abspielen" and stops at its end (`VideoStart`).
+///   "Abspielen" and stops at its end, in Low Power Mode it plays once (`VideoStart`). Looping,
+///   it lets the iPhone lock after its first play.
 /// - Without sound until the user turns it on; the choice holds for the next videos of this
 ///   photo view (`VideoSound`, `LiveAudio.videoSound`).
 /// - Only from the iPhone (`VideoLoader`): a video only in iCloud is said to be there and not
@@ -43,7 +44,7 @@ final class ViewerVideo {
     @ObservationIgnored private var assetLength: VideoDuration?
     @ObservationIgnored private var looper: AVPlayerLooper?
     @ObservationIgnored private var observer: Any?
-    @ObservationIgnored private var start = VideoStart(reduceMotion: true, autoplayVideos: false)
+    @ObservationIgnored private var start = VideoStart(reduceMotion: true, autoplayVideos: false, lowPowerMode: false)
     @ObservationIgnored private var seek = ChaseSeek()
     @ObservationIgnored private var scrubbing = false
     @ObservationIgnored private var playsAfterScrub = false
@@ -205,6 +206,11 @@ final class ViewerVideo {
         if let item = player.value.currentItem {
             let playing = VideoDuration.playing(asset: assetLength, item: item.duration.seconds)
             if playing != length { length = playing }
+        }
+        // A looping video lets the iPhone lock after its first play (review F, F8).
+        let keepsOn = start.keepsScreenOn(loopsDone: looper?.loopCount ?? 0)
+        if player.value.preventsDisplaySleepDuringVideoPlayback != keepsOn {
+            player.value.preventsDisplaySleepDuringVideoPlayback = keepsOn
         }
         if !scrubbing { time = seconds.isFinite ? max(seconds, 0) : 0 }
         let playing = player.value.timeControlStatus != .paused

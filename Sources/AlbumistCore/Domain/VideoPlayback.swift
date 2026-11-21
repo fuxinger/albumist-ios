@@ -115,17 +115,25 @@ enum VideoClock {
 /// into view and starts over at its end until it is paused (Photos' "Loop Videos", on since iOS
 /// 18.2), but only where motion is welcome: not with Reduce Motion, not with Settings ›
 /// Accessibility › Motion › "Auto-Play Video Previews" off. There it shows its still with
-/// "Abspielen" and stops at its end. Low Power Mode does not hold it back: it keeps a Live
-/// Photo's short motion still (`LiveMotion`, decoration), not the video the user opened to watch.
+/// "Abspielen" and stops at its end. Low Power Mode keeps a Live Photo's short motion still
+/// (`LiveMotion`, decoration), but not the video the user opened to watch: it starts, plays
+/// once and stops at its end (review F, F8).
 public struct VideoStart: Equatable, Sendable {
     /// It plays once it is on screen.
     public let byItself: Bool
     /// It starts over at its end.
     public let loops: Bool
 
-    public init(reduceMotion: Bool, autoplayVideos: Bool) {
+    public init(reduceMotion: Bool, autoplayVideos: Bool, lowPowerMode: Bool) {
         byItself = !reduceMotion && autoplayVideos
-        loops = byItself
+        loops = byItself && !lowPowerMode
+    }
+
+    /// Whether the playing video keeps the screen on (review F, F8): while it plays, as any video
+    /// the user watches; one that loops only through its first play (`loopsDone` 0), then the
+    /// iPhone may lock as usual, since it loops on while nobody watches.
+    public func keepsScreenOn(loopsDone: Int) -> Bool {
+        !loops || loopsDone == 0
     }
 }
 

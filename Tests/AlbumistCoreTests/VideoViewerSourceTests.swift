@@ -83,7 +83,8 @@ struct VideoViewerSourceTests {
     @Test func aVideoPlaysAsInPhotos() throws {
         let viewer = try Self.code(Self.viewerPath)
         let play = try #require(AppSource.body(of: "private func playVideo(", in: viewer))
-        #expect(play.contains("VideoStart(reduceMotion: reduceMotion, autoplayVideos: UIAccessibility.isVideoAutoplayEnabled)"))
+        #expect(Self.squeezed(play).contains("VideoStart(reduceMotion:reduceMotion,autoplayVideos:UIAccessibility.isVideoAutoplayEnabled,"
+                                             + "lowPowerMode:ProcessInfo.processInfo.isLowPowerModeEnabled)"), "\(play)")
         #expect(play.contains("await video.open(id,"))
         let look = try #require(AppSource.body(of: "private func lookAtCurrent(", in: viewer))
         #expect(Self.inOrder(["await PhotoBasics.of(id)", "await playVideo(id)", "await checkSharing(id)"], in: look))
@@ -105,6 +106,10 @@ struct VideoViewerSourceTests {
         #expect(make.contains("actionAtItemEnd = .pause"), "a video that does not loop moves on at its end")
         #expect(make.contains("isMuted = !sound.isOn"))
         #expect(make.contains("addPeriodicTimeObserver("))
+        // A looping video lets the iPhone lock after its first play (review F, F8).
+        let tick = try #require(AppSource.body(of: "private func ticked(", in: model))
+        #expect(Self.inOrder(["let keepsOn = start.keepsScreenOn(loopsDone: looper?.loopCount ?? 0)",
+                              "player.value.preventsDisplaySleepDuringVideoPlayback = keepsOn"], in: tick), "\(tick)")
         let leave = try #require(AppSource.body(of: "private func stop(", in: model))
         for step in ["removeTimeObserver(", "pause()", "removeAllItems()", "looper = nil", "player = nil"] {
             #expect(leave.contains(step), "\(step): the player stays alive off screen")

@@ -406,9 +406,11 @@ struct PhotoViewer: View {
     }
 
     /// The video on screen (DS-16): asked for from the iPhone only, played by itself where
-    /// motion is welcome (`VideoStart`); it stops when the user swipes on (`keepOnly`).
+    /// motion is welcome (`VideoStart`), once in Low Power Mode; it stops when the user swipes on
+    /// (`keepOnly`).
     private func playVideo(_ id: AssetID) async {
-        let start = VideoStart(reduceMotion: reduceMotion, autoplayVideos: UIAccessibility.isVideoAutoplayEnabled)
+        let start = VideoStart(reduceMotion: reduceMotion, autoplayVideos: UIAccessibility.isVideoAutoplayEnabled,
+                               lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled)
         await video.open(id, length: videoLength(of: id), start: start)
     }
 

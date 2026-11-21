@@ -16,6 +16,12 @@ import AlbumistCore
 /// shares the photo from the iPhone (`PhotoShare`); a tap hides the bars, the status bar and
 /// the home indicator and the next brings them back, but never while VoiceOver or Switch
 /// Control runs (`ViewerChrome`); Live Photos move (`LivePhotoPlayer`).
+///
+/// Design wave 3: videos play as in Photos (DS-16, `ViewerVideo`): by themselves and looping
+/// where motion is welcome, without sound until the user turns it on, only from the iPhone, with
+/// their controls under them on a solid ground, going with the bars. While a photo comes, the
+/// thumbnail the grid showed stands in for it, never a spinner, and a picture that would only be
+/// big and blurry never stands: the calm note says why (DS-18, `ViewerPicture`).
 struct PhotoViewer: View {
     struct Start: Identifiable {
         var id: AssetID
@@ -67,6 +73,12 @@ struct PhotoViewer: View {
     /// shows: a photo not analysed yet is told on it (review D2, N10).
     @State private var homeZone: TimeZone?
     @State private var homeZoneAsked = false
+    /// The video on screen: one player at most (DS-16).
+    @State private var video = ViewerVideo()
+    /// The pages whose picture did not come sharp: they say so themselves, the video's note under
+    /// them would say it twice.
+    @State private var unavailablePictures: Set<AssetID> = []
+    @Environment(\.scenePhase) private var scenePhase
 
     init(ids: [AssetID], current: AssetID, showsInfo: Bool = false) {
         self.ids = ids
@@ -101,9 +113,11 @@ struct PhotoViewer: View {
         LiveAudio.prepare()
     }
 
+    /// The video stops, and the app's sound mixes with the user's again (DS-16).
     private func closed() {
         leaveShare()
         PhotoShare.removeLeftovers()
+        video.close()
     }
 
     // MARK: Pages
@@ -120,8 +134,11 @@ struct PhotoViewer: View {
             .persistentSystemOverlays(chrome.isShown ? .automatic : .hidden)
             .overlay(alignment: .bottom) { notes }
             .animation(.snappy, value: model.lastIgnored)
+            .animation(.easeInOut(duration: 0.2), value: video.availability)
             .onChange(of: assistive, initial: true) { _, running in chrome.assistiveTechnology(running: running) }
             .task(id: current) { await lookAtCurrent() }
+            // A video pauses when the app goes to the background, as in Photos.
+            .onChange(of: scenePhase) { _, phase in if phase == .background { video.pause() } }
     }
 
     private var pages: some View {
@@ -137,6 +154,8 @@ struct PhotoViewer: View {
             window = window.following(ids.firstIndex(of: current) ?? 0, count: ids.count)
             // A share prepared for the photo left behind is not this one's (review D2, N7).
             leaveShare()
+            // A video left behind stops at once, as in Photos (DS-16).
+            video.keepOnly(current)
         }
         // The photos lie on the whole screen, under a bar of fixed height (`top`).
         .ignoresSafeArea()
@@ -163,9 +182,11 @@ struct PhotoViewer: View {
     private func page(at index: Int) -> some View {
         let id = ids[index]
         let photo = ZoomablePhoto(id: id, label: label(of: id), position: position(of: index), isCurrent: id == current,
+                                  isVideo: isVideo(id), player: video.surface(for: id),
                                   top: top, pull: $pull, onTap: { toggleChrome() }, onClose: { dismiss() },
                                   onLive: { _ = livePhotos.insert($0) }, onZoom: { zoomChrome() },
-                                  onPressing: { livePress(id, $0) })
+                                  onPressing: { livePress(id, $0) }, onPicture: { pictureCame($0, sharp: $1) },
+                                  onPlayPause: { if video.id == id { video.togglePlay() } })
         return photo.ignoresSafeArea().tag(id)
     }
 
@@ -190,9 +211,12 @@ struct PhotoViewer: View {
         model.photoTitle(for: id, photo: basics[id], homeZone: homeZone, clock: clock)
     }
 
-    /// What VoiceOver says for a photo: where and when it was taken, as its title says it.
+    /// What VoiceOver says for a photo: where and when it was taken, as its title says it; for a
+    /// video then what it is and how long ("Video, 15 Sekunden", DS-16).
     private func label(of id: AssetID) -> String {
-        title(of: id).spoken(live: livePhotos.contains(id))
+        let spoken = title(of: id).spoken(live: livePhotos.contains(id))
+        guard let length = videoLength(of: id) else { return spoken }
+        return spoken + ", " + length.spoken(model.proposalWords)
     }
 
     /// "3 von 176": where the photo is among those swiped through (before, the bar's title).
@@ -228,7 +252,7 @@ struct PhotoViewer: View {
     }
 
     /// Shares the photo from the iPhone (`PhotoShare`); off, with the reason, where only a
-    /// preview of it is here. Only for still images: videos come with wave 3 (DS-16).
+    /// preview of it is here. Only for still images (DS-10); a video plays (DS-16).
     @ViewBuilder
     private var shareButton: some View {
         if isImage {
@@ -260,7 +284,8 @@ struct PhotoViewer: View {
         }
     }
 
-    /// Under the photo, on a solid ground: why it cannot be shared, which goes with the bars, and
+    /// Under the photo, on a solid ground: why it cannot be shared, which goes with the bars, a
+    /// video's controls or why it does not play, which go with the bars too (DS-16), and
     /// "Widerrufen" after ignoring the photo from its details (design review D4), which stays for
     /// its time even when a tap hides the bars (review D, L7).
     private var notes: some View {
@@ -269,7 +294,22 @@ struct PhotoViewer: View {
                 ShareInICloudNote()
                     .transition(.opacity)
             }
+            if chrome.isShown && video.id == current {
+                videoPanel
+                    .transition(.opacity)
+            }
             IgnoreUndoBar()
+        }
+    }
+
+    /// A video that plays has its controls; one that does not says why, unless its page says it
+    /// already (no sharp still of it on the iPhone either).
+    @ViewBuilder
+    private var videoPanel: some View {
+        if video.availability.plays {
+            VideoControls(video: video, words: model.proposalWords)
+        } else if let note = video.availability.note, !unavailablePictures.contains(current) {
+            VideoNoteView(note: note)
         }
     }
 
@@ -309,6 +349,29 @@ struct PhotoViewer: View {
         return model.factsByID[current].map { $0.asset.kind == .image } ?? true
     }
 
+    /// A page said whether its sharp picture came (DS-18): under one that says it is not
+    /// available now, a video's note would say it twice; one that came later has it again.
+    private func pictureCame(_ id: AssetID, sharp: Bool) {
+        if sharp {
+            if unavailablePictures.contains(id) { unavailablePictures.remove(id) }
+        } else {
+            unavailablePictures.insert(id)
+        }
+    }
+
+    /// A video, as Photos says once it is known, before that as Albumist's facts say (DS-16).
+    private func isVideo(_ id: AssetID) -> Bool {
+        if let known = basics[id] { return known.isVideo }
+        return model.factsByID[id]?.asset.kind == .video
+    }
+
+    /// How long a video is, as Photos or else Albumist's facts say; nil for a photo.
+    private func videoLength(of id: AssetID) -> VideoDuration? {
+        if let known = basics[id] { return known.length }
+        guard let facts = model.factsByID[id], facts.asset.kind == .video else { return nil }
+        return VideoDuration(seconds: facts.asset.duration)
+    }
+
     /// A tap on the photo: the bars, the status bar and the home indicator go or come back, a
     /// plain fade with Reduce Motion; with VoiceOver or Switch Control they stay.
     private func toggleChrome() {
@@ -338,7 +401,15 @@ struct PhotoViewer: View {
         if basics[id] == nil, let found = await PhotoBasics.of(id), !Task.isCancelled {
             basics[id] = found
         }
+        if isVideo(id) { await playVideo(id) }
         await checkSharing(id)
+    }
+
+    /// The video on screen (DS-16): asked for from the iPhone only, played by itself where
+    /// motion is welcome (`VideoStart`); it stops when the user swipes on (`keepOnly`).
+    private func playVideo(_ id: AssetID) async {
+        let start = VideoStart(reduceMotion: reduceMotion, autoplayVideos: UIAccessibility.isVideoAutoplayEnabled)
+        await video.open(id, length: videoLength(of: id), start: start)
     }
 
     /// Whether the photo shown can be shared: asked once it has been on screen a moment (not for
@@ -387,7 +458,13 @@ struct PhotoViewer: View {
 
 /// One photo that fits the screen; pinch or double-tap to zoom, drag to look around, pull
 /// down to close, tap to hide or show the bars, press and hold to play a Live Photo
-/// (`LivePress`).
+/// (`LivePress`). A video plays over its still (`VideoSurface`), zoomed and pulled with it.
+///
+/// While the photo comes, the thumbnail the grid showed stands in for it, from memory, as in
+/// Photos; without one the page is black. No spinner (DS-18). The large picture shows only when
+/// it is sharp at the screen's size (`ViewerPicture`); a photo of which only Photos' small
+/// preview is on the iPhone (the photo itself in iCloud) gets the calm note instead of a big
+/// blurry picture (design rule 6).
 private struct ZoomablePhoto: View {
     var id: AssetID
     /// What VoiceOver says: place, day and time ("München, 12. Oktober 2024, 14:32").
@@ -396,6 +473,11 @@ private struct ZoomablePhoto: View {
     var position: Text
     /// The photo on screen (the pages beside it are built too): only it loads its Live Photo.
     var isCurrent: Bool
+    /// A video: its words while it loads and when it is not available; VoiceOver's magic tap
+    /// plays and pauses it.
+    var isVideo: Bool
+    /// The video's player while this video is on screen (`ViewerVideo`).
+    var player: ViewerVideo.Player?
     /// The top of the photo's area (under the bar).
     var top: CGFloat
     @Binding var pull: CGFloat
@@ -407,8 +489,14 @@ private struct ZoomablePhoto: View {
     var onZoom: () -> Void
     /// A long press on its Live Photo began (true) or ended (false): the pager holds still.
     var onPressing: (Bool) -> Void
+    /// A sharp picture came (true), or none will and the page says so (false): the photo view
+    /// then says nothing more of it.
+    var onPicture: (AssetID, Bool) -> Void
+    /// VoiceOver's two-finger double tap on a video's page: it plays or pauses.
+    var onPlayPause: () -> Void
     @State private var image: UIImage?
-    /// Nothing came from Photos (only in iCloud, or gone): said instead of an endless spinner.
+    /// No sharp picture came from Photos (only in iCloud, or gone): said instead of an endless
+    /// wait or a big blurry picture.
     @State private var unavailable = false
     @State private var scale: CGFloat = 1
     @State private var lastScale: CGFloat = 1
@@ -476,17 +564,39 @@ private struct ZoomablePhoto: View {
             photo(image, in: size)
         } else if unavailable {
             ContentUnavailableView {
-                Label("Dieses Foto ist gerade nicht verfügbar.", systemImage: "icloud.slash")
+                if isVideo {
+                    Label("Dieses Video ist gerade nicht verfügbar.", systemImage: "icloud.slash")
+                } else {
+                    Label("Dieses Foto ist gerade nicht verfügbar.", systemImage: "icloud.slash")
+                }
             } description: {
                 Text("Vielleicht liegt es nur in iCloud. In der Fotos-App lädt iOS es herunter.")
             }
             .frame(width: size.width, height: size.height)
             .accessibilityIdentifier("viewer.unavailable")
         } else {
-            ProgressView().tint(.white)
-                .accessibilityLabel(Text("Foto wird geladen"))
-                .frame(width: size.width, height: size.height)
+            waiting(in: size)
         }
+    }
+
+    /// While the picture comes: the thumbnail the grid showed, from memory, fitted as the picture
+    /// will be, as Photos does; else the black page. No spinner (DS-18); VoiceOver hears that it
+    /// loads. A moment at most: the sharp picture replaces it, or the note when none comes.
+    private func waiting(in size: CGSize) -> some View {
+        Color.clear
+            .overlay {
+                if let preview = ThumbnailCache.shared.thumbnailInMemory(for: id) {
+                    // Pulled down to close or pinched, it follows the finger as the photo will.
+                    Image(uiImage: preview)
+                        .resizable()
+                        .scaledToFit()
+                        .scaleEffect(scale * (1 - min(pull / 2000, 0.15)))
+                        .offset(x: offset.width, y: offset.height + pull)
+                }
+            }
+            .frame(width: size.width, height: size.height)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(isVideo ? Text("Video wird geladen") : Text("Foto wird geladen"))
     }
 
     /// The still, and over it the Live Photo's motion while it plays; zoomed and moved together.
@@ -498,6 +608,11 @@ private struct ZoomablePhoto: View {
                 .scaledToFit()
             if let live {
                 LivePhotoPlayer(livePhoto: live.value, command: command)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            if let player {
+                VideoSurface(player: player)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -513,6 +628,7 @@ private struct ZoomablePhoto: View {
         // which clashed with VoiceOver's double tap (design review W11).
         .accessibilityZoomAction { action in zoom(action) }
         .accessibilityActions { liveActions }
+        .modifier(PlayPauseOnMagicTap(isVideo: isVideo, action: onPlayPause))
     }
 
     /// A Live Photo plays from VoiceOver's actions too (swipe up or down), as the long press.
@@ -634,21 +750,41 @@ private struct ZoomablePhoto: View {
 
     // MARK: Loading
 
+    /// The large picture, at twice the screen's pixels for the zoom; shown when it is sharp at
+    /// the screen's size, or the photo's whole self (a small photo); otherwise the note (DS-18).
     private func load(in size: CGSize) async {
         unavailable = false
+        let basics = await PhotoBasics.of(id)
         let pixels = CGSize(width: size.width * displayScale * 2, height: size.height * displayScale * 2)
         let loaded = await ThumbnailCache.shared.largeImage(for: id, pixels: pixels)
         // After a swipe to the next photo this task is cancelled; its late image must
         // not replace the new photo's.
         guard !Task.isCancelled else { return }
-        image = loaded
-        if loaded == nil { unavailable = true }
+        let screen = PixelSize(width: Double(size.width * displayScale), height: Double(size.height * displayScale))
+        switch ViewerPicture.choose(preview: false, delivered: loaded.map(Self.pixelSize(of:)), answered: true,
+                                    original: basics?.pixels, screen: screen) {
+        case .sharp:
+            image = loaded
+            onPicture(id, true)
+        case .unavailable: becameUnavailable()
+        case .waiting: break
+        }
+    }
+
+    private static func pixelSize(of image: UIImage) -> PixelSize {
+        PixelSize(width: Double(image.size.width * image.scale), height: Double(image.size.height * image.scale))
     }
 
     /// Photos may never answer for a photo that is only in iCloud.
     private func giveUp() async {
         try? await Task.sleep(for: .seconds(15))
-        if image == nil && !Task.isCancelled { unavailable = true }
+        if image == nil && !Task.isCancelled { becameUnavailable() }
+    }
+
+    /// No sharp picture comes: the page says so, and the photo view knows.
+    private func becameUnavailable() {
+        unavailable = true
+        onPicture(id, false)
     }
 
     /// The Live Photo of the photo on screen, once its still shows; the pages beside it let
@@ -677,5 +813,22 @@ private struct ZoomablePhoto: View {
     private func play(_ kind: LiveCommand.Kind) {
         guard live != nil else { return }
         command.next(kind)
+    }
+}
+
+/// VoiceOver's two-finger double tap plays and pauses a video (DS-16), on its page as on its
+/// controls (`VideoControls`). On a photo it stays the system's, which plays or pauses the
+/// user's music: the page does not take it.
+private struct PlayPauseOnMagicTap: ViewModifier {
+    var isVideo: Bool
+    var action: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isVideo {
+            content.accessibilityAction(.magicTap, action)
+        } else {
+            content
+        }
     }
 }

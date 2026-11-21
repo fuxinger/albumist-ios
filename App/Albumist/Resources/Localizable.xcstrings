@@ -12311,6 +12311,16 @@
         }
       }
     },
+    "Dieses Video ist gerade nicht verfügbar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Video Isn’t Available Right Now"
+          }
+        }
+      }
+    },
     "Vielleicht liegt es nur in iCloud. In der Fotos-App lädt iOS es herunter." : {
       "localizations" : {
         "en" : {
@@ -13747,6 +13757,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Loading photo"
+          }
+        }
+      }
+    },
+    "Video wird geladen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading video"
           }
         }
       }
@@ -15397,6 +15417,76 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Play Live Photo"
+          }
+        }
+      }
+    },
+    "Abspielen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play"
+          }
+        }
+      }
+    },
+    "Anhalten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pause"
+          }
+        }
+      }
+    },
+    "Ton an" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unmute"
+          }
+        }
+      }
+    },
+    "Ton aus" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mute"
+          }
+        }
+      }
+    },
+    "Wiedergabeposition" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playback position"
+          }
+        }
+      }
+    },
+    "Das Video liegt nur in iCloud. Abspielen kannst du es in der Fotos-App." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The video is only in iCloud. You can play it in the Photos app."
+          }
+        }
+      }
+    },
+    "Dieses Video lässt sich gerade nicht abspielen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This video can’t be played right now."
           }
         }
       }

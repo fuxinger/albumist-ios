@@ -116,7 +116,7 @@ struct LivePhotoPlayer: UIViewRepresentable {
 /// The app's sound mixes with what the user listens to and follows the silent switch
 /// (`.ambient`), so a Live Photo never stops the user's music or podcast (review D, H2): with
 /// iOS's default session, other apps' audio stops as soon as a Live Photo plays, even muted.
-/// Albumist plays no other sound.
+/// The only other sound is a video's, once the user turns it on (`videoSound`, design wave 3).
 ///
 /// Set when the photo view opens, off the main thread (review D2, N9: it is a synchronous call
 /// to the audio server, and it ran where the first Live Photo starts to move, right after a
@@ -131,7 +131,11 @@ enum LiveAudio {
     static func prepare() {
         guard !isReady, !setting else { return }
         setting = true
-        Task.detached(priority: .utility) {
+        // In turn with a video's sound (`videoSound`): "Ton an" right after the photo view opened
+        // is never undone by this.
+        let previous = soundChange
+        soundChange = Task.detached(priority: .utility) {
+            await previous?.value
             let done = (try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [])) != nil
             await LiveAudio.finished(done)
         }
@@ -140,6 +144,45 @@ enum LiveAudio {
     private static func finished(_ done: Bool) {
         setting = false
         isReady = done
+    }
+}
+
+@MainActor
+extension LiveAudio {
+    /// The last change of the app's sound (`prepare`, `videoSound`): the next one waits for it,
+    /// so the changes reach the audio server in the order they were asked for.
+    private static var soundChange: Task<Void, Never>?
+
+    /// A video's sound in the photo view (design wave 3, DS-16, `VideoSound`). On: as in Photos
+    /// the video's sound stops the user's music and plays with the silent switch on
+    /// (`.playback`). Off, and when the photo view closes: the app's sound mixes and follows the
+    /// switch again (`.ambient`), and the user's music is told it may go on
+    /// (`.notifyOthersOnDeactivation`). Off the main thread, as `prepare` (synchronous calls to
+    /// the audio server), one change after the other. A Live Photo's short motion waits
+    /// meanwhile and while the sound is on (`isReady`); it may move again once `.ambient` is set,
+    /// and if that failed, `prepare` sets it when the photo view opens next.
+    static func videoSound(_ on: Bool) {
+        isReady = false
+        let previous = soundChange
+        soundChange = Task.detached(priority: .userInitiated) {
+            await previous?.value
+            let session = AVAudioSession.sharedInstance()
+            let done: Bool
+            if on {
+                done = (try? session.setCategory(.playback, mode: .moviePlayback, options: [])) != nil
+                try? session.setActive(true)
+            } else {
+                done = (try? session.setCategory(.ambient, mode: .default, options: [])) != nil
+                // Fails while a player still runs (it went a moment ago): the user's music then
+                // waits for their own tap, nothing else changes.
+                try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            }
+            await LiveAudio.videoSoundSet(on: on, done: done)
+        }
+    }
+
+    private static func videoSoundSet(on: Bool, done: Bool) {
+        isReady = !on && done
     }
 }
 

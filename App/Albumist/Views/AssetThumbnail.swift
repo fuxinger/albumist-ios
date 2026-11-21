@@ -16,6 +16,17 @@ final class ThumbnailCache {
     /// hundreds of the grids' thumbnails. Only sharp covers are kept (`keepCover`).
     private let covers = NSCache<NSString, CachedCover>()
     private let assets = NSCache<NSString, PHAsset>()
+    /// The length of each video the lookup found, in seconds (design wave 3, DS-16), read from the
+    /// asset the lookup fetches anyway: a video's thumbnail says how long it is without a fetch
+    /// of its own (100,000 photos in a grid). Only videos; goes on a memory warning and is read
+    /// again with the next lookup.
+    private var videoLengths: [String: Double] = [:]
+    /// The side each photo's thumbnail was last kept at (DS-18): the photo view shows that
+    /// thumbnail from memory while its large picture comes (`thumbnailInMemory`).
+    private var keptSides: [String: CGFloat] = [:]
+    /// More entries than any grid shows between two memory warnings: past it the records start
+    /// again (they are only a shortcut to what is in memory).
+    private static let recordLimit = 20_000
 
     static let thumbnailCostLimit = 80 * 1024 * 1024
     static let coverCostLimit = 24 * 1024 * 1024
@@ -32,6 +43,8 @@ final class ThumbnailCache {
             $0.cache.removeAllObjects()
             $0.covers.removeAllObjects()
             $0.assets.removeAllObjects()
+            $0.videoLengths.removeAll()
+            $0.keptSides.removeAll()
             $0.manager.value.stopCachingImagesForAllAssets()
         }
     }
@@ -42,7 +55,7 @@ final class ThumbnailCache {
         guard let asset = await photoAsset(for: id) else { return nil }
         let scale = UITraitCollection.current.displayScale
         let size = CGSize(width: side * scale, height: side * scale)
-        return await load(asset, pixels: size, key: key)
+        return await load(asset, pixels: size, id: id, side: side)
     }
 
     /// A cover (`CoverPhoto`): the photo at `pixels` (filled, cropped later), only from what is
@@ -96,7 +109,21 @@ final class ThumbnailCache {
 
     /// Keeps a thumbnail as `image(for:side:)` does (for the tests).
     func keepThumbnail(_ image: UIImage, for id: AssetID, side: CGFloat) {
-        keep(image, key: Self.thumbnailKey(id, side))
+        keep(image, id: id, side: side)
+    }
+
+    /// The thumbnail a grid last showed of `id`, at the side it was kept at, from memory only:
+    /// what the photo view shows while the large picture comes (design wave 3, DS-18), as Photos
+    /// does. Nil when it is not in memory (the photo view's page stays black meanwhile).
+    func thumbnailInMemory(for id: AssetID) -> UIImage? {
+        guard let side = keptSides[id.rawValue] else { return nil }
+        return cachedThumbnail(for: id, side: side)
+    }
+
+    /// How long the video `id` is, as the lookup found it, from memory only (DS-16); nil for a
+    /// photo or while it was not looked up.
+    func videoLength(for id: AssetID) -> VideoDuration? {
+        videoLengths[id.rawValue].flatMap { VideoDuration(seconds: $0) }
     }
 
     private static func thumbnailKey(_ id: AssetID, _ side: CGFloat) -> NSString {
@@ -117,16 +144,18 @@ final class ThumbnailCache {
         }
     }
 
-    private func load(_ asset: ThumbnailRequest.Asset, pixels: CGSize, key: NSString) async -> UIImage? {
+    private func load(_ asset: ThumbnailRequest.Asset, pixels: CGSize, id: AssetID, side: CGFloat) async -> UIImage? {
         let image = await ThumbnailRequest.load(asset, size: pixels, manager: manager)
         // A cancelled request is not kept: what came back may not be the prepared thumbnail.
-        if let image, !Task.isCancelled { keep(image, key: key) }
+        if let image, !Task.isCancelled { keep(image, id: id, side: side) }
         return image
     }
 
-    private func keep(_ image: UIImage, key: NSString) {
+    private func keep(_ image: UIImage, id: AssetID, side: CGFloat) {
         let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
-        cache.setObject(image, forKey: key, cost: cost)
+        cache.setObject(image, forKey: Self.thumbnailKey(id, side), cost: cost)
+        if keptSides.count >= Self.recordLimit { keptSides.removeAll() }
+        keptSides[id.rawValue] = side
     }
 
     /// A large version for the full-screen viewer: not kept in the cache (a few of them would
@@ -180,7 +209,11 @@ final class ThumbnailCache {
         let key = id.rawValue
         // The empty id is the placeholder of cards that have no photo yet.
         guard !key.isEmpty else { return .unknown }
-        if let known = assets.object(forKey: key as NSString) { return .found(ThumbnailRequest.Asset(known)) }
+        if let known = assets.object(forKey: key as NSString) {
+            // Its length again where the records started over (`recordLimit`).
+            if known.mediaType == .video, videoLengths[key] == nil { videoLengths[key] = known.duration }
+            return .found(ThumbnailRequest.Asset(known))
+        }
         if let since = missing[key], ContinuousClock.now - since < Self.missingKept { return .unknown }
         nextToken &+= 1
         let token = nextToken
@@ -250,6 +283,11 @@ final class ThumbnailCache {
                 if let asset {
                     assets.setObject(asset.value, forKey: id as NSString)
                     missing[id] = nil
+                    // A video's length comes with its asset (DS-16): no fetch of its own.
+                    if asset.value.mediaType == .video {
+                        if videoLengths.count >= Self.recordLimit { videoLengths.removeAll() }
+                        videoLengths[id] = asset.value.duration
+                    }
                 } else {
                     missing[id] = now
                 }
@@ -448,6 +486,20 @@ enum ThumbnailRequest {
     }
 }
 
+/// A photo's square thumbnail in a grid, straight from Photos (`ThumbnailCache`).
+///
+/// Design wave 3 (DS-18, "ruhige Platzhalter beim Laden statt grauer Flächen"): while the photo
+/// comes the tile shows a soft tinted ground (`ThumbnailGround`), no grey slab; a photo that
+/// took a moment fades in, one from memory or that came at once is simply there, so a rebuilt
+/// or scrolled-back cell never flickers (`ThumbnailAppearance`). A cell drawn at another size
+/// (a grid zoomed to other columns) asks for its photo at that size and shows the one it has
+/// meanwhile.
+///
+/// DS-16: a video says how long it is, "0:15" on a small solid ground in its bottom-leading
+/// corner where it fits (`VideoLengthBadge`), and VoiceOver hears "Video, 15 Sekunden" with the
+/// cell around it (its label stays the cell's own, the date). The length comes from the asset
+/// the thumbnails' lookup fetches anyway (`ThumbnailCache.videoLength`): no fetch per cell.
+/// Covers and the mosaic of a card leave it out (`thumbnailShowsVideoLength`).
 struct AssetThumbnail: View {
     var id: AssetID
     var side: CGFloat
@@ -457,10 +509,23 @@ struct AssetThumbnail: View {
     /// The photo `image` shows: when the same view gets another `id` (a trip's cover), the old
     /// photo is not shown while the new one loads.
     @State private var loadedID: AssetID?
+    /// How long the photo `loadedID` is when it is a video.
+    @State private var video: VideoDuration?
+    @Environment(\.thumbnailShowsVideoLength) private var showsVideoLength
+
+    /// What the app's words are in ("Video, 15 Sekunden"), as the photo view's title has them.
+    private static let words = ProposalWords(localization: Bundle.main.preferredLocalizations.first,
+                                             region: Locale.current.region?.identifier)
+
+    /// What the task asks for: the photo at the side it is drawn at.
+    private struct Slot: Equatable {
+        var id: AssetID
+        var side: CGFloat
+    }
 
     /// Starts with the thumbnail the cache holds in memory, if it has one: a thumbnail made anew
     /// (a grid cell rebuilt when its photo's long press is switched on or off as "Auswählen"
-    /// toggles, `photoMenu`) shows its photo from its first frame, not its grey ground until the
+    /// toggles, `photoMenu`) shows its photo from its first frame, not its ground until the
     /// task below has read the cache again (review C2 of design wave 2, N1). Only from memory:
     /// nothing is asked of Photos here, the task asks for what is not in memory, as before.
     init(id: AssetID, side: CGFloat = 80, anchor: Alignment = .center) {
@@ -470,31 +535,141 @@ struct AssetThumbnail: View {
         let kept = ThumbnailCache.shared.cachedThumbnail(for: id, side: side)
         _image = State(initialValue: kept)
         _loadedID = State(initialValue: kept == nil ? nil : id)
+        _video = State(initialValue: kept == nil ? nil : ThumbnailCache.shared.videoLength(for: id))
     }
 
     var body: some View {
-        Rectangle()
-            .fill(Color(uiColor: .tertiarySystemFill))
+        ThumbnailGround()
             .overlay(alignment: anchor) {
                 if let image, loadedID == id {
                     Image(uiImage: image).resizable().scaledToFill()
+                        .transition(.opacity)
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if showsVideoLength, loadedID == id, let video {
+                    BadgeCorner { VideoLengthBadge(length: video) }
+                        .transition(.opacity)
                 }
             }
             .clipped()
-            .task(id: id) {
+            .task(id: Slot(id: id, side: side)) {
+                let asked = ContinuousClock.now
+                let seeded = image != nil && loadedID == id
                 let loaded = await ThumbnailCache.shared.image(for: id, side: side)
                 // A cell that moved on to another photo keeps the new one's image.
                 guard !Task.isCancelled else { return }
-                image = loaded
-                loadedID = id
+                show(loaded, seeded: seeded, since: asked)
+            }
+            // Only a video says something, with the cell around it: its length as a value.
+            .accessibilityElement(children: .ignore)
+            .accessibilityValue(spokenLength.map { Text(verbatim: $0) } ?? Text(verbatim: ""))
+            .accessibilityHidden(spokenLength == nil)
+    }
+
+    /// The photo, and how long it is when it is a video; it fades in when it took a moment.
+    private func show(_ loaded: UIImage?, seeded: Bool, since asked: ContinuousClock.Instant) {
+        let fade = ThumbnailAppearance.fade(seeded: seeded, waited: (ContinuousClock.now - asked) / .seconds(1))
+        withAnimation(fade.map { Animation.easeOut(duration: $0) }) {
+            image = loaded
+            loadedID = id
+            video = ThumbnailCache.shared.videoLength(for: id)
+        }
+    }
+
+    /// "Video, 15 Sekunden" for the cell around it; nil for a photo, while it loads, and where
+    /// the length is left out.
+    private var spokenLength: String? {
+        guard showsVideoLength, loadedID == id, let video else { return nil }
+        return video.spoken(Self.words)
+    }
+}
+
+/// The ground of a thumbnail while its photo comes (design wave 3, DS-18): the card with a soft
+/// wash of the accent, top-leading to bottom-trailing, the family of the covers' placeholder
+/// (`CoverPhoto`), never the flat grey slab of before; a little stronger in dark mode and with
+/// Increase Contrast (`ThumbnailGroundTint`). It does not move.
+struct ThumbnailGround: View {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        let tint = ThumbnailGroundTint(dark: scheme == .dark, increasedContrast: contrast == .increased)
+        Rectangle()
+            .fill(Theme.card)
+            .overlay {
+                LinearGradient(colors: [Theme.accent.opacity(tint.top), Theme.accent.opacity(tint.bottom)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
             }
             .accessibilityHidden(true)
     }
 }
 
+/// A video's length on its thumbnail (DS-16): "0:15" on a small solid light ground, in dark mode
+/// too, so it reads the same on any photo (design rule 1: no text right on a photo), with a
+/// hairline edge that keeps its shape on a white sky, a firmer one with Increase Contrast (the
+/// look of `CardBadgeLabel`). Like the mosaic's "+N" it stops growing at the first accessibility
+/// size and keeps to one line; where it would cover too much of the photo it gives way
+/// (`BadgeCorner`). VoiceOver hears the length with the cell (`AssetThumbnail`), not here.
+struct VideoLengthBadge: View {
+    var length: VideoDuration
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        Text(verbatim: length.text)
+            .font(.caption2.weight(.semibold))
+            .monospacedDigit()
+            .lineLimit(1)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.white, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(Color.black.opacity(contrast == .increased ? 0.6 : 0.08), lineWidth: contrast == .increased ? 1 : 0.5)
+            }
+            .environment(\.colorScheme, .light)
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Places its badge in the bottom-leading corner of the tile, a little in, where it leaves most
+/// of the photo free (`VideoBadge.fits`); otherwise out of the tile, which clips it.
+private struct BadgeCorner: Layout {
+    private static let inset: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let fits = VideoBadge.fits(badgeWidth: Double(size.width + Self.inset), tileWidth: Double(bounds.width))
+                && size.height + Self.inset * 2 <= bounds.height
+            let corner = CGPoint(x: bounds.minX + Self.inset, y: fits ? bounds.maxY - Self.inset : bounds.maxY + size.height + Self.inset)
+            subview.place(at: corner, anchor: .bottomLeading, proposal: ProposedViewSize(size))
+        }
+    }
+}
+
+private struct ThumbnailShowsVideoLengthKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// Whether a thumbnail says a video's length (DS-16): on in the grids, off for covers and
+    /// the mosaic of a card, where a photo stands for an album or a suggestion.
+    var thumbnailShowsVideoLength: Bool {
+        get { self[ThumbnailShowsVideoLengthKey.self] }
+        set { self[ThumbnailShowsVideoLengthKey.self] = newValue }
+    }
+}
+
 /// A cover: the photo, or, when there is none to show because every photo is a sensitive
 /// document (`PreviewRank`), a quiet tile with the symbol Photos uses for hidden photos.
-/// `hidden: false` for a cover that is missing for another reason (an empty album).
+/// `hidden: false` for a cover that is missing for another reason (an empty album): the calm
+/// ground of a thumbnail (DS-18). A cover says no video length: it stands for its album.
 struct CoverThumbnail: View {
     var id: AssetID?
     var side: CGFloat = 80
@@ -503,18 +678,27 @@ struct CoverThumbnail: View {
     var body: some View {
         if let id {
             AssetThumbnail(id: id, side: side)
+                .environment(\.thumbnailShowsVideoLength, false)
+        } else if hidden {
+            HiddenThumbnail()
         } else {
-            Rectangle()
-                .fill(Color(uiColor: .tertiarySystemFill))
-                .overlay {
-                    if hidden {
-                        Image(systemName: "eye.slash")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary) // secondary-text: system (a symbol on a placeholder tile, not text: 3:1 is enough)
-                    }
-                }
-                .accessibilityHidden(true)
+            ThumbnailGround()
         }
+    }
+}
+
+/// The tile of a cover whose every photo is a sensitive document: a neutral ground (design rule
+/// 9) with the symbol Photos uses for hidden photos.
+private struct HiddenThumbnail: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color(uiColor: .tertiarySystemFill))
+            .overlay {
+                Image(systemName: "eye.slash")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary) // secondary-text: system (a symbol on a placeholder tile, not text: 3:1 is enough)
+            }
+            .accessibilityHidden(true)
     }
 }
 
@@ -561,6 +745,8 @@ struct ThumbnailGrid: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            // A preview of a suggestion or album: no video lengths on it (DS-16).
+            .environment(\.thumbnailShowsVideoLength, false)
         }
     }
 

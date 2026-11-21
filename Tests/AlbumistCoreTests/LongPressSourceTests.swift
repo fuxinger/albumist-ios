@@ -488,8 +488,10 @@ struct LongPressSourceTests {
             #expect(!made.contains(request), "the initializer asks Photos: \(request)")
         }
         // What is not in memory the task asks for, as before; the shown image is the photo's own.
+        // The task follows the side too (design wave 3, H11): a cell drawn at another size (a
+        // grid zoomed to other columns) asks for its photo at that size.
         let shown = try Self.body(["struct AssetThumbnail", "var body: some View"], in: Self.thumbnails)
-        #expect(shown.contains(".task(id: id) {") && shown.contains("await ThumbnailCache.shared.image(for: id, side: side)"))
+        #expect(shown.contains(".task(id: Slot(id: id, side: side)) {") && shown.contains("await ThumbnailCache.shared.image(for: id, side: side)"))
         #expect(shown.contains("if let image, loadedID == id {"))
         // Every caller keeps working: `id:`, then `side:` and `anchor:` where it gives them.
         var callers = 0

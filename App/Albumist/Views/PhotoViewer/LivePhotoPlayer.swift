@@ -116,7 +116,7 @@ enum LivePhotoLoader {
     }
 
     private static func request(_ asset: ThumbnailRequest.Asset, pixels: CGSize) async -> Live? {
-        let answer = PhotoKitAnswer<Live?>(fallback: nil)
+        let answer = PhotoKitAnswer.image(fallback: Live?.none)
         answer.limit(.seconds(15))
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in

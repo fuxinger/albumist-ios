@@ -45,6 +45,21 @@ struct PhotoViewerStateTests {
         #expect(chrome.isShown)
     }
 
+    /// Zooming in hides the bars, as in Photos, so no title stands on the zoomed photo (design
+    /// rule 1; review D, L6); a tap brings them back. With VoiceOver or Switch Control they stay.
+    @Test func zoomingInHidesTheBars() {
+        var chrome = ViewerChrome()
+        chrome.zoomed(assistive: false)
+        #expect(!chrome.isShown)
+        chrome.zoomed(assistive: false)
+        #expect(!chrome.isShown)
+        chrome.tap(assistive: false)
+        #expect(chrome.isShown)
+        var assisted = ViewerChrome()
+        assisted.zoomed(assistive: true)
+        #expect(assisted.isShown)
+    }
+
     // MARK: Live Photos
 
     /// A Live Photo plays its short motion by itself when it comes into view, as in Photos,

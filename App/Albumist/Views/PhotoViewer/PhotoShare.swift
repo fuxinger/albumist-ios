@@ -87,7 +87,7 @@ enum PhotoShare {
     }
 
     private static func load(_ asset: ThumbnailRequest.Asset) async -> Loaded {
-        let answer = PhotoKitAnswer(fallback: Loaded(answered: false))
+        let answer = PhotoKitAnswer.image(fallback: Loaded(answered: false))
         answer.limit(.seconds(20))
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in

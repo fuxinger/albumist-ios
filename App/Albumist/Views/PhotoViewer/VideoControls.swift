@@ -8,7 +8,8 @@ import AlbumistCore
 ///
 /// For everyone: the buttons say what they do (VoiceOver and Voice Control read the words, the
 /// symbols alone show), the slider says where the video is in words and moves by a step that
-/// fits the length (`VideoPosition`); the times stand on a line of their own, so a large text
+/// fits the length (`VideoPosition`), and VoiceOver's two-finger double tap plays and pauses on
+/// each of them as on the video's page; the times stand on a line of their own, so a large text
 /// size never cuts them, and the symbols stop growing at the second accessibility size.
 struct VideoControls: View {
     var video: ViewerVideo
@@ -65,6 +66,7 @@ struct VideoControls: View {
         .buttonStyle(.borderless)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .accessibilityShowsLargeContentViewer()
+        .accessibilityAction(.magicTap) { video.togglePlay() }
         .accessibilityIdentifier("viewer.video.play")
     }
 
@@ -87,6 +89,7 @@ struct VideoControls: View {
             @unknown default: break
             }
         }
+        .accessibilityAction(.magicTap) { video.togglePlay() }
         .accessibilityIdentifier("viewer.video.position")
     }
 
@@ -105,6 +108,7 @@ struct VideoControls: View {
         .buttonStyle(.borderless)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .accessibilityShowsLargeContentViewer()
+        .accessibilityAction(.magicTap) { video.togglePlay() }
         .accessibilityIdentifier("viewer.video.sound")
     }
 }

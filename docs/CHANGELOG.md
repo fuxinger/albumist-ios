@@ -2,6 +2,16 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. Sortier-Show, ruhige Farben und die ersten 100 % (Design-Welle 3, DS-17, DS-11 und DS-08, mit der
+  Zweitprüfung K, noch in keinem Build): In der Sortier-Show fliegen größere Fotos vom Stapel in ihr Album, das als
+  sein echtes Titelbild wartet (grau, bis es gefüllt ist, dann farbig, der Haken auf einem Ring); der Stapel zeigt
+  seine Fotos auch mit „Bewegung reduzieren“, VoiceOver und im Stromsparmodus, auf niedrigen iPhones rückt zuerst
+  der Stapel zusammen, die Show hält nur die Fotos, die sie zeigt, und ein zweiter Tipp auf „Anlegen“ startet
+  nichts. Die Seite eines Vorschlags nimmt die ruhige Farbe ihres Titelbilds als Grund (hell blass, dunkel tief,
+  wie Musik mit dem Albumcover, Texte gut lesbar); eine bekannte Farbe steht sofort da, und sie geht mit dem
+  Titelbild. Wird die erste ganze Analyse fertig, während Albumist offen ist, zeigt der Ring einmal „100 %“; war
+  die erste Analyse zu schnell dafür, kommt der Moment beim nächsten gefeierten Ende. In Einstellungen › Über
+  steht das Glass-Stack-Symbol mit dem Namen der App. Neue Mac-Tests für alle vier.
 - 21.11. Videos nach der Zweitprüfung (Design-Welle 3, Review F, noch in keinem Build): „Ton aus“ hält ein Video
   nicht mehr an; die Musik darf beim Schließen der Foto-Ansicht weiterlaufen. Ein Video startet von selbst erst, wenn
   der App-Ton mit der Musik mischt, und hält sie so nie an. Die Knöpfe unter dem Video lassen sich auf 44 pt treffen,

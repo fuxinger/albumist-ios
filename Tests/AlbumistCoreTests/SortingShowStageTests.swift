@@ -95,6 +95,59 @@ struct SortingShowStageTests {
         }
     }
 
+    /// Where the screen is lower than the scene, the pile gives way first (second review, K6):
+    /// its loose photos lie closer together up and down and the gap the photos fly through
+    /// narrows, down to `minimumFlightGap`; only what is still missing then is scaled away with
+    /// the whole scene (`SortingShow.sceneScale`). The photos and the album keep their size in the
+    /// scene, so on screen they are bigger than with the whole scene scaled. With room enough,
+    /// or not measured yet, the scene is as it was.
+    @Test func aLowScreenSqueezesThePileBeforeTheSceneScales() {
+        for width in Self.widths {
+            for largeText in [false, true] {
+                let full = SortingShowLayout(width: width, largeText: largeText)
+                #expect(SortingShowLayout(width: width, largeText: largeText, room: nil) == full)
+                #expect(SortingShowLayout(width: width, largeText: largeText, room: full.height) == full)
+                #expect(SortingShowLayout(width: width, largeText: largeText, room: 2000) == full)
+                let most = full.scatter.dy * 2 + SortingShowLayout.flightGap - SortingShowLayout.minimumFlightGap
+                var last = full
+                for room in stride(from: full.height - 1, through: 100, by: -3) {
+                    let low = SortingShowLayout(width: width, largeText: largeText, room: room)
+                    let what = "width \(width), large \(largeText), room \(room)"
+                    #expect(low.photo == full.photo && low.cover == full.cover && low.layers == full.layers, "\(what)")
+                    #expect(low.labelRoom == full.labelRoom && low.spacing == full.spacing && low.scatter.dx == full.scatter.dx, "\(what)")
+                    #expect(low.height <= last.height, "\(what): \(low.height) after \(last.height)")
+                    if room >= full.height - most {
+                        #expect(abs(low.height - room) <= 2, "\(what): \(low.height)")
+                    } else {
+                        #expect(abs(low.height - (full.height - most)) <= 2, "\(what): \(low.height)")
+                    }
+                    // Still a pile above a gap above the album, every photo inside it.
+                    let pileBottom = low.pileCenterY + low.pileHeight / 2
+                    #expect(low.pileCenterY - low.pileHeight / 2 >= 0, "\(what)")
+                    #expect(low.coverCenterY - low.cover / 2 - low.layers >= pileBottom + SortingShowLayout.minimumFlightGap, "\(what)")
+                    #expect(low.pileHeight >= low.photo * 1.16 + low.scatter.dy * 2, "\(what)")
+                    for index in 0..<6 {
+                        #expect(abs(low.loose(index).y) <= low.scatter.dy + 0.001, "\(what), photo \(index)")
+                        #expect(low.loose(index).x == full.loose(index).x && low.loose(index).angle == full.loose(index).angle, "\(what)")
+                    }
+                    #expect(low.coverCenterY + low.cover / 2 + low.labelRoom <= low.height, "\(what)")
+                    // On screen at least as big as with the whole scene scaled.
+                    #expect(low.photo * min(1, room / low.height) >= full.photo * min(1, room / full.height) - 0.001, "\(what)")
+                    last = low
+                }
+            }
+        }
+        // The 4.7" iPhone: about 313 pt for the scene (554 pt between its bars, less the padding,
+        // the counts and the button), 431 pt needed. Before DS-17 its photos showed at about
+        // 66 pt; the whole scene scaled would show them at about 73 pt, with the pile giving way
+        // at more than 80.
+        let full = SortingShowLayout(width: 343, largeText: false)
+        #expect(full.height == 431)
+        #expect(full.photo * 313 / full.height < 74)
+        let small = SortingShowLayout(width: 343, largeText: false, room: 313)
+        #expect(small.photo * min(1, 313 / small.height) > 80, "\(small.height)")
+    }
+
     /// The pile's loose photos stay inside the width at every size: scattered by at most
     /// `scatter.dx` to each side.
     @Test func thePileStaysInsideTheWidth() {

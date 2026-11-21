@@ -660,6 +660,55 @@ enum UITestScreens {
             app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@", "addToAlbum.create", "Anlegen …")).firstMatch
         }
 
+        /// A plan of one new album with the tab's first two photos, made as a user makes one by
+        /// hand: "Auswählen", two photos, "Zu Album hinzufügen", its name `title`, "Anlegen …".
+        /// The caller has the tab open; where it has no photos left (everything sorted), the
+        /// uncertain ones. True once the preview ("Vorschau") shows; else false with a
+        /// `UI_STEP_MISSING` line for the step that did not come, which the caller judges.
+        @discardableResult
+        static func planNewAlbum(_ app: XCUIApplication, titled title: String, _ what: String) -> Bool {
+            func tap(_ element: XCUIElement, _ step: String) -> Bool {
+                guard element.waitForExistence(timeout: 15) else {
+                    print("UI_STEP_MISSING \(what): \(step)")
+                    return false
+                }
+                // Into view where it is not (the bars' buttons always are).
+                var swipes = 0
+                while !element.isHittable && swipes < 3 {
+                    app.swipeUp()
+                    swipes += 1
+                }
+                element.tap()
+                print("UI_STEP_OK \(what): \(step)")
+                return true
+            }
+            // A photo's name holds its date ("Foto, 12. Oktober 2024"); the first pass over the
+            // library comes before the photos (`library.preparing`).
+            let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
+            if !photos.firstMatch.waitForExistence(timeout: 7) {
+                show(app, "uncertain", named: "Unsicher", "\(what): uncertain photos")
+                // Not asserted: the count below is.
+                _ = UITestWait.holds(timeout: 5) { photos.count >= 2 }
+            }
+            guard tap(app.buttons["Auswählen"], "select photos"), UITestWait.holds(timeout: 5, { photos.count >= 2 }) else {
+                print("UI_STEP_MISSING \(what): two photos to pick (\(photos.count))")
+                return false
+            }
+            photos.element(boundBy: 0).tap()
+            photos.element(boundBy: 1).tap()
+            guard tap(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Zu Album hinzufügen")).firstMatch, "add to album") else {
+                return false
+            }
+            var field = app.textFields["Name des neuen Albums"]
+            if !field.waitForExistence(timeout: 5) { field = app.textFields.firstMatch }
+            guard tap(field, "name of the new album") else { return false }
+            field.typeText(title)
+            guard tap(createAlbum(app), "create \(title)") else { return false }
+            let preview = app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
+            print(preview ? "UI_STEP_OK \(what): preview of \(title)" : "UI_STEP_MISSING \(what): preview of \(title)")
+            return preview
+        }
+
         /// Shows the filter: its chip at the standard text sizes; at the accessibility sizes
         /// the menu (`library.filter`), then the choice by its name.
         @discardableResult

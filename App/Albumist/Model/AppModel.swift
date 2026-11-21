@@ -1280,7 +1280,7 @@ final class AppModel {
             // Owed before the wait below: a run that starts meanwhile (a trip change, new photos,
             // "Neu prüfen") no longer drops "Analyse fertig" (`FinishMoment`).
             finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)
-            firstAnalysisRunEnded(finished: end.isFinished, celebrates: celebrate) // Design W3 H13: the first 100 % (DS-08), before the marker says completed
+            firstAnalysisRunEnded(finished: end.isFinished, celebrates: celebrate) // Design W3 H13: the first 100 % (DS-08), decided before the wait below
             // The trips it made are on screen only once its end has refreshed the overview.
             tripChangeLedger.runEnded(generation, madeSuggestions: finished.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true)
             analysis.stoppedAt = analysis.position
@@ -1907,6 +1907,7 @@ final class AppModel {
             if end.isFinished, analysis.outcome.refined(with: ended) {
                 // Complete now: nothing to go on with (review of c772325: the card read 100 %
                 // and then "Macht da weiter · 37 %" from the marker of the run before).
+                FirstAnalysisMomentStore.shared.completedAway(first: !AnalysisMarker.completedOnce) // Design W3 H13: the first 100 % (DS-08) happened without the user
                 AnalysisMarker.finished()
                 analysis.resumeFrom = nil
                 analysis.resumed = nil

@@ -36,6 +36,9 @@ struct PlanReviewView: View {
     @State private var loading = true
     /// Albums of the plan that is running, for the "photos fly into albums" show.
     @State private var show: [SortingShow.Album]?
+    /// "Anlegen" was tapped and its run has not ended yet: the show's albums are cast first
+    /// (`applyButton`), and a second tap meanwhile starts nothing.
+    @State private var starting = false
     /// The result's moment is still to come (`ResultCard.onMoment`): the success tap waits for
     /// the main cover to lie down on the stack (draft E3), as it waits for the show's end, but
     /// never longer than `ResultCoverFan.successDeadline` once the result shows (`momentDue`).
@@ -438,17 +441,26 @@ struct PlanReviewView: View {
     /// Runs the plan, with the sorting show when photos go into albums.
     private func applyButton(_ plan: ChangePlan, _ facts: PlanReviewFacts, scrollToTop: @escaping () -> Void) -> some View {
         Button {
-            let albums = SortingShow.albums(from: model.sortingShowAlbums(facts.filledAlbums, plan: plan))
-            if !albums.isEmpty {
-                withAnimation(.smooth(duration: 0.4)) {
-                    show = albums
-                    scrollToTop()
-                }
-            }
-            beginMoment(plan)
+            // Once: a second tap while the show's albums are cast starts nothing.
+            guard !starting else { return }
+            starting = true
+            // What the show and the result's stack know of the suggestions, taken once as the
+            // plan starts (second review, K10: each walked the plan's suggestions on the tap).
+            let sources = model.resultCoverSources(for: plan)
+            beginMoment(plan, sources: sources)
             // Its own run does not make the plan stale; one that did not take it leaves it as it was.
             freshness.handOver()
+            let filled = facts.filledAlbums
             Task {
+                // The show's albums, cast off the main thread, before the run starts: the show is
+                // always there before the result.
+                let albums = SortingShow.albums(from: await model.sortingShowAlbums(filled, plan: plan, sources: sources))
+                if !albums.isEmpty {
+                    withAnimation(.smooth(duration: 0.4)) {
+                        show = albums
+                        scrollToTop()
+                    }
+                }
                 // Once it ran, the preview never offers it again (the result shows, and a result
                 // cleared later leaves "Nichts zu tun"), whatever runs on other tabs meanwhile.
                 // A plan that did not start, or stopped with an error, has no result: the moment
@@ -457,6 +469,7 @@ struct PlanReviewView: View {
                     freshness.notTaken()
                 }
                 if model.execution.finished?.id != plan.id { endMoment() }
+                starting = false
             }
         } label: {
             applyTitle(plan, facts.summary)
@@ -469,11 +482,10 @@ struct PlanReviewView: View {
     }
 
     /// The result's moment (draft E3) as the plan starts: the success tap waits for it, what
-    /// the stack must know of the suggestions is taken now (the analysis may make them anew
-    /// before the result shows), and the covers load while the plan runs, side by side, kept
+    /// the stack must know of the suggestions is taken now (`sources`: the analysis may make them
+    /// anew before the result shows), and the covers load while the plan runs, side by side, kept
     /// here as they arrive, so they are there with the result (`ResultMomentLoader.prefetch`).
-    private func beginMoment(_ plan: ChangePlan) {
-        let sources = model.resultCoverSources(for: plan)
+    private func beginMoment(_ plan: ChangePlan, sources: ResultCoverSources) {
         coverSources = sources
         momentPending = true
         let stack = model.resultCoverStack(for: plan, taken: sources, expected: true)

@@ -12,14 +12,16 @@ import AlbumistCore
 /// at once and stays on screen at every text size: the scene gives way to it (`sceneScale`).
 /// With Reduce Motion only the current album is shown and cross-fades; nothing flies.
 ///
-/// Design wave 3 (DS-17, "Show und Handschrift"): the photos are bigger (101 pt on the 4.7"
-/// iPhone, up to 125 pt; before 76) and the album is its real cover, grey while it waits and in
-/// its colours once filled, no longer a pale box (`SortingShowLayout`, `ShowAlbumCover`). Only
-/// photos that are sharp on the device fly or lie on the pile (`ShowPhotos`), never a sensitive
-/// document, never a personal suggestion's photo; a personal album shows "Vorschau
-/// ausgeblendet" (`SortingShowAlbum`). The count is in Apple's wide figures in the accent, as
-/// the result's count that follows it. In Low Power Mode the albums fill as before, with their
-/// tap, but no photo flies.
+/// Design wave 3 (DS-17, "Show und Handschrift"): the photos are bigger (in the scene 101 pt on
+/// the 4.7" iPhone, up to 125 pt; before 76) and the album is its real cover, grey while it waits
+/// and in its colours once filled, no longer a pale box (`SortingShowLayout`, `ShowAlbumCover`).
+/// On a low screen the pile gives way first and the rest of the scene is scaled (`sceneScale`):
+/// on the 4.7" iPhone the photos show at about 82 pt (before about 66). Only photos that are
+/// sharp on the device fly or lie on the pile (`ShowPhotos`), never a sensitive document, never
+/// a personal suggestion's photo; a personal album shows "Vorschau ausgeblendet"
+/// (`SortingShowAlbum`). The count is in Apple's wide figures in the accent, as the result's count
+/// that follows it. In Low Power Mode the albums fill as before, with their tap, but no photo
+/// flies; the pile shows its photos in every mode.
 struct SortingShow: View {
     struct Album: Identifiable, Equatable {
         /// Index of the album's last "add photos" step in the plan.
@@ -76,31 +78,40 @@ struct SortingShow: View {
     @State private var headerHeight: CGFloat = 0
     @State private var skipHeight: CGFloat = 0
     /// The photos that are sharp on the device at the size they are drawn: only these lie on
-    /// the pile and fly (`ShowPhotos`).
+    /// the pile and fly (`ShowPhotos`). Held while they are drawn: an album's go once it landed.
     @State private var photos = ShowPhotos()
     /// Low Power Mode as the show starts: the albums fill one after the other as before, with
     /// their tap, but no photo flies (the calm version; with Reduce Motion or VoiceOver the
     /// albums are riffled through quietly, as before).
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
 
-    /// The scene's sizes for the width on screen (DS-17): photos, cover, pile and strip.
+    /// The scene's sizes for the width on screen (DS-17): photos, cover, pile and strip; on a low
+    /// screen with its pile giving way first (`sceneRoom`).
     private var stage: SortingShowLayout {
-        SortingShowLayout(width: Double(available), largeText: typeSize >= .xxLarge)
+        SortingShowLayout(width: Double(available), largeText: typeSize >= .xxLarge, room: sceneRoom.map { Double($0) })
     }
-    /// The scene's own height, from its sizes (431 pt on the 4.7" iPhone, 360 pt before DS-17).
+    /// The scene's own height, from its sizes: 431 pt on the 4.7" iPhone with room enough (360 pt
+    /// before DS-17), 387 pt with its pile given way.
     private var sceneHeight: CGFloat { CGFloat(stage.height) }
     /// The show's own padding above its counts.
     private static let topPadding = Theme.Spacing.m
     private var sideBySide: Bool { verticalSizeClass == .compact }
-    /// The scene's own size, 1 where the screen has room for it. It gives way to the counts and
-    /// the button, which keep their text size, so "Animation überspringen" stays on screen at
+    /// What the screen leaves for the scene: its visible height without the padding, the counts
+    /// and the button, which keep their text size, so "Animation überspringen" stays on screen at
     /// every size (review P3-18: at the largest text it lay below the tab bar on the small
-    /// iPhone, and there even at the default size). The scene is drawn at its full size and
-    /// scaled, so the flights keep their paths.
-    private var sceneScale: CGFloat {
-        guard let room else { return 1 }
+    /// iPhone, and there even at the default size). Nil until measured.
+    private var sceneRoom: CGFloat? {
+        guard let room else { return nil }
         var free = room - 2 * screenPadding - Self.topPadding - skipHeight - Theme.Spacing.l
         if !sideBySide { free -= headerHeight + Theme.Spacing.l }
+        return free
+    }
+    /// The scene's own size, 1 where the screen has room for it. Where it has not, the pile gave
+    /// way first (`stage`), and the rest is scaled: drawn at its full size and scaled, so the
+    /// flights keep their paths. On the 4.7" iPhone about 0.81 (313 pt for 387), 0.73 before the
+    /// pile gave way (second review, K6).
+    private var sceneScale: CGFloat {
+        guard let free = sceneRoom else { return 1 }
         return min(1, max(0.1, free / sceneHeight))
     }
     /// The scene's width before scaling: scaled, it fills the width on screen.
@@ -146,15 +157,23 @@ struct SortingShow: View {
             }
             await run()
         }
-        // The pile's photos, sharp at the size they are drawn; again when the size changes.
-        .task(id: stage.photo) {
-            guard flies else { return }
+        // The pile's photos, sharp at the size they are drawn, in every mode (only the flights
+        // wait for `flies`; second review, K1); again when the size changes, and after a memory
+        // warning took them (`ShowPhotos.letGo`).
+        .task(id: PileLoad(side: stage.photo, generation: photos.generation)) {
             await photos.load(pilePhotos, side: CGFloat(stage.photo), scale: displayScale)
         }
     }
 
+    /// When the pile's photos are loaded: for their size, and again after a memory warning.
+    private struct PileLoad: Equatable {
+        var side: Double
+        var generation: Int
+    }
+
     /// Photos fly: not with Reduce Motion or VoiceOver (the albums are riffled through quietly),
-    /// not in Low Power Mode (the albums fill with their tap, nothing flies).
+    /// not in Low Power Mode (the albums fill with their tap, nothing flies). The pile shows its
+    /// photos either way.
     private var flies: Bool { !reduceMotion && !voiceOver && !lowPower }
 
     // MARK: Parts
@@ -409,6 +428,9 @@ struct SortingShow: View {
             _ = landed.insert(index)
         }
         withAnimation(.snappy(duration: quietly ? 0.15 : 0.35)) { sorted.formUnion(albums[index].assets) }
+        // Its photos are drawn no more (the flights hold theirs until they end): the show keeps
+        // only what it shows (second review, K2), the pile's photos.
+        photos.release(albums[index].shown, keeping: Set(pilePhotos))
         if quietly { return }
         if index < 3 || index == albums.count - 1 { landings += 1 } // a few soft taps, not one per album
         withAnimation(.spring(response: 0.22, dampingFraction: 0.6)) { pop = true }

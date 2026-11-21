@@ -35,7 +35,8 @@ struct SortingShowSourceTests {
     @Test func theSceneTakesItsSizesFromTheLayout() throws {
         let show = try Self.code(Self.show)
         let stage = try Self.body(["struct SortingShow", "var stage: SortingShowLayout"], in: show)
-        #expect(stage.contains("SortingShowLayout(width: Double(available), largeText: typeSize >= .xxLarge)"), "\(stage)")
+        // With what the screen leaves for the scene: the pile gives way first (second review, K6).
+        #expect(stage.contains("SortingShowLayout(width: Double(available), largeText: typeSize >= .xxLarge, room: sceneRoom.map { Double($0) })"), "\(stage)")
         let height = try Self.body(["struct SortingShow", "var sceneHeight: CGFloat"], in: show)
         #expect(height.contains("stage.height"), "\(height)")
         for literal in [/side:\s*76\b/, /sceneHeight:\s*CGFloat\s*=\s*360\b/, /:\s*CGFloat\s*=\s*124\b/, /y:\s*78\b/, /y:\s*252\b/] {
@@ -107,6 +108,71 @@ struct SortingShowSourceTests {
         #expect(launch.contains("if flies {"), "\(launch)")
     }
 
+    /// With Reduce Motion, VoiceOver or in Low Power Mode nothing flies, but the pile is never an
+    /// empty area (second review, K1): its photos load whenever the scene shows, and `flies`
+    /// decides only the flights (their launch and the photos loaded ahead for them). Before
+    /// DS-17 the pile showed in every mode; with Reduce Motion it still thins out in a fade.
+    @Test func thePileShowsItsPhotosInEveryMode() throws {
+        let show = try Self.code(Self.show)
+        let body = try Self.body(["struct SortingShow", "var body: some View"], in: show)
+        let load = try #require(body.range(of: "await photos.load(pilePhotos, side: CGFloat(stage.photo), scale: displayScale)"),
+                                "the pile's photos are not loaded: \(body)")
+        let task = try #require(body[..<load.lowerBound].range(of: ".task(id:", options: .backwards), "\(body)")
+        #expect(!body[task.lowerBound..<load.lowerBound].contains("flies"), "the pile waits for flights: \(body)")
+        let launch = try Self.body(["struct SortingShow", "func launch("], in: show)
+        #expect(launch.contains("if flies {"), "\(launch)")
+        let prefetch = try Self.body(["struct SortingShow", "func prefetch("], in: show)
+        #expect(prefetch.contains("if flies {"), "\(prefetch)")
+        #expect(show.matches(of: /\bflies\b/).count == 3, "`flies` decides something else than the flights")
+        let pile = try Self.body(["struct SortingShow", "var pile: some View"], in: show)
+        #expect(pile.contains(".transition(reduceMotion ? AnyTransition.opacity"), "\(pile)")
+    }
+
+    /// The show holds only what it shows (second review, K2): an album's photos go once it has
+    /// landed (the pile's stay, and a photo another album shows later is asked for again), and
+    /// on a memory warning every photo goes, as from the other caches (`MemoryPressure`); the
+    /// pile asks again then. Registered once, by the instance the show keeps.
+    @Test func theShowHoldsOnlyWhatItShows() throws {
+        let pieces = try Self.code(Self.pieces)
+        let release = try Self.body(["final class ShowPhotos", "func release("], in: pieces)
+        #expect(release.contains("asked[id] = nil") && release.contains("images[id] = nil"), "\(release)")
+        let letGo = try Self.body(["final class ShowPhotos", "func letGo()"], in: pieces)
+        for part in ["images.removeAll()", "asked.removeAll()", "generation += 1"] {
+            #expect(letGo.contains(part), "\(part): \(letGo)")
+        }
+        let register = try Self.body(["final class ShowPhotos", "private func register()"], in: pieces)
+        #expect(register.contains("MemoryPressure.shared.register(\"sorting show photos\", owner: self) { $0.letGo() }"), "\(register)")
+        let load = try Self.body(["final class ShowPhotos", "func load("], in: pieces)
+        #expect(load.contains("register()"), "\(load)")
+        let show = try Self.code(Self.show)
+        let land = try Self.body(["struct SortingShow", "func land("], in: show)
+        #expect(land.contains("photos.release(albums[index].shown, keeping: Set(pilePhotos))"), "\(land)")
+        let body = try Self.body(["struct SortingShow", "var body: some View"], in: show)
+        #expect(body.contains(".task(id: PileLoad(side: stage.photo, generation: photos.generation))"),
+                "the pile does not come back after a memory warning: \(body)")
+    }
+
+    /// "Anlegen" walks the plan's photos once on the main actor (second review, K10): the cover
+    /// sources are taken once and handed to the show and to the result's moment, and the show's
+    /// albums are cast off the main thread before the run starts (the show is always there before
+    /// the result). A second tap meanwhile starts nothing.
+    @Test func theTapTakesTheSourcesOnceAndCastsOffTheMainThread() throws {
+        let review = try Self.code(Self.review)
+        let button = try Self.body(["struct PlanReviewView", "func applyButton("], in: review)
+        #expect(Self.count("resultCoverSources(for: plan)", in: button) == 1, "\(button)")
+        #expect(button.contains("beginMoment(plan, sources: sources)"), "\(button)")
+        #expect(button.contains("guard !starting else { return }"), "\(button)")
+        let begin = try Self.body(["struct PlanReviewView", "func beginMoment("], in: review)
+        #expect(!begin.contains("resultCoverSources("), "the moment takes the sources again: \(begin)")
+        let cast = try #require(button.range(of: "await model.sortingShowAlbums(filled, plan: plan, sources: sources)"), "\(button)")
+        let run = try #require(button.range(of: "await model.execute(plan)"), "\(button)")
+        #expect(cast.upperBound < run.lowerBound, "the run may end before the show is there")
+        let model = try Self.code(Self.model)
+        let albums = try #require(AppSource.body(of: "func sortingShowAlbums(", in: model))
+        #expect(albums.contains("Task.detached(priority: .userInitiated)"), "\(albums)")
+        #expect(!albums.contains("resultCoverSources("), "\(albums)")
+    }
+
     /// Low Power Mode: the calm version. Nothing flies (`flies`), the albums still fill one after
     /// the other with their tap; with Reduce Motion or VoiceOver the albums are riffled through
     /// quietly, as before. The haptic stays the one soft tap at a landing, no more.
@@ -130,12 +196,14 @@ struct SortingShowSourceTests {
     @Test func theScreenTakesTheAlbumsFromTheModel() throws {
         let review = try Self.code(Self.review)
         let button = try Self.body(["struct PlanReviewView", "func applyButton("], in: review)
-        #expect(button.contains("let albums = SortingShow.albums(from: model.sortingShowAlbums(facts.filledAlbums, plan: plan))"), "\(button)")
+        #expect(button.contains("let sources = model.resultCoverSources(for: plan)"), "\(button)")
+        #expect(button.contains("let filled = facts.filledAlbums"), "\(button)")
+        #expect(button.contains("let albums = SortingShow.albums(from: await model.sortingShowAlbums(filled, plan: plan, sources: sources))"), "\(button)")
         let model = try Self.code(Self.model)
         let albums = try #require(AppSource.body(of: "func sortingShowAlbums(", in: model))
-        #expect(albums.contains("resultCoverSources(for: plan)"), "\(albums)")
-        #expect(albums.contains("SortingShowAlbum.cast(filled, plan: plan, cardCovers: sources.covers, personal: sources.personal,"), "\(albums)")
-        #expect(albums.contains("ranks: previewRanks"), "\(albums)")
+        #expect(albums.contains("let covers = sources.covers") && albums.contains("let personal = sources.personal"), "\(albums)")
+        #expect(albums.contains("SortingShowAlbum.cast(filled, plan: plan, cardCovers: covers, personal: personal,"), "\(albums)")
+        #expect(albums.contains("let ranks = previewRanks") && albums.contains("ranks: ranks"), "\(albums)")
         let show = try Self.code(Self.show)
         #expect(!show.contains("filledAlbums"), "the show builds its albums from the plan's photos")
         let builder = try Self.body(["struct SortingShow", "static func albums(from cast: [SortingShowAlbum])"], in: show)

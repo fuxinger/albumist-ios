@@ -219,7 +219,7 @@ struct MomentsSourceTests {
         #expect(Self.count(".sensoryFeedback(", in: file) == 2, "the result screen has haptics of its own")
         #expect(file.contains("ExecutionHaptics(execution: model.execution, holdSuccess: show != nil || momentPending)"))
         let begin = try Self.body(["struct PlanReviewView", "func beginMoment("], in: file)
-        for part in ["momentPending = true", "model.resultCoverSources(for: plan)",
+        for part in ["momentPending = true", "coverSources = sources",
                      "model.resultCoverStack(for: plan, taken: sources, expected: true)", "prefetch?.cancel()",
                      "covers.start(id)",
                      "prefetch = Task { await ResultMomentLoader.prefetch(stack, plan: id, scale: scale, keepingIn: covers) }"] {
@@ -237,7 +237,9 @@ struct MomentsSourceTests {
             #expect(end.contains(part), "\(part): \(end)")
         }
         let button = try Self.body(["struct PlanReviewView", "func applyButton("], in: file)
-        #expect(button.contains("beginMoment(plan)"), "\(button)")
+        // Taken once as the plan starts, for the show and the stack (second review of H13, K10).
+        #expect(button.contains("let sources = model.resultCoverSources(for: plan)"), "\(button)")
+        #expect(button.contains("beginMoment(plan, sources: sources)"), "\(button)")
         // A plan that did not start, or stopped with an error, has no result: the tap goes.
         let notTaken = try #require(button.range(of: "freshness.notTaken()"))
         #expect(button[notTaken.upperBound...].prefix(120).contains("if model.execution.finished?.id != plan.id { endMoment() }"),

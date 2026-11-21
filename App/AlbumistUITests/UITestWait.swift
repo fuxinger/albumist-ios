@@ -183,6 +183,9 @@ enum UITestWait {
                 print("UI_FLAKY_RETRY \(testID(test)) app still in the foreground (state \(app.state.rawValue)) \(Int(Date().timeIntervalSince(pressed))) s after the Home press \(why), tried: \(way.name)")
             }
             clearSystemAlert(index == 0 ? "before the Home press \(why)" : "before the \(way.name) \(why)")
+            // The moment of each way, next to the app's own `UI_FACT app lifecycle` lines
+            // (`UITestLifecycle`): did the first press reach the app at all?
+            UITestOnboarding.clock("\(way.name) \(why)")
             if index < 2 {
                 XCUIDevice.shared.press(.home)
             } else {

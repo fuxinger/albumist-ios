@@ -18,8 +18,9 @@ final class PhotoGridGestureState {
     /// finger reaches.
     private var waiting: Waiting?
     private var zooming: Zooming?
-    /// When the last drag ended: the lift that ends a drag is no tap of its own (`endsDrag`).
-    private var dragEnded: Date?
+    /// When the last drag or pinch ended: the lift that ends one is no tap of its own
+    /// (`endsGesture`).
+    private var gestureEnded: Date?
     let ticker = PhotoGridTicker()
 
     /// One drag to select.
@@ -115,15 +116,16 @@ final class PhotoGridGestureState {
     func endDrag() {
         ticker.stop()
         drag?.scroller?.endAutoScroll()
-        if drag != nil { dragEnded = Date() }
+        if drag != nil { gestureEnded = Date() }
         drag = nil
         waiting = nil
     }
 
-    /// Whether a tap on a photo now is the lift that ends a drag (UIKit may hand it to the
-    /// photo's button too, before or right after the drag's end): it ticks nothing of its own.
-    var endsDrag: Bool {
-        drag != nil || dragEnded.map { Date().timeIntervalSince($0) < 0.4 } ?? false
+    /// Whether a tap on a photo now is the lift that ends a drag or a pinch (UIKit may hand it to
+    /// the photo's button too, before or right after the gesture's end): it neither ticks nor
+    /// opens a photo of its own.
+    var endsGesture: Bool {
+        drag != nil || zooming != nil || gestureEnded.map { Date().timeIntervalSince($0) < 0.4 } ?? false
     }
 
     /// The range begins at the first of `points` with a photo under it; with none the drag
@@ -229,6 +231,7 @@ final class PhotoGridGestureState {
     }
 
     func endPinch() {
+        if zooming != nil { gestureEnded = Date() }
         zooming = nil
     }
 }

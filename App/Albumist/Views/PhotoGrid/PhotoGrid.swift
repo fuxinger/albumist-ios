@@ -113,12 +113,13 @@ struct PhotoGrid: View {
         let isSelected = selection.contains(id)
         // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
         return Button {
+            // The lift that ends a drag or a pinch is no tap: the drag ticked its first photo
+            // already, and a pinch opens nothing.
+            guard !gestures.endsGesture else { return }
             guard selecting else {
                 open(id)
                 return
             }
-            // The lift that ends a drag on its first photo ticked it already.
-            guard !gestures.endsDrag else { return }
             if isSelected { selection.remove(id) } else { selection.insert(id) }
         } label: {
             Color.clear
@@ -161,15 +162,15 @@ struct PhotoGrid: View {
         .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
         .accessibilityIdentifier(identifier)
         // The pinch without two fingers: VoiceOver's zoom, and the actions for Switch Control,
-        // Voice Control and a keyboard, only those that make a step.
+        // Voice Control and a keyboard, only those that make a step (none while the grid waits).
         .accessibilityZoomAction { action in
             step(zoomingIn: action.direction == .zoomIn, on: id, columns: columns)
         }
         .accessibilityActions {
-            if PhotoGridZoom.fewer(than: columns) != nil {
+            if !disabled, PhotoGridZoom.fewer(than: columns) != nil {
                 Button("Vergrößern") { step(zoomingIn: true, on: id, columns: columns) }
             }
-            if PhotoGridZoom.more(than: columns) != nil {
+            if !disabled, PhotoGridZoom.more(than: columns) != nil {
                 Button("Verkleinern") { step(zoomingIn: false, on: id, columns: columns) }
             }
         }
@@ -180,8 +181,8 @@ struct PhotoGrid: View {
         // Where it is, for the fingers of the gestures.
         .onGeometryChange(for: PhotoGridPlace.self) { proxy in
             PhotoGridPlace(position: entry.position, frame: proxy.frame(in: .named(PhotoGridPlace.space)))
-        } action: { place in
-            gestures.place(id, place)
+        } action: { reported in
+            gestures.place(id, reported)
         }
         .onDisappear { gestures.forget(id) }
     }
@@ -238,9 +239,10 @@ struct PhotoGrid: View {
     }
 
     /// A step without two fingers (VoiceOver's zoom, "Vergrößern", "Verkleinern") on `photo`:
-    /// it stays in the middle of the screen, and the new size is said.
+    /// it stays in the middle of the screen, and the new size is said. Not while the grid waits,
+    /// as the pinch.
     private func step(zoomingIn: Bool, on photo: AssetID, columns: Int) {
-        guard let next = zoomingIn ? PhotoGridZoom.fewer(than: columns) : PhotoGridZoom.more(than: columns) else { return }
+        guard !disabled, let next = zoomingIn ? PhotoGridZoom.fewer(than: columns) : PhotoGridZoom.more(than: columns) else { return }
         step(to: next, from: columns, keeping: photo, anchor: { _ in 0.5 }, around: nil)
         AccessibilityNotification.Announcement(String(localized: "\(next) \(next.formatted()) Fotos pro Reihe")).post()
     }

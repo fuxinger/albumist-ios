@@ -88,13 +88,15 @@ struct PhotoGridSourceTests {
     /// A photo is a real button named with its date and time on its own clock (the UI tests find
     /// the photos as buttons with a year in their names), opens or ticks as before, says when it
     /// is ticked, zooms into the photo view out of its tile, and does nothing while the page waits.
-    /// The lift that ends a drag (UIKit may hand it to the photo's button too) ticks nothing of
-    /// its own: the drag ticked its first photo already.
+    /// The lift that ends a drag or a pinch (UIKit may hand it to the photo's button too) is no
+    /// tap: the drag ticked its first photo already, and a pinch opens nothing.
     @Test func aPhotoOpensAndTicksAsBefore() throws {
         let cell = try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.grid)
         let tap = Self.squeezed(cell)
-        #expect(tap.contains("returnButton{guardselectingelse{open(id)return}guard!gestures.endsDragelse{return}"
+        #expect(tap.contains("returnButton{guard!gestures.endsGestureelse{return}guardselectingelse{open(id)return}"
                              + "ifisSelected{selection.remove(id)}else{selection.insert(id)}}"), "\(tap)")
+        let lift = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "var endsGesture: Bool"], in: Self.state))
+        #expect(lift == "{drag!=nil||zooming!=nil||gestureEnded.map{Date().timeIntervalSince($0)<0.4}??false}", "\(lift)")
         for modifier in [".matchedTransitionSource(id: id, in: zoom)", ".buttonStyle(.plain)", ".disabled(disabled)",
                          ".accessibilityLabel(Text(Self.spokenDate(entry)))",
                          ".accessibilityAddTraits(selecting && isSelected ? .isSelected : [])",
@@ -217,14 +219,17 @@ struct PhotoGridSourceTests {
 
     /// The pinch is there without two fingers: VoiceOver's zoom on a photo, and the photo's
     /// actions "Vergrößern" and "Verkleinern" for Switch Control, Voice Control and a keyboard
-    /// (only those that make a step), each saying the new size; the words have English.
+    /// (only those that make a step, none while the grid waits, as the pinch), each saying the
+    /// new size; the words have English.
     @Test func theZoomIsThereWithoutTwoFingers() throws {
         let cell = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.grid))
         #expect(cell.contains(".accessibilityZoomAction{actioninstep(zoomingIn:action.direction==.zoomIn,on:id,columns:columns)}"), "\(cell)")
-        #expect(cell.contains(".accessibilityActions{ifPhotoGridZoom.fewer(than:columns)!=nil{Button(\"Vergrößern\"){step(zoomingIn:true,on:id,columns:columns)}}"
-                              + "ifPhotoGridZoom.more(than:columns)!=nil{Button(\"Verkleinern\"){step(zoomingIn:false,on:id,columns:columns)}}}"),
-                "\(cell)")
+        #expect(cell.contains(".accessibilityActions{if!disabled,PhotoGridZoom.fewer(than:columns)!=nil{Button(\"Vergrößern\"){"
+                              + "step(zoomingIn:true,on:id,columns:columns)}}if!disabled,PhotoGridZoom.more(than:columns)!=nil{"
+                              + "Button(\"Verkleinern\"){step(zoomingIn:false,on:id,columns:columns)}}}"), "\(cell)")
         let said = try Self.body(["struct PhotoGrid: View", "private func step(zoomingIn"], in: Self.grid)
+        #expect(Self.squeezed(said).hasPrefix("{guard!disabled,letnext=zoomingIn?PhotoGridZoom.fewer(than:columns):"
+                                              + "PhotoGridZoom.more(than:columns)else{return}"), "not while the grid waits: \(said)")
         #expect(said.contains("AccessibilityNotification.Announcement(String(localized: \"\\(next) \\(next.formatted()) Fotos pro Reihe\")).post()"),
                 "\(said)")
         let catalog = try StringCatalogTests.catalog()

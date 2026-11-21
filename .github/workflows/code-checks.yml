@@ -1,0 +1,88 @@
+name: Code checks
+
+# Unused code, found by Periphery (Fuchs 20.11.: SwiftLint, Periphery and Xcode's analyzer after
+# Build 40). Report only for now: the findings go into the job summary and the artifact
+# "periphery"; the job fails only when Periphery did not scan (periphery_report.py). Each finding
+# is checked by hand before code is removed.
+#
+# Xcode's analyzer ("xcodebuild analyze") is left out on purpose: it is the Clang static analyzer,
+# which checks C, C++ and Objective-C only, and this app is Swift (the one C file is the SQLite
+# module header Sources/CSQLite/shim.h). SwiftLint runs in ci.yml ("SwiftLint report").
+#
+# Once a night (a Mac for about 10 minutes, at an hour without UI runs), by hand, and in a pull
+# request that changes this check itself. Not in the Mac queue of the UI runs (ui.yml): it
+# neither waits for them nor replaces one. No cache (rule since the CodeQL incident).
+on:
+  schedule:
+    # 23:30 UTC = 00:30 in Berlin in winter; before the nightly run (01:00 UTC).
+    - cron: '30 23 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/code-checks.yml'
+      - '.github/scripts/periphery_report.py'
+      - '.github/lint-tools.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: code-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  periphery:
+    name: Unused code (Periphery report)
+    runs-on: xcode-27
+    # First runs: a build with index (CI's app build takes 1.5 to 3 min) and the scan.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode
+      - name: Install XcodeGen
+        run: python3 .github/scripts/toolchain.py xcodegen
+      - name: Generate Xcode project
+        run: cd App && xcodegen generate
+      - name: Install the pinned Periphery
+        run: python3 .github/scripts/toolchain.py periphery
+      - name: Build with index
+        # Periphery reads the index of a build. Built here with xcodebuild (and the same settings
+        # as CI) so a build error shows its own lines, then scanned with --skip-build.
+        run: |
+          mkdir -p build/periphery
+          cd App
+          xcodebuild build-for-testing \
+            -project Albumist.xcodeproj \
+            -scheme Albumist \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath ../build/dd \
+            COMPILER_INDEX_STORE_ENABLE=YES \
+            CODE_SIGNING_ALLOWED=NO > ../build/periphery/build-log.txt 2>&1 \
+            || { grep -E "error:" -A3 ../build/periphery/build-log.txt | head -80; tail -30 ../build/periphery/build-log.txt; exit 1; }
+          tail -2 ../build/periphery/build-log.txt
+      - name: Scan (report only)
+        run: |
+          set +e
+          periphery scan \
+            --project App/Albumist.xcodeproj \
+            --schemes Albumist \
+            --skip-build \
+            --index-store-path build/dd/Index.noindex/DataStore \
+            --format json \
+            --relative-results \
+            --disable-update-check \
+            --quiet > build/periphery/findings.json
+          status=$?
+          set -e
+          python3 .github/scripts/periphery_report.py --status "$status" build/periphery/findings.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: periphery
+          path: build/periphery/
+          if-no-files-found: ignore
+          retention-days: 14

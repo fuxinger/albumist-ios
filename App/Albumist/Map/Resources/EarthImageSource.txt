@@ -1,0 +1,34 @@
+EarthBlueMarble-5400.jpg: the Earth as our own globe shows it (map concept 2.0, section 7).
+
+Image: NASA Blue Marble Next Generation with topography and bathymetry, 5400 x 2700 pixels,
+equirectangular (plate carree), longitude -180 to 180 from the left edge, latitude 90 to -90
+from the top. Credit: NASA Earth Observatory (Reto Stoeckli, NASA Goddard Space Flight Center).
+NASA imagery is in the public domain.
+
+This copy is the file bmng.jpg of the Python package basemap-data 2.0.0 (PyPI, matplotlib
+basemap), unchanged (sha256 10f5389b365d7ece89f68a73ce5653fb5692145fde181fc64596d0d87cb89bb8),
+which distributes it under this notice:
+
+Copyright (c) 2011 Jeffrey Whitaker
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The prototype decides the sharpness the app needs (concept: about 5 to 15 MB); a sharper
+image comes from NASA's original files (visibleearth.nasa.gov) when it does.

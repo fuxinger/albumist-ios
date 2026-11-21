@@ -153,11 +153,13 @@ struct VideoViewerSourceTests {
         #expect(Self.inOrder(["still(image)", "VideoSurface(", ".scaleEffect("], in: photo), "the video does not zoom with its still")
         // A video that plays is its own sharp picture (review F, F6): it shows while its still
         // comes and when none came sharp (a small poster frame), over the grid's thumbnail from
-        // memory or the black page; the page says "not available" only without a player.
+        // memory or the black page; the page says "not available" only without a player, and for
+        // a video only once it is known not to play (review V1, `ViewerPage`).
         let zoomable = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: viewer))
+        let page = try #require(AppSource.body(of: "private var page: ViewerPage", in: zoomable))
+        #expect(page.contains("playing: player != nil"), "\(page)")
         let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: zoomable))
-        #expect(Self.inOrder(["if image != nil || player != nil {", "photo(image, in: size)", "} else if unavailable {",
-                              "ContentUnavailableView", "} else {", "waiting(in: size)"], in: shown), "\(shown)")
+        #expect(shown.contains("case .picture: photo(image, in: size)"), "\(shown)")
         let still = try #require(AppSource.body(of: "private func still(_ image: UIImage?)", in: zoomable))
         #expect(Self.inOrder(["if let still = image ?? ThumbnailCache.shared.thumbnailInMemory(for: id) {", "Image(uiImage: still)",
                               ".scaledToFit()", "} else {", "Color.clear"], in: still), "\(still)")
@@ -371,7 +373,7 @@ struct VideoViewerSourceTests {
                 && waiting.contains(".offset(x: offset.width, y: offset.height + pull)"), "the preview stands still under a pull")
         #expect(waiting.contains("Text(\"Foto wird geladen\")") && waiting.contains("Text(\"Video wird geladen\")"))
         let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: photo))
-        #expect(Self.inOrder(["if image != nil || player != nil {", "} else if unavailable {", "} else {", "waiting(in: size)"], in: shown))
+        #expect(shown.contains("case .waiting: waiting(in: size)"), "\(shown)")
         let load = try #require(AppSource.body(of: "private func load(in size: CGSize)", in: photo))
         #expect(Self.inOrder(["await PhotoBasics.of(id)", "ThumbnailCache.shared.largeImage(for: id, pixels: pixels)",
                               "guard !Task.isCancelled", "ViewerPicture.choose(", "case .sharp:", "image = loaded",
@@ -402,6 +404,32 @@ struct VideoViewerSourceTests {
         #expect(keep.contains("keptSides[id.rawValue] = side"))
         // The core's measure of sharp is the grids' and the covers'.
         #expect(thumbnails.contains("static let sharpShare: CGFloat = \(ViewerPicture.sharpShare)"))
+    }
+
+    /// A video's page never says "Dieses Video ist gerade nicht verfügbar" while its video may
+    /// still come (review V1): what a page shows is the core's rule (`ViewerPage`), told where the
+    /// page's own video is. That is `.unknown` while it is not the video on screen (not asked for
+    /// yet, or swiped away): after a swipe away and back the page waits again until Photos answers.
+    @Test func aVideosPageWaitsWhileItsVideoMayStillCome() throws {
+        let viewer = try Self.code(Self.viewerPath)
+        let zoomable = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: viewer))
+        let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: zoomable))
+        #expect(Self.inOrder(["switch page {", "case .picture: photo(image, in: size)", "case .unavailable: unavailableNote(in: size)",
+                              "case .waiting: waiting(in: size)"], in: shown), "\(shown)")
+        let page = try #require(AppSource.body(of: "private var page: ViewerPage", in: zoomable))
+        #expect(Self.squeezed(page).contains("ViewerPage.shows(still:picture,playing:player!=nil,video:isVideo?videoAvailability:nil)"),
+                "\(page)")
+        let picture = try #require(AppSource.body(of: "private var picture: ViewerPicture?", in: zoomable))
+        #expect(Self.inOrder(["if image != nil { return .sharp }", "return unavailable ? .unavailable : nil"], in: picture), "\(picture)")
+        let worded = try Self.code(Self.viewerPath, keepStrings: true)
+        let note = try #require(AppSource.body(of: ["private struct ZoomablePhoto", "private func unavailableNote(in size: CGSize)"], in: worded))
+        #expect(Self.inOrder(["ContentUnavailableView {", "if isVideo {", "Dieses Video ist gerade nicht verfügbar.", "} else {",
+                              "Dieses Foto ist gerade nicht verfügbar.", ".accessibilityIdentifier(\"viewer.unavailable\")"], in: note), "\(note)")
+        let built = try #require(AppSource.body(of: "private func page(at index: Int)", in: viewer))
+        #expect(built.contains("videoAvailability: video.availability(for: id)"), "\(built)")
+        let model = try Self.file("ViewerVideo.swift")
+        let availability = try #require(AppSource.body(of: "func availability(for id: AssetID) -> VideoAvailability", in: model))
+        #expect(Self.squeezed(availability) == "{self.id==id?availability:.unknown}", "\(availability)")
     }
 
     // MARK: Thumbnails

@@ -65,6 +65,13 @@ final class ViewerVideo {
         self.id == id ? player : nil
     }
 
+    /// Where the video `id` is, for its page: `.unknown` while it is not the video on screen (not
+    /// asked for yet, or swiped away), so its page waits instead of saying it is not available
+    /// (review V1).
+    func availability(for id: AssetID) -> VideoAvailability {
+        self.id == id ? availability : .unknown
+    }
+
     /// The video `id` came on screen: asks Photos for it, only from the iPhone, and plays it
     /// where it starts by itself, after a moment for the swipe to come to rest (as a Live
     /// Photo's short motion waits). Ends quietly with the task that asked (a swipe on).

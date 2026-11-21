@@ -4,7 +4,8 @@ import Foundation
 /// (design wave 3, DS-18: "ruhige Platzhalter beim Laden statt grauer Flächen und Kreisel"), as
 /// in Photos: the picture, when it is sharp at the screen's size. When no sharp picture comes
 /// (only Photos' small preview is on the iPhone, the photo itself is in iCloud, or Photos has
-/// nothing), the calm note says why: no big blurry picture is left standing (design rule 6).
+/// nothing), the calm note says why, for a video once the video is known not to play
+/// (`ViewerPage`): no big blurry picture is left standing (design rule 6).
 /// Until Photos answers, the page waits by itself with the thumbnail the grid showed, from
 /// memory, fitted as the picture will be (the black page without one), never a spinner.
 public enum ViewerPicture: Equatable, Sendable {
@@ -36,6 +37,36 @@ public enum ViewerPicture: Equatable, Sendable {
         if stretch * sharpShare <= 1 { return true }
         guard let original, !original.isEmpty else { return false }
         return picture.width >= original.width * sharpShare && picture.height >= original.height * sharpShare
+    }
+}
+
+/// What one page of the photo view shows (DS-16, DS-18; review V1 of design wave 3): the picture
+/// once its still came sharp or its video plays over it; the calm note only once nothing will
+/// come, for a video only once the video itself is known not to play. Until then the page waits
+/// by itself with the grid's thumbnail from memory (the black page without one): a video's small
+/// poster frame made its page say "nicht verfügbar" for the moment the video took to come, before
+/// every such video and again after a swipe away and back.
+public enum ViewerPage: Equatable, Sendable {
+    /// The sharp still, and over it the video while it has its player.
+    case picture
+    /// The grid's thumbnail from memory, fitted as the picture will be; without one the black page.
+    case waiting
+    /// "Dieses Foto ist gerade nicht verfügbar." / "Dieses Video ist gerade nicht verfügbar."
+    case unavailable
+
+    /// - Parameters:
+    ///   - still: What Photos' answer for the still was (`ViewerPicture.choose`); nil until it answered.
+    ///   - playing: The page's video has its player: it is its own sharp picture (review F, F6).
+    ///   - video: For a video, where it is for this page: `.unknown` while it is not asked for or
+    ///     not answered (also on a page beside the one on screen, or swiped away and back). Nil for
+    ///     a photo.
+    public static func shows(still: ViewerPicture?, playing: Bool, video: VideoAvailability?) -> ViewerPage {
+        if still == .sharp || playing { return .picture }
+        guard still == .unavailable else { return .waiting }
+        switch video {
+        case nil, .onlyInICloud, .unavailable: return .unavailable
+        case .unknown, .onDevice: return .waiting
+        }
     }
 }
 

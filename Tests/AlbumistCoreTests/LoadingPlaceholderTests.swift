@@ -73,6 +73,36 @@ struct LoadingPlaceholderTests {
         #expect(none == .sharp)
     }
 
+    /// A page says "nicht verfügbar" only once nothing will come (review V1): a photo once no sharp
+    /// picture came; a video only once the video itself is known not to play (only in iCloud, or it
+    /// cannot play). A video's small poster frame made its page say it for the moment the video
+    /// took to come, before every such video and again after a swipe away and back. Until then
+    /// the page waits with the grid's thumbnail from memory (black without one).
+    @Test func aPageSaysNotAvailableOnlyOnceNothingWillCome() {
+        // A photo: the picture once it came sharp, the note once none will, waiting until then.
+        #expect(ViewerPage.shows(still: .sharp, playing: false, video: nil) == .picture)
+        #expect(ViewerPage.shows(still: .unavailable, playing: false, video: nil) == .unavailable)
+        #expect(ViewerPage.shows(still: nil, playing: false, video: nil) == .waiting)
+        // A video that plays is its own sharp picture (review F, F6), with its still or without.
+        for still in [ViewerPicture.sharp, .unavailable, nil] {
+            #expect(ViewerPage.shows(still: still, playing: true, video: .onDevice) == .picture, "\(String(describing: still))")
+        }
+        // Its still is not sharp while the video is asked for, or not asked yet (a page beside the
+        // one on screen, a page swiped away and back): it waits.
+        #expect(ViewerPage.shows(still: .unavailable, playing: false, video: .unknown) == .waiting)
+        #expect(ViewerPage.shows(still: .unavailable, playing: false, video: .onDevice) == .waiting)
+        // Known not to play: the note, on the page itself.
+        for found in [VideoAvailability.onlyInICloud, .unavailable] {
+            #expect(ViewerPage.shows(still: .unavailable, playing: false, video: found) == .unavailable, "\(found)")
+        }
+        // A sharp still of a video that does not play shows; the note under it says why (`VideoNoteView`).
+        for found in [VideoAvailability.unknown, .onDevice, .onlyInICloud, .unavailable] {
+            #expect(ViewerPage.shows(still: .sharp, playing: false, video: found) == .picture, "\(found)")
+            // Before Photos answered for the still nothing is said, whatever the video.
+            #expect(ViewerPage.shows(still: nil, playing: false, video: found) == .waiting, "\(found)")
+        }
+    }
+
     // MARK: Thumbnails
 
     /// A thumbnail that was in memory, or came at once, is simply there: a cell rebuilt or

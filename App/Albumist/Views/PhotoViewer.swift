@@ -191,7 +191,7 @@ struct PhotoViewer: View {
     private func page(at index: Int) -> some View {
         let id = ids[index]
         let photo = ZoomablePhoto(id: id, label: label(of: id), position: position(of: index), isCurrent: id == current,
-                                  isVideo: isVideo(id), player: video.surface(for: id),
+                                  isVideo: isVideo(id), player: video.surface(for: id), videoAvailability: video.availability(for: id),
                                   top: top, pull: $pull, onTap: { toggleChrome() }, onClose: { closeNow() },
                                   onLive: { _ = livePhotos.insert($0) }, onZoom: { zoomChrome() },
                                   onPressing: { livePress(id, $0) }, onPicture: { pictureCame($0, sharp: $1) },
@@ -476,7 +476,8 @@ struct PhotoViewer: View {
 /// Photos; without one the page is black. No spinner (DS-18). The large picture shows only when
 /// it is sharp at the screen's size (`ViewerPicture`); a photo of which only Photos' small
 /// preview is on the iPhone (the photo itself in iCloud) gets the calm note instead of a big
-/// blurry picture (design rule 6).
+/// blurry picture (design rule 6), a video only once the video is known not to play
+/// (`ViewerPage`, review V1).
 private struct ZoomablePhoto: View {
     var id: AssetID
     /// What VoiceOver says: place, day and time ("München, 12. Oktober 2024, 14:32").
@@ -490,6 +491,9 @@ private struct ZoomablePhoto: View {
     var isVideo: Bool
     /// The video's player while this video is on screen (`ViewerVideo`).
     var player: ViewerVideo.Player?
+    /// Where its video is (`ViewerVideo.availability(for:)`): while it may still play, the page
+    /// waits instead of saying it is not available (review V1).
+    var videoAvailability: VideoAvailability
     /// The top of the photo's area (under the bar).
     var top: CGFloat
     @Binding var pull: CGFloat
@@ -570,27 +574,44 @@ private struct ZoomablePhoto: View {
             .simultaneousGesture(pullDown, including: scale > 1 ? .subviews : .all)
     }
 
-    /// A video that plays is its own sharp picture: it shows while its still comes and when none
-    /// came sharp (a small poster frame), never under the note (review F, F6).
+    /// What the page shows (`ViewerPage`): the picture once its still is sharp, or its video plays
+    /// over it, also while the still comes and when none came sharp (a small poster frame, review
+    /// F, F6); the note once nothing will come, for a video only once the video is known not to
+    /// play (review V1); until then it waits.
     @ViewBuilder
     private func shown(in size: CGSize) -> some View {
-        if image != nil || player != nil {
-            photo(image, in: size)
-        } else if unavailable {
-            ContentUnavailableView {
-                if isVideo {
-                    Label("Dieses Video ist gerade nicht verfügbar.", systemImage: "icloud.slash")
-                } else {
-                    Label("Dieses Foto ist gerade nicht verfügbar.", systemImage: "icloud.slash")
-                }
-            } description: {
-                Text("Vielleicht liegt es nur in iCloud. In der Fotos-App lädt iOS es herunter.")
-            }
-            .frame(width: size.width, height: size.height)
-            .accessibilityIdentifier("viewer.unavailable")
-        } else {
-            waiting(in: size)
+        switch page {
+        case .picture: photo(image, in: size)
+        case .unavailable: unavailableNote(in: size)
+        case .waiting: waiting(in: size)
         }
+    }
+
+    /// The core's rule, told where the page's video is (`.unknown` while it is not on screen).
+    private var page: ViewerPage {
+        ViewerPage.shows(still: picture, playing: player != nil, video: isVideo ? videoAvailability : nil)
+    }
+
+    /// What Photos' answer for the still was: sharp, none will come, or nil while it has not answered.
+    private var picture: ViewerPicture? {
+        if image != nil { return .sharp }
+        return unavailable ? .unavailable : nil
+    }
+
+    /// Nothing sharp came, and for a video the video does not play: said calmly instead of an
+    /// endless wait or a big blurry picture.
+    private func unavailableNote(in size: CGSize) -> some View {
+        ContentUnavailableView {
+            if isVideo {
+                Label("Dieses Video ist gerade nicht verfügbar.", systemImage: "icloud.slash")
+            } else {
+                Label("Dieses Foto ist gerade nicht verfügbar.", systemImage: "icloud.slash")
+            }
+        } description: {
+            Text("Vielleicht liegt es nur in iCloud. In der Fotos-App lädt iOS es herunter.")
+        }
+        .frame(width: size.width, height: size.height)
+        .accessibilityIdentifier("viewer.unavailable")
     }
 
     /// While the picture comes: the thumbnail the grid showed, from memory, fitted as the picture

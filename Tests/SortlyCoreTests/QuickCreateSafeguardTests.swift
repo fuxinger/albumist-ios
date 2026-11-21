@@ -13,6 +13,8 @@ import SortlyTestSupport
 /// - Findings 4 and 9: "Anlegen" on a card under "Nicht jetzt" kept the stored rejection, and
 ///   "Widerrufen" did not set the suggestion aside again; the card jumped to its area's section
 ///   the moment it was tapped.
+/// - Finding 10: after the purchase sheet, the album was made from the sheet's copy of a
+///   suggestion the analysis no longer had.
 @Suite("Quick create: where and when it may make an album")
 struct QuickCreateSafeguardTests {
     static let model = "App/Sortly/Model/AppModel+QuickCreate.swift"
@@ -208,5 +210,19 @@ struct QuickCreateSafeguardTests {
         let model = try Self.code(Self.model)
         #expect(model.contains("func quickCreateKeepsNotNow(_ id: SortlyID) -> Bool"))
         #expect(model.contains("var setAside = QuickCreateSetAside()"))
+    }
+
+    // MARK: Finding 10: after the purchase sheet
+
+    /// After the purchase, only a suggestion the analysis still has is made. A gone one is said,
+    /// never made from a copy: the sheet keeps the suggestion's id only.
+    @Test func afterThePurchaseOnlyACurrentSuggestionIsMade() throws {
+        let after = try Self.body("func continueQuickCreate(after purchase: QuickCreatePurchase)", in: Self.model)
+        #expect(!after.contains("purchase.proposal"), "made from the sheet's copy")
+        let gone = try Self.between("guard let current = proposals.first(where: { $0.id == purchase.id }) else {", "return", in: after)
+        #expect(gone.contains("message = "), "a gone suggestion is not said")
+        #expect(after.contains("await createNow(current)"))
+        let request = try Self.body("struct QuickCreatePurchase", in: Self.model)
+        #expect(!request.contains("AlbumProposal"), "the purchase sheet keeps a copy of the suggestion")
     }
 }

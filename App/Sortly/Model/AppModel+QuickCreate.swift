@@ -21,11 +21,11 @@ enum QuickCreateOutcome: Equatable {
     case failed
 }
 
-/// "Anlegen" found the free albums used up: the purchase sheet, for this suggestion. After the
-/// purchase the album is made as tapped.
+/// "Anlegen" found the free albums used up: the purchase sheet, for the suggestion `id`. After
+/// the purchase its album is made as tapped, from the suggestion as the analysis has it then:
+/// the sheet keeps no copy of it.
 struct QuickCreatePurchase: Identifiable, Equatable {
-    let proposal: AlbumProposal
-    var id: SortlyID { proposal.id }
+    let id: SortlyID
 }
 
 /// What one-tap creating keeps between taps: the banner, the suggestion being made, the purchase
@@ -130,7 +130,7 @@ extension AppModel {
         // The free albums: used up, the purchase sheet instead of the album. The suggestion
         // stays open.
         guard Purchases.shared.allows(albums: made.freeAlbumUse(applied: false)) else {
-            state.purchase = QuickCreatePurchase(proposal: proposal)
+            state.purchase = QuickCreatePurchase(id: proposal.id)
             return .needsPurchase
         }
         // A preview open on another tab keeps its own plan (`PlanReviewView`).
@@ -141,9 +141,14 @@ extension AppModel {
     }
 
     /// After the purchase the sheet asked for: the suggestion is made as tapped, in its state
-    /// now when the analysis still has it.
+    /// now. One the analysis no longer has (it made its suggestions anew meanwhile) is not made
+    /// from what it was when "Anlegen" was tapped: said instead (review B of design wave 1).
     func continueQuickCreate(after purchase: QuickCreatePurchase) async {
-        let current = proposals.first(where: { $0.id == purchase.id }) ?? purchase.proposal
+        guard let current = proposals.first(where: { $0.id == purchase.id }) else {
+            message = AppMessage(title: String(localized: "Der Vorschlag hat sich geändert"),
+                                 text: String(localized: "Während des Kaufs hat Albumist die Vorschläge aktualisiert. Angelegt wurde nichts; den neuen Stand siehst du auf der Seite „Vorschläge“."))
+            return
+        }
         await createNow(current)
     }
 

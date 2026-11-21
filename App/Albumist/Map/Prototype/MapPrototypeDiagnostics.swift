@@ -2,7 +2,7 @@ import Foundation
 import AlbumistMap
 
 /// The map prototype's part of the diagnostic report (concept 2.0 §9: "Der Diagnosebericht
-/// schreibt mit"): the latest 60-second test of each view, the altitude check of the photos and
+/// schreibt mit"): the two latest 60-second tests of each view, the altitude check of the photos and
 /// the map summary of the user's own trips with its build time. Kept as JSON in the user
 /// defaults, so a test made before a relaunch is still in the report the owner sends.
 ///
@@ -20,7 +20,7 @@ enum MapPrototypeDiagnostics {
         return measured + summary
     }
 
-    /// The latest test of each view, one per view.
+    /// The two latest tests of each view, oldest first (`MapMeasurements.TestResult.keeping`).
     static func storedResults() -> [MapMeasurements.TestResult] {
         load([MapMeasurements.TestResult].self, resultsKey) ?? []
     }
@@ -29,11 +29,10 @@ enum MapPrototypeDiagnostics {
         load(MapMeasurements.AltitudeCheck.self, altitudeKey)
     }
 
-    /// Keeps `result` as its view's latest test.
+    /// Keeps `result` as its view's latest test, and the test before it for a first-against-second
+    /// comparison (concept §9: data over the network the first and the second time).
     static func store(_ result: MapMeasurements.TestResult) {
-        var results = storedResults().filter { $0.source != result.source }
-        results.append(result)
-        save(results, resultsKey)
+        save(MapMeasurements.TestResult.keeping(storedResults(), adding: result), resultsKey)
     }
 
     static func store(_ altitude: MapMeasurements.AltitudeCheck) {

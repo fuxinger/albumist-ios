@@ -35,7 +35,7 @@ struct MapPrototypeNotes: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if metrics.runningTest == nil, let result = metrics.results[source] {
-                MapPrototypeNote(text: MapMeasurements.summary(result), lines: 4)
+                MapPrototypeNote(text: MapMeasurements.summary(result), lines: 5)
                     .accessibilityIdentifier("proto.testResult")
             }
             if let toolNote {

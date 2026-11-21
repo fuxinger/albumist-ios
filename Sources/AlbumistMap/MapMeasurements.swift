@@ -475,13 +475,16 @@ public enum MapMeasurements {
         public var events: [EventStats]
         /// The view's notes so far ("texture": "5400x2700, 78 MB").
         public var notes: [String: String]
+        /// What went over Wi-Fi and the mobile network during the test, the whole iPhone's;
+        /// `nil` when iOS gave no counters (and in tests stored before 21.11.2026).
+        public var network: NetworkUse?
 
         /// `frameRuns`: the view's frames during the test; `gpuSeconds`: its GPU times during the
         /// test. Values out of range (a battery level of -1, a memory peak below the start) are
         /// made sensible here, so a stored result always encodes.
         public init(source: Source, startedAt: Date, plannedSeconds: Double, durationSeconds: Double, frameRuns: [[Double]], gpuSeconds: [Double],
                     thermalStart: Thermal, thermalEnd: Thermal, batteryStartPercent: Double?, batteryEndPercent: Double?, charging: Bool,
-                    memoryStartMB: Double?, memoryPeakMB: Double?, events: [EventStats], notes: [String: String]) {
+                    memoryStartMB: Double?, memoryPeakMB: Double?, events: [EventStats], notes: [String: String], network: NetworkUse? = nil) {
             func percent(_ value: Double?) -> Double? {
                 guard let value = finite(value), value >= 0, value <= 100 else { return nil }
                 return value
@@ -507,6 +510,7 @@ public enum MapMeasurements {
             self.memoryPeakMB = [start, peak].compactMap { $0 }.max()
             self.events = events
             self.notes = notes
+            self.network = network
         }
 
         /// Battery percentage points used per minute (positive: used); `nil` without both
@@ -523,6 +527,104 @@ public enum MapMeasurements {
         public var isComplete: Bool { durationSeconds >= plannedSeconds - 1 }
 
         public func stats(_ event: Event) -> EventStats? { events.first { $0.event == event } }
+
+        /// How many tests of one view are kept: the latest and the one before it, so the report
+        /// can set a first run against a second (Apple's map comes partly from its cache then).
+        public static let keptPerView = 2
+
+        /// `stored` with `new` added: per view the `keptPerView` latest tests, oldest first, so the
+        /// last test of a view in the list is its latest.
+        public static func keeping(_ stored: [TestResult], adding new: TestResult) -> [TestResult] {
+            let sameView = stored.filter { $0.source == new.source }.sorted { $0.startedAt < $1.startedAt }
+            return stored.filter { $0.source != new.source } + sameView.suffix(keptPerView - 1) + [new]
+        }
+    }
+
+    // MARK: - Data over the network
+
+    /// The iPhone's network counters at one moment (concept §9, "Mobile Daten"): per interface the
+    /// bytes received and sent since its connection came up. iOS keeps them in 32 bits, so they
+    /// wrap after 4 GiB. They count the whole iPhone, not only Albumist: a fair test has nothing
+    /// else loading. The interface names stay on the device; the report gets the sums only.
+    public struct NetworkCounters: Hashable, Sendable {
+        public enum Kind: Hashable, Sendable { case wifi, cellular }
+
+        public struct Interface: Hashable, Sendable {
+            public var kind: Kind
+            public var received: UInt32
+            public var sent: UInt32
+
+            public init(kind: Kind, received: UInt32, sent: UInt32) {
+                self.kind = kind
+                self.received = received
+                self.sent = sent
+            }
+        }
+
+        /// By interface name ("en0" is Wi-Fi, "pdp_ip0" the mobile network).
+        public var interfaces: [String: Interface]
+
+        public init(interfaces: [String: Interface] = [:]) {
+            self.interfaces = interfaces
+        }
+    }
+
+    /// What went over the network during a test, in bytes, both directions together.
+    public struct NetworkUse: Hashable, Sendable, Codable {
+        public var wifiBytes: UInt64
+        public var cellularBytes: UInt64
+
+        public init(wifiBytes: UInt64 = 0, cellularBytes: UInt64 = 0) {
+            self.wifiBytes = wifiBytes
+            self.cellularBytes = cellularBytes
+        }
+
+        /// Megabytes of a million bytes, as iOS counts them in its settings.
+        public var wifiMB: Double { Double(wifiBytes) / 1_000_000 }
+        public var cellularMB: Double { Double(cellularBytes) / 1_000_000 }
+    }
+
+    /// Adds up the network use of a test from readings of the counters taken about every half
+    /// second, interface by interface. A counter that went down between two readings either
+    /// wrapped past 4 GiB (then the difference counts modulo 2^32) or started again from zero
+    /// because its connection came back (then its new value counts); more than
+    /// `plausibleBytesPerReading` since the last reading means the latter. An interface that comes
+    /// up during the test counts from zero; one that goes away adds nothing more.
+    public struct NetworkLog: Sendable {
+        /// 256 MB in about half a second is beyond any iPhone's network (4 Gbit/s).
+        public static let plausibleBytesPerReading: UInt32 = 256_000_000
+
+        private var last: NetworkCounters?
+        public private(set) var use = NetworkUse()
+        public private(set) var readings = 0
+
+        public init() {}
+
+        public mutating func add(_ reading: NetworkCounters) {
+            readings += 1
+            defer { last = reading }
+            guard let last else { return }
+            for (name, now) in reading.interfaces {
+                let before = last.interfaces[name].flatMap { $0.kind == now.kind ? $0 : nil }
+                let bytes = Self.bytes(from: before?.received, to: now.received) + Self.bytes(from: before?.sent, to: now.sent)
+                switch now.kind {
+                case .wifi: use.wifiBytes += bytes
+                case .cellular: use.cellularBytes += bytes
+                }
+            }
+        }
+
+        /// The use since the first reading; `nil` until there are two readings.
+        public var result: NetworkUse? { readings >= 2 ? use : nil }
+
+        /// The bytes between two values of one counter (`old` is `nil` for a new interface).
+        static func bytes(from old: UInt32?, to new: UInt32) -> UInt64 {
+            if let old {
+                let difference = new &- old
+                if difference <= plausibleBytesPerReading { return UInt64(difference) }
+            }
+            return new <= plausibleBytesPerReading ? UInt64(new) : 0
+        }
     }
 
     // MARK: - Altitude of the photos
@@ -651,6 +753,9 @@ public enum MapMeasurements {
                 + "to \(english(result.batteryEndPercent, decimals: 0)) % (\(english(result.batteryPerMinute, decimals: 1)) per minute, "
                 + "charging \(result.charging)); memory \(english(result.memoryStartMB, decimals: 0)) MB, peak \(english(result.memoryPeakMB, decimals: 0)) MB",
         ]
+        if let network = result.network {
+            lines.append("\(name) data: wifi \(english(network.wifiMB, decimals: 1)) MB, cellular \(english(network.cellularMB, decimals: 1)) MB (whole iPhone)")
+        }
         if !result.events.isEmpty {
             lines.append("\(name) events: " + result.events.map(eventText).joined(separator: "; "))
         }
@@ -729,6 +834,9 @@ public enum MapMeasurements {
         if result.charging { battery += ", am Strom" }
         parts.append(battery)
         parts.append("Speicher \(german(result.memoryStartMB, decimals: 0, unit: "")) → \(german(result.memoryPeakMB, decimals: 0, unit: " MB"))")
+        if let network = result.network {
+            parts.append("Netz \(german(network.wifiMB, decimals: 1, unit: " MB")) WLAN, \(german(network.cellularMB, decimals: 1, unit: " MB")) mobil")
+        }
         return "\(result.source.germanName), 60-s-Test: " + parts.joined(separator: " · ")
     }
 

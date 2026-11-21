@@ -59,8 +59,9 @@ extension MetricEvent {
 
 /// The measurements of the map prototype page (concept 2.0 §9, §13 wave 0): the views call it
 /// for every frame, GPU time and event; the HUD reads it at most twice a second; a 60-second
-/// test of one view adds heat, battery and memory and leaves a `MapMeasurements.TestResult`,
-/// which `MapPrototypeDiagnostics` keeps for the diagnostic report.
+/// test of one view adds heat, battery, memory and the data that went over the network, and
+/// leaves a `MapMeasurements.TestResult`, which `MapPrototypeDiagnostics` keeps for the
+/// diagnostic report.
 ///
 /// Cheap per frame: a frame is a timestamp appended to an array, nothing is worked out and
 /// nothing observed changes (the logs are `@ObservationIgnored`, so no view is drawn again
@@ -91,6 +92,7 @@ extension MetricEvent {
     @ObservationIgnored private var notes: [MetricSource: [String: String]] = [:]
     @ObservationIgnored private var testTask: Task<Void, Never>?
     @ObservationIgnored private var testPeakMB: Double?
+    @ObservationIgnored private var testNetwork = MapMeasurements.NetworkLog()
 
     /// The view on screen: a memory warning is counted for it.
     @ObservationIgnored var activeSource: MetricSource = .ownGlobe
@@ -175,6 +177,8 @@ extension MetricEvent {
         if enabled { device.isBatteryMonitoringEnabled = true }
         let memory = PrototypeMemory.footprintMB()
         testPeakMB = memory
+        testNetwork = MapMeasurements.NetworkLog()
+        sampleNetwork()
         let now = Date()
         runningTest = RunningTest(source: source, startedAt: now, endsAt: now.addingTimeInterval(seconds), plannedSeconds: seconds,
                                   startMediaTime: CACurrentMediaTime(), thermalStart: Self.thermalNow(), batteryStartPercent: Self.batteryPercent(),
@@ -185,6 +189,7 @@ extension MetricEvent {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, let test = self.runningTest, !Task.isCancelled else { return }
                 self.sampleMemory()
+                self.sampleNetwork()
                 if Date() >= test.endsAt {
                     self.finishTest()
                     return
@@ -212,11 +217,18 @@ extension MetricEvent {
         testPeakMB = max(testPeakMB ?? now, now)
     }
 
+    /// A reading of the network counters, about every half second while a test runs.
+    private func sampleNetwork() {
+        guard let reading = PrototypeNetwork.counters() else { return }
+        testNetwork.add(reading)
+    }
+
     private func finishTest() {
         guard let test = runningTest else { return }
         testTask?.cancel()
         testTask = nil
         sampleMemory()
+        sampleNetwork()
         let source = test.source
         let result = MapMeasurements.TestResult(
             source: source.measured, startedAt: test.startedAt, plannedSeconds: test.plannedSeconds,
@@ -227,7 +239,7 @@ extension MetricEvent {
             batteryStartPercent: test.batteryStartPercent, batteryEndPercent: Self.batteryPercent(),
             charging: test.chargingAtStart || Self.isCharging(),
             memoryStartMB: test.memoryStartMB, memoryPeakMB: testPeakMB,
-            events: eventLogs[source]?.allStats ?? [], notes: notes[source] ?? [:])
+            events: eventLogs[source]?.allStats ?? [], notes: notes[source] ?? [:], network: testNetwork.result)
         if test.enabledBatteryMonitoring { UIDevice.current.isBatteryMonitoringEnabled = false }
         runningTest = nil
         results[source] = result

@@ -258,12 +258,7 @@ struct SearchView: View {
         let hit = model.factsByID[id]
         let key = source + ":" + id.rawValue
         return Button {
-            zoomSource = key
-            // The best hits sit above the grid and may lie beyond the pages shown: the
-            // viewer always contains the photo that was tapped.
-            var ids = Array(result.ids.prefix(shown))
-            if !ids.contains(id) { ids.insert(id, at: 0) }
-            viewing = PhotoViewer.Start(id: id, ids: ids)
+            open(id, from: key)
         } label: {
             AssetThumbnail(id: id, side: 110)
                 .aspectRatio(1, contentMode: .fill)
@@ -274,6 +269,32 @@ struct SearchView: View {
         .disabled(hit == nil)
         .accessibilityLabel(Text(hit?.asset.creationDate?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
         .accessibilityIdentifier("search.result")
+        // The long press (DS-06a): the photo larger, with what a hit offers.
+        .photoMenu(id, place: .search, available: hit != nil) { action in
+            perform(action, on: id, from: key)
+        }
+    }
+
+    /// The photo large, zooming out of the thumbnail `key` (a photo can be in the best hits and
+    /// in the grid).
+    private func open(_ id: AssetID, from key: String) {
+        zoomSource = key
+        // The best hits sit above the grid and may lie beyond the pages shown: the
+        // viewer always contains the photo that was tapped.
+        var ids = Array(result.ids.prefix(shown))
+        if !ids.contains(id) { ids.insert(id, at: 0) }
+        viewing = PhotoViewer.Start(id: id, ids: ids)
+    }
+
+    /// An item of a hit's long press, the search's way: "Ansehen" as a tap, "Zu Album
+    /// hinzufügen …" the sheet "Als Album anlegen" opens (then the preview).
+    private func perform(_ action: PhotoMenu.Item, on id: AssetID, from key: String) {
+        switch action {
+        case .view: open(id, from: key)
+        case .addToAlbum: addingToAlbum = [id]
+        // Ignoring is the model's, the same everywhere (`PhotoMenuItems`); a suggestion's own.
+        case .ignore, .stopIgnoring, .removeFromSuggestion: break
+        }
     }
 
     static func symbol(_ kind: SearchToken.Kind) -> String {

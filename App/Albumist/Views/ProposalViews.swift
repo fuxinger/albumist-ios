@@ -603,6 +603,8 @@ struct ProposalDetailView: View {
                 ProposalPhotosView(days: days, selecting: selecting, selected: $selected, hidden: photosHidden,
                                    disabled: busy) {
                     revealed = true
+                } remove: { id in
+                    Task { await model.removeFromProposal([id], proposal: proposal) }
                 }
                 .padding(.top, Theme.Spacing.xl)
             }
@@ -1674,7 +1676,12 @@ struct ProposalPhotosView: View {
     /// under them).
     var disabled: Bool
     var reveal: () -> Void
+    /// Takes one photo out of the suggestion, once its long press's "Aus Vorschlag entfernen"
+    /// was confirmed (`AppModel.removeFromProposal`, as "Auswählen" takes several out).
+    var remove: (AssetID) -> Void
     @State private var viewing: PhotoViewer.Start?
+    /// The photo whose "Aus Vorschlag entfernen" is being asked about.
+    @State private var removing: AssetID?
     @Namespace private var zoom
     /// Three in a row from the narrowest iPhone (375 pt) to the widest (440 pt); more on an iPad.
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 2)]
@@ -1708,6 +1715,34 @@ struct ProposalPhotosView: View {
             PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
                 .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
+        // One photo from its long press: asked first, as "Auswählen" asks for several.
+        .confirmationDialog("Foto aus diesem Vorschlag entfernen?", isPresented: asking, titleVisibility: .visible,
+                            presenting: removing) { id in
+            Button("Entfernen", role: .destructive) { remove(id) }
+        } message: { _ in
+            Text("Es kommt nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleibt es.")
+        }
+    }
+
+    private var asking: Binding<Bool> {
+        Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })
+    }
+
+    /// The photo large, the suggestion's others to swipe through (a snapshot: a photo ignored
+    /// from its details must not reshuffle the pages).
+    private func open(_ id: AssetID) {
+        viewing = PhotoViewer.Start(id: id, ids: days.flatMap(\.ids))
+    }
+
+    /// An item of the photo's long press: "Ansehen" as a tap, "Aus Vorschlag entfernen" asked
+    /// first.
+    private func perform(_ item: PhotoMenu.Item, on id: AssetID) {
+        switch item {
+        case .view: open(id)
+        case .removeFromSuggestion: removing = id
+        // Not offered for a suggestion's photos (`PhotoMenu`): they stay behind "Ansehen" › "Info".
+        case .addToAlbum, .ignore, .stopIgnoring: break
+        }
     }
 
     /// "Samstag, 12. Oktober" with "3 Fotos" at the end of the line; below each other at the
@@ -1734,8 +1769,7 @@ struct ProposalPhotosView: View {
         return Button {
             // Outside "Auswählen" a tap opens the photo large (first device test 15.11.).
             guard selecting else {
-                // A snapshot: a photo ignored from its details must not reshuffle the pages.
-                viewing = PhotoViewer.Start(id: id, ids: days.flatMap(\.ids))
+                open(id)
                 return
             }
             if isSelected { selected.remove(id) } else { selected.insert(id) }
@@ -1762,6 +1796,10 @@ struct ProposalPhotosView: View {
         .accessibilityLabel(Text(spokenDate(id)))
         .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
         .accessibilityIdentifier("proposalPhotos.photo")
+        // The long press (DS-06a): the photo larger, "Ansehen" and "Aus Vorschlag entfernen".
+        .photoMenu(id, place: .suggestion, selecting: selecting, available: !disabled) { item in
+            perform(item, on: id)
+        }
     }
 
     /// The photo's date and time on the clock where it was taken, as its day's header says it.

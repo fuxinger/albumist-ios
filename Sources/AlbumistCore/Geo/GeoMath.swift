@@ -100,17 +100,4 @@ public struct GeoCell: Hashable, Sendable, Codable, CustomStringConvertible {
     }
 
     public var description: String { "\(Int(sizeMeters))m:\(x):\(y)" }
-
-    /// The 3×3 neighbourhood including this cell.
-    public var neighbourhood: [GeoCell] {
-        var cells: [GeoCell] = []
-        cells.reserveCapacity(9)
-        for dy in -1...1 {
-            let ny = y + dy
-            for dx in -1...1 {
-                cells.append(GeoCell(x: x + dx, y: ny, sizeMeters: sizeMeters))
-            }
-        }
-        return cells
-    }
 }

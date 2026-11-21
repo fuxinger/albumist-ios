@@ -25,13 +25,6 @@ public enum PlannedOperation: Hashable, Sendable, Codable {
     case removeAssets(album: CollectionID, assets: [AssetID])
     /// Deletes an album or folder *container*. Originals stay in the library.
     case deleteCollection(CollectionID, title: String)
-
-    public var isStructural: Bool {
-        switch self {
-        case .renameCollection, .moveCollection, .removeAssets, .deleteCollection: true
-        default: false
-        }
-    }
 }
 
 public enum StepState: Hashable, Sendable, Codable {

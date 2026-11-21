@@ -122,14 +122,6 @@ public struct PlaceComponents: Hashable, Sendable, Codable {
         }
         return parts.isEmpty ? nil : PlaceKey(level: level, path: parts.joined(separator: "/"))
     }
-
-    /// Most specific human-readable name that is available, up to `maxLevel`.
-    public func bestName(maxLevel: PlaceLevel = .locality) -> String? {
-        for level in PlaceLevel.allCases.reversed() where level <= maxLevel && level >= .country {
-            if let n = name(at: level) { return n }
-        }
-        return nil
-    }
 }
 
 /// Normalized place identity at a given level.

@@ -3,9 +3,12 @@
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
 - 21.11. Zwei Momente (Design-Welle 2, Entwürfe E3 und E6, noch in keinem Build): Nach dem Umsetzen legen sich die
-  Cover der neuen Alben gefächert über die Zahl, das Hauptcover zuletzt und mit dem einen Erfolgs-Tap; nur ergänzte
-  Alben heißen jetzt „12 Fotos in 3 deiner Alben ergänzt“. Nach „Anlegen“ auf einer Karte fliegt ihr Cover in den
-  Tab „Alben“. Mit „Bewegung reduzieren“ wird nur eingeblendet.
+  Cover der neuen Alben gefächert über die Zahl, das Hauptcover zuletzt und mit dem einen Erfolgs-Tap (spätestens
+  1,5 s nach dem Ergebnis; ohne geladenes Cover sofort das Symbol); nur ergänzte Alben des Nutzers heißen „12 Fotos
+  in 3 deiner Alben ergänzt“, Alben von Albumist und „Fehlendes erneut versuchen“ „1 Album ergänzt · mit 5 Fotos“.
+  Nach „Anlegen“ auf einer Karte fliegt ihr Cover Richtung Tab „Alben“ und verblasst an der Leiste, nur bei offener
+  Tab-Leiste; der Erfolgs-Tap kommt wie bisher mit dem Banner. Mit „Bewegung reduzieren“ blenden die Cover des
+  Ergebnisses nur ein, nach „Anlegen“ fliegt nichts.
 - Neue Fortschrittsanzeige der Analyse (Entwurf v3 mit den 5 Punkten vom 15.11.): ein Balken in
   6 Abschnitten nach Zeitanteil, „Fertig gegen 23:40“ für die ganze Analyse, gleitender Balken,
   „Schon fertig: 51 Reisen, 38 Orte · Ansehen“, Fertig-Moment mit Häkchen, Details-Blatt,

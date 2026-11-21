@@ -165,7 +165,8 @@ extension SortedRing where Inside == EmptyView {
 ///
 /// - No haptic of its own: the success tap of "Analyse fertig" (`AnalysisFinishedView`) comes
 ///   with it, as it always did. Nothing flies (only the two moments of wave 2 do), nothing glows.
-/// - Reduce Motion (and the UI runs): the bar shows joined, the moment fades in and out.
+/// - Reduce Motion (and the UI runs, which show it only when a test asks for it): the bar shows
+///   joined, the moment fades in and out.
 /// - VoiceOver: said once ("Analyse fertig: 100 %"). The moment is decoration and hidden; "Analyse
 ///   fertig" below stays the element to read and to tap.
 struct FirstAnalysisMomentHeader: View {
@@ -250,7 +251,7 @@ struct FirstAnalysisMomentHeader: View {
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: T.join)) { joined = true }
         }
-        let hold = UITestSupport.isRunning ? T.uiTestHold : T.hold
+        let hold = FirstAnalysisMomentStore.askedByUITest ? T.heldForUITest : T.hold
         try? await Task.sleep(for: .seconds(calm ? hold : hold - T.joinDelay))
         guard !Task.isCancelled else { return }
         withAnimation(calm ? .easeInOut(duration: T.fade) : .smooth(duration: T.fold)) { store.ended() }

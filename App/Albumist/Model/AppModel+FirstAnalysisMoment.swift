@@ -18,6 +18,12 @@ final class FirstAnalysisMomentStore {
 
     private static let key = "analysis.firstFinishMoment"
 
+    /// `-AlbumistUITestFirstFinishMoment`: a UI test asks for the moment and finds it, held
+    /// `FirstAnalysisMoment.Timing.heldForUITest`. Other UI runs never show it: the start page
+    /// would change under the audits that follow the first analysis (UI run 43774578089 ended
+    /// test 1 on a page that changed during its audit). Always false in the shipped app.
+    static let askedByUITest = UITestSupport.isRunning && ProcessInfo.processInfo.arguments.contains("-AlbumistUITestFirstFinishMoment")
+
     private(set) var moment: FirstAnalysisMoment
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
@@ -53,13 +59,13 @@ final class FirstAnalysisMomentStore {
     /// The card with "Analyse fertig" is there: true once, while due and on screen; it plays
     /// from now.
     func claim(onScreen: Bool) -> Bool {
-        guard moment.dueSince != nil else { return false }
+        guard moment.dueSince != nil, !UITestSupport.isRunning || Self.askedByUITest else { return false }
         return moment.claim(at: Date(), onScreen: onScreen)
     }
 
-    /// It folded away, or the card went (another tab, a new run).
+    /// It folded away, or its card went while it played (another tab, a new run).
     func ended() {
-        guard moment.playing || moment.dueSince != nil else { return }
+        guard moment.playing else { return }
         moment.ended()
     }
 

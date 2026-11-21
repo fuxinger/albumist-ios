@@ -137,6 +137,19 @@ struct FirstAnalysisMomentSourceTests {
         #expect(bar.contains("FirstAnalysisMoment.segments(shares: shares, width: Double(rect.width), joined: joined)"))
     }
 
+    /// UI runs show it only when a test asks for it (`-AlbumistUITestFirstFinishMoment`), held
+    /// long enough to be found; otherwise the start page would change under the audits after
+    /// the first analysis. Never so in the shipped app (`UITestSupport.isRunning` is false there).
+    @Test func uiRunsShowItOnlyWhenATestAsks() throws {
+        let store = try Self.code(Self.store)
+        #expect(store.contains("static let askedByUITest = UITestSupport.isRunning && ProcessInfo.processInfo.arguments.contains(\"-AlbumistUITestFirstFinishMoment\")"))
+        let claim = try Self.body(["final class FirstAnalysisMomentStore", "func claim(onScreen: Bool)"], in: store)
+        #expect(claim.contains("guard moment.dueSince != nil, !UITestSupport.isRunning || Self.askedByUITest else { return false }"), "\(claim)")
+        let ring = try Self.code(Self.ringCard)
+        let play = try Self.body(["struct FirstAnalysisMomentHeader", "private func play() async"], in: ring)
+        #expect(play.contains("let hold = FirstAnalysisMomentStore.askedByUITest ? T.heldForUITest : T.hold"), "\(play)")
+    }
+
     /// What VoiceOver says, in German and English.
     @Test func theSpokenLineIsInTheCatalog() throws {
         let data = try #require(try AppSource.read("App/Albumist/Resources/Localizable.xcstrings").data(using: .utf8))

@@ -217,6 +217,22 @@ struct FirstAnalysisMomentTests {
         #expect(onScreen)
     }
 
+    /// The card went before the moment played (a run started meanwhile, off screen): it stays
+    /// due, and the next "Analyse fertig" within the window brings it. Once it played, a card
+    /// that goes ends it.
+    @Test func aCardThatGoesBeforeItPlaysLeavesItDue() {
+        var moment = Self.fresh()
+        Self.end(&moment)
+        moment.ended()
+        #expect(moment.isDue(at: Self.at(60)))
+        let plays = moment.claim(at: Self.at(90), onScreen: true)
+        #expect(plays)
+        moment.ended()
+        #expect(!moment.playing && !moment.shows(at: Self.at(91)))
+        let again = moment.claim(at: Self.at(92), onScreen: true)
+        #expect(!again)
+    }
+
     // MARK: What finishes the first analysis
 
     /// Paused, cut off by iOS or the device, ended by an error, a change of the settings left: the
@@ -309,13 +325,15 @@ struct FirstAnalysisMomentTests {
     // MARK: How it plays
 
     /// Short and calm: the bar joins after the card settled, the whole is gone within four
-    /// seconds; with Reduce Motion it only fades.
+    /// seconds, before the UI runs' usual wait for an idle start page (three checks two seconds
+    /// apart) is over; with Reduce Motion it only fades. A UI test that asks for it finds it
+    /// with those checks.
     @Test func itIsShort() {
         typealias T = FirstAnalysisMoment.Timing
         #expect(T.joinDelay > 0 && T.joinDelay + T.join < T.hold)
         #expect(T.hold + T.fold <= 4)
         #expect(T.fade > 0 && T.fade <= 0.35)
-        #expect(T.uiTestHold > T.hold && T.uiTestHold <= 8)
+        #expect(T.heldForUITest >= 10 && T.heldForUITest <= 20)
     }
 
     // MARK: The bar joining

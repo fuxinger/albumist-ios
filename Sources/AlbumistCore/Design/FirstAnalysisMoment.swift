@@ -96,24 +96,24 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
         return true
     }
 
-    /// It folded away, or the card went (another tab, a new run): over.
+    /// It folded away, or its card went while it played (another tab, a new run): over. A card
+    /// that went before it played leaves it due: the next card within `window` brings it.
     public mutating func ended() {
-        dueSince = nil
         playing = false
     }
 
     /// How it plays (`FirstAnalysisMomentHeader`): "100 %" and the full bar come with "Analyse
     /// fertig"; after `joinDelay` the bar's six parts close into one over `join`; it stays until
     /// `hold` from its start and folds away over `fold`. Calm (Reduce Motion): the bar shows
-    /// joined, nothing moves, it fades in and out over `fade`. UI runs hold it `uiTestHold`, so a
-    /// screenshot finds it.
+    /// joined, nothing moves, it fades in and out over `fade`. A UI test that asks for it holds it
+    /// `heldForUITest`, so its checks every two seconds and its screenshot find it.
     public enum Timing {
         public static let joinDelay = 0.35
         public static let join = 0.7
         public static let hold = 3.2
         public static let fold = 0.45
         public static let fade = 0.3
-        public static let uiTestHold = 6.0
+        public static let heldForUITest = 15.0
     }
 
     /// One part of the bar as it joins: from `x`, `width` points wide; its ends round by these

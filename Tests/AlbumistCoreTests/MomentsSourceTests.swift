@@ -249,8 +249,12 @@ struct MomentsSourceTests {
         }
         // The ratios are the ones the cards draw their covers at.
         let start = try Self.code(Self.start)
-        let startCard = try Self.body(["struct StartProposalCard", "var body: some View"], in: start)
-        #expect(startCard.contains("aspectRatio: style == .large ? 2 : 3.0 / 2.0"), "\(startCard)")
+        // The start card is built from small typed parts (Xcode's type checker, wave 2 H7): its
+        // photo card takes the ratio from its own property.
+        let startCard = try Self.body(["struct StartProposalCard", "private var photoCard: some View"], in: start)
+        #expect(startCard.contains("aspectRatio: aspectRatio"), "\(startCard)")
+        let startRatio = try Self.body(["struct StartProposalCard", "private var aspectRatio: CGFloat"], in: start)
+        #expect(startRatio.contains("style == .large ? 2 : 3.0 / 2.0"), "\(startRatio)")
         let list = try Self.code(Self.list)
         let listCard = try Self.body(["var photoCard: some View"], in: list)
         #expect(listCard.contains("PhotoCard(") && !listCard.contains("aspectRatio:"), "\(listCard)")

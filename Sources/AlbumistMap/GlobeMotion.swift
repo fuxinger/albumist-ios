@@ -293,6 +293,20 @@ public struct GlobeMotion: Sendable {
         fly(to: optics.doubleTapTarget(atX: x, y: y), duration: Self.doubleTapSeconds)
     }
 
+    /// A tap with two fingers: twice the width round the same centre, as a short flight (Apple's
+    /// maps zoom out so), at most `GlobeCamera.maximumWidthMeters`.
+    public mutating func zoomOut() {
+        guard !isHandedOver else { return }
+        fly(to: GlobeCamera(center: camera.center, widthMeters: camera.widthMeters * 2), duration: Self.doubleTapSeconds)
+    }
+
+    /// A finger touched the globe: a flight or the coasting stops where it is, as in Apple's maps.
+    /// The spin goes on once no finger is on the globe.
+    public mutating func halt() {
+        activeFlight = nil
+        activeInertia = nil
+    }
+
     /// Moves the camera on by a frame of `seconds`: the flight, else the coasting, else the spin
     /// (not while a finger is on the globe).
     public mutating func advance(by seconds: Double) {

@@ -384,6 +384,43 @@ struct GlobeMotionTests {
         #expect(motion.camera == still)
     }
 
+    @Test func aTwoFingerTapZoomsOutRoundTheCentre() {
+        var motion = motion(camera(48, 11, 4_000_000))
+        motion.zoomOut()
+        #expect(motion.isFlying)
+        for _ in 0..<21 { motion.advance(by: 1.0 / 60) }
+        #expect(!motion.isFlying && motion.camera == camera(48, 11, 8_000_000))
+        // Never beyond the farthest view.
+        motion.jump(to: camera(48, 11, GlobeCamera.maximumWidthMeters * 0.8))
+        motion.zoomOut()
+        for _ in 0..<21 { motion.advance(by: 1.0 / 60) }
+        #expect(motion.camera.widthMeters == GlobeCamera.maximumWidthMeters)
+    }
+
+    @Test func aTouchHaltsFlightsAndCoastingButNotTheSpin() {
+        var motion = motion(GlobeCamera.wholeEarth)
+        motion.fly(to: camera(0, 100, 5_000_000), duration: 3)
+        motion.advance(by: 1)
+        let halted = motion.camera
+        motion.halt()
+        motion.advance(by: 1)
+        #expect(!motion.isFlying && motion.camera == halted)
+
+        motion.beginDrag(atX: 195, y: 422)
+        motion.moveDrag(toX: 255, y: 422)
+        motion.endDrag(velocityX: 900, velocityY: 0)
+        #expect(motion.isCoasting)
+        motion.halt()
+        let still = motion.camera
+        motion.advance(by: 0.1)
+        #expect(!motion.isCoasting && motion.camera == still)
+
+        motion.isAutoRotating = true
+        motion.halt()
+        motion.advance(by: 0.2)
+        #expect(motion.isMoving && abs(MapHome.normalizedLongitude(still.center.longitude - motion.camera.center.longitude) - 2) < 1e-9)
+    }
+
     @Test func aJumpEndsEveryMotion() {
         var motion = motion(GlobeCamera.wholeEarth)
         motion.fly(to: camera(0, 100, 5_000_000), duration: 3)

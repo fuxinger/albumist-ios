@@ -112,7 +112,14 @@ public struct CountryMask: Hashable, Sendable {
     public struct Level: Hashable, Sendable {
         public var width: Int
         public var height: Int
+        /// Row by row from the north, `width` per row.
         public var pixels: [UInt8]
+
+        public init(width: Int, height: Int, pixels: [UInt8]) {
+            self.width = width
+            self.height = height
+            self.pixels = pixels
+        }
 
         func halved() -> Level {
             let w = max(1, width / 2), h = max(1, height / 2)

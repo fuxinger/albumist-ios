@@ -6091,6 +6091,16 @@
         }
       }
     },
+    "Zu Album hinzufügen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add to Album…"
+          }
+        }
+      }
+    },
     "Zugriff auf deine Fotos" : {
       "localizations" : {
         "en" : {
@@ -7861,6 +7871,26 @@
         }
       }
     },
+    "Aus Vorschlag entfernen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove from Suggestion"
+          }
+        }
+      }
+    },
+    "Foto aus diesem Vorschlag entfernen?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Photo from This Suggestion?"
+          }
+        }
+      }
+    },
     "Fotos aus diesem Vorschlag entfernen?" : {
       "localizations" : {
         "en" : {
@@ -7887,6 +7917,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "They won’t go into this album. They stay in your library and in other suggestions."
+          }
+        }
+      }
+    },
+    "Es kommt nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleibt es." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It won’t go into this album. It stays in your library and in other suggestions."
           }
         }
       }

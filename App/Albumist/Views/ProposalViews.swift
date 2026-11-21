@@ -161,6 +161,8 @@ struct ProposalListView: View {
             let banner = model.quickCreateBanner?.proposalID
             made = made.filter { $0.key == banner }
         }
+        // What a card's long press opens: "Anpassen", the trip workshop, "Keine Reise?" (DS-06a).
+        .suggestionMenuFlows()
     }
 
     private var columns: [GridItem] {
@@ -254,6 +256,8 @@ struct ProposalListView: View {
 /// Photos will show it, its status, and its one action, or a tick while the list selects.
 private struct ProposalListCard: View {
     @Environment(AppModel.self) private var model
+    /// The list's sheets and question for the long press (`suggestionMenuFlows()`).
+    @Environment(\.openSuggestionMenuFlow) private var openFlow
     var proposal: AlbumProposal
     /// Its words (`AppModel.proposalCard`), made once for the whole list.
     var card: ProposalCardText
@@ -286,12 +290,37 @@ private struct ProposalListCard: View {
 
     /// The photo card, ticked while the list selects and the card is chosen.
     private var photoCard: some View {
-        PhotoCard(coverIDs: model.proposalCoverIDs(for: proposal), title: Text(verbatim: card.title),
+        PhotoCard(coverIDs: covers, title: Text(verbatim: card.title),
                   subtitle: card.styledSubtitle, hidesPreview: card.hidesPreview,
                   placeholderSymbol: proposal.placeholderSymbol, onOpen: opens) {
             cardAction
+        } menu: {
+            menuItems
+        } preview: {
+            menuPreview
         }
         .selected(selecting && isSelected)
+    }
+
+    /// The cover's candidates; none while its photos are hidden (every one a sensitive document).
+    private var covers: [AssetID] {
+        card.hidesPreview ? [] : model.proposalCoverIDs(for: proposal)
+    }
+
+    /// The long press (design wave 2, DS-06a; draft E4): the card's word first, doing what its
+    /// button does, then what the open suggestion's "…" offers; nothing while its album is made,
+    /// once it is made, or while the list selects.
+    private var menuItems: SuggestionMenuItems {
+        SuggestionMenuItems(model: model, openFlow: openFlow, proposal: proposal, card: card, made: made,
+                            working: model.quickCreating == proposal.id,
+                            waits: model.quickCreating != nil && model.quickCreating != proposal.id,
+                            selecting: selecting, act: { act(card.action) })
+    }
+
+    /// What the long press lifts: the suggestion large, as an album's long press shows the album.
+    private var menuPreview: SuggestionPreview {
+        SuggestionPreview(covers: covers, hidesPreview: card.hidesPreview, title: card.title, line: card.styledSubtitle,
+                          placeholderSymbol: proposal.placeholderSymbol)
     }
 
     /// The card's body opens the suggestion, or ticks it while the list selects (`onOpen`: its
@@ -574,6 +603,8 @@ struct ProposalDetailView: View {
                 ProposalPhotosView(days: days, selecting: selecting, selected: $selected, hidden: photosHidden,
                                    disabled: busy) {
                     revealed = true
+                } remove: { id in
+                    Task { await model.removeFromProposal([id], proposal: proposal) }
                 }
                 .padding(.top, Theme.Spacing.xl)
             }
@@ -933,7 +964,7 @@ struct ProposalDetailView: View {
                 .accessibilityIdentifier("proposal.oftenHere.no")
             // Why a button waits (design review N8 found the two buttons behaving differently
             // without a word why): "Ja" plans the trips anew, "Nein" changes nothing.
-            if let reason = oftenHereWaitReason(askedOnTheCard: true) {
+            if let reason = Self.oftenHereWaitReason(model, askedOnTheCard: true) {
                 Text(reason)
                     .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -943,8 +974,8 @@ struct ProposalDetailView: View {
 
     /// Why "Ja, hier bin ich öfter" on the question card (and during a change in "Dein
     /// Zuhause" also "Nein"), or "Keine Reise, hier bin ich öfter" on a trip, waits; nil when it
-    /// can be tapped.
-    private func oftenHereWaitReason(askedOnTheCard: Bool) -> LocalizedStringKey? {
+    /// can be tapped. Also the reason in a card's long press (`SuggestionMenuItems`).
+    static func oftenHereWaitReason(_ model: AppModel, askedOnTheCard: Bool) -> LocalizedStringKey? {
         if model.homeChangeRunning {
             return LocalizedStringKey("Gleich wieder möglich: Albumist passt gerade die Vorschläge an deine Änderung in „Dein Zuhause“ an.")
         }
@@ -1300,7 +1331,7 @@ struct ProposalDetailView: View {
                             Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
                             // Why it waits, as on the question card: a second Text in the label
                             // is the menu item's second line (screenshot 63b-trip-menu-analysis).
-                            if let reason = oftenHereWaitReason(askedOnTheCard: false) {
+                            if let reason = Self.oftenHereWaitReason(model, askedOnTheCard: false) {
                                 Text(reason)
                             }
                         }
@@ -1319,7 +1350,7 @@ struct ProposalDetailView: View {
     /// visited too rarely for the question (a semester abroad, a new second home). Not while
     /// the question card asks it.
     private var offersOftenHere: Bool {
-        model.recurringPlaceQuestion(for: proposal) == nil && model.canMarkRecurringPlace(proposal)
+        model.offersNotATrip(proposal)
     }
 
     // MARK: The preview
@@ -1645,7 +1676,12 @@ struct ProposalPhotosView: View {
     /// under them).
     var disabled: Bool
     var reveal: () -> Void
+    /// Takes one photo out of the suggestion, once its long press's "Aus Vorschlag entfernen"
+    /// was confirmed (`AppModel.removeFromProposal`, as "Auswählen" takes several out).
+    var remove: (AssetID) -> Void
     @State private var viewing: PhotoViewer.Start?
+    /// The photo whose "Aus Vorschlag entfernen" is being asked about.
+    @State private var removing: AssetID?
     @Namespace private var zoom
     /// Three in a row from the narrowest iPhone (375 pt) to the widest (440 pt); more on an iPad.
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 2)]
@@ -1679,6 +1715,34 @@ struct ProposalPhotosView: View {
             PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
                 .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
+        // One photo from its long press: asked first, as "Auswählen" asks for several.
+        .confirmationDialog("Foto aus diesem Vorschlag entfernen?", isPresented: asking, titleVisibility: .visible,
+                            presenting: removing) { id in
+            Button("Entfernen", role: .destructive) { remove(id) }
+        } message: { _ in
+            Text("Es kommt nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleibt es.")
+        }
+    }
+
+    private var asking: Binding<Bool> {
+        Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })
+    }
+
+    /// The photo large, the suggestion's others to swipe through (a snapshot: a photo ignored
+    /// from its details must not reshuffle the pages).
+    private func open(_ id: AssetID) {
+        viewing = PhotoViewer.Start(id: id, ids: days.flatMap(\.ids))
+    }
+
+    /// An item of the photo's long press: "Ansehen" as a tap, "Aus Vorschlag entfernen" asked
+    /// first.
+    private func perform(_ item: PhotoMenu.Item, on id: AssetID) {
+        switch item {
+        case .view: open(id)
+        case .removeFromSuggestion: removing = id
+        // Not offered for a suggestion's photos (`PhotoMenu`): they stay behind "Ansehen" › "Info".
+        case .addToAlbum, .ignore, .stopIgnoring: break
+        }
     }
 
     /// "Samstag, 12. Oktober" with "3 Fotos" at the end of the line; below each other at the
@@ -1705,8 +1769,7 @@ struct ProposalPhotosView: View {
         return Button {
             // Outside "Auswählen" a tap opens the photo large (first device test 15.11.).
             guard selecting else {
-                // A snapshot: a photo ignored from its details must not reshuffle the pages.
-                viewing = PhotoViewer.Start(id: id, ids: days.flatMap(\.ids))
+                open(id)
                 return
             }
             if isSelected { selected.remove(id) } else { selected.insert(id) }
@@ -1733,6 +1796,10 @@ struct ProposalPhotosView: View {
         .accessibilityLabel(Text(spokenDate(id)))
         .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
         .accessibilityIdentifier("proposalPhotos.photo")
+        // The long press (DS-06a): the photo larger, "Ansehen" and "Aus Vorschlag entfernen".
+        .photoMenu(id, place: .suggestion, selecting: selecting, available: !disabled) { item in
+            perform(item, on: id)
+        }
     }
 
     /// The photo's date and time on the clock where it was taken, as its day's header says it.

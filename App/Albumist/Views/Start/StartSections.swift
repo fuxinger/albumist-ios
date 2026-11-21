@@ -82,6 +82,8 @@ struct StartSections: View {
         .onChange(of: model.quickCreateBanner?.id) { _, _ in
             if let banner = model.quickCreateBanner { visit.announced(banner.proposalID, by: banner.plan.id) }
         }
+        // What a card's long press opens: "Anpassen", the trip workshop, "Keine Reise?" (DS-06a).
+        .suggestionMenuFlows()
     }
 
     /// A new visit (`StartVisit`), which remembers at once what it shows (whatever runs first,
@@ -356,14 +358,53 @@ struct StartProposalCard: View {
     var style: PhotoCardStyle
     var onOpen: () -> Void
     var onAction: () -> Void
+    /// For the long press's menu, which reads them only when it is drawn.
+    @Environment(AppModel.self) private var model
+    @Environment(\.openSuggestionMenuFlow) private var openFlow
 
+    // Built from small parts, each with its own type: Xcode gave up on one expression with a
+    // condition and several trailing closures in the list's card (CI 44847306162).
     var body: some View {
+        photoCard
+            .accessibilityIdentifier(identifier)
+    }
+
+    /// The card with its one button, and the long press's menu and lifted card.
+    private var photoCard: some View {
         PhotoCard(coverIDs: covers, title: Text(verbatim: text.title), subtitle: text.styledSubtitle,
-                  hidesPreview: text.hidesPreview, aspectRatio: style == .large ? 2 : 3.0 / 2.0, style: style,
+                  hidesPreview: text.hidesPreview, aspectRatio: aspectRatio, style: style,
                   placeholderSymbol: proposal.kind.area.symbol, onOpen: onOpen) {
             button
+        } menu: {
+            menuItems
+        } preview: {
+            menuPreview
         }
-        .accessibilityIdentifier("suggestion.card.\(made ? "made" : text.action.kind)")
+    }
+
+    /// Wide on a large card, 3:2 in a row.
+    private var aspectRatio: CGFloat {
+        style == .large ? 2 : 3.0 / 2.0
+    }
+
+    /// For UI tests: `suggestion.card.create` (`add`, `name`, `look`), `suggestion.card.made`.
+    private var identifier: String {
+        "suggestion.card.\(made ? "made" : text.action.kind)"
+    }
+
+    /// The long press (design wave 2, DS-06a; draft E4): the card's word first, doing what its
+    /// button does, then what the open suggestion's "…" offers; nothing while it works or once
+    /// it is made. Each part a typed property of its own, so Xcode type-checks the card at once.
+    private var menuItems: SuggestionMenuItems {
+        SuggestionMenuItems(model: model, openFlow: openFlow, proposal: proposal, card: text, made: made,
+                            working: working, waits: waits, act: onAction)
+    }
+
+    /// What the long press lifts: the suggestion large, as an album's long press shows the album,
+    /// "Vorschau ausgeblendet" where the card hides its photos (the page hands it no covers then).
+    private var menuPreview: SuggestionPreview {
+        SuggestionPreview(covers: covers, hidesPreview: text.hidesPreview, title: text.title, line: text.styledSubtitle,
+                          placeholderSymbol: proposal.kind.area.symbol)
     }
 
     @ViewBuilder

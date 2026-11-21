@@ -134,34 +134,63 @@ struct LibraryView: View {
     private func grid(_ members: [LibraryBuckets.Item]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
             ForEach(members.prefix(shown)) { item in
-                let id = item.id
-                // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
-                Button {
-                    guard selecting else {
-                        viewing = PhotoViewer.Start(id: id, ids: members.prefix(shown).map(\.id))
-                        return
-                    }
-                    if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
-                } label: {
-                    AssetThumbnail(id: id, side: 110)
-                        .aspectRatio(1, contentMode: .fill)
-                        .matchedTransitionSource(id: id, in: zoom)
-                        .overlay(alignment: .bottomTrailing) {
-                            if selecting {
-                                Image(systemName: selection.contains(id) ? "checkmark.circle.fill" : "circle")
-                                    .font(.title3)
-                                    .foregroundStyle(.white, selection.contains(id) ? Theme.accent : Color.black.opacity(0.3))
-                                    .padding(6)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(item.date?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
-                .accessibilityAddTraits(selecting && selection.contains(id) ? .isSelected : [])
+                cell(item, in: members)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
+    }
+
+    /// One photo: a tap opens it, or ticks it while selecting; the long press lifts it with what
+    /// "Unsortiert" offers for it (DS-06a), none while selecting.
+    private func cell(_ item: LibraryBuckets.Item, in members: [LibraryBuckets.Item]) -> some View {
+        let id = item.id
+        // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
+        return Button {
+            guard selecting else {
+                open(id, in: members)
+                return
+            }
+            if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
+        } label: {
+            thumbnail(id)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(item.date?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+        .accessibilityAddTraits(selecting && selection.contains(id) ? .isSelected : [])
+        .photoMenu(id, place: .unsorted, selecting: selecting) { action in
+            perform(action, on: id, in: members)
+        }
+    }
+
+    private func thumbnail(_ id: AssetID) -> some View {
+        AssetThumbnail(id: id, side: 110)
+            .aspectRatio(1, contentMode: .fill)
+            .matchedTransitionSource(id: id, in: zoom)
+            .overlay(alignment: .bottomTrailing) {
+                if selecting {
+                    Image(systemName: selection.contains(id) ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(.white, selection.contains(id) ? Theme.accent : Color.black.opacity(0.3))
+                        .padding(6)
+                }
+            }
+            .contentShape(Rectangle())
+    }
+
+    /// The photo large, the list's photos shown so far to swipe through.
+    private func open(_ id: AssetID, in members: [LibraryBuckets.Item]) {
+        viewing = PhotoViewer.Start(id: id, ids: members.prefix(shown).map(\.id))
+    }
+
+    /// An item of the photo's long press, the way "Unsortiert" goes it: "Ansehen" as a tap,
+    /// "Zu Album hinzufügen …" the sheet the selection opens (then the preview).
+    private func perform(_ action: PhotoMenu.Item, on id: AssetID, in members: [LibraryBuckets.Item]) {
+        switch action {
+        case .view: open(id, in: members)
+        case .addToAlbum: addingToAlbum = [id]
+        // Ignoring is the model's, the same everywhere (`PhotoMenuItems`); a suggestion's own.
+        case .ignore, .stopIgnoring, .removeFromSuggestion: break
+        }
     }
 
     /// The tab's filters as chips; at the largest text sizes a menu, so every filter stays

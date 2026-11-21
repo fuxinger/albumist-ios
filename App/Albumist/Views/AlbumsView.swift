@@ -356,6 +356,8 @@ struct AlbumScreen: View {
     @State private var viewing: PhotoViewer.Start?
     @State private var undoing: ManagedAlbumState?
     @State private var lastTitle = ""
+    /// "Zu Album hinzufügen …" from a photo's long press.
+    @State private var addingToAlbum: [AssetID]?
     @Namespace private var zoom
 
     var body: some View {
@@ -388,6 +390,12 @@ struct AlbumScreen: View {
             PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
                 .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
+        .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
+            AddToAlbumSheet(assets: addingToAlbum ?? []) {}
+        }
+        // "Widerrufen" after "Ignorieren" from a photo's long press, as in "Unsortiert".
+        .safeAreaInset(edge: .bottom) { IgnoreUndoBar() }
+        .animation(.snappy, value: model.lastIgnored)
     }
 
     /// Albumist's record of the album while something of Albumist's is in it (an album of the
@@ -414,17 +422,7 @@ struct AlbumScreen: View {
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
                     ForEach(ids, id: \.self) { photo in
-                        Button {
-                            viewing = PhotoViewer.Start(id: photo, ids: ids)
-                        } label: {
-                            AssetThumbnail(id: photo, side: 110)
-                                .aspectRatio(1, contentMode: .fill)
-                                .matchedTransitionSource(id: photo, in: zoom)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(Text(model.creationDates[photo]?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
-                        .accessibilityIdentifier("album.photo")
+                        tile(photo, ids: ids)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
@@ -432,6 +430,41 @@ struct AlbumScreen: View {
             .padding(Theme.Spacing.l)
         }
         .navigationTitle(album.title)
+    }
+
+    /// One photo of the album: a tap opens it; the long press lifts it with what an album's
+    /// photo offers (DS-06a).
+    private func tile(_ photo: AssetID, ids: [AssetID]) -> some View {
+        Button {
+            open(photo, ids: ids)
+        } label: {
+            AssetThumbnail(id: photo, side: 110)
+                .aspectRatio(1, contentMode: .fill)
+                .matchedTransitionSource(id: photo, in: zoom)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(model.creationDates[photo]?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+        .accessibilityIdentifier("album.photo")
+        .photoMenu(photo, place: .album) { action in
+            perform(action, on: photo, ids: ids)
+        }
+    }
+
+    /// The photo large, the album's photos to swipe through.
+    private func open(_ photo: AssetID, ids: [AssetID]) {
+        viewing = PhotoViewer.Start(id: photo, ids: ids)
+    }
+
+    /// An item of a photo's long press, an album's way: "Ansehen" as a tap, "Zu Album
+    /// hinzufügen …" the sheet "Unsortiert" opens (then the preview).
+    private func perform(_ action: PhotoMenu.Item, on photo: AssetID, ids: [AssetID]) {
+        switch action {
+        case .view: open(photo, ids: ids)
+        case .addToAlbum: addingToAlbum = [photo]
+        // Ignoring is the model's, the same everywhere (`PhotoMenuItems`); a suggestion's own.
+        case .ignore, .stopIgnoring, .removeFromSuggestion: break
+        }
     }
 }
 

@@ -187,11 +187,13 @@ struct AirborneFilterTests {
         #expect(MapCountries.compute(facts: all, airborne: [], tripStarts: [:]).contains { $0.code == "RU" })
     }
 
-    /// Munich → Lisbon at 830 km/h: three window photos four seconds apart over France, the trip's
-    /// first photos (or a gate photo `gateSecondsBefore` them), the arrival photo 25 minutes after
-    /// landing, four days in Lisbon; everyday photos at home until three days before. No
-    /// altitudes.
-    static func lisbonLibrary(gateSecondsBefore: TimeInterval?) -> MapInput {
+    /// Munich → Lisbon at 830 km/h: window photos over France `windowAt` seconds after 09:15 (by
+    /// default three, four seconds apart), each at the fix `fix` gives for its seconds (by default
+    /// where the plane is then), the trip's first photos (or a gate photo `gateSecondsBefore`
+    /// them), the arrival photo 25 minutes after landing, four days in Lisbon; everyday photos at
+    /// home until three days before. No altitudes.
+    static func lisbonLibrary(gateSecondsBefore: TimeInterval?, windowAt seconds: [Double] = [0, 4, 8],
+                              fix: (Double) -> Double = { $0 }) -> MapInput {
         let trip = AlbumistID("lisbon"), overFrance = MapFixture.date("2024-04-02 09:15")
         let speed = 830_000.0 / 3_600, way = GeoMath.distance(munichAirport, lisbonAirport)
         var photos: [AssetFacts] = []
@@ -199,9 +201,9 @@ struct AirborneFilterTests {
             photos.append(MapFixture.photo("gate", at: overFrance.addingTimeInterval(-gate), munichAirport, country: "DE", town: "Freising",
                                            timeZone: "Europe/Berlin"))
         }
-        for k in 0..<3 {
-            photos.append(MapFixture.photo("window-\(k)", at: overFrance.addingTimeInterval(Double(k) * 4),
-                                           along(munichAirport, lisbonAirport, 0.4 + Double(k) * 4 * speed / way), country: "FR", town: "Wolken",
+        for (k, s) in seconds.enumerated() {
+            photos.append(MapFixture.photo("window-\(k)", at: overFrance.addingTimeInterval(s),
+                                           along(munichAirport, lisbonAirport, 0.4 + fix(s) * speed / way), country: "FR", town: "Wolken",
                                            timeZone: "Europe/Paris"))
         }
         photos.append(MapFixture.photo("landing", at: overFrance.addingTimeInterval(0.6 * way / speed + 1_500), lisbonAirport, country: "PT",
@@ -230,6 +232,42 @@ struct AirborneFilterTests {
         #expect(!summary.trips.contains { $0.geometry.places.contains { $0.name == "Wolken" } })
         #expect(summary.numbers.record(.northernmost)?.placeName != "Wolken")
         #expect(summary.trips.map(\.geometry.airborneCount) == [3])
+    }
+
+    /// Finding 2.2 of the third review: a quick series was a burst only when every step from one
+    /// photo to the next was 200 m and more and the steps were within a factor of 1.5. Two photos
+    /// of one moment (HDR with "Keep Normal Photo", a duplicate) broke the chain, and a photo half
+    /// a second after a found series stayed on the ground and added its town. Photos within a
+    /// second of each other, or on the fix of the photo before, are one moment now
+    /// (`AirborneFilter.sampleDuration`): the series is judged moment to moment, and all its
+    /// photos go with it.
+    ///
+    /// Documented: a series of fewer than three moments (three photos 0.8 or 0.3 seconds apart, a
+    /// pair half a second apart and a third four seconds later), or on fixes of a one-second clock
+    /// that make its steps uneven (1.5 seconds apart: steps of one and two seconds of flight), is
+    /// no burst. With a flown leg (here to the arrival photo) it is maybe in flight and counts
+    /// for nothing (`FlightJudgement`): no country, no place, no town.
+    @Test func quickSeriesOfWindowPhotosMakeNoCountry() {
+        let lastFullSecond: (Double) -> Double = { $0.rounded(.down) }
+        let cases: [(name: String, seconds: [Double], fix: (Double) -> Double, found: Bool)] = [
+            ("three 4 s apart, each kept twice", [0, 0, 4, 4, 8, 8], { $0 }, true),
+            ("three 4 s apart and a fourth half a second after the third", [0, 4, 8, 8.5], { $0 }, true),
+            ("three 0.8 s apart", [0, 0.8, 1.6], { $0 }, false),
+            ("three kept of a burst, 0.3 s apart", [0, 0.3, 0.6], { $0 }, false),
+            ("three 1.5 s apart, each with the fix of the last full second", [0, 1.5, 3], lastFullSecond, false),
+            ("a pair half a second apart and a third 4 s later", [0, 0.5, 4.5], { $0 }, false),
+        ]
+        for (name, seconds, fix, found) in cases {
+            let input = Self.lisbonLibrary(gateSecondsBefore: 9_900, windowAt: seconds, fix: fix)
+            let window = Set(seconds.indices.map { AssetID("window-\($0)") })
+            let judged = AirborneFilter.judge(input.facts.map(\.asset))
+            #expect(found ? judged.airborne == window : judged.maybeInFlight.isSuperset(of: window),
+                    "\(name): in flight \(judged.airborne.sorted()), maybe \(judged.maybeInFlight.sorted())")
+            let summary = MapSummary.build(input)
+            #expect(!summary.countries.map(\.code).contains("FR"), "\(name): countries \(summary.countries.map(\.code))")
+            #expect(!summary.trips.contains { $0.geometry.places.contains { $0.name == "Wolken" } }, "\(name): a place in the clouds")
+            #expect(summary.numbers.cities == 2, "\(name): \(summary.numbers.cities) towns")
+        }
     }
 
     /// Finding 1: one photo every 2.5 hours on a long-haul flight.
@@ -352,6 +390,67 @@ struct AirborneFilterTests {
         #expect(summary.numbers.record(.highest)?.placeName != "Wolken")
     }
 
+    static let genevaAirport = MapFixture.at(46.2381, 6.1090)
+    static let geneva = MapFixture.at(46.2044, 6.1432)
+
+    /// Finding 2.1 of the third review: the series people take out of the window on final
+    /// approach and right after take-off. Lisbon → Geneva comes in over France: three photos four
+    /// seconds apart three minutes before landing (380 km/h, 16 km out) moved on slower than
+    /// `maximumGroundSpeed`, a "stay", so rule 4 refused them right next to the confirmed window
+    /// photos. They made France a visited country, a town, a place and two records, and with
+    /// stored altitudes "Höchstes Foto" (1,291 m). Munich → Lisbon: three photos three minutes
+    /// after take-off made a place near the airport and "Höchstes Foto" (1,366 m). Next to a
+    /// confirmed run a row shows a stay only when it moved on slower than
+    /// `AirborneFilter.stayMovingSpeed`.
+    @Test(arguments: [false, true])
+    func photosOnFinalApproachAndRightAfterTakeOffCountForNothing(storedAltitudes: Bool) {
+        /// A gate photo 40 minutes before take-off, window photos every ten minutes from ten
+        /// minutes after take-off to ten before landing, three photos 4 s apart `minutes` after
+        /// take-off (negative: before landing), the arrival photo 25 minutes after landing, four
+        /// days in town. Altitudes: the airports' own, 10,500 m at cruise, three degrees up from
+        /// the nearer airport.
+        func library(from: GeoCoordinate, to: GeoCoordinate, town: GeoCoordinate, seriesAt minutes: Double, origin: (String, String),
+                     below: (String, String), destination: (String, String), field: Double) -> MapInput {
+            let trip = AlbumistID("trip"), takeoff = MapFixture.date("2024-04-02 08:00")
+            let path = Flight(from: from, to: to, takeoff: takeoff)
+            var photos = [MapFixture.photo("gate", at: Self.minutes(takeoff, -40), from, country: origin.0, town: origin.1)]
+            var altitudes: [AssetID: Double] = [:]
+            for (k, m) in Self.every(10, of: path.minutes).enumerated() {
+                photos.append(MapFixture.photo("cruise-\(k)", at: path.date(minutes: m), path.position(minutes: m), country: "ES", town: "Wolken"))
+                altitudes[AssetID("cruise-\(k)")] = 10_500
+            }
+            for k in 0..<3 {
+                let m = (minutes >= 0 ? minutes : path.minutes + minutes) + Double(k) * 4 / 60
+                let position = path.position(minutes: m)
+                photos.append(MapFixture.photo("series-\(k)", at: path.date(minutes: m), position, country: below.0, town: below.1))
+                altitudes[AssetID("series-\(k)")] = field + 0.0524 * min(GeoMath.distance(from, position), GeoMath.distance(position, to))
+            }
+            photos.append(MapFixture.photo("arrival", at: Self.minutes(path.landing, 25), to, country: destination.0, town: destination.1))
+            for day in 3...6 {
+                photos += MapFixture.burst("town-\(day)", count: 8, at: town, day: "2024-04-0\(day)", country: destination.0, town: destination.1)
+            }
+            for photo in photos where altitudes[photo.id] == nil { altitudes[photo.id] = field }
+            let members = MapFixture.members(photos, of: trip)
+            return MapInput(facts: members, trips: [MapFixture.trip(trip, members)], altitudes: storedAltitudes ? altitudes : [:],
+                            calendar: MapFixture.calendar, now: MapFixture.date("2024-07-01"))
+        }
+        let approach = library(from: Self.lisbonAirport, to: Self.genevaAirport, town: Self.geneva, seriesAt: -3, origin: ("PT", "Lissabon"),
+                               below: ("FR", "Saint-Julien"), destination: ("CH", "Genf"), field: 420)
+        let climb = library(from: Self.munichAirport, to: Self.lisbonAirport, town: Places.lisbon, seriesAt: 3, origin: ("DE", "Freising"),
+                            below: ("DE", "Erding"), destination: ("PT", "Lissabon"), field: 450)
+        for (name, input, town) in [("approach to Geneva", approach, "Saint-Julien"), ("climb out of Munich", climb, "Erding")] {
+            let airborne = AirborneFilter.airborne(input.facts.map(\.asset), altitudes: input.altitudes)
+            #expect(airborne.isSuperset(of: ["series-0", "series-1", "series-2"]), "\(name): in flight \(airborne.filter { $0.rawValue.hasPrefix("series") }.sorted())")
+            let summary = MapSummary.build(input)
+            #expect(!summary.trips.contains { $0.geometry.places.contains { $0.name == town } }, "\(name)")
+            let records = summary.numbers.records.filter { $0.placeName == town }.map { "\($0.kind.rawValue) \(Int($0.value))" }
+            #expect(records.isEmpty, "\(name): records \(records)")
+        }
+        let summary = MapSummary.build(approach)
+        #expect(!summary.countries.map(\.code).contains("FR"), "countries \(summary.countries.map(\.code))")
+        #expect(summary.numbers.cities == 2, "\(summary.numbers.cities) towns")
+    }
+
     /// What moves on the ground up there keeps its photos when altitudes are stored: nothing above
     /// `aloftAltitude` comes near `aloftBurstSpeed`. The summit day on Kilimanjaro (Uhuru Peak,
     /// 5,895 m) with series of photos at the top, the cable car up the Aiguille du Midi (43 km/h,
@@ -430,6 +529,9 @@ struct AirborneFilterTests {
         let airborne = AirborneFilter.airborne(journey.photos)
         #expect(airborne.isDisjoint(with: journey.ground))
         #expect(airborne == journey.window)
+        // And they count: none of them is maybe in flight either (their legs to the window photos
+        // are slow).
+        #expect(AirborneFilter.judge(journey.photos) == FlightJudgement(airborne: journey.window))
     }
 
     /// Munich → Dubai → Bangkok: a gate photo in Munich, photos at Dubai airport, Bangkok.
@@ -460,6 +562,8 @@ struct AirborneFilterTests {
                 let airborne = AirborneFilter.airborne(journey.photos)
                 #expect(airborne.isDisjoint(with: layover), "\(name), window photos \(window)")
                 #expect(airborne == journey.window, "\(name), window photos \(window)")
+                // And they count (`FlightJudgement`): a stay is on the ground.
+                #expect(layover.allSatisfy(AirborneFilter.judge(journey.photos).isOnTheGround), "\(name), window photos \(window)")
             }
         }
     }
@@ -507,6 +611,64 @@ struct AirborneFilterTests {
         #expect(AirborneFilter.airborne(photos(vienna: [0])) == ["vie-0"])
     }
 
+    /// Finding 2.5 of the third review: three window photos within six seconds whose location the
+    /// iPhone did not update (one fix for all three), between a gate photo 50 minutes before and
+    /// the arrival photo. Both legs are flown (940 and 641 km/h), and five seconds of photos that
+    /// did not move on looked like a stay: they made France a country, a place and two records.
+    /// No plane lands 783 km from the gate within 50 minutes and takes off again
+    /// (`landingDuration`): no stay, so they are in flight (rule 2). Each with its own fix, they
+    /// are found too; the layover at Vienna stays on the ground
+    /// (`aQuickSeriesAtAShortHaulLayoverStaysOnTheGround`).
+    ///
+    /// The same family: three photos 4 s apart with the gate photo 2 h 45 min before (rule 3),
+    /// and one more 70 s later still on the third's fix. That photo was "a minute of photos near
+    /// its last", a stay, and the location "came back" near all three, so all four counted. A
+    /// repeated fix carries the time of the photo it was first taken for (`FlightTrack.fixTimes`):
+    /// no stay, no return, and the photo goes with the series.
+    @Test func windowPhotosOnOneFixBetweenTwoFlownLegsAreInFlight() {
+        let window: Set<AssetID> = ["window-0", "window-1", "window-2"]
+        #expect(AirborneFilter.airborne(Self.lisbonLibrary(gateSecondsBefore: 3_000, windowAt: [0, 3, 6]).facts.map(\.asset)) == window)
+        let frozen = Self.lisbonLibrary(gateSecondsBefore: 3_000, windowAt: [0, 3, 6], fix: { _ in 0 })
+        #expect(AirborneFilter.airborne(frozen.facts.map(\.asset)) == window)
+        let summary = MapSummary.build(frozen)
+        #expect(!summary.countries.map(\.code).contains("FR"))
+        #expect(!summary.trips.contains { $0.geometry.places.contains { $0.name == "Wolken" } })
+        #expect(summary.numbers.record(.northernmost)?.placeName != "Wolken")
+        let later = Self.lisbonLibrary(gateSecondsBefore: 9_900, windowAt: [0, 4, 8, 78], fix: { min($0, 8) })
+        #expect(AirborneFilter.airborne(later.facts.map(\.asset)) == window.union(["window-3"]))
+        #expect(!MapSummary.build(later).countries.map(\.code).contains("FR"))
+    }
+
+    // MARK: Maybe in flight: only the ground counts
+
+    /// `FlightJudgement`: a photo with exactly one flown leg that shows no stay is maybe taken in
+    /// flight and counts for nothing. Two window photos two seconds apart over France with the
+    /// gate photo 2 h 45 min before are missed by the rules (rule 3 needs three photos, rule 2 two
+    /// flown legs, and the gate photo is too far for rule 4); they are maybe in flight, and so is
+    /// the arrival photo after them (its leg from them is flown). The gate photo is on the ground:
+    /// its legs are slow. The price: the gate and arrival photos of a flight without window
+    /// photos, whose only flown leg is the flight, are maybe in flight too (each costs its town
+    /// where it has no other photo). A layover's photos are judged by rule 2 (both legs flown):
+    /// three at Dubai are a stay, on the ground; a single one is in flight.
+    @Test func aPhotoWithOneFlownLegAndNoStayIsMaybeInFlight() {
+        let pair = AirborneFilter.judge(Self.lisbonLibrary(gateSecondsBefore: 9_900, windowAt: [0, 2]).facts.map(\.asset))
+        #expect(pair == FlightJudgement(maybeInFlight: ["window-0", "window-1", "landing"]))
+        #expect(pair.isOnTheGround("gate") && !pair.isOnTheGround("window-0"))
+        // A flight without window photos, from a morning at home to an afternoon in Lisbon.
+        let bare = Self.flight("bare", from: Self.munichAirport, to: Self.lisbonAirport, takeoff: MapFixture.date("2024-04-04 08:00")) { _ in [] }
+        let home = Self.shot("home", Self.minutes(bare.path.takeoff, -180), Places.regensburg)
+        let city = (0..<6).map { k in
+            Self.shot("lisbon-\(k)", Self.minutes(bare.path.landing, 120 + Double(k) * 20), Fixture.jitter(Places.lisbon, seed: k, meters: 300))
+        }
+        #expect(AirborneFilter.judge([home] + bare.photos + city) == FlightJudgement(maybeInFlight: bare.ground))
+        // Layovers between flights without window photos.
+        for (shape, airborne) in [([1_200.0, 2_100, 3_000], 0), ([1_800.0], 1)] {
+            let (journey, layover) = Self.layover("judged-\(shape.count)", dubai: shape, window: false)
+            let judged = AirborneFilter.judge(journey.photos)
+            #expect(judged == FlightJudgement(airborne: airborne == 0 ? [] : layover, maybeInFlight: journey.ground.subtracting(layover)))
+        }
+    }
+
     // MARK: Two people, wrong locations, trains, cars and jumping fixes stay on the ground
 
     /// Photos alternating between two places every `minutes` (an iCloud Shared Library).
@@ -543,6 +705,88 @@ struct AirborneFilterTests {
             }
         }
         #expect(AirborneFilter.airborne(photos).isEmpty)
+    }
+
+    /// Finding 2.3 of the third review: someone at home takes photos while the other flies (an
+    /// iCloud Shared Library). A window photo's nearest photos were those at home: its legs were
+    /// no flight (faster than a plane, or there and back), and a series of three did not head on
+    /// towards a photo at home behind the plane. A photo out of reach is someone else's now and
+    /// nobody's neighbour (`AirborneFilter.jumpMeters`). Munich → Lisbon → Rome → Munich with a
+    /// window photo every 20 minutes and a series of three per flight, 20 libraries of 580 window
+    /// photos: with a photo at home every hour 515 are found (319 before), every half hour 507
+    /// (190); with nobody at home 520. Those within reach of a photo at home (near Munich) can
+    /// still zig-zag and count: 23 and 44 (244 and 387 before). The photos at home all count.
+    @Test(arguments: [60.0, 30.0])
+    func someoneAtHomeInASharedLibraryHidesNoWindowPhotos(minutesBetweenPhotosAtHome: Double) {
+        var found = 0, alone = 0, counted = 0, total = 0
+        for seed in 1...20 as ClosedRange<UInt64> {
+            var random = MapRandom(seed: seed)
+            var photos: [AssetSnapshot] = [], window = Set<AssetID>()
+            for (name, from, to, takeoff) in [("out", Self.munichAirport, Self.lisbonAirport, "2024-04-02 09:00"),
+                                              ("on", Self.lisbonAirport, Self.romeAirport, "2024-04-05 11:00"),
+                                              ("back", Self.romeAirport, Self.munichAirport, "2024-04-08 15:00")] {
+                let journey = Self.flight(name, from: from, to: to, takeoff: MapFixture.date(takeoff)) { total in
+                    Self.every(20, of: total) + Self.series(at: total / 2 + 3, count: 3, seconds: 4)
+                }
+                photos += journey.photos
+                window.formUnion(journey.window)
+            }
+            // Nobody at home: all but the first or last window photo of a flight (documented).
+            let travellerAlone = AirborneFilter.airborne(photos).intersection(window).count
+            #expect(travellerAlone >= window.count - 6)
+            var home: [AssetSnapshot] = []
+            for day in ["2024-04-02", "2024-04-05", "2024-04-08"] {
+                var minute = 7 * 60 + minutesBetweenPhotosAtHome * random.unit(), k = 0
+                while minute < 21 * 60 {
+                    home.append(Self.shot("home-\(day)-\(k)", MapFixture.date(day).addingTimeInterval(minute * 60),
+                                          Fixture.jitter(Places.regensburg, seed: k, meters: 300)))
+                    minute += minutesBetweenPhotosAtHome * (0.5 + random.unit())
+                    k += 1
+                }
+            }
+            let judged = AirborneFilter.judge(photos + home)
+            #expect(home.allSatisfy { judged.isOnTheGround($0.id) })
+            found += judged.airborne.intersection(window).count
+            counted += window.filter(judged.isOnTheGround).count
+            alone += travellerAlone
+            total += window.count
+        }
+        let line = "a photo at home every \(Int(minutesBetweenPhotosAtHome)) min: \(found) of \(total) window photos found (\(alone) alone), \(counted) count"
+        #expect(found * 100 >= alone * 97, "\(line)")
+        #expect(counted * 10 <= total, "\(line)")
+    }
+
+    /// The same on the map: one flight Munich → Lisbon with a window photo every ten minutes, and
+    /// a photo at home in Regensburg every half hour all day. France, flown over, was a visited
+    /// country with 9 photos; now none of them but the first counts. That one, ten minutes after
+    /// take-off, is within reach of the photos at home before and after it (a zig-zag) and counts.
+    @Test func someoneAtHomeInASharedLibraryMakesNoCountryFlownOver() {
+        let trip = AlbumistID("lisbon")
+        let journey = Self.flight("out", from: Self.munichAirport, to: Self.lisbonAirport, takeoff: MapFixture.date("2024-04-02 09:00")) {
+            Self.every(10, of: $0)
+        }
+        var facts = journey.photos.map { photo -> AssetFacts in
+            let window = journey.window.contains(photo.id), gate = photo.id.rawValue.contains("gate")
+            var fact = MapFixture.photo(photo.id.rawValue, at: photo.creationDate!, photo.location, country: window ? "FR" : gate ? "DE" : "PT",
+                                        town: window ? "Wolken" : gate ? "Freising" : "Lissabon", trip: trip)
+            fact.asset = photo
+            return fact
+        }
+        facts += MapFixture.burst("lis", count: 8, at: Places.lisbon, day: "2024-04-03", country: "PT", town: "Lissabon", trip: trip)
+        // The traveller alone: every window photo is found.
+        #expect(AirborneFilter.airborne(facts.map(\.asset)) == journey.window)
+        let home = (0..<28).map { k in
+            MapFixture.photo("home-\(k)", at: MapFixture.date("2024-04-02 07:17").addingTimeInterval(Double(k) * 1_800),
+                             Fixture.jitter(Places.regensburg, seed: k, meters: 300), country: "DE", town: "Regensburg", atHome: true)
+        }
+        let input = MapInput(facts: home + facts, trips: [MapFixture.trip(trip, facts)],
+                             detectedHome: DetectedHome(center: Places.regensburg, since: nil, photoDays: 400), calendar: MapFixture.calendar,
+                             now: MapFixture.date("2024-07-01"))
+        let judged = AirborneFilter.judge(input.facts.map(\.asset))
+        #expect(judged.airborne == journey.window.subtracting(["out-w-0"]))
+        #expect(judged.isOnTheGround("out-w-0") && home.allSatisfy { judged.isOnTheGround($0.id) })
+        let summary = MapSummary.build(input)
+        #expect(!summary.countries.map(\.code).contains("FR"), "countries \(summary.countries.map { "\($0.code) (\($0.photoCount))" })")
     }
 
     /// Finding 10: Munich, Florence and Rome lie on a line.
@@ -637,6 +881,8 @@ struct AirborneFilterTests {
             let photos = Self.train(kmh)
             #expect(photos.count >= 24)
             #expect(AirborneFilter.airborne(photos).isEmpty, "\(kmh)")
+            // Nor maybe in flight: they all count.
+            #expect(AirborneFilter.judge(photos) == FlightJudgement(), "\(kmh)")
         }
     }
 
@@ -648,7 +894,7 @@ struct AirborneFilterTests {
         let photos = times.enumerated().map { i, t in
             Self.shot("car-\(i)", start.addingTimeInterval(t), Fixture.jitter(Self.along(Places.munich, Self.nuremberg, t / seconds), seed: i, meters: 60))
         }
-        #expect(AirborneFilter.airborne(photos).isEmpty)
+        #expect(AirborneFilter.judge(photos) == FlightJudgement())
     }
 
     @Test func aLocationJumpingKilometresIndoorsStaysOnTheGround() {
@@ -799,10 +1045,12 @@ struct AirborneFilterTests {
 
     // MARK: The fast search is the rule, photo by photo
 
-    /// What the reference found, rule by rule.
+    /// What the reference found, rule by rule, and the photos maybe taken in flight
+    /// (`FlightJudgement`).
     struct Judged {
         var all = Set<AssetID>()
         var byRule = [Set<AssetID>](repeating: [], count: 4)
+        var maybe = Set<AssetID>()
     }
 
     /// The rules as `AirborneFilter` states them, photo by photo: every neighbour by a plain search,
@@ -817,16 +1065,23 @@ struct AirborneFilterTests {
         let accuracy = judged.map { $0.locationAccuracy.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 0 }
         let leg = AirborneFilter.minimumLegMeters, window = AirborneFilter.maximumLongLegDuration, stay = AirborneFilter.stayDuration
         let ground = AirborneFilter.maximumGroundSpeed, plane = AirborneFilter.maximumFlightSpeed
+        // A photo on exactly the fix of the photo before repeats it: the fix is as old as the first
+        // photo of the row.
+        var fixTime = t
+        for k in 0..<n where k > 0 && c[k] == c[k - 1] { fixTime[k] = fixTime[k - 1] }
         func meters(_ a: Int, _ b: Int) -> Double { a <= b ? GeoMath.distance(c[a], c[b]) : GeoMath.distance(c[b], c[a]) }
         func fast(_ a: Int, _ b: Int) -> Bool { meters(a, b) > ground * abs(t[b] - t[a]) }
+        func turning(_ a: Int, _ b: Int) -> Bool { meters(a, b) > AirborneFilter.turnBackSpeed * abs(t[b] - t[a]) }
         func flown(_ a: Int, _ b: Int) -> Bool { fast(a, b) && meters(a, b) <= plane * abs(t[b] - t[a]) }
         func onTheWay(_ a: Int, _ m: Int, _ b: Int) -> Bool {
             meters(a, m) + meters(m, b) <= AirborneFilter.detourFactor * meters(a, b) + AirborneFilter.detourAllowanceMeters
         }
+        // A photo out of reach is someone else's: passed.
+        func reachable(_ a: Int, _ b: Int) -> Bool { meters(a, b) <= plane * abs(t[b] - t[a]) + AirborneFilter.jumpMeters }
         func neighbour(_ i: Int, _ step: Int) -> Int? {
             var j = i + step
             while j >= 0 && j < n && abs(t[j] - t[i]) <= window {
-                if meters(j, i) >= leg { return j }
+                if meters(j, i) >= leg && reachable(j, i) { return j }
                 j += step
             }
             return nil
@@ -836,26 +1091,46 @@ struct AirborneFilterTests {
             while j + step >= 0 && j + step < n && abs(t[j + step] - t[i]) <= window { j += step }
             return j
         }
-        func stays(_ i: Int, _ before: Int?, _ after: Int?) -> Bool {
-            let first = before.map { $0 + 1 } ?? edge(i, -1), last = after.map { $0 - 1 } ?? edge(i, 1)
+        func landable(_ a: Int, _ b: Int) -> Bool {
+            !fast(a, b) || meters(a, b) <= plane * (t[b] - t[a] - AirborneFilter.landingDuration)
+        }
+        func stays(_ i: Int, _ before: Int?, _ after: Int?, moving: Double = AirborneFilter.maximumGroundSpeed, landing: Bool = false) -> Bool {
+            var first = before.map { $0 + 1 } ?? edge(i, -1), last = after.map { $0 - 1 } ?? edge(i, 1)
+            while first < i && meters(first, i) >= leg { first += 1 }
+            while last > i && meters(i, last) >= leg { last -= 1 }
             guard first < last else { return false }
             let span = t[last] - t[first]
             guard span >= AirborneFilter.shortestStay else { return false }
+            if landing && c[first] == c[last] && t[i] - t[first] < stay && t[last] - t[i] < stay {
+                if let before, !landable(before, first) { return false }
+                if let after, !landable(last, after) { return false }
+            }
             var progress = Double.infinity
             if let before { progress = min(progress, meters(before, last) - meters(before, first)) }
             if let after { progress = min(progress, meters(first, after) - meters(last, after)) }
             if before == nil && after == nil { progress = meters(first, last) }
-            return progress < max(ground * span, accuracy[first] + accuracy[last]) + 1
+            return progress < max(moving * span, accuracy[first] + accuracy[last]) + 1
         }
-        func staysAt(_ p: Int, _ step: Int) -> Bool {
-            let farthest = neighbour(p, step).map { $0 - step } ?? edge(p, step)
-            return abs(t[farthest] - t[p]) >= stay
+        // With `byFix`, a minute of fixes: a repeated fix is as old as the first photo on it.
+        func staysAt(_ p: Int, _ step: Int, byFix: Bool = false) -> Bool {
+            let s = byFix ? fixTime : t
+            var j = p + step
+            while j >= 0 && j < n && abs(t[j] - t[p]) <= window {
+                if meters(j, p) >= leg {
+                    if reachable(j, p) { return false }
+                } else if abs(s[j] - s[p]) >= stay {
+                    return true
+                }
+                j += step
+            }
+            return false
         }
+        // By the times of the fixes.
         func comesBack(_ i: Int) -> Bool {
             for step in [-1, 1] {
                 var k = i + step
-                while k >= 0 && k < n && abs(t[k] - t[i]) <= AirborneFilter.returnDuration {
-                    if abs(t[k] - t[i]) >= stay && meters(i, k) < leg { return true }
+                while k >= 0 && k < n && abs(fixTime[k] - fixTime[i]) <= AirborneFilter.returnDuration {
+                    if abs(fixTime[k] - fixTime[i]) >= stay && meters(i, k) < leg { return true }
                     k += step
                 }
             }
@@ -866,31 +1141,45 @@ struct AirborneFilterTests {
         let high = judged.map { photo in altitudes[photo.id].map { $0 > AirborneFilter.maximumAltitude } ?? false }
         let run = (0..<n).map { i -> Bool in
             guard let b = neighbour(i, -1), let a = neighbour(i, 1), flown(b, i), flown(i, a), onTheWay(b, i, a) else { return false }
-            if stays(i, b, a) { return false }
+            if stays(i, b, a, landing: true) { return false }
             if t[i] - t[b] <= AirborneFilter.runEndLongDuration && staysAt(b, -1) { return false }
             if t[a] - t[i] <= AirborneFilter.runEndLongDuration && staysAt(a, 1) { return false }
-            if let p = neighbour(b, -1), fast(p, b), !onTheWay(p, b, i) { return false }
-            if let q = neighbour(a, 1), fast(a, q), !onTheWay(i, a, q) { return false }
+            if let p = neighbour(b, -1), turning(p, b), !onTheWay(p, b, i) { return false }
+            if let q = neighbour(a, 1), turning(a, q), !onTheWay(i, a, q) { return false }
             return !comesBack(i)
         }
-        // Rule 3: every four and every three photos in a row that move steadily and straight on,
-        // chained where they share a photo; a chain without four of them must head on.
+        // Rule 3: every four and every three moments in a row that move steadily and straight on,
+        // chained where they share a moment; a chain without four of them must head on. A photo is
+        // of the moment before it on the fix of the photo before, or within `sampleDuration` of
+        // the moment's first photo with no step of its own from it.
         let aloft = judged.map { photo in altitudes[photo.id].map { $0 > AirborneFilter.aloftAltitude } ?? false }
+        var moments: [Int] = []
+        for k in 0..<n {
+            if let m = moments.last {
+                let d = meters(m, k), s = t[k] - t[m]
+                let step = d >= max(AirborneFilter.burstStepMeters, accuracy[m] + accuracy[k]) && d <= plane * s
+                if c[k] == c[k - 1] || (s <= AirborneFilter.sampleDuration && !step) { continue }
+            }
+            moments.append(k)
+        }
+        func momentEnd(_ m: Int) -> Int { m + 1 < moments.count ? moments[m + 1] - 1 : n - 1 }
         func steady(_ from: Int, _ to: Int) -> Bool {
             var slowest = Double.infinity, fastest = 0.0, path = 0.0
             for m in from..<to {
-                let d = meters(m, m + 1), s = t[m + 1] - t[m]
-                let speed = aloft[m] && aloft[m + 1] ? AirborneFilter.aloftBurstSpeed : AirborneFilter.burstSpeed
-                guard s > 0, s <= AirborneFilter.burstStepDuration, d >= max(AirborneFilter.burstStepMeters, accuracy[m] + accuracy[m + 1]),
+                let x = moments[m], y = moments[m + 1]
+                let d = meters(x, y), s = t[y] - t[x]
+                let speed = aloft[x] && aloft[y] ? AirborneFilter.aloftBurstSpeed : AirborneFilter.burstSpeed
+                guard s > 0, s <= AirborneFilter.burstStepDuration, d >= max(AirborneFilter.burstStepMeters, accuracy[x] + accuracy[y]),
                       d > speed * s, d <= plane * s else { return false }
                 slowest = min(slowest, d / s)
                 fastest = max(fastest, d / s)
                 path += d
             }
-            return fastest <= AirborneFilter.burstSpeedRatio * slowest && path <= AirborneFilter.burstStraightness * meters(from, to)
+            return fastest <= AirborneFilter.burstSpeedRatio * slowest
+                && path <= AirborneFilter.burstStraightness * meters(moments[from], moments[to])
         }
         var chains: [(first: Int, last: Int, four: Bool)] = []
-        for k in 0..<n {
+        for k in moments.indices {
             let four = k >= 3 && steady(k - 3, k)
             guard four || (k >= 2 && steady(k - 2, k)) else { continue }
             let from = four ? k - 3 : k - 2
@@ -900,8 +1189,9 @@ struct AirborneFilterTests {
                 chains.append((from, k, four))
             }
         }
+        // From a burst's first photo to its last; a minute of fixes near either end is a stay.
         func headsOn(_ from: Int, _ to: Int) -> Bool {
-            guard !staysAt(from, -1), !staysAt(to, 1) else { return false }
+            guard !staysAt(from, -1, byFix: true), !staysAt(to, 1, byFix: true) else { return false }
             let before = neighbour(from, -1), after = neighbour(to, 1)
             guard before != nil || after != nil else { return false }
             let way = AirborneFilter.burstHeading * meters(from, to)
@@ -910,8 +1200,10 @@ struct AirborneFilterTests {
             return true
         }
         var burst = [Bool](repeating: false, count: n), first = [Int](repeating: -1, count: n), last = first
-        for chain in chains where chain.four || headsOn(chain.first, chain.last) {
-            for p in chain.first...chain.last { (burst[p], first[p], last[p]) = (true, chain.first, chain.last) }
+        for chain in chains {
+            let from = moments[chain.first], to = momentEnd(chain.last)
+            guard chain.four || headsOn(from, to) else { continue }
+            for p in from...to { (burst[p], first[p], last[p]) = (true, from, to) }
         }
         // A burst's photos that the location comes back to are none.
         let inBurst = (0..<n).map { burst[$0] && !comesBack($0) }
@@ -919,8 +1211,10 @@ struct AirborneFilterTests {
         let confirmed = (0..<n).map { high[$0] || run[$0] || inBurst[$0] }
         let end = (0..<n).map { i -> Bool in
             guard !confirmed[i] else { return false }
+            // A minute of photos near it is a stay; next to the flown leg to the run, a shorter
+            // row is one when it moved on slower than `stayMovingSpeed`.
             let b = neighbour(i, -1), a = neighbour(i, 1)
-            guard !stays(i, b, a), !comesBack(i) else { return false }
+            guard !staysAt(i, -1), !staysAt(i, 1), !stays(i, b, a, moving: AirborneFilter.stayMovingSpeed), !comesBack(i) else { return false }
             for (r, other, later) in [(a, b, true), (b, a, false)] {
                 guard let r, confirmed[r], flown(i, r) else { continue }
                 let seconds = abs(t[r] - t[i])
@@ -940,6 +1234,22 @@ struct AirborneFilterTests {
                 result.byRule[rule].insert(judged[i].id)
             }
         }
+        // Maybe in flight: exactly one flown leg (no short one to a stay), and rule 2's conditions
+        // with it, a stay moving on slower than `stayMovingSpeed`.
+        for i in 0..<n where !result.all.contains(judged[i].id) {
+            guard !staysAt(i, -1), !staysAt(i, 1) else { continue }
+            let b = neighbour(i, -1), a = neighbour(i, 1)
+            let short = AirborneFilter.runEndLongDuration
+            let flownBefore = b.map { flown($0, i) && !(t[i] - t[$0] <= short && staysAt($0, -1)) } ?? false
+            let flownAfter = a.map { flown(i, $0) && !(t[$0] - t[i] <= short && staysAt($0, 1)) } ?? false
+            guard flownBefore != flownAfter else { continue }
+            if let b, let a, !onTheWay(b, i, a) { continue }
+            if stays(i, b, a, moving: AirborneFilter.stayMovingSpeed) { continue }
+            if let b, let p = neighbour(b, -1), turning(p, b), !onTheWay(p, b, i) { continue }
+            if let a, let q = neighbour(a, 1), turning(a, q), !onTheWay(i, a, q) { continue }
+            if !comesBack(i) { result.maybe.insert(judged[i].id) }
+        }
+        result.maybe.subtract(result.all)
         return result
     }
 
@@ -1038,7 +1348,7 @@ struct AirborneFilterTests {
     }
 
     @Test func theFastSearchGivesThePhotoByPhotoResult() {
-        var byRule = [Int](repeating: 0, count: 4)
+        var byRule = [Int](repeating: 0, count: 4), maybe = 0
         for seed in 1...6 as ClosedRange<UInt64> {
             let photos = Self.wander(seed: seed, count: 2_500)
             let altitudes = Dictionary(photos.enumerated().filter { $0.offset % 97 == 0 }.map { ($0.element.id, Double($0.offset % 3) * 4_000) },
@@ -1046,13 +1356,20 @@ struct AirborneFilterTests {
             let expected = Self.reference(photos, altitudes: altitudes)
             let airborne = AirborneFilter.airborne(photos, altitudes: altitudes)
             #expect(airborne == expected.all, "seed \(seed): extra \(airborne.subtracting(expected.all)), missing \(expected.all.subtracting(airborne))")
+            let judgement = AirborneFilter.judge(photos, altitudes: altitudes)
+            #expect(judgement.airborne == airborne)
+            #expect(judgement.maybeInFlight == expected.maybe,
+                    "seed \(seed), maybe: extra \(judgement.maybeInFlight.subtracting(expected.maybe)), missing \(expected.maybe.subtracting(judgement.maybeInFlight))")
             for rule in 0..<4 { byRule[rule] += expected.byRule[rule].count }
+            maybe += expected.maybe.count
         }
-        // Every rule had photos to judge.
-        #expect(byRule.allSatisfy { $0 > 0 }, "\(byRule)")
+        // Every rule had photos to judge, and some were maybe taken in flight.
+        #expect(byRule.allSatisfy { $0 > 0 } && maybe > 0, "\(byRule), maybe \(maybe)")
         // The flights of the realistic library too.
         let library = MapLibrary(count: 6_000, seed: 3).facts.map(\.asset)
-        #expect(AirborneFilter.airborne(library) == Self.reference(library).all)
+        let reference = Self.reference(library)
+        #expect(AirborneFilter.airborne(library) == reference.all)
+        #expect(AirborneFilter.judge(library).maybeInFlight == reference.maybe)
         // A photo every three seconds for half an hour in flight (the search for a location coming
         // back passes them by the way flown), and evenings of a location jumping around indoors.
         let dense = Self.flight("every-3s", from: Self.munichAirport, to: Self.lisbonAirport, takeoff: MapFixture.date("2024-05-05 08:00"),
@@ -1076,16 +1393,23 @@ struct AirborneFilterTests {
     /// up to a second before (it updates the location about once a second), off by GPS noise of
     /// 10 m.
     static func fix(_ path: Flight, seconds: TimeInterval, _ random: inout MapRandom) -> GeoCoordinate {
-        let truth = path.position(minutes: max(0, seconds - random.unit()) / 60)
+        noisy(path.position(minutes: max(0, seconds - random.unit()) / 60), &random)
+    }
+
+    /// `truth` off by GPS noise of 10 m.
+    static func noisy(_ truth: GeoCoordinate, _ random: inout MapRandom) -> GeoCoordinate {
         let noise = 10 * (-2 * log(max(1e-12, random.unit()))).squareRoot()
         return offset(truth, km: noise / 1_000, bearing: random.unit() * 360)
     }
 
     /// Flights between `europe`'s airports three days apart whose only window photos are one
-    /// series of `size` photos 1 to 10 seconds apart, anywhere from 8 minutes after take-off to
-    /// 8 minutes before landing (`fix`); four times in five a gate photo 30 minutes to 3 hours
-    /// before take-off, four times in five an arrival photo 20 minutes to 3 hours after landing.
-    static func seriesFlights(seed: UInt64, flights: Int, size: Int) -> (photos: [AssetSnapshot], series: [[AssetID]]) {
+    /// series of `size` photos `spacing` seconds apart, anywhere from 8 minutes after take-off to
+    /// 8 minutes before landing (`fix`; with `clock`, the iPhone updates the fix once a second, at
+    /// a moment of each flight's own, and every photo until the next update carries it); four
+    /// times in five a gate photo 30 minutes to 3 hours before take-off, four times in five an
+    /// arrival photo 20 minutes to 3 hours after landing.
+    static func seriesFlights(seed: UInt64, flights: Int, size: Int, spacing: ClosedRange<Double> = 1...10,
+                              clock: Bool = false) -> (photos: [AssetSnapshot], series: [[AssetID]]) {
         var random = MapRandom(seed: seed)
         func uniform(_ low: Double, _ high: Double) -> Double { low + (high - low) * random.unit() }
         var photos: [AssetSnapshot] = [], series: [[AssetID]] = []
@@ -1102,11 +1426,20 @@ struct AirborneFilterTests {
                 photos.append(shot("arr-\(n)", minutes(path.landing, uniform(20, 180)), Fixture.jitter(b, seed: n, meters: 600)))
             }
             var seconds = uniform(8, path.minutes - 8 - Double(size) / 6) * 60
-            var ids: [AssetID] = []
+            let phase = clock ? random.unit() : 0
+            var ids: [AssetID] = [], updates: [Double: GeoCoordinate] = [:]
             for k in 0..<size {
-                if k > 0 { seconds += uniform(1, 10) }
+                if k > 0 { seconds += uniform(spacing.lowerBound, spacing.upperBound) }
                 ids.append(AssetID("s-\(n)-\(k)"))
-                photos.append(shot(ids[k].rawValue, takeoff.addingTimeInterval(seconds), fix(path, seconds: seconds, &random)))
+                let location: GeoCoordinate
+                if clock {
+                    let update = (seconds - phase).rounded(.down) + phase
+                    location = updates[update] ?? noisy(path.position(minutes: update / 60), &random)
+                    updates[update] = location
+                } else {
+                    location = fix(path, seconds: seconds, &random)
+                }
+                photos.append(shot(ids[k].rawValue, takeoff.addingTimeInterval(seconds), location))
             }
             series.append(ids)
             day = day.addingTimeInterval(3 * 86_400)
@@ -1128,6 +1461,39 @@ struct AirborneFilterTests {
             let found = series.filter { $0.allSatisfy(airborne.contains) }.count
             #expect(found >= 425, "\(size): \(found) of \(series.count) found")
             #expect(airborne.allSatisfy { $0.rawValue.hasPrefix("s-") }, "\(size)")
+        }
+    }
+
+    /// Finding 2.2 of the third review at scale: the same flights, the photos of a series 1 to 3
+    /// seconds apart as people tap, or 0.3 to 2 seconds, with the tests' fixes (`fix`) and with a
+    /// fix updated once a second. Found whole, of 500 (tests' fixes, one-second clock):
+    /// - 1 to 3 s: series of three 311 and 295, of four 234 and 230 (unchanged);
+    /// - 0.3 to 2 s: three 117 and 137 (unchanged), four 188 and 186, where they were 50 and 81:
+    ///   a photo within a second of the one before with no step of its own from it (on its fix,
+    ///   shorter than `burstStepMeters`, or faster than a plane) broke the series; it is of that
+    ///   photo's moment now (`AirborneFilter.sampleDuration`).
+    ///
+    /// Documented limit, measured: the review asked for 425 of 500 at 1 to 3 s. Steady steps need
+    /// fixes about as old as each other, and at this pace they seldom are: a fix up to a second old
+    /// lengthens or shortens a step of one to three seconds by up to a second's flight. Accepting a
+    /// series when one speed fits all its steps within a second of fix age finds 415 and 436 series
+    /// of three (399 and 437 of four), but takes a fast train with noisy fixes for a plane: of
+    /// `ground`'s photos it takes 3,276 instead of 420 (1,109 instead of 8 with stated accuracies;
+    /// trains 662 and 636 instead of 3 and 0). Of the series of three missed at 1 to 3 s, 129 and
+    /// 143 count on the map: no leg of theirs was flown. The time of each fix (the location's own
+    /// timestamp, which the analysis does not store yet) would make their steps exact.
+    @Test(arguments: [3, 4])
+    func lonelySeriesAtThePacePeopleTapAreFound(size: Int) {
+        let floors: [(spacing: ClosedRange<Double>, clock: Bool, three: Int, four: Int)] = [
+            (1...3, false, 300, 225), (1...3, true, 285, 220), (0.3...2, false, 110, 180), (0.3...2, true, 130, 180),
+        ]
+        for (spacing, clock, three, four) in floors {
+            let (photos, series) = Self.seriesFlights(seed: 21, flights: 500, size: size, spacing: spacing, clock: clock)
+            let airborne = AirborneFilter.airborne(photos)
+            let found = series.filter { $0.allSatisfy(airborne.contains) }.count
+            let fix = clock ? "a fix updated once a second" : "the tests' fixes"
+            #expect(found >= (size == 3 ? three : four), "\(spacing) s, \(fix): \(found) of \(series.count) series of \(size) found whole")
+            #expect(airborne.allSatisfy { $0.rawValue.hasPrefix("s-") }, "\(spacing) s, \(fix)")
         }
     }
 
@@ -1390,11 +1756,13 @@ struct AirborneFilterTests {
     @Test func fiftyThousandPhotosAreJudgedQuickly() {
         let photos = MapLibrary(count: 50_000).facts.map(\.asset)
         let clock = ContinuousClock()
-        var result = Set<AssetID>()
-        let elapsed = clock.measure { result = AirborneFilter.airborne(photos) }
+        var result = FlightJudgement()
+        // As the summary judges them: with the photos maybe taken in flight.
+        let elapsed = clock.measure { result = AirborneFilter.judge(photos) }
         let ms = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1e15
-        print(String(format: "AIRBORNE_PERF photos %d: %.1f ms, %d in flight", photos.count, ms, result.count))
-        #expect(result.count > 1_000)
+        print(String(format: "AIRBORNE_PERF photos %d: %.1f ms, %d in flight, %d maybe", photos.count, ms, result.airborne.count,
+                     result.maybeInFlight.count))
+        #expect(result.airborne.count > 1_000)
         // A debug build on a shared machine is several times slower than the app; the bound only
         // catches a search that reads every photo of a burst for every photo of it.
         #expect(ms < 2_000)
@@ -1452,12 +1820,14 @@ struct AirborneFilterTests {
     @Test func aDenseLibraryIsJudgedQuickly() {
         let photos = Self.denseLibrary(count: 50_000)
         let clock = ContinuousClock()
-        var result = Set<AssetID>()
-        let elapsed = clock.measure { result = AirborneFilter.airborne(photos) }
+        var result = FlightJudgement()
+        let elapsed = clock.measure { result = AirborneFilter.judge(photos) }
         let ms = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1e15
-        print(String(format: "AIRBORNE_PERF dense photos %d: %.1f ms, %d in flight", photos.count, ms, result.count))
-        // All on the ground (the photo on the far side of the world is a wrong location: one leg).
-        #expect(result.isEmpty)
+        print(String(format: "AIRBORNE_PERF dense photos %d: %.1f ms, %d in flight, %d maybe %@", photos.count, ms, result.airborne.count,
+                     result.maybeInFlight.count, result.maybeInFlight.sorted().prefix(5).map(\.rawValue).joined(separator: " ")))
+        // All on the ground (the photo on the far side of the world is a wrong location: one leg,
+        // faster than a plane), and they all count.
+        #expect(result == FlightJudgement())
         // Before the search stopped after a minute of photos near the photo, the evening after the
         // far photo took about ten seconds here.
         #expect(ms < 2_000)

@@ -6,10 +6,11 @@ extension TripGeometry {
     /// distinct places with their names, the route between them (at most `maxRoutePoints`), the
     /// legs "ohne Fotos", the place its arc points to, its countries and its photos per day.
     ///
-    /// Only photos with a usable location and a date, not taken in flight, no screenshot and not
-    /// at home (`AssetFacts.atHome`, concept §8: everyday photos at home never appear on the map,
-    /// not even one the trip detection put in a trip) are drawn on the map: day places, places,
-    /// route, destination, covers, countries and photos per day come from them alone. Their place
+    /// Only photos with a usable location and a date, on the ground (`FlightJudgement`), no
+    /// screenshot and not at home (`AssetFacts.atHome`, concept §8: everyday photos at home never
+    /// appear on the map, not even one the trip detection put in a trip) are drawn on the map: day
+    /// places, places, route, destination, covers, countries and photos per day come from them
+    /// alone, and so every record (concept §5: "Flugzeugfotos zählen nicht"). Their place
     /// is their GPS place (`AssetFacts.gpsPlace`), never one guessed from the content. Every photo
     /// counts in `photoCount` and every dated one in the trip's days (`start` to `end`, `firstDay`
     /// to `lastDay`), as its album shows them.
@@ -20,15 +21,18 @@ extension TripGeometry {
     ///     (`eachPhotoOnce`).
     ///   - airborne: photos taken in flight (`AirborneFilter.airborne`): left out of places,
     ///     route and countries, counted in `airborneCount`.
+    ///   - maybeInFlight: photos maybe taken in flight (`FlightJudgement`): left out as well, not
+    ///     counted in `airborneCount`.
     ///   - altitudes: metres above sea level by photo, where the iPhone stored one (`TripPlace.altitude`).
     ///   - timeZone: the device's time zone, for a trip none of whose photos has a known one.
     ///
     /// A photo's day is the day on the clock where it was taken, as the app's albums count it
     /// (`AssetFacts.timeZone`, review P1-15; decision 19.11.2026), else in its place's zone, else
     /// in the trip's zone (the most common zone of its photos on the map).
-    public static func build(trip: Trip, facts: [AssetFacts], airborne: Set<AssetID>, altitudes: [AssetID: Double] = [:],
-                             timeZone: TimeZone) -> TripGeometry {
-        TripGeometryBuilder.build(trip: trip, facts: facts, airborne: airborne, altitudes: altitudes, deviceTimeZone: timeZone)
+    public static func build(trip: Trip, facts: [AssetFacts], airborne: Set<AssetID>, maybeInFlight: Set<AssetID> = [],
+                             altitudes: [AssetID: Double] = [:], timeZone: TimeZone) -> TripGeometry {
+        TripGeometryBuilder.build(trip: trip, facts: facts, airborne: airborne, maybeInFlight: maybeInFlight, altitudes: altitudes,
+                                  deviceTimeZone: timeZone)
     }
 }
 
@@ -40,8 +44,8 @@ extension TripGeometry {
 /// step is about linear in the photos, so one trip holding all of them costs what the trips of a
 /// library do.
 enum TripGeometryBuilder {
-    /// A photo the geometry is drawn from: a usable location and a date, not taken in flight, no
-    /// screenshot, not at home.
+    /// A photo the geometry is drawn from: a usable location and a date, on the ground
+    /// (`FlightJudgement`), no screenshot, not at home.
     struct Photo {
         /// Into the photos' `Source`s, which keep the order the facts came in.
         var source: Int
@@ -123,7 +127,7 @@ enum TripGeometryBuilder {
     /// with no photo on the map whose centre may be home (`build`).
     static let nowhere = GeoCoordinate(latitude: 0, longitude: 0)
 
-    static func build(trip: Trip, facts: [AssetFacts], airborne: Set<AssetID>, altitudes: [AssetID: Double],
+    static func build(trip: Trip, facts: [AssetFacts], airborne: Set<AssetID>, maybeInFlight: Set<AssetID> = [], altitudes: [AssetID: Double],
                       deviceTimeZone: TimeZone) -> TripGeometry {
         let facts = eachPhotoOnce(facts)
         // Every dated photo with the zone of its clock, for its day; the photos on the map with
@@ -142,6 +146,7 @@ enum TripGeometryBuilder {
         for (index, fact) in facts.enumerated() {
             let inFlight = !airborne.isEmpty && airborne.contains(fact.id)
             if inFlight { airborneCount += 1 }
+            let notOnTheGround = inFlight || (!maybeInFlight.isEmpty && maybeInFlight.contains(fact.id))
             if fact.atHome { someAtHome = true }
             guard let date = fact.asset.creationDate else { continue }
             if dated.isEmpty || date < start { start = date }
@@ -151,7 +156,7 @@ enum TripGeometryBuilder {
             // The clock where it was taken, as the app counts its days and months
             // (`AssetFacts.timeZone`, review P1-15), else its place's zone.
             if let identifier = fact.timeZone?.identifier ?? place?.timeZoneIdentifier { zone = zones.number(identifier) }
-            guard !inFlight, !fact.atHome, !fact.asset.isScreenshotLike, let coordinate = fact.asset.usableLocation else {
+            guard !notOnTheGround, !fact.atHome, !fact.asset.isScreenshotLike, let coordinate = fact.asset.usableLocation else {
                 dated.append((date, zone, -1))
                 continue
             }
@@ -563,8 +568,13 @@ enum TripGeometryBuilder {
     /// Library) or with a wrong location. The order of a run of visits joined by such legs is no
     /// way anyone went, so the route passes each of the run's places once, at its first visit in
     /// the run: photos taken in turn in two places add no point and no kilometre, whichever of
-    /// them came last. A leg someone went starts a new run, from the route's last point; a visit
-    /// to that point's own place adds no point but lengthens it to the visit's last photo.
+    /// them came last. A leg someone went starts a new run, from where the last photos before it
+    /// were taken: when the run's last visit was left out (its place once), the route goes back
+    /// to that place first, so the leg on does not start where nobody was any more (review: an
+    /// afternoon in turn in Reykjavík and at Þingvellir, then the evening in Reykjavík and on to
+    /// Vík; with the afternoon's last photos in Reykjavík the route went from Þingvellir to Vík).
+    /// A visit to the route's last point's own place adds no point but lengthens it to the
+    /// visit's last photo.
     ///
     /// The legs are those between all the visits (`legs`). More than `TripGeometry.maxRoutePoints`
     /// visits are then cut (`simplified`), each leg of the cut route carrying the legs it stands
@@ -588,8 +598,12 @@ enum TripGeometryBuilder {
             if k == 0 {
                 visits.append(visit)
             } else if travelled[k - 1] {
-                // A new run, from the route's last point when it is here already.
+                // A new run, from where the last photos were taken: the run's last visit first
+                // when its place is not the route's last point. Then the visit, at that point
+                // when it is here already.
                 run += 1
+                let left = all[k - 1]
+                if visits[visits.count - 1].place != left.place { visits.append(left) }
                 if visits[visits.count - 1].place == visit.place {
                     visits[visits.count - 1].last = visit.last
                 } else {
@@ -616,53 +630,85 @@ enum TripGeometryBuilder {
     /// and, gate to gate, from some 150 km on (Honolulu to Maui in 40 minutes). 200 km/h, in
     /// metres per second.
     static let turnBackSpeed = 200.0 / 3.6
-    /// At most this long at a place (from its first photo there to its last), between legs faster
-    /// than `turnBackSpeed` from one place and back to it, is turning back right away: an hour.
-    /// Whoever gets somewhere that fast mostly stays for hours (a day out by high-speed train, an
-    /// island by plane); two cameras taking photos in turn mostly stay minutes at each turn.
+    /// At most this long at each place on the way of a quick return (`travelledLegs`), from its
+    /// first photo there to its last, is turning back right away: an hour. Whoever gets
+    /// somewhere that fast mostly stays for hours (a day out by high-speed train, an island by
+    /// plane); two cameras taking photos in turn mostly stay minutes at each turn.
     static let turnBackStay: TimeInterval = 3_600
 
     /// For each leg from one visit to the next (`visits[k]` to `visits[k + 1]`, from the last
     /// photo of the one to the first of the other), whether someone went it, as far as the photos
     /// tell. Nobody went it
     /// - when nothing could have gone it in the time, not even a plane (`isNoTravel`); or
-    /// - when it leads to or from a visit the route **turns back** from right away, with another
-    ///   such visit next to it or one visit away (A → B → A → B, or A → B → A → C → A, the visit
-    ///   between them as long as it may be). The route turns back from a visit right away when
-    ///   the visits before and after it are at one place, both its legs are faster than
-    ///   `turnBackSpeed` (`isFast`) and it lasts at most `turnBackStay`. Once is a way people go:
-    ///   a scenic flight circling a glacier and back to the airfield, a high-speed train out and
-    ///   straight back. Twice in a row is not: the photos were taken in two places at the same
-    ///   time, by two cameras or with a location jumping to and fro (review: Reykjavík and
-    ///   Þingvellir, 41 km apart, in turn every ten minutes made 18 route points and 700 km
-    ///   "vor Ort").
+    /// - when it lies on a **quick return** that shares a visit with another one: two returns in
+    ///   a row (A → B → A → B, or A → B → A → C → A with the visit between them as long as it may
+    ///   be, or three places in turn, A → B → C → A → B). A quick return goes from a visit back
+    ///   to the next visit at its place through visits of at most `turnBackStay` each, its legs
+    ///   together faster than `turnBackSpeed` as the crow flies. Once is a way people go: a
+    ///   scenic flight circling a glacier and back to the airfield, a high-speed train out and
+    ///   straight back, once round by helicopter. Twice in a row is not: the photos were taken in
+    ///   two or three places at the same time, by several cameras or with a location jumping to
+    ///   and fro (review: Reykjavík and Þingvellir, 41 km apart, in turn every ten minutes made
+    ///   18 route points and 700 km "vor Ort"). The legs together, not each one: two cameras take
+    ///   their photos at minutes of their own, so the way from one to the other may take a minute
+    ///   and the way back the rest of the round, and the round is what nobody goes (third review:
+    ///   with the photos at the same minutes it was 18 route points again; three people in three
+    ///   places, 36 route points and 1,704 km).
     ///
-    /// So photos taken in turn in two places still zig-zag when their legs are slower than
-    /// `turnBackSpeed` (two cameras 41 km apart, in turn every quarter of an hour), when the route
-    /// turns back right away from one visit with no other such visit next to it or one visit away
-    /// (A → B → A, then on to C), and when the visits last longer than `turnBackStay`. Real ways
-    /// back and forth this fast with no more than `turnBackStay` at two turns in a row (shuttle
-    /// flights with a crew's short turnarounds, photos at two spots of a race track lap after
-    /// lap) count as no way anyone went.
+    /// So photos taken in turn in several places still zig-zag when going round is slower than
+    /// `turnBackSpeed` (two cameras 41 km apart in turn every half hour, or 5 to 20 km apart every
+    /// 5 to 20 minutes, as a car on a motorway can go), when the route returns quickly once only
+    /// (A → B → A, then on to C), and when a visit on the way lasts longer than `turnBackStay`.
+    /// Real ways round this fast with no more than `turnBackStay` at each turn, twice in a row
+    /// (shuttle flights with a crew's short turnarounds, photos at two spots of a race track lap
+    /// after lap), count as no way anyone went. The camera of each photo, stored by the analysis,
+    /// would part several cameras' photos at any speed; it is not stored yet.
     static func travelledLegs(_ visits: [Visit], photos: [Photo]) -> [Bool] {
         guard visits.count > 1 else { return [] }
-        var travelled: [Bool] = [], fast: [Bool] = []
-        travelled.reserveCapacity(visits.count - 1)
-        fast.reserveCapacity(visits.count - 1)
+        let count = visits.count
+        var travelled: [Bool] = []
+        travelled.reserveCapacity(count - 1)
+        // Running totals: `meters[k]` and `seconds[k]` of the legs before visit `k`, `long[k]` the
+        // visits before it that last longer than `turnBackStay`.
+        var meters = [0.0], seconds = [0.0], long = [0]
+        meters.reserveCapacity(count)
+        seconds.reserveCapacity(count)
+        long.reserveCapacity(count + 1)
         for (from, to) in zip(visits, visits.dropFirst()) {
-            travelled.append(!isNoTravel(from: photos[from.last], to: photos[to.first]))
-            fast.append(isFast(from: photos[from.last], to: photos[to.first]))
+            let a = photos[from.last], b = photos[to.first]
+            travelled.append(!isNoTravel(from: a, to: b))
+            meters.append(meters[meters.count - 1] + GeoMath.distance(a.coordinate, b.coordinate))
+            seconds.append(seconds[seconds.count - 1] + b.date.timeIntervalSince(a.date))
         }
-        // The visits the route turns back from right away (never the first or the last).
-        var turnsBack = [Bool](repeating: false, count: visits.count)
-        for k in 1..<(visits.count - 1) where visits[k - 1].place == visits[k + 1].place && fast[k - 1] && fast[k] {
-            turnsBack[k] = photos[visits[k].last].date.timeIntervalSince(photos[visits[k].first].date) <= turnBackStay
+        for visit in visits {
+            let stay = photos[visit.last].date.timeIntervalSince(photos[visit.first].date)
+            long.append(long[long.count - 1] + (stay > turnBackStay ? 1 : 0))
         }
-        // Two of them in a row: the legs to and from both.
-        for k in turnsBack.indices where turnsBack[k] {
-            for other in [k + 1, k + 2] where other < turnsBack.count && turnsBack[other] {
-                for leg in [k - 1, k, other - 1, other] { travelled[leg] = false }
+        // The quick returns, from visit `from` back to its place at visit `to`.
+        var returns: [(from: Int, to: Int)] = []
+        var lastVisit: [Int: Int] = [:]
+        for (k, visit) in visits.enumerated() {
+            if let j = lastVisit[visit.place], long[k] == long[j + 1],
+               meters[k] - meters[j] > turnBackSpeed * (seconds[k] - seconds[j]) {
+                returns.append((j, k))
             }
+            lastVisit[visit.place] = k
+        }
+        // Those sharing a visit with another: their legs. `shared[k]`: the visits before `k` on
+        // two returns or more.
+        var starts = [Int](repeating: 0, count: count + 1)
+        for r in returns {
+            starts[r.from] += 1
+            starts[r.to + 1] -= 1
+        }
+        var shared = [0], depth = 0
+        shared.reserveCapacity(count + 1)
+        for k in 0..<count {
+            depth += starts[k]
+            shared.append(shared[k] + (depth >= 2 ? 1 : 0))
+        }
+        for r in returns where shared[r.to + 1] > shared[r.from] {
+            for leg in r.from..<r.to { travelled[leg] = false }
         }
         return travelled
     }
@@ -672,12 +718,6 @@ enum TripGeometryBuilder {
     /// as the crow flies): they were taken at the same time in two places.
     static func isNoTravel(from a: Photo, to b: Photo) -> Bool {
         GeoMath.distance(a.coordinate, b.coordinate) > AirborneFilter.maximumFlightSpeed * b.date.timeIntervalSince(a.date)
-    }
-
-    /// Whether going from where `a` was taken to where `b` was in the time between them (`b` not
-    /// before `a`) is faster than `turnBackSpeed`, as the crow flies.
-    static func isFast(from a: Photo, to b: Photo) -> Bool {
-        GeoMath.distance(a.coordinate, b.coordinate) > turnBackSpeed * b.date.timeIntervalSince(a.date)
     }
 
     /// At most `limit` visits of `visits` (concept §9), the first and last always among them,

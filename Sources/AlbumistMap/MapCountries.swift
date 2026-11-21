@@ -4,10 +4,12 @@ import AlbumistCore
 /// The visited countries of "Deine Welt" and the towns counted beside them (concept §5, "Länder"
 /// and "Städte": as the travel atlas counts them today, `TravelAtlas.compute`). Two differences
 /// to the atlas: a place counts only when it comes from GPS (`AssetFacts.gpsPlace`, never a place
-/// guessed from the picture), and photos taken in flight (`AirborneFilter`) count for nothing
-/// (concept §5: "Flugzeugfotos zählen nicht").
+/// guessed from the picture), and only photos on the ground count (`FlightJudgement`: none taken
+/// in flight or maybe taken in flight; concept §5: "Flugzeugfotos zählen nicht").
 public enum MapCountries {
-    /// The countries with at least `minimumPhotos` photos, first visit order (then code).
+    /// The countries with at least `minimumPhotos` photos on the ground, first visit order (then
+    /// code). `airborne` and `maybeInFlight`: the photos taken in flight and maybe taken in flight
+    /// (`FlightJudgement`), which count for nothing.
     ///
     /// - A photo counts for the ISO code of its GPS place. A disputed area has no code (decision
     ///   18.11.2026), so its photos make no country; a code always wins over an area, as in the
@@ -26,7 +28,7 @@ public enum MapCountries {
     ///   of the old year wherever the iPhone is.
     /// - `tripIDs`: the trips (`AssetFacts.tripID`) with at least one counted photo there, ordered
     ///   by their start in `tripStarts`, then id; a trip missing from `tripStarts` comes last.
-    public static func compute(facts: [AssetFacts], airborne: Set<AssetID>, tripStarts: [AlbumistID: Date],
+    public static func compute(facts: [AssetFacts], airborne: Set<AssetID>, maybeInFlight: Set<AssetID> = [], tripStarts: [AlbumistID: Date],
                                minimumPhotos: Int = MapSummary.minimumPhotosPerCountry, timeZone: TimeZone = .current) -> [MapCountry] {
         struct Tally {
             var photos = Set<AssetID>()
@@ -60,8 +62,9 @@ public enum MapCountries {
         // is at hand without a look-up.
         var tallies: [Tally] = [], codes: [String] = [], index: [String: Int] = [:]
         var last: (code: String, tally: Int)?
+        let leftOut = notOnTheGround(airborne, maybeInFlight)
         for fact in facts {
-            guard let code = isoCode(fact.gpsPlace?.isoCountryCode), !airborne.contains(fact.id) else { continue }
+            guard let code = isoCode(fact.gpsPlace?.isoCountryCode), !leftOut.contains(fact.id) else { continue }
             let tally: Int
             if let last, last.code == code {
                 tally = last.tally
@@ -98,9 +101,10 @@ public enum MapCountries {
 
     /// Distinct towns, as the atlas counts them: a town is its country key and its name, so
     /// "Frankfurt" in Germany and in the US are two, and towns in a disputed area count (keyed by
-    /// the area, decision 18.11.2026 and the second review of 752ba07). GPS places only, photos
-    /// in flight left out.
-    public static func cityCount(facts: [AssetFacts], airborne: Set<AssetID>) -> Int {
+    /// the area, decision 18.11.2026 and the second review of 752ba07). GPS places only, of photos
+    /// on the ground (`compute`): a single photo makes a town, so one window photo over a town
+    /// would.
+    public static func cityCount(facts: [AssetFacts], airborne: Set<AssetID>, maybeInFlight: Set<AssetID> = []) -> Int {
         struct Town: Hashable {
             var country: String
             var name: String
@@ -108,15 +112,21 @@ public enum MapCountries {
         var towns = Set<Town>()
         // Photos come mostly in runs at one town: one already counted needs no look at the set.
         var last: Town?
+        let leftOut = notOnTheGround(airborne, maybeInFlight)
         for fact in facts {
             guard let place = fact.gpsPlace, let town = place.locality, !town.isEmpty, let country = countryKey(of: place) else { continue }
             if let last, last.name == town, last.country == country { continue }
-            guard !airborne.contains(fact.id) else { continue }
+            guard !leftOut.contains(fact.id) else { continue }
             let key = Town(country: country, name: town)
             towns.insert(key)
             last = key
         }
         return towns.count
+    }
+
+    /// The photos that count for nothing, in one set: one look-up per photo.
+    static func notOnTheGround(_ airborne: Set<AssetID>, _ maybeInFlight: Set<AssetID>) -> Set<AssetID> {
+        maybeInFlight.isEmpty ? airborne : airborne.union(maybeInFlight)
     }
 
     /// `countries` by first visit, then code: the order of the passport's stamps, of "Neu: …" and

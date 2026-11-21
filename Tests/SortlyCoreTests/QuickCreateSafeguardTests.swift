@@ -3,16 +3,23 @@ import Testing
 @testable import SortlyCore
 import SortlyTestSupport
 
-/// What review B of design wave 1 found around "Anlegen" on a card (decision 7B), read in the
-/// App's code: the App does not build on Linux. Each test was red on the code before its fix.
+/// What review B of design wave 1 found around "Anlegen" on a card (decision 7B). The memory of
+/// "Nicht jetzt" is core and tested as such; the rest is read in the App's code, as the App does
+/// not build on Linux. Each test was red on the code before its fix.
 ///
 /// - Finding 1: "Album anlegen" on a suggestion opened in a sheet over the tabs (a photo's
 ///   "Info") made its album at once, but the banner with "Widerrufen", the purchase sheet and
 ///   the messages show only on the tabs, under that sheet.
+/// - Findings 4 and 9: "Anlegen" on a card under "Nicht jetzt" kept the stored rejection, and
+///   "Widerrufen" did not set the suggestion aside again; the card jumped to its area's section
+///   the moment it was tapped.
 @Suite("Quick create: where and when it may make an album")
 struct QuickCreateSafeguardTests {
+    static let model = "App/Sortly/Model/AppModel+QuickCreate.swift"
+    static let appModel = "App/Sortly/Model/AppModel.swift"
     static let navigation = "App/Sortly/Views/Navigation.swift"
     static let tabs = "App/Sortly/Views/RootView.swift"
+    static let list = "App/Sortly/Views/ProposalViews.swift"
 
     static func code(_ path: String) throws -> String {
         AppSource.code(try AppSource.read(path))
@@ -21,6 +28,13 @@ struct QuickCreateSafeguardTests {
     static func body(_ declaration: String, in path: String) throws -> String {
         let code = try code(path)
         return try #require(AppSource.body(of: declaration, in: code), "\(declaration) is not in \(path)")
+    }
+
+    /// The text of `code` from `first` to `second` (both must be there, in this order).
+    static func between(_ first: String, _ second: String, in code: String) throws -> Substring {
+        let start = try #require(code.range(of: first), "missing: \(first)")
+        let end = try #require(code.range(of: second, range: start.upperBound..<code.endIndex), "missing after \(first): \(second)")
+        return code[start.lowerBound..<end.upperBound]
     }
 
     // MARK: Finding 1: only where the banner shows
@@ -78,5 +92,121 @@ struct QuickCreateSafeguardTests {
             }
         }
         #expect(calls == 3, "the start page, the list and the suggestion's page")
+    }
+
+    // MARK: Findings 4 and 9: a card under "Nicht jetzt"
+
+    static let rome = AlbumProposal(id: SortlyID("rome"), kind: .trip, title: "Rom, Mai 2024", folderPath: ["Reisen"],
+                                    assetIDs: ["r1", "r2", "r3"])
+    static let oslo = AlbumProposal(id: SortlyID("oslo"), kind: .trip, title: "Oslo, Juni 2024", folderPath: ["Reisen"],
+                                    assetIDs: ["o1", "o2"])
+
+    /// A card made from "Nicht jetzt" is remembered from the tap until its banner ends: its card
+    /// stays there meanwhile, and a completed "Widerrufen" gets the suggestion back, once, to set
+    /// it aside again. An open suggestion is never remembered.
+    @Test func aCardFromNichtJetztIsRememberedWhileItsBannerShows() {
+        var memory = QuickCreateSetAside()
+        memory.begin(Self.oslo, setAside: false)
+        #expect(!memory.contains(Self.oslo.id), "an open suggestion is no card under \"Nicht jetzt\"")
+        memory.begin(Self.rome, setAside: true)
+        #expect(memory.contains(Self.rome.id), "while its album is made")
+        memory.bannerShown(for: Self.rome.id)
+        #expect(memory.contains(Self.rome.id), "while its banner shows")
+        #expect(memory.undone(Self.rome.id) == Self.rome)
+        #expect(!memory.contains(Self.rome.id))
+        #expect(memory.undone(Self.rome.id) == nil, "set aside again only once")
+    }
+
+    /// Nothing made, or a banner that went by itself (the album stays, and the lifted rejection
+    /// with it): forgotten, the card follows its decision again.
+    @Test func whatIsNotMadeOrStaysIsForgotten() {
+        var memory = QuickCreateSetAside()
+        memory.begin(Self.rome, setAside: true)
+        memory.notMade(Self.rome.id)
+        #expect(!memory.contains(Self.rome.id))
+        memory.begin(Self.rome, setAside: true)
+        memory.bannerShown(for: Self.rome.id)
+        memory.bannerGone(for: Self.rome.id)
+        #expect(!memory.contains(Self.rome.id))
+        #expect(memory.undone(Self.rome.id) == nil, "no \"Widerrufen\" without its banner")
+        // Tapped on an open card later: not set aside any more.
+        memory.begin(Self.rome, setAside: true)
+        memory.begin(Self.rome, setAside: false)
+        #expect(!memory.contains(Self.rome.id))
+    }
+
+    /// A banner ends only its own memory, never that of a card being made meanwhile; a newer
+    /// banner replaces the older one, whose "Widerrufen" is gone with it.
+    @Test func aNewerBannerEndsTheOlderOnes() {
+        var memory = QuickCreateSetAside()
+        memory.begin(Self.rome, setAside: true)
+        memory.bannerShown(for: Self.rome.id)
+        memory.begin(Self.oslo, setAside: true)
+        #expect(memory.contains(Self.rome.id) && memory.contains(Self.oslo.id))
+        memory.bannerGone(for: Self.rome.id)
+        #expect(!memory.contains(Self.rome.id) && memory.contains(Self.oslo.id), "Oslo is still being made")
+
+        memory = QuickCreateSetAside()
+        memory.begin(Self.rome, setAside: true)
+        memory.bannerShown(for: Self.rome.id)
+        memory.begin(Self.oslo, setAside: true)
+        memory.bannerShown(for: Self.oslo.id)
+        #expect(!memory.contains(Self.rome.id) && memory.contains(Self.oslo.id))
+        #expect(memory.undone(Self.rome.id) == nil)
+    }
+
+    /// The model's stored "Nicht jetzt" can be lifted from the quick create file
+    /// (`removeRejection` was private to `AppModel.swift`).
+    @Test func theStoredRejectionCanBeLifted() throws {
+        let code = try Self.code(Self.appModel)
+        #expect(!code.contains("private func removeRejection("))
+        #expect(code.contains("func removeRejection(of sources: Set<SortlyID>?) async"))
+    }
+
+    /// "Anlegen" notes whether the suggestion was set aside before its pick took the decision's
+    /// place, and forgets it whenever nothing was made. Once the album is made, the stored
+    /// rejection is lifted before the banner shows, so "Widerrufen" never runs ahead of it.
+    @Test func anlegenRemembersNichtJetzt() throws {
+        let create = try Self.body("func createNow(", in: Self.model)
+        let noted = try #require(create.range(of: "let setAside = chosen == .reject"), "the decision before the pick is not noted")
+        let remembered = try #require(create.range(of: "state.setAside.begin(proposal, setAside: setAside)"))
+        let picked = try #require(create.range(of: "selectForPreview("))
+        #expect(noted.lowerBound < picked.lowerBound && remembered.lowerBound < picked.lowerBound,
+                "noted after the pick took the decision's place")
+        #expect(create.contains("if !created { state.setAside.notMade(proposal.id) }"), "kept in \"Nicht jetzt\" although nothing was made")
+        #expect(create.contains("created = outcome == .created"))
+        #expect(create.contains("finishQuickCreate(made, proposal: proposal, setAside: setAside)"))
+        let finish = try Self.body("private func finishQuickCreate(", in: Self.model)
+        let ended = try #require(finish.range(of: "QuickCreate.ending(of: finished)"))
+        let lifted = try #require(finish.range(of: "if setAside { await removeRejection(of: [proposal.id]) }"),
+                                  "the stored rejection stays")
+        let shown = try #require(finish.range(of: "showQuickCreateBanner("))
+        #expect(ended.lowerBound < lifted.lowerBound, "lifted before the album is in Photos")
+        #expect(lifted.lowerBound < shown.lowerBound, "lifted after the banner shows: \"Widerrufen\" can run ahead of it")
+    }
+
+    /// The banner keeps the memory: a newer banner ends the older ones', a banner that goes by
+    /// itself ends its own, and a completed "Widerrufen" sets the suggestion aside again.
+    @Test func widerrufenSetsItAsideAgain() throws {
+        let shown = try Self.body("private func showQuickCreateBanner(", in: Self.model)
+        #expect(shown.contains("setAside.bannerShown(for: banner.proposalID)"))
+        let expiry = try Self.body("private func expireQuickCreateBanner(", in: Self.model)
+        #expect(expiry.contains("setAside.bannerGone(for:"))
+        let undo = try Self.body("func undoQuickCreate(", in: Self.model)
+        let completed = try Self.between("if undonePlans.contains(banner.plan.id)", "} else {", in: undo)
+        #expect(completed.contains("if let setAside = state.setAside.undone(banner.proposalID)"))
+        #expect(completed.contains("setDecision(.reject, for: setAside)"))
+    }
+
+    /// The list keeps such a card in "Nicht jetzt" while its album is made and while its banner
+    /// shows, instead of following the pick to its area: one memory for the list and for
+    /// "Widerrufen".
+    @Test func theCardStaysInNichtJetzt() throws {
+        let sections = try Self.body("private func sections(of all: [AlbumProposal])", in: Self.list)
+        #expect(sections.contains("model.quickCreateKeepsNotNow("), "the sections follow the decisions only")
+        #expect(!sections.contains("all.filter { model.decisions[$0.id] != .reject }"))
+        let model = try Self.code(Self.model)
+        #expect(model.contains("func quickCreateKeepsNotNow(_ id: SortlyID) -> Bool"))
+        #expect(model.contains("var setAside = QuickCreateSetAside()"))
     }
 }

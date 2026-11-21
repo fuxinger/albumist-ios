@@ -2232,7 +2232,7 @@ final class AppModel {
     }
 
     /// Removes stored "Nicht jetzt" rejections, so the suggestions can be offered and applied again.
-    private func removeRejection(of sources: Set<SortlyID>?) async {
+    func removeRejection(of sources: Set<SortlyID>?) async {
         guard let store, let all = try? await store.overrides() else { return }
         for o in all where o.decision == .rejectProposal {
             guard case .source(let s) = o.scope, sources?.contains(s) ?? true else { continue }

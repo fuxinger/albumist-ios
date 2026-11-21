@@ -29,7 +29,8 @@ struct QuickCreatePurchase: Identifiable, Equatable {
 }
 
 /// What one-tap creating keeps between taps: the banner, the suggestion being made, the purchase
-/// sheet it asked for. One per app, like the model; kept apart from `AppModel.swift`.
+/// sheet it asked for, what "Nicht jetzt" had set aside. One per app, like the model; kept apart
+/// from `AppModel.swift`.
 @MainActor @Observable
 final class QuickCreateState {
     static let shared = QuickCreateState()
@@ -38,6 +39,9 @@ final class QuickCreateState {
     /// The suggestion being made right now: its card's button waits.
     var creating: SortlyID?
     var purchase: QuickCreatePurchase?
+    /// Made, or being made, from "Nicht jetzt" while its banner shows: the list keeps its card
+    /// there, and "Widerrufen" sets it aside again.
+    var setAside = QuickCreateSetAside()
     /// Ends the banner after its time; a newer banner or "Widerrufen" ends the older timer.
     @ObservationIgnored var expiry: Task<Void, Never>?
 }
@@ -55,6 +59,13 @@ extension AppModel {
 
     /// The suggestion whose album is being made right now.
     var quickCreating: SortlyID? { QuickCreateState.shared.creating }
+
+    /// Whether the list keeps the suggestion's card under "Nicht jetzt" although its decision
+    /// says otherwise: made, or being made, from there while its banner shows
+    /// (`QuickCreateSetAside`, review B of design wave 1).
+    func quickCreateKeepsNotNow(_ id: SortlyID) -> Bool {
+        QuickCreateState.shared.setAside.contains(id)
+    }
 
     /// The purchase sheet "Anlegen" asked for (the free albums are used up).
     var quickCreatePurchase: QuickCreatePurchase? {
@@ -76,8 +87,10 @@ extension AppModel {
             return .notNow
         }
         // What the suggestion's page would make: the user's choice for it, else its
-        // recommendation (with the name the user gave it).
+        // recommendation (with the name the user gave it). Set aside with "Nicht jetzt" is noted
+        // before the pick takes the decision's place.
         let chosen = decision(for: proposal)
+        let setAside = chosen == .reject
         let pick = chosen.isAccepted ? chosen : recommendedDecision(for: proposal)
         // A suggestion whose photos its card hides (every one a sensitive document) is looked
         // at first, as a sensitive one is: the user has not seen what would go into Photos.
@@ -86,7 +99,14 @@ extension AppModel {
             return .needsLook
         }
         state.creating = proposal.id
-        defer { state.creating = nil }
+        state.setAside.begin(proposal, setAside: setAside)
+        var created = false
+        defer {
+            state.creating = nil
+            // Nothing made: the pick is given back (`endPreview`), and the decision says again
+            // where its card is.
+            if !created { state.setAside.notMade(proposal.id) }
+        }
         // Selected for this plan only, as "Album anlegen" on its page does, and given back
         // afterwards whatever happened: never left selected without the user's choice. A made
         // suggestion has left the open list by then (`finalize`), and stays made.
@@ -115,7 +135,9 @@ extension AppModel {
         }
         // A preview open on another tab keeps its own plan (`PlanReviewView`).
         await execute(made)
-        return finishQuickCreate(made, proposal: proposal)
+        let outcome = await finishQuickCreate(made, proposal: proposal, setAside: setAside)
+        created = outcome == .created
+        return outcome
     }
 
     /// After the purchase the sheet asked for: the suggestion is made as tapped, in its state
@@ -145,6 +167,8 @@ extension AppModel {
         await undo(banner.plan)
         let undoRan = execution.planID != before.planID
         if undonePlans.contains(banner.plan.id) {
+            // Made from "Nicht jetzt": set aside there again, as before "Anlegen".
+            if let setAside = state.setAside.undone(banner.proposalID) { setDecision(.reject, for: setAside) }
             if state.banner?.id == banner.id { state.banner = nil }
             #if canImport(UIKit)
             UIAccessibility.post(notification: .announcement, argument: String(localized: "„\(banner.title)“ rückgängig gemacht"))
@@ -172,7 +196,8 @@ extension AppModel {
     }
 
     /// What follows the run of a plan made from a card: the banner, or why there is none.
-    private func finishQuickCreate(_ made: ChangePlan, proposal: AlbumProposal) -> QuickCreateOutcome {
+    /// `setAside`: made from "Nicht jetzt".
+    private func finishQuickCreate(_ made: ChangePlan, proposal: AlbumProposal, setAside: Bool) async -> QuickCreateOutcome {
         guard execution.planID == made.id else {
             // It did not start: full access missing (said by `execute`), or another plan took
             // the turn first.
@@ -197,6 +222,10 @@ extension AppModel {
         case .created:
             break
         }
+        // Made from "Nicht jetzt": its stored rejection goes, as for a suggestion accepted there
+        // (`setDecision`), and before the banner shows, so "Widerrufen", which sets it aside
+        // again, never runs ahead of it.
+        if setAside { await removeRejection(of: [proposal.id]) }
         if let banner = QuickCreateBanner(plan: finished, proposalID: proposal.id) {
             showQuickCreateBanner(banner)
         }
@@ -204,7 +233,10 @@ extension AppModel {
     }
 
     private func showQuickCreateBanner(_ banner: QuickCreateBanner) {
-        QuickCreateState.shared.banner = banner
+        let state = QuickCreateState.shared
+        state.banner = banner
+        // The banner it replaces can no longer be taken back: that card follows its decision.
+        state.setAside.bannerShown(for: banner.proposalID)
         #if canImport(UIKit)
         UIAccessibility.post(notification: .announcement, argument: String(localized: "„\(banner.title)“ angelegt"))
         #endif
@@ -225,7 +257,11 @@ extension AppModel {
         state.expiry = Task { @MainActor in
             try? await Task.sleep(for: duration)
             guard !Task.isCancelled else { return }
-            if state.banner?.id == id, state.banner?.canUndo == true { state.banner = nil }
+            if let banner = state.banner, banner.id == id, banner.canUndo {
+                state.banner = nil
+                // The album stays, and so does the lifted rejection: its card follows its decision.
+                state.setAside.bannerGone(for: banner.proposalID)
+            }
         }
     }
 

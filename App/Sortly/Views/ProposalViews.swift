@@ -45,8 +45,14 @@ struct ProposalListView: View {
     }
 
     private func sections(of all: [AlbumProposal]) -> [CardSection] {
-        let open = all.filter { model.decisions[$0.id] != .reject }
-        let notNow = all.filter { model.decisions[$0.id] == .reject }
+        // Set aside, or made from "Nicht jetzt" while its banner shows: its pick, then its album,
+        // would move the card to its area under the finger, and "Widerrufen" sets it aside again
+        // (`AppModel.quickCreateKeepsNotNow`).
+        let isNotNow = { (proposal: AlbumProposal) in
+            model.decisions[proposal.id] == .reject || model.quickCreateKeepsNotNow(proposal.id)
+        }
+        let open = all.filter { !isNotNow($0) }
+        let notNow = all.filter(isNotNow)
         var result: [CardSection] = []
         if area == nil {
             // All suggestions: one section per area, so a trip "Rom, Mai 2024" is not mistaken

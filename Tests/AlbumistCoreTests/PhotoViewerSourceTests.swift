@@ -280,6 +280,13 @@ struct PhotoViewerSourceTests {
             last = found.upperBound
         }
         #expect(Self.count(#"\.gesture\(LivePress\("#, in: source) == 1)
+        // A pinch that waits for the press is not kept waiting: a second finger fails it at once.
+        let recognizer = AppSource.code(try Self.file("LivePress.swift"))
+        #expect(recognizer.contains("import UIKit.UIGestureRecognizerSubclass"))
+        let touches = try #require(AppSource.body(of: "override func touchesBegan(", in: recognizer), "a pinch waits for the press")
+        let begun = try #require(touches.range(of: "super.touchesBegan(touches, with: event)"))
+        let fails = try #require(touches.range(of: "if numberOfTouches > 1, state == .possible { state = .failed }"))
+        #expect(begun.upperBound < fails.lowerBound)
         // The press is told to the photo view, which holds the pager still meanwhile.
         let press = try #require(AppSource.body(of: "private func press(", in: source))
         let began = try #require(press.range(of: "onPressing(true)"))

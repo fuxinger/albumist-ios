@@ -7,11 +7,12 @@ import AlbumistCore
 /// a stack the symbol as before (undo, removal, failed steps, or no cover sharp on the device).
 ///
 /// - Which albums and photos: `ResultCoverStack` (core), worked out once per plan as the result
-///   shows and kept (`make`; review E of design wave 2, finding 7). The covers come from the
-///   covers' store only (`ResultMomentLoader.kept`): what the preview loaded through `CoverLoader`
-///   while the plan ran, sharp and from the device (never iCloud, never blurry). The result never
-///   waits for Photos (finding 1): an album without a kept cover is left out, and with none the
-///   symbol shows at once, with no room held for covers that might come (finding 9).
+///   shows and kept (`make`; review E of design wave 2, finding 7). The covers are what the
+///   preview loaded through `CoverLoader` while the plan ran, sharp and from the device (never
+///   iCloud, never blurry), kept in the screen's own state as they arrived (`held`), else what the
+///   covers' store still keeps (`ResultMomentLoader.kept`; review E2, N3). The result never waits
+///   for Photos (finding 1): an album without a kept cover is left out, and with none the symbol
+///   shows at once, with no room held for covers that might come (finding 9).
 /// - The screen's success tap comes as the main cover lies down (`onSettled`, within
 ///   `ResultCoverFan.settleTime`; the screen lets it go after `successDeadline` anyway). No
 ///   haptic of its own.
@@ -28,6 +29,9 @@ struct ResultCoverMoment: View {
     /// What the stack knows of the suggestions the plan came from, taken as it started (nil:
     /// taken now, `AppModel.resultCoverStack`).
     let sources: ResultCoverSources?
+    /// The covers the screen kept as they loaded while the plan ran (nil: none, another screen
+    /// ran it).
+    let held: ResultMomentCovers?
     /// The symbol without a stack, and its colour.
     let symbol: String
     let tint: Color
@@ -131,12 +135,12 @@ struct ResultCoverMoment: View {
 
     // MARK: Choreography
 
-    /// Works the stack out for this plan, once: which albums and photos, and which covers are
-    /// kept sharp on the device now. Nothing is loaded here.
+    /// Works the stack out for this plan, once: which albums and photos, and which covers were
+    /// kept for it, sharp from the device. Nothing is loaded here.
     private func make() {
         guard madeFor != plan.id else { return }
         let stack = model.resultCoverStack(for: plan, taken: sources)
-        covers = ResultMomentLoader.kept(stack, scale: displayScale)
+        covers = ResultMomentLoader.kept(stack, held: held, plan: plan.id, scale: displayScale)
         if settledFor != plan.id { laid = 0 }
         madeFor = plan.id
     }
@@ -174,13 +178,49 @@ struct ResultCoverMoment: View {
     }
 }
 
-/// One cover of the stack and the card it stands for.
+/// One cover of the stack: the card it stands for and the photo it shows.
 struct ResultMomentCover: Identifiable {
     let card: String
+    let photo: AssetID
     let image: UIImage
     let focus: UnitPoint
 
     var id: String { card }
+}
+
+/// The covers the preview loaded for the result's stack while its plan ran (draft E3), kept by
+/// the screen as they arrive (`ResultMomentLoader.prefetch`): the covers' store is a cache that a
+/// memory warning or a moment in the background empties, and the result takes its covers from
+/// here first (review E2 of design wave 2, N3). For one plan at a time. Not observed: nothing is
+/// drawn again as covers arrive; the result reads them once, as it shows (`make`).
+@MainActor
+final class ResultMomentCovers {
+    private var plan: AlbumistID?
+    private var covers: [String: ResultMomentCover] = [:]
+
+    /// A new run: what was kept for another plan goes.
+    func start(_ plan: AlbumistID) {
+        self.plan = plan
+        covers = [:]
+    }
+
+    /// Keeps a cover that arrived for `plan`; one for another plan is not kept.
+    func keep(_ cover: ResultMomentCover, for plan: AlbumistID) {
+        guard plan == self.plan else { return }
+        covers[cover.card] = cover
+    }
+
+    /// The photos kept for `plan`, by card.
+    func photos(for plan: AlbumistID) -> [String: AssetID] {
+        guard plan == self.plan else { return [:] }
+        return covers.mapValues(\.photo)
+    }
+
+    /// The cover kept for `card` of `plan`.
+    func cover(for card: String, plan: AlbumistID) -> ResultMomentCover? {
+        guard plan == self.plan else { return nil }
+        return covers[card]
+    }
 }
 
 /// One cover in the fan: the photo cropped like a card's cover, a white edge (the card colour in
@@ -230,14 +270,16 @@ private struct FannedCover: View {
 
 /// The covers of the result's stack: loaded through `CoverLoader` (the cards' own loader: only
 /// from the device, the first candidate that is sharp, kept in the covers' store) while the plan
-/// runs (`prefetch`), and taken from that store as the result shows (`kept`), at the card's full
-/// size whatever the fan is scaled to. The result never asks Photos itself.
+/// runs (`prefetch`), a few side by side and kept by the screen as they arrive, then taken as the
+/// result shows (`kept`), at the card's full size whatever the fan is scaled to. The result never
+/// asks Photos itself.
 @MainActor
 enum ResultMomentLoader {
     /// How long the covers may load while the plan runs and the show plays; the screen cancels
     /// the loading as the result shows, or when the run ends without one.
     static let prefetchPatience: Duration = .seconds(20)
-    /// Photos did not answer (busy with the run): the cover asks once more after this.
+    /// Photos did not answer (busy with the run): the card asks once more after this, once the
+    /// cards after it had their turn (`ResultCoverPrefetch`).
     static let retryDelay: Duration = .milliseconds(800)
 
     /// The size in pixels each cover is asked for and kept at.
@@ -245,42 +287,66 @@ enum ResultMomentLoader {
         CGSize(width: CGFloat(ResultCoverFan.cardWidth) * scale, height: CGFloat(ResultCoverFan.cardHeight) * scale)
     }
 
-    /// Loads the covers of the stack ahead, card by card in order, while the plan runs: each card
-    /// tries its own photos, and the sharp ones are kept in the covers' store. Nothing is shown.
-    static func prefetch(_ stack: ResultCoverStack, scale: CGFloat) async {
+    /// Loads the covers of the stack ahead while the plan runs (review E2 of design wave 2, N3):
+    /// first one look-up for all the photos the cards may try (one wait for Photos instead of one
+    /// per card), then `ResultCoverPrefetch.together` cards side by side in the stack's order. A
+    /// card Photos did not answer for comes back after the others; only cards that may still lie
+    /// on the stack load; it stops once the stack is decided, cancelled, or out of patience.
+    /// Every sharp cover is kept in `held` as it arrives. Nothing is shown.
+    static func prefetch(_ stack: ResultCoverStack, plan: AlbumistID, scale: CGFloat, keepingIn held: ResultMomentCovers) async {
         let pixels = pixels(scale: scale)
         let started = ContinuousClock.now
-        var sharp = 0
-        for card in stack.cards {
-            guard sharp < ResultCoverStack.limit, !Task.isCancelled,
-                  ContinuousClock.now - started < prefetchPatience else { return }
-            let request = CoverLoader.Request(ids: card.candidates, pixels: pixels)
-            var loaded = await CoverLoader.load(request)
-            // Photos did not answer: asked once more while there is time.
-            if loaded.counted == nil, !Task.isCancelled, ContinuousClock.now - started + retryDelay < prefetchPatience {
-                try? await Task.sleep(for: retryDelay)
-                loaded = await CoverLoader.load(request)
+        var candidates: [String: [AssetID]] = [:]
+        for card in stack.cards { candidates[card.id] = card.candidates }
+        await ThumbnailCache.shared.lookUp(stack.cards.flatMap(\.candidates))
+        var loading = ResultCoverPrefetch(cards: stack.cards.map(\.id))
+        await withTaskGroup(of: ResultCoverPrefetch.Arrival.self) { group in
+            while !Task.isCancelled, !loading.isDecided, ContinuousClock.now - started < prefetchPatience {
+                while let start = loading.next() {
+                    let request = CoverLoader.Request(ids: candidates[start.card] ?? [], pixels: pixels)
+                    group.addTask { await ResultMomentLoader.fetch(start, request: request, keepingIn: held, plan: plan) }
+                }
+                guard let arrival = await group.next() else { break }
+                loading.record(arrival)
             }
-            if case .photo = loaded.shown { sharp += 1 }
+            group.cancelAll()
         }
     }
 
-    /// The covers that lie on the stack (`ResultCoverStack.shown`), card by card in order, from
-    /// the covers' store only: each card's first photo whose sharp cover is kept at the card's
-    /// size. Asks Photos nothing, so the result never waits; an album without one is left out.
-    static func kept(_ stack: ResultCoverStack, scale: CGFloat) -> [ResultMomentCover] {
-        let pixels = pixels(scale: scale)
-        var sharp: [String: AssetID] = [:]
-        var found: [AssetID: ResultMomentCover] = [:]
-        for card in stack.cards {
-            for photo in card.candidates {
-                guard let cover = ThumbnailCache.shared.cachedCover(for: photo, pixels: pixels) else { continue }
-                let focus = CoverLoader.focus(imageSize: cover.image.size, screenshot: cover.screenshot, target: pixels)
-                sharp[card.id] = photo
-                found[photo] = ResultMomentCover(card: card.id, image: cover.image, focus: focus)
-                break
-            }
+    /// One card's cover through `CoverLoader`, kept in `held` as it arrives. A card that comes
+    /// back after Photos did not answer waits `retryDelay` first.
+    private static func fetch(_ start: ResultCoverPrefetch.Start, request: CoverLoader.Request, keepingIn held: ResultMomentCovers,
+                              plan: AlbumistID) async -> ResultCoverPrefetch.Arrival {
+        let card = start.card
+        if start.again { try? await Task.sleep(for: retryDelay) }
+        guard !Task.isCancelled else { return ResultCoverPrefetch.Arrival(card: card, answer: .noAnswer) }
+        let loaded = await CoverLoader.load(request)
+        guard !Task.isCancelled else { return ResultCoverPrefetch.Arrival(card: card, answer: .noAnswer) }
+        guard case .photo(let image, let focus) = loaded.shown else {
+            return ResultCoverPrefetch.Arrival(card: card, answer: loaded.counted == nil ? .noAnswer : .noSharpPhoto)
         }
-        return stack.shown(sharp: sharp, limit: ResultCoverStack.limit).compactMap { found[$0.photo] }
+        // The photo it shows: `CoverLoader` keeps the sharp cover it returns in the covers' store,
+        // and the candidates before it had none there.
+        guard let photo = request.ids.first(where: { ThumbnailCache.shared.cachedCover(for: $0, pixels: request.pixels) != nil }) else {
+            return ResultCoverPrefetch.Arrival(card: card, answer: .noAnswer)
+        }
+        held.keep(ResultMomentCover(card: card, photo: photo, image: image, focus: focus), for: plan)
+        return ResultCoverPrefetch.Arrival(card: card, answer: .sharp(photo))
+    }
+
+    /// The covers that lie on the stack (`ResultCoverStack.shown`), card by card in order: what
+    /// the screen kept for each while the plan ran (`held`), else what the covers' store still
+    /// keeps at the card's size (`ResultCoverStack.sharpPhotos`). Asks Photos nothing, so the
+    /// result never waits; an album without one is left out.
+    static func kept(_ stack: ResultCoverStack, held: ResultMomentCovers?, plan: AlbumistID, scale: CGFloat) -> [ResultMomentCover] {
+        let pixels = pixels(scale: scale)
+        let ahead = held?.photos(for: plan) ?? [:]
+        let sharp = stack.sharpPhotos(held: ahead) { ThumbnailCache.shared.cachedCover(for: $0, pixels: pixels) != nil }
+        return stack.shown(sharp: sharp, limit: ResultCoverStack.limit).compactMap { (shown) -> ResultMomentCover? in
+            if let cover = held?.cover(for: shown.card, plan: plan), cover.photo == shown.photo { return cover }
+            guard let cover = ThumbnailCache.shared.cachedCover(for: shown.photo, pixels: pixels) else { return nil }
+            let focus = CoverLoader.focus(imageSize: cover.image.size, screenshot: cover.screenshot, target: pixels)
+            return ResultMomentCover(card: shown.card, photo: shown.photo, image: cover.image, focus: focus)
+        }
     }
 }

@@ -61,7 +61,7 @@ struct MomentsSourceTests {
         #expect(view.contains(".onChange(of: plan.id, initial: true) { make() }"), "\(view)")
         let make = try Self.body(["struct ResultCoverMoment", "func make()"], in: covers)
         for part in ["guard madeFor != plan.id else { return }", "model.resultCoverStack(for: plan, taken: sources)",
-                     "ResultMomentLoader.kept(stack, scale: displayScale)", "madeFor = plan.id"] {
+                     "ResultMomentLoader.kept(stack, held: held, plan: plan.id, scale: displayScale)", "madeFor = plan.id"] {
             #expect(make.contains(part), "\(part): \(make)")
         }
         let kept = try Self.body(["struct ResultCard", "func essentials("], in: file)
@@ -134,14 +134,28 @@ struct MomentsSourceTests {
             }
         }
         let stack = try Self.code(Self.stack)
+        // Side by side, as the core decides (review E2 of design wave 2, N3): a few cards at once
+        // in the stack's order, a card Photos did not answer for comes back later, and the
+        // loading stops once the stack is decided, cancelled or out of patience.
         let load = try Self.body(["enum ResultMomentLoader", "static func prefetch("], in: stack)
-        #expect(load.contains("CoverLoader.Request(ids: card.candidates, pixels: pixels)"), "\(load)")
-        #expect(load.contains("await CoverLoader.load(request)"), "\(load)")
-        #expect(load.contains("!Task.isCancelled"), "\(load)")
-        #expect(stack.contains("static func kept(_ stack: ResultCoverStack, scale: CGFloat) -> [ResultMomentCover] {"),
-                "the result's covers are not taken from the store at once")
+        for part in ["withTaskGroup(of: ResultCoverPrefetch.Arrival.self)", "ResultCoverPrefetch(cards: stack.cards.map(\\.id))",
+                     "while let start = loading.next()", "loading.record(arrival)", "!loading.isDecided", "!Task.isCancelled",
+                     "prefetchPatience", "group.cancelAll()", "CoverLoader.Request(ids: candidates[start.card] ?? [], pixels: pixels)",
+                     "await ThumbnailCache.shared.lookUp("] {
+            #expect(load.contains(part), "\(part): \(load)")
+        }
+        let fetch = try Self.body(["enum ResultMomentLoader", "static func fetch("], in: stack)
+        for part in ["await CoverLoader.load(request)", "Task.isCancelled", "try? await Task.sleep(for: retryDelay)",
+                     "held.keep(ResultMomentCover(", "ThumbnailCache.shared.cachedCover(for: $0, pixels: request.pixels)"] {
+            #expect(fetch.contains(part), "\(part): \(fetch)")
+        }
+        // Kept as they arrive in the result's own state, not observed (nothing is drawn again).
+        #expect(stack.contains("@MainActor\nfinal class ResultMomentCovers {"), "the kept covers are observed, or not a class")
+        #expect(stack.contains("static func kept(_ stack: ResultCoverStack, held: ResultMomentCovers?, plan: AlbumistID, scale: CGFloat) -> [ResultMomentCover] {"),
+                "the result's covers are not taken from what was kept at once")
         let fromStore = try Self.body(["enum ResultMomentLoader", "static func kept("], in: stack)
-        #expect(fromStore.contains("ThumbnailCache.shared.cachedCover(for: photo, pixels: pixels)"), "\(fromStore)")
+        #expect(fromStore.contains("stack.sharpPhotos(held: ahead)"), "\(fromStore)")
+        #expect(fromStore.contains("ThumbnailCache.shared.cachedCover(for: $0, pixels: pixels)"), "\(fromStore)")
         #expect(!fromStore.contains("await"), "\(fromStore)")
         // The view itself never asks Photos: its only waits are the covers lying down.
         let view = try Self.body(["struct ResultCoverMoment"], in: stack)
@@ -199,9 +213,17 @@ struct MomentsSourceTests {
         let begin = try Self.body(["struct PlanReviewView", "func beginMoment("], in: file)
         for part in ["momentPending = true", "model.resultCoverSources(for: plan)",
                      "model.resultCoverStack(for: plan, taken: sources, expected: true)", "prefetch?.cancel()",
-                     "prefetch = Task { await ResultMomentLoader.prefetch(stack, scale: scale) }"] {
+                     "covers.start(id)",
+                     "prefetch = Task { await ResultMomentLoader.prefetch(stack, plan: id, scale: scale, keepingIn: covers) }"] {
             #expect(begin.contains(part), "\(part): \(begin)")
         }
+        // The covers that arrive are the screen's own, kept while the result shows (review E2 of
+        // design wave 2, N3).
+        #expect(file.contains("@State private var momentCovers = ResultMomentCovers()"))
+        let handed = try Self.body(["struct PlanReviewView", "func resultCard("], in: file)
+        #expect(handed.contains("held: momentCovers"), "\(handed)")
+        let moment = try Self.body(["struct ResultCard", "func moment("], in: file)
+        #expect(moment.contains("held: held"), "\(moment)")
         let end = try Self.body(["struct PlanReviewView", "func endMoment()"], in: file)
         for part in ["momentPending = false", "prefetch?.cancel()", "prefetch = nil"] {
             #expect(end.contains(part), "\(part): \(end)")

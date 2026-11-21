@@ -261,7 +261,16 @@ struct PhotoGridSourceTests {
         // A tick of a grid that went stops the clock (the clock holds its target).
         #expect(state.contains("self?.scrollStep(seconds) ?? false"))
         let scroll = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func scroll(by"], in: Self.scrolling))
-        #expect(scroll.contains("iflety=target.next(by:step,offset:offset,range:top...bottom){position.scrollTo(y:CGFloat(y))}"), "\(scroll)")
+        #expect(scroll.contains("guardletwanted=target.next(by:step,offset:offset,range:top...bottom)else{return}"), "\(scroll)")
+        // What `scrollTo(y:)` takes is learned from the scroll view, not assumed (review L5).
+        #expect(scroll.contains("lety=Self.calibration.y(for:wanted,insetTop:insetTop)"
+                                + "Self.calibration.asked(y,from:offset,insetTop:insetTop,range:top...bottom)"
+                                + "position.scrollTo(y:CGFloat(y))"), "\(scroll)")
+        let reported = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func reported(_ geometry"], in: Self.scrolling))
+        #expect(reported.contains("Self.calibration.reported(offset)"), "\(reported)")
+        let ended = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func endAutoScroll("], in: Self.scrolling))
+        #expect(ended == "{target.reset()Self.calibration.reset()}", "\(ended)")
+        #expect(try Self.code(Self.scrolling).contains("private static var calibration = PhotoGridAutoScroll.Calibration()"))
     }
 
     // MARK: Pinch to zoom

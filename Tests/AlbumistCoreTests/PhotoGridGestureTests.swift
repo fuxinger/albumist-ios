@@ -351,6 +351,62 @@ struct PhotoGridGestureTests {
         #expect(target.next(by: -60, offset: -20, range: -50...1_000) == -50)
     }
 
+    /// Whether `scrollTo(y:)` takes the content offset or counts from where the scroll view rests
+    /// at the top is learned from the first step that can tell (review L5): asked as the content
+    /// offset, the scroll view reports the same, or less by the top inset; from then on the steps
+    /// ask so the scroll view goes where they mean, also to the content's last rows.
+    @Test func howScrollToCountsIsLearnedFromTheFirstStep() {
+        // Content offsets from -100 (at rest at the top, under 100 pt of bars) to 2,000.
+        let range = -100.0...2_000
+        var asOffset = PhotoGridAutoScroll.Calibration()
+        #expect(asOffset.y(for: 510, insetTop: 100) == 510, "not known yet: as the content offset")
+        asOffset.asked(510, from: 500, insetTop: 100, range: range)
+        asOffset.reported(500)
+        #expect(asOffset.convention == nil, "not moved yet")
+        asOffset.reported(510)
+        #expect(asOffset.convention == .contentOffset)
+        #expect(asOffset.y(for: 2_000, insetTop: 100) == 2_000)
+
+        var fromTop = PhotoGridAutoScroll.Calibration()
+        fromTop.asked(510, from: 500, insetTop: 100, range: range)
+        fromTop.reported(410)
+        #expect(fromTop.convention == .fromRestingTop)
+        #expect(fromTop.y(for: 520, insetTop: 100) == 620)
+        #expect(fromTop.y(for: 2_000, insetTop: 100) == 2_100, "the last rows are reached")
+        #expect(fromTop.y(for: -100, insetTop: 100) == 0, "the top")
+        // Learned once: a later step changes nothing.
+        fromTop.asked(700, from: 520, insetTop: 100, range: range)
+        fromTop.reported(700)
+        #expect(fromTop.convention == .fromRestingTop)
+    }
+
+    /// A step that cannot tell teaches nothing: without a top inset (both ways agree), cut at an
+    /// end of the content one way, answered with an offset of neither way (something else moved
+    /// the scroll view), or let go before it was answered.
+    @Test func aStepThatCannotTellTeachesNothing() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        calibration.asked(510, from: 500, insetTop: 0, range: 0...2_000)
+        calibration.reported(510)
+        #expect(calibration.convention == nil, "no top inset: both ways agree")
+        #expect(calibration.y(for: 510, insetTop: 0) == 510)
+        calibration.asked(-95, from: -100, insetTop: 100, range: range)
+        calibration.reported(-100)
+        #expect(calibration.convention == nil, "from the top: counted from the top it would be cut there")
+        calibration.asked(1_999.5, from: 1_990, insetTop: 100, range: range)
+        calibration.reported(1_999.5)
+        #expect(calibration.convention == nil, "at the bottom: as the content offset it would be cut")
+        calibration.asked(510, from: 500, insetTop: 100, range: range)
+        calibration.reported(455)
+        #expect(calibration.convention == nil, "moved by something else")
+        calibration.reset()
+        calibration.reported(510)
+        #expect(calibration.convention == nil, "a step let go teaches nothing")
+        calibration.asked(510, from: 500, insetTop: 100, range: range)
+        calibration.reported(510)
+        #expect(calibration.convention == .contentOffset, "the next step that can tell")
+    }
+
     // MARK: Pinch to zoom
 
     /// Three, five or seven in a row, as Photos offers 3 and 5 among others; three when

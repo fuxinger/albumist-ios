@@ -335,6 +335,71 @@ public enum PhotoGridAutoScroll {
             pending = nil
         }
     }
+
+    /// How `ScrollPosition.scrollTo(y:)` counts, learned from the scroll view (review L5 of
+    /// design wave 3): SwiftUI's documentation does not say whether `y` is the scroll view's
+    /// content offset (minus the top inset at rest at the top, as `ScrollGeometry` reports it)
+    /// or counts from where the scroll view rests at the top. A step asked as the content offset
+    /// tells: the scroll view then reports the same, or less by the top inset. Until a step told
+    /// (and where the top inset is too small to tell, so both ways agree) `y` is taken as the
+    /// content offset; once known, for the app's life, the steps ask so the scroll view goes
+    /// where they mean, at most one step off on the way.
+    public struct Calibration: Equatable, Sendable {
+        public enum Convention: Equatable, Sendable {
+            /// `y` is the content offset.
+            case contentOffset
+            /// `y` is 0 where the scroll view rests at the top: the content offset plus the top inset.
+            case fromRestingTop
+        }
+
+        public private(set) var convention: Convention?
+        /// A step asked while the convention is not known, which can tell it.
+        private var probe: Probe?
+
+        private struct Probe: Equatable, Sendable {
+            var y: Double
+            var insetTop: Double
+        }
+
+        public init() {}
+
+        /// The `y` to ask for, so the scroll view goes to the content offset `offset`, with the top
+        /// inset `insetTop`.
+        public func y(for offset: Double, insetTop: Double) -> Double {
+            convention == .fromRestingTop ? offset + insetTop : offset
+        }
+
+        /// `y` was asked while the scroll view was at `from`, in content offsets `range`. While the
+        /// convention is not known it is a step that tells, when the two ways' answers are apart
+        /// from each other (a top inset of 2 pt or more) and from no move at all, and neither is
+        /// cut at an end of the content.
+        public mutating func asked(_ y: Double, from: Double, insetTop: Double, range: ClosedRange<Double>) {
+            guard convention == nil, probe == nil, insetTop >= 2 else { return }
+            let asOffset = y, fromTop = y - insetTop
+            guard fromTop >= range.lowerBound + 1, asOffset <= range.upperBound - 1,
+                  abs(asOffset - from) >= 2, abs(fromTop - from) >= 2 else { return }
+            probe = Probe(y: y, insetTop: insetTop)
+        }
+
+        /// The scroll view reports the content offset `offset`: at the step's `y` it takes the
+        /// content offset, less by the top inset it counts from the top; anything else (not moved
+        /// yet, moved by something else) waits for the next report.
+        public mutating func reported(_ offset: Double) {
+            guard let probe else { return }
+            if abs(offset - probe.y) < 1 {
+                convention = .contentOffset
+                self.probe = nil
+            } else if abs(offset - (probe.y - probe.insetTop)) < 1 {
+                convention = .fromRestingTop
+                self.probe = nil
+            }
+        }
+
+        /// The grid stopped scrolling by itself: a step not answered tells nothing.
+        public mutating func reset() {
+            probe = nil
+        }
+    }
 }
 
 /// Pinch to zoom in a photo grid (DS-06b): two fingers change the number of photos in a row in

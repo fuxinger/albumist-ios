@@ -94,9 +94,11 @@ struct PhotoViewer: View {
             .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in clock = AppModel.deviceClock() }
     }
 
-    /// A share the app could not clean up after (it was ended while the sheet was open) goes.
+    /// A share the app could not clean up after (it was ended while the sheet was open) goes;
+    /// the app's sound is set to mix with the user's before any Live Photo plays (review D2, N9).
     private func opened() {
         PhotoShare.removeLeftovers()
+        LiveAudio.prepare()
     }
 
     private func closed() {

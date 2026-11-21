@@ -207,11 +207,23 @@ struct PhotoViewerSourceTests {
         #expect(player.contains("startPlayback(with: .full)"))
         #expect(player.contains("stopPlayback()"))
         #expect(player.contains("isOtherAudioPlaying"), "a Live Photo's sound would stop the user's music")
-        // The app's sound mixes with the user's and follows the silent switch, set once before
-        // the first Live Photo plays (review D, H2).
+        // The app's sound mixes with the user's and follows the silent switch (review D, H2).
+        // Set when the photo view opens, off the main thread and not where a Live Photo starts
+        // to move; kept only once it worked, so a failure is tried again (review D2, N9).
         #expect(player.contains("setCategory(.ambient"))
         let follow = try #require(AppSource.body(of: "func follow(", in: player))
-        #expect(follow.contains("LiveAudio.prepare()"))
+        #expect(!follow.contains("LiveAudio.prepare()"), "the audio server is called where the motion starts")
+        let short = try #require(follow.range(of: "case .hint:"))
+        let ready = try #require(follow.range(of: "guard LiveAudio.isReady else { return }", range: short.upperBound..<follow.endIndex),
+                                 "the short motion may stop the user's music")
+        #expect(follow.range(of: "case .full:", range: short.upperBound..<ready.lowerBound) == nil)
+        let prepare = try #require(AppSource.body(of: "static func prepare(", in: player))
+        let detached = try #require(prepare.range(of: "Task.detached("))
+        let set = try #require(prepare.range(of: "setCategory(.ambient", range: detached.upperBound..<prepare.endIndex))
+        _ = try #require(prepare.range(of: "await LiveAudio.finished(done)", range: set.upperBound..<prepare.endIndex))
+        #expect(!prepare.contains("isReady = true"), "kept before it worked")
+        #expect(try #require(AppSource.body(of: "private static func finished(", in: player)).contains("isReady = done"))
+        #expect(try #require(AppSource.body(of: "private func opened(", in: AppSource.code(try Self.viewer()))).contains("LiveAudio.prepare()"))
         // PhotoKit does not promise the main thread for its delegate calls: a hop, not a trap (M4).
         let hop = try #require(AppSource.body(of: "nonisolated private func showOnMain(", in: player))
         #expect(hop.contains("if Thread.isMainThread"))

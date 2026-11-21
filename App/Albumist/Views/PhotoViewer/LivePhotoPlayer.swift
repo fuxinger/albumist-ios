@@ -72,9 +72,11 @@ struct LivePhotoPlayer: UIViewRepresentable {
         func follow(_ command: LiveCommand) {
             guard command.serial != followed, let view else { return }
             followed = command.serial
-            if command.kind != .stop { LiveAudio.prepare() }
             switch command.kind {
             case .hint:
+                // Only once the app's sound mixes with the user's: before, even this muted
+                // motion would stop their music (`LiveAudio`).
+                guard LiveAudio.isReady else { return }
                 view.isMuted = true
                 view.startPlayback(with: .hint)
             case .full:
@@ -114,15 +116,30 @@ struct LivePhotoPlayer: UIViewRepresentable {
 /// The app's sound mixes with what the user listens to and follows the silent switch
 /// (`.ambient`), so a Live Photo never stops the user's music or podcast (review D, H2): with
 /// iOS's default session, other apps' audio stops as soon as a Live Photo plays, even muted.
-/// Albumist plays no other sound, so it is set once, before the first Live Photo plays.
+/// Albumist plays no other sound.
+///
+/// Set when the photo view opens, off the main thread (review D2, N9: it is a synchronous call
+/// to the audio server, and it ran where the first Live Photo starts to move, right after a
+/// swipe), and kept only once it worked: a failure (the session busy during a call) is tried
+/// again when the photo view opens next. Until then the short motion waits (`isReady`).
 @MainActor
 enum LiveAudio {
-    private static var prepared = false
+    /// The category is set: the app's sound mixes with the user's.
+    private(set) static var isReady = false
+    private static var setting = false
 
     static func prepare() {
-        guard !prepared else { return }
-        prepared = true
-        try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [])
+        guard !isReady, !setting else { return }
+        setting = true
+        Task.detached(priority: .utility) {
+            let done = (try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [])) != nil
+            await LiveAudio.finished(done)
+        }
+    }
+
+    private static func finished(_ done: Bool) {
+        setting = false
+        isReady = done
     }
 }
 

@@ -294,7 +294,8 @@ struct PhotoViewer: View {
 }
 
 /// One photo that fits the screen; pinch or double-tap to zoom, drag to look around, pull
-/// down to close, tap to hide or show the bars, press and hold to play a Live Photo.
+/// down to close, tap to hide or show the bars, press and hold to play a Live Photo
+/// (`LivePress`).
 private struct ZoomablePhoto: View {
     var id: AssetID
     /// What VoiceOver says: place, day and time ("München, 12. Oktober 2024, 14:32").
@@ -319,7 +320,9 @@ private struct ZoomablePhoto: View {
     @State private var lastOffset: CGSize = .zero
     @State private var live: LivePhotoLoader.Live?
     @State private var command = LiveCommand()
-    @GestureState private var holding = false
+    /// A long press plays the Live Photo (`LivePress`); when the last one ended.
+    @State private var pressing = false
+    @State private var pressEnded: ContinuousClock.Instant?
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -331,7 +334,6 @@ private struct ZoomablePhoto: View {
                 .task(id: LiveRequest(id: id, isCurrent: isCurrent, shown: image != nil)) { await loadLive(in: area(of: geo.size)) }
         }
         .onDisappear { reset() }
-        .onChange(of: holding) { _, held in play(held ? .full : .stop) }
     }
 
     /// When the Live Photo is wanted: for the photo on screen, once its still is shown.
@@ -351,8 +353,9 @@ private struct ZoomablePhoto: View {
             .padding(.top, top)
             .frame(width: size.width, height: size.height)
             .contentShape(Rectangle())
-            .gesture(touches)
+            .gesture(taps)
             .gesture(magnify)
+            .gesture(LivePress(isEnabled: live != nil) { began in press(began) })
             // Moving the zoomed photo wins over swiping to the next one; at normal size the
             // swipe goes to the next photo.
             .highPriorityGesture(pan, including: scale > 1 ? .all : .subviews)
@@ -417,25 +420,33 @@ private struct ZoomablePhoto: View {
     // MARK: Gestures
 
     /// A tap hides or shows the bars, a double tap zooms (the single tap waits for the second
-    /// one). On a Live Photo a long press plays it whole, as in Photos, and is no tap; a photo
-    /// that does not move has no long press, so a slow tap stays a tap.
-    private var touches: AnyGesture<Void> {
-        guard live != nil else { return AnyGesture(taps.map { _ in }) }
-        return AnyGesture(hold.exclusively(before: taps).map { _ in })
-    }
-
-    private var hold: some Gesture {
-        LongPressGesture(minimumDuration: 0.3)
-            .sequenced(before: DragGesture(minimumDistance: 0))
-            .updating($holding) { value, state, _ in
-                if case .second(true, _) = value { state = true }
-            }
-    }
-
+    /// one). The touch that was a long press on a Live Photo (`LivePress`) is no tap.
     private var taps: some Gesture {
         TapGesture(count: 2)
-            .onEnded { toggleZoom() }
-            .exclusively(before: TapGesture().onEnded { onTap() })
+            .onEnded { if !pressedLately { toggleZoom() } }
+            .exclusively(before: TapGesture().onEnded { if !pressedLately { onTap() } })
+    }
+
+    /// The long press on a Live Photo began or is over: it plays whole while the press lasts,
+    /// as in Photos. Only a press that began ends one (a touch too short for a press is a tap).
+    private func press(_ began: Bool) {
+        if began {
+            pressing = true
+            play(.full)
+        } else if pressing {
+            pressing = false
+            pressEnded = .now
+            play(.stop)
+        }
+    }
+
+    /// A long press is on, or ended a moment ago: the tap or pull that ends with it was the
+    /// press (a single tap is known only after the wait for a second one, about a third of a
+    /// second).
+    private var pressedLately: Bool {
+        if pressing { return true }
+        guard let pressEnded else { return false }
+        return ContinuousClock.now - pressEnded < .milliseconds(600)
     }
 
     private var magnify: some Gesture {
@@ -455,16 +466,17 @@ private struct ZoomablePhoto: View {
             .onEnded { _ in lastOffset = offset }
     }
 
+    /// A finger that drifts while a long press plays the Live Photo pulls nothing.
     private var pullDown: some Gesture {
         DragGesture(minimumDistance: 20)
             .onChanged { value in
                 let t = value.translation
-                guard t.height > 0, abs(t.height) > abs(t.width) else { return }
+                guard !pressedLately, t.height > 0, abs(t.height) > abs(t.width) else { return }
                 pull = t.height
             }
             .onEnded { value in
                 let t = value.translation
-                if t.height > 120, abs(t.height) > abs(t.width) {
+                if !pressedLately, t.height > 120, abs(t.height) > abs(t.width) {
                     onClose()
                 } else {
                     withAnimation(.snappy) { pull = 0 }

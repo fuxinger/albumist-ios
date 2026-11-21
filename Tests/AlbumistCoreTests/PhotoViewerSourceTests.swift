@@ -141,7 +141,24 @@ struct PhotoViewerSourceTests {
         #expect(call.contains("reduceMotion"))
         #expect(call.contains("isLowPowerModeEnabled"))
         #expect(call.contains("isVideoAutoplayEnabled"))
-        #expect(viewer.contains("LongPressGesture("))
+        // The long press is UIKit's, beside the pager's swipe: SwiftUI's long press followed by
+        // a drag kept the swipe from the pager on exactly the Live Photo pages (review D, H1).
+        #expect(!viewer.contains("LongPressGesture("))
+        #expect(!viewer.contains(".sequenced(before:"))
+        #expect(AppSource.calls(of: "LivePress(", in: viewer).count == 1)
+        let press = AppSource.code(try Self.file("LivePress.swift"))
+        #expect(press.contains("UIGestureRecognizerRepresentable"))
+        #expect(press.contains("UILongPressGestureRecognizer"))
+        #expect(press.contains("minimumPressDuration = 0.3"))
+        #expect(press.contains("numberOfTouches == 1"), "two fingers resting for a pinch would play it")
+        #expect(press.contains("shouldRecognizeSimultaneouslyWith"), "the press would hold the swipe back")
+        #expect(press.contains("case .began"))
+        #expect(press.contains("case .ended, .cancelled, .failed"))
+        // The touch that was a press is neither a tap nor a pull down to close.
+        for gesture in ["private var taps", "private var pullDown"] {
+            let body = try #require(AppSource.body(of: gesture, in: viewer))
+            #expect(body.contains("pressedLately"), "\(gesture) acts on a long press")
+        }
         #expect(viewer.contains("Button(\"Live Photo abspielen\")"), "VoiceOver cannot play it")
         #expect(viewer.contains(".accessibilityHidden(true)"))
         for path in [Self.viewerPath, "\(Self.folder)/LivePhotoPlayer.swift"] {

@@ -154,11 +154,12 @@ struct PhotoPreview: View {
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        let minimum = gridWidth.map { CGFloat(PhotoMenu.liftMinimum(gridWidth: Double($0))) } ?? 0
+        // The lift's floor: the cell's side, in a zooming grid as at three in a row.
+        let lifted = gridWidth.map { CGFloat(PhotoGridZoom.liftSide(cell: Double(side), gridWidth: Double($0))) } ?? side
         if let image = sharpestInMemory {
             let size = PhotoMenu.liftSize(imageWidth: Double(image.size.width * image.scale),
                                           imageHeight: Double(image.size.height * image.scale),
-                                          scale: Double(displayScale), cellSide: Double(side), minimumSide: Double(minimum))
+                                          scale: Double(displayScale), cellSide: Double(lifted))
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
@@ -168,12 +169,12 @@ struct PhotoPreview: View {
         } else {
             AssetThumbnail(id: id, side: side)
                 .environment(\.thumbnailShowsVideoLength, false) // the lifted photo, as from memory
-                .frame(width: max(side, minimum), height: max(side, minimum))
+                .frame(width: lifted, height: lifted)
         }
     }
 
-    /// The sharpest image of the photo kept in memory (`PhotoMenu.sharpest`): its cell's, one of a
-    /// zooming grid's other sizes, or the one a grid showed last.
+    /// The sharpest image of the photo kept in memory (`PhotoGridZoom.sharpestKept`): its cell's,
+    /// one of a zooming grid's other sizes, or the one a grid showed last.
     private var sharpestInMemory: UIImage? {
         let cache = ThumbnailCache.shared
         var sides = [side]
@@ -181,6 +182,6 @@ struct PhotoPreview: View {
         var images = sides.compactMap { cache.cachedThumbnail(for: id, side: $0) }
         if let last = cache.thumbnailInMemory(for: id) { images.append(last) }
         let pixels = images.map { (width: Double($0.size.width * $0.scale), height: Double($0.size.height * $0.scale)) }
-        return PhotoMenu.sharpest(pixels).map { images[$0] }
+        return PhotoGridZoom.sharpestKept(pixels).map { images[$0] }
     }
 }

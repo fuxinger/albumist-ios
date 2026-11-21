@@ -463,11 +463,11 @@ struct LongPressSourceTests {
                 "\(sharpest)")
         #expect(sharpest.contains("varimages=sides.compactMap{cache.cachedThumbnail(for:id,side:$0)}"
                                   + "ifletlast=cache.thumbnailInMemory(for:id){images.append(last)}"), "\(sharpest)")
-        #expect(sharpest.contains("returnPhotoMenu.sharpest(pixels).map{images[$0]}"), "\(sharpest)")
-        #expect(Self.squeezed(lifted).contains("letminimum=gridWidth.map{CGFloat(PhotoMenu.liftMinimum(gridWidth:Double($0)))}??0"),
-                "the minimum of a zooming grid: \(lifted)")
-        #expect(Self.squeezed(lifted).contains("cellSide:Double(side),minimumSide:Double(minimum))"), "\(lifted)")
-        #expect(Self.squeezed(lifted).contains(".frame(width:max(side,minimum),height:max(side,minimum))"), "\(lifted)")
+        #expect(sharpest.contains("returnPhotoGridZoom.sharpestKept(pixels).map{images[$0]}"), "\(sharpest)")
+        #expect(Self.squeezed(lifted).contains("letlifted=gridWidth.map{CGFloat(PhotoGridZoom.liftSide(cell:Double(side),"
+                                               + "gridWidth:Double($0)))}??side"), "the floor of a zooming grid: \(lifted)")
+        #expect(Self.squeezed(lifted).contains("scale:Double(displayScale),cellSide:Double(lifted))"), "\(lifted)")
+        #expect(Self.squeezed(lifted).contains(".frame(width:lifted,height:lifted)"), "\(lifted)")
         for request in ["image(for:", "requestImage(", "PHImageManager", "largeImage("] {
             #expect(!lifted.contains(request), "the lift asks Photos itself: \(request)")
         }

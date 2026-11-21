@@ -448,6 +448,29 @@ public enum PhotoGridZoom {
         columns.map { side(width: width, columns: $0) }
     }
 
+    /// The smallest a photo of a grid `gridWidth` points wide is lifted by its long press on its
+    /// short side, for a cell of `cell` points (review L9 of design wave 3): as large as at three
+    /// in a row (the grids' size before they zoomed, and the menu's lift then), never under
+    /// 110 pt (the grids' photos before), also at five and seven in a row, where the cell is much
+    /// smaller; the cell's own side where it is larger. The lift's floor
+    /// (`PhotoMenu.liftSize(cellSide:)`).
+    public static func liftSide(cell: Double, gridWidth: Double) -> Double {
+        max(cell, 110, side(width: gridWidth, columns: standard))
+    }
+
+    /// Of the images kept in memory of a photo (`width` × `height` pixels each: at the grid's
+    /// sizes, and the one a grid showed last), the one its long press lifts: the one with the most
+    /// pixels, the sharpest at any size; on a tie the first (the cell's own). Nil when none is
+    /// kept: the lift asks Photos for nothing of its own (review L9).
+    public static func sharpestKept(_ images: [(width: Double, height: Double)]) -> Int? {
+        var best: (index: Int, pixels: Double)?
+        for (index, image) in images.enumerated() {
+            let pixels = image.width * image.height
+            if best == nil || pixels > best!.pixels { best = (index, pixels) }
+        }
+        return best?.index
+    }
+
     /// One pinch: a step each time the fingers spread (fewer photos) or pinch (more) by
     /// `stepScale` since the last step. Past the last step the furthest scale counts, so turning
     /// back needs a full step again and the grid never flickers between two steps.

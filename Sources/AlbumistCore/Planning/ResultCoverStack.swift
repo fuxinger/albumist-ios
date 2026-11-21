@@ -202,9 +202,28 @@ public enum ResultCoverFan {
 
     public static let cardWidth = 124.0
     public static let cardHeight = 156.0
-    /// Below this the covers stop being photos one can make out; the stack keeps this size and
-    /// the screen scrolls.
-    public static let minimumScale = 0.45
+    /// The stack gives way to what stands below it (the count, the way to Photos, "Alle
+    /// Änderungen" and "Rückgängig machen"), but not below six tenths: smaller covers stop being
+    /// photos one can make out. The stack keeps this size then and the screen scrolls.
+    public static let minimumScale = 0.6
+
+    /// How the covers lie down (`ResultCoverMoment`): one after another, `layingStep` apart, the
+    /// main cover last, lying `lastFall` after it began to fall; with Reduce Motion all of them
+    /// fade in where they lie over `fadeIn`.
+    public static let layingStep = 0.11
+    public static let lastFall = 0.3
+    public static let fadeIn = 0.35
+    /// The success tap comes as the main cover lies down, and the screen never holds it longer
+    /// than this after the result shows (`PlanReviewView`), whatever the covers do.
+    public static let successDeadline = 1.5
+
+    /// Seconds from the start of the moment until the main cover lies, which is when the success
+    /// tap comes: none without covers (the symbol shows at once).
+    public static func settleTime(count covers: Int, calm: Bool) -> Double {
+        let laid = count(covers)
+        guard laid > 0 else { return 0 }
+        return calm ? fadeIn : Double(laid - 1) * layingStep + lastFall
+    }
 
     /// How many covers the fan lays: four as three, so the main cover keeps the middle, and five
     /// at most.

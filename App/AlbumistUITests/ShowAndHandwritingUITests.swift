@@ -173,15 +173,19 @@ final class ShowAndHandwritingUITests: XCTestCase {
     /// "Analyse fertig" once (`analysis.firstFinish`, VoiceOver's "Analyse fertig: 100 %"), and
     /// never again, not after the next full analysis either. The group's simulator is not fresh,
     /// so the first launch starts the moment afresh (`-AlbumistUITestFirstFinishOwed`) and
-    /// rebuilds the database: its analysis at launch is the first full one, and the demo
-    /// library's takes long enough to be celebrated. The relaunch rebuilds the database again
-    /// without starting afresh: the same full analysis, and the moment must stay away. Both
-    /// launches let it show (`-AlbumistUITestFirstFinishMoment`, held 15 s instead of 3.2 s).
+    /// rebuilds the database: its analysis at launch is the first full one. The relaunch rebuilds
+    /// the database again without starting afresh: the same full analysis, and the moment must
+    /// stay away. Both launches let it show (`-AlbumistUITestFirstFinishMoment`, held 15 s instead
+    /// of 3.2 s) and slow the analysis (`-AlbumistUITestSlowAnalysis`: 150 ms more per photo, one
+    /// lane), so each full analysis of the demo library's 241 photos runs well over the 30 s that
+    /// "Analyse fertig" needs, on any Mac: the second finish is celebrated, and the check that
+    /// the moment stays away has teeth (verification review V7).
     func test1_FirstFullAnalysisShowsItsHundredPercentOnce() {
         continueAfterFailure = true
         prepare("first 100 %")
 
-        launch(["-AlbumistUITestRebuildDatabase", "-AlbumistUITestFirstFinishMoment", "-AlbumistUITestFirstFinishOwed"])
+        launch(["-AlbumistUITestRebuildDatabase", "-AlbumistUITestFirstFinishMoment", "-AlbumistUITestFirstFinishOwed",
+                "-AlbumistUITestSlowAnalysis"])
         UITestWait.appears(app.tabBars.firstMatch, "first 100 %: start page after the rebuild", timeout: 60)
         let first = watchAnalysis("first 100 %: first full analysis")
         let moment = firstFinish
@@ -204,13 +208,14 @@ final class ShowAndHandwritingUITests: XCTestCase {
         UITestWait.disappears(moment, "first 100 %: folded away", timeout: 40)
         audit("start page after the first 100 %")
 
-        launch(["-AlbumistUITestRebuildDatabase", "-AlbumistUITestFirstFinishMoment"])
+        launch(["-AlbumistUITestRebuildDatabase", "-AlbumistUITestFirstFinishMoment", "-AlbumistUITestSlowAnalysis"])
         UITestWait.appears(app.tabBars.firstMatch, "first 100 %: start page after the second rebuild", timeout: 60)
         let next = watchAnalysis("first 100 %: next full analysis")
+        // Only a celebrated finish could show it: the check below has teeth only then.
+        print("UI_FACT first 100 %: the next finish \(next.celebrated ? "was" : "was not") celebrated (\(next.seconds) s)")
+        XCTAssertTrue(next.celebrated, "The next full analysis ended without \"Analyse fertig\" (\(next.seconds) s): no moment could have shown, so its absence says nothing")
         XCTAssertFalse(next.moment, "The 100 % came again after the next full analysis")
         UITestWait.never("first 100 %: not again after the next full analysis", for: 20) { firstFinish.exists }
-        // Only a celebrated finish could show it: the check has teeth only then.
-        print("UI_FACT first 100 %: the next finish was \(next.celebrated ? "celebrated (\"Analyse fertig\"), where an owed moment would have shown" : "not celebrated, so it says less") (\(next.seconds) s)")
         shot("09y-no-second-100")
     }
 

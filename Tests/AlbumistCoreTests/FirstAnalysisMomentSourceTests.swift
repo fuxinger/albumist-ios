@@ -276,6 +276,28 @@ struct FirstAnalysisMomentSourceTests {
         }
     }
 
+    /// UI test 1's "not again" half has teeth (verification review V7): both full analyses run
+    /// slowed (`-AlbumistUITestSlowAnalysis`, 150 ms more per photo, one lane: the demo library's
+    /// 241 photos take more than the 30 s "Analyse fertig" needs, on any Mac), and the test asserts
+    /// that the second finish was celebrated before it asserts that no moment came. The switch is
+    /// inert outside UI runs.
+    @Test func theUITestsSecondFullAnalysisIsCelebrated() throws {
+        let test = AppSource.code(try AppSource.read(Self.uiTest), keepStrings: true)
+        let body = try Self.body(["final class ShowAndHandwritingUITests", "func test1_FirstFullAnalysisShowsItsHundredPercentOnce()"], in: test)
+        let launches = body.components(separatedBy: "launch([").dropFirst().map { $0.prefix(while: { $0 != "]" }) }
+        #expect(launches.count == 2, "\(launches)")
+        for launch in launches {
+            #expect(launch.contains("\"-AlbumistUITestSlowAnalysis\""), "a full analysis that may end before 30 s: \(launch)")
+        }
+        let celebrated = try #require(body.range(of: "XCTAssertTrue(next.celebrated"), "the second finish may go uncelebrated: \(body)")
+        let noMoment = try #require(body.range(of: "XCTAssertFalse(next.moment"), "\(body)")
+        #expect(celebrated.upperBound < noMoment.lowerBound, "\(body)")
+        let support = try Self.code("App/Albumist/Platform/UITestSupport.swift")
+        #expect(support.contains("static let slowsAnalysis: Bool = isRunning && ProcessInfo.processInfo.arguments.contains(\"-AlbumistUITestSlowAnalysis\")"))
+        let demo = try Self.code("App/Albumist/Platform/DemoLibrary.swift")
+        #expect(demo.contains("+ 45 + 12 + Self.screenshots.count + Self.documents.count + 1"), "the demo library changed size")
+    }
+
     /// The switches of DS-08 live with the other UI-test switches (`UITestSwitches.swift`), read
     /// through `flag`, which is false unless a debug build was started by the UI tests
     /// (`UITestSupport.isRunning` is false in a release build), and nothing else in the App reads

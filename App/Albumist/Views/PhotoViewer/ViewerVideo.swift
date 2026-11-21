@@ -51,6 +51,12 @@ final class ViewerVideo {
     /// of the jump, while the player still waits, move neither the thumb nor the play symbol.
     @ObservationIgnored private var settling = false
     @ObservationIgnored private var playsAfterScrub = false
+    /// The video plays on once it settled, as it played before; a pause meanwhile keeps it still.
+    @ObservationIgnored private var resumes = false
+    /// Which seek's end counts: a new number for every player and every place the video settles
+    /// at. An end with another number belongs to a player that went (a swipe on) or to a place
+    /// passed since, and does nothing (review F, F10).
+    @ObservationIgnored private var seekSerial = 0
     /// Videos Photos said are only in iCloud: not asked again while the photo view is open.
     @ObservationIgnored private var onlyInICloud: Set<AssetID> = []
 
@@ -143,6 +149,7 @@ final class ViewerVideo {
     func pause() {
         player?.value.pause()
         isPlaying = false
+        resumes = false
     }
 
     func toggleSound() {
@@ -187,7 +194,9 @@ final class ViewerVideo {
     /// thumb and the play symbol hold still until it is there (`settling`, review F, F9).
     private func settle(at seconds: Double, playing: Bool) {
         settling = true
-        seek(to: seconds, then: playing)
+        resumes = playing
+        seekSerial += 1
+        seek(to: seconds, settles: true)
     }
 
     // MARK: Player
@@ -195,6 +204,7 @@ final class ViewerVideo {
     private func make(_ item: AVPlayerItem) {
         let queue = AVQueuePlayer()
         queue.isMuted = !sound.isOn
+        seekSerial += 1
         if start.loops {
             looper = AVPlayerLooper(player: queue, templateItem: item)
         } else {
@@ -229,19 +239,28 @@ final class ViewerVideo {
         if playing != isPlaying { isPlaying = playing }
     }
 
-    private func seek(to seconds: Double, then plays: Bool? = nil) {
+    /// To the exact frame at `seconds`: while the finger moves (the next place of the chase
+    /// follows when it ends), or to where the video `settles`.
+    private func seek(to seconds: Double, settles: Bool = false) {
         guard let player else { return }
         let target = CMTime(seconds: seconds, preferredTimescale: 600)
-        player.value.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: Self.seekHandler(self, then: plays))
+        player.value.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero,
+                          completionHandler: Self.seekHandler(self, serial: seekSerial, settles: settles))
     }
 
-    private func seekEnded(then plays: Bool?) {
-        if let plays {
+    private func seekEnded(serial: Int, settles: Bool) {
+        guard serial == seekSerial else { return }
+        if settles {
+            // The finger is back on the slider: its own seeks follow it.
+            guard !scrubbing else { return }
             settling = false
-            if plays { play() }
-            return
+            if resumes {
+                resumes = false
+                play()
+            }
+        } else if let next = chase.finished() {
+            seek(to: next)
         }
-        if let next = chase.finished() { seek(to: next) }
     }
 
     /// What AVFoundation calls with the time, on the main queue (`queue: .main`): handed to the
@@ -255,11 +274,12 @@ final class ViewerVideo {
         }
     }
 
-    /// The end of a seek, which AVFoundation tells on a queue of its own: a hop to the main actor.
-    nonisolated private static func seekHandler(_ video: ViewerVideo, then plays: Bool?) -> @Sendable (Bool) -> Void {
+    /// The end of a seek, which AVFoundation tells on a queue of its own: a hop to the main actor,
+    /// with the seek's number (`seekSerial`).
+    nonisolated private static func seekHandler(_ video: ViewerVideo, serial: Int, settles: Bool) -> @Sendable (Bool) -> Void {
         { [weak video] _ in
             guard let video else { return }
-            Task { @MainActor in video.seekEnded(then: plays) }
+            Task { @MainActor in video.seekEnded(serial: serial, settles: settles) }
         }
     }
 
@@ -283,5 +303,7 @@ final class ViewerVideo {
         scrubbing = false
         settling = false
         playsAfterScrub = false
+        resumes = false
+        seekSerial += 1
     }
 }

@@ -166,6 +166,24 @@ struct VideoViewerSourceTests {
         #expect(try #require(AppSource.body(of: "private func stop(", in: model)).contains("settling = false"))
     }
 
+    /// A seek's end acts only for its own player and the last place asked for, and never against
+    /// a pause: a swipe on right after the finger lifted does not start the next video, a pause
+    /// right after it keeps the video still (review F, F10).
+    @Test func aSeeksEndActsOnlyForItsOwnPlayer() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let seek = try #require(AppSource.body(of: "private func seek(to seconds: Double", in: model))
+        #expect(seek.contains("completionHandler: Self.seekHandler(self, serial: seekSerial, settles: settles)"), "\(seek)")
+        let ended = try #require(AppSource.body(of: "private func seekEnded(", in: model))
+        #expect(Self.inOrder(["guard serial == seekSerial else { return }", "if settles {", "guard !scrubbing else { return }",
+                              "settling = false", "if resumes {", "resumes = false", "play()", "chase.finished()"], in: ended), "\(ended)")
+        for owner in ["private func make(", "private func stop(", "private func settle("] {
+            #expect(try #require(AppSource.body(of: owner, in: model)).contains("seekSerial += 1"), "\(owner)")
+        }
+        #expect(try #require(AppSource.body(of: "private func settle(", in: model)).contains("resumes = playing"))
+        #expect(try #require(AppSource.body(of: "func pause(", in: model)).contains("resumes = false"),
+                "a pause right after the finger lifted is undone")
+    }
+
     /// A video starts without sound; "Ton an" gives it sound, which stops the user's music and
     /// plays with the silent switch on, as in Photos; "Ton aus" lets the app's sound mix again,
     /// and once the photo view closes, after its player is gone, the user's music is told it may

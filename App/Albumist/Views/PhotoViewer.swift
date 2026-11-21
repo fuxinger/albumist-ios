@@ -144,8 +144,10 @@ struct PhotoViewer: View {
             .animation(.easeInOut(duration: 0.2), value: video.availability)
             .onChange(of: assistive, initial: true) { _, running in chrome.assistiveTechnology(running: running) }
             .task(id: current) { await lookAtCurrent() }
-            // A video pauses when the app goes to the background, as in Photos.
+            // A video pauses when the app goes to the background, as in Photos; told by the
+            // app too, as a full-screen cover has not always been told its scene's phase.
             .onChange(of: scenePhase) { _, phase in if phase == .background { video.pause() } }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in video.pause() }
     }
 
     private var pages: some View {

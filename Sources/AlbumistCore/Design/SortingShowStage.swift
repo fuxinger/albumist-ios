@@ -42,7 +42,7 @@ public struct SortingShowLayout: Hashable, Sendable {
     /// Between the pile and the album's layers: where the photos fly.
     static let flightGap = 16.0
     /// Between the cover and the album's name.
-    static let labelGap = 8.0
+    public static let labelGap = 8.0
 
     /// The side of a photo on the pile and in flight.
     public var photo: Double

@@ -438,7 +438,7 @@ struct PlanReviewView: View {
     /// Runs the plan, with the sorting show when photos go into albums.
     private func applyButton(_ plan: ChangePlan, _ facts: PlanReviewFacts, scrollToTop: @escaping () -> Void) -> some View {
         Button {
-            let albums = SortingShow.albums(from: facts.filledAlbums)
+            let albums = SortingShow.albums(from: model.sortingShowAlbums(facts.filledAlbums, plan: plan))
             if !albums.isEmpty {
                 withAnimation(.smooth(duration: 0.4)) {
                     show = albums

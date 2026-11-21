@@ -108,6 +108,13 @@ extension Font {
     static func wideNumber(_ style: Font.TextStyle, weight: Font.Weight = .bold) -> Font {
         .system(style, weight: weight).width(.expanded).monospacedDigit()
     }
+
+    /// The wide figures at a fixed size, for a count that must keep its size while the text
+    /// around it grows: the sorting show's count of albums (DS-17), drawn as the result's count
+    /// that follows it ("10 neue Alben").
+    static func wideNumber(size: CGFloat, weight: Font.Weight = .heavy) -> Font {
+        .system(size: size, weight: weight).width(.expanded).monospacedDigit()
+    }
 }
 
 extension Text {

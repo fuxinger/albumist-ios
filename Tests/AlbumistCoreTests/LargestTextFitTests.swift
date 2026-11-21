@@ -170,11 +170,12 @@ struct LargestTextFitTests {
 
     /// The counts keep their height while the photos are counted up: a hidden copy of the line
     /// with every photo of the plan holds the room the widest count needs, so a line that wraps
-    /// mid-show never shrinks the scene at once (second review of P3-18).
+    /// mid-show never shrinks the scene at once (second review of P3-18). Since DS-17 the count
+    /// has its thousands separator (`%lld %@`, as every other count of photos).
     @Test func theCountsKeepTheirHeightWhileCounting() throws {
         let header = try #require(AppSource.body(of: ["struct SortingShow", "var header: some View"], in: try Self.code(Self.show)))
-        #expect(header.contains(/Text\("\\\(totalPhotos\) Fotos einsortiert"\)\s*\.hidden\(\)/), "\(header)")
-        #expect(header.contains(/Text\("\\\(counted\) Fotos einsortiert"\)/), "\(header)")
+        #expect(header.contains(/Text\("\\\(totalPhotos\) \\\(totalPhotos\.formatted\(\)\) Fotos einsortiert"\)\s*\.hidden\(\)/), "\(header)")
+        #expect(header.contains(/Text\("\\\(counted\) \\\(counted\.formatted\(\)\) Fotos einsortiert"\)/), "\(header)")
     }
 
     /// Every layout of the show places the button under the scene: the column (header, scene,

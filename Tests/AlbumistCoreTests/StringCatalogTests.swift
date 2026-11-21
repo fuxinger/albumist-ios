@@ -50,7 +50,7 @@ struct StringCatalogTests {
         "Unterbrochen: %lld von %lld Schritten erledigt",
         "%lld von %lld Schritten",
         "von %lld Alben fertig",
-        "%lld von %lld Alben fertig, %lld Fotos einsortiert",
+        "%lld von %lld Alben fertig, %lld %@ Fotos einsortiert",
         "%lld Fotos ignoriert",
         "%lld %@ Fotos ignoriert",
         "Vorschlag mit %lld %@ Fotos",

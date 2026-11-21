@@ -67,19 +67,21 @@ struct PhotoGridSourceTests {
     /// The days as Photos shows them: a header per day, its photos below it, the header pinned
     /// at the top while its photos scroll under it where the page asks for it (never at the
     /// accessibility sizes, where it can take several lines), a heading for VoiceOver that
-    /// wraps instead of being cut, on the page's ground so no text lies on a photo.
+    /// wraps instead of being cut. Pinned, it lies on the page's ground, so no text lies on a
+    /// photo; otherwise it has no ground of its own (a suggestion's page is tinted by its photo).
     @Test func theGridShowsTheDaysAsPhotosDoes() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
         #expect(view.contains("ForEach(sections){sectioninSection{ForEach(section.entries){entryincell(entry,side:side,columns:columns)}"
-                              + "}header:{PhotoGridHeader(section:section)}}"), "\(view)")
-        #expect(view.contains("pinnedViews:pinsHeaders&&!typeSize.isAccessibilitySize?[.sectionHeaders]:[]"), "\(view)")
+                              + "}header:{PhotoGridHeader(section:section,pinned:pinned)}}"), "\(view)")
+        #expect(view.contains("letpinned=pinsHeaders&&!typeSize.isAccessibilitySize"), "\(view)")
+        #expect(view.contains("pinnedViews:pinned?[.sectionHeaders]:[]"), "\(view)")
         #expect(view.contains("GridItem(.flexible(),spacing:CGFloat(PhotoGridZoom.spacing))"), "\(view)")
         #expect(view.contains("letcolumns=PhotoGridZoom.columns(stored:storedColumns)"), "\(view)")
         #expect(view.contains(".scrollTargetLayout()"), "the scroll view finds the photos by id")
         let header = try Self.body(["struct PhotoGridHeader", "var body: some View"], in: Self.grid)
         #expect(header.contains("AdaptiveStack(verticalAlignment: .firstTextBaseline"), "\(header)")
         #expect(header.contains(".accessibilityElement(children: .combine)") && header.contains(".accessibilityAddTraits(.isHeader)"))
-        #expect(header.contains(".background(Theme.background)"), "a pinned header over the photos")
+        #expect(header.contains(".background(pinned ? Theme.background : Color.clear)"), "a pinned header over the photos")
         #expect(!header.contains(".lineLimit("), "a header is cut at the large text sizes")
         #expect(header.contains("Text(verbatim: section.title)") && header.contains("Text(verbatim: section.countText)"))
         #expect(header.contains(".foregroundStyle(.noteText)"))

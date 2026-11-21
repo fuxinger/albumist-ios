@@ -62,16 +62,17 @@ struct PhotoGrid: View {
         let side = CGFloat(PhotoGridZoom.side(width: Double(width), columns: columns))
         // A copy for the animation, which runs apart from the view.
         let settle = self.settle
+        let pinned = pinsHeaders && !typeSize.isAccessibilitySize
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: CGFloat(PhotoGridZoom.spacing)), count: columns),
                   spacing: CGFloat(PhotoGridZoom.spacing),
-                  pinnedViews: pinsHeaders && !typeSize.isAccessibilitySize ? [.sectionHeaders] : []) {
+                  pinnedViews: pinned ? [.sectionHeaders] : []) {
             ForEach(sections) { section in
                 Section {
                     ForEach(section.entries) { entry in
                         cell(entry, side: side, columns: columns)
                     }
                 } header: {
-                    PhotoGridHeader(section: section)
+                    PhotoGridHeader(section: section, pinned: pinned)
                 }
             }
         }
@@ -250,9 +251,11 @@ struct PhotoGrid: View {
 
 /// A day's header: "Samstag, 12. Oktober" with "3 Fotos" at the end of the line; below each
 /// other at the accessibility text sizes, wrapped rather than cut. A heading for VoiceOver's
-/// rotor, on the page's ground, so no text lies on a photo when it is pinned over them.
+/// rotor. Pinned over the photos it lies on the page's ground, so no text lies on a photo;
+/// otherwise it has no ground of its own (a suggestion's page is tinted by its photo).
 struct PhotoGridHeader: View {
     var section: PhotoGridSection
+    var pinned = false
 
     var body: some View {
         AdaptiveStack(verticalAlignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
@@ -267,7 +270,7 @@ struct PhotoGridHeader: View {
         .padding(.top, Theme.Spacing.m)
         .padding(.bottom, Theme.Spacing.s)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.background)
+        .background(pinned ? Theme.background : Color.clear)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }

@@ -3,12 +3,12 @@ import Testing
 
 /// The thumbnails keep each video's length (`ThumbnailCache`, design wave 3, DS-16) from the
 /// asset their lookup fetched; a change in Photos corrects it (review F, F14 c), and the cells on
-/// screen follow at once (review V4): a video trimmed in Photos showed its old length on its
-/// badge and to VoiceOver until its cell was built anew.
+/// screen follow once the change was walked, some seconds after it (review V4): a video trimmed in
+/// Photos showed its old length on its badge and to VoiceOver until its cell was built anew.
 @Suite("Kept video lengths follow a change in Photos (V4)")
 struct KeptVideoLengthTests {
     /// A video trimmed in Photos takes its new length, and the cells on screen read theirs again:
-    /// its badge and VoiceOver's "Video, 20 Sekunden" follow at once.
+    /// its badge and VoiceOver's "Video, 20 Sekunden" follow without the cell being made anew.
     @Test func aTrimmedVideoTakesItsNewLengthAndTheCellsReadItAgain() {
         let step = KeptVideoLength.step(kept: 45, inMemory: true, found: .changed(seconds: 20))
         #expect(step == .update(seconds: 20, shown: true))

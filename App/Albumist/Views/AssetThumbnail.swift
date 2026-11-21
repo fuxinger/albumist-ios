@@ -375,8 +375,9 @@ final class ThumbnailCache {
 
 /// Raised when a change in Photos corrected a length a thumbnail may show (review V4 of design
 /// wave 3): the thumbnails on screen read theirs again (`AssetThumbnail`), so a video trimmed in
-/// Photos shows its new length at once, on its badge and to VoiceOver. Observed on its own: the
-/// cache itself is not.
+/// Photos shows its new length on its badge and to VoiceOver once the change was walked, some
+/// seconds after it (the photo library watcher's pause), without its cell being made anew.
+/// Observed on its own: the cache itself is not.
 @MainActor
 @Observable
 final class VideoLengthRevision {
@@ -715,7 +716,9 @@ struct AssetThumbnail: View {
     }
 
     /// A change in Photos corrected a video's length (a video trimmed in Photos, review V4): the
-    /// cell on screen reads its record again, so its badge and VoiceOver's words follow at once.
+    /// cell on screen reads its record again, so its badge and VoiceOver's words follow without
+    /// the cell being made anew, some seconds after the change: once it was walked, after the
+    /// photo library watcher's pause (3 s, up to 20 s right after an analysis).
     private func readLengthAgain() {
         guard loadedID == id else { return }
         video = ThumbnailCache.shared.videoLength(for: id)

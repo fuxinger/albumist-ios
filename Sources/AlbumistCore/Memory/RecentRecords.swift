@@ -59,7 +59,8 @@ extension RecentRecords: Sendable where Value: Sendable {}
 /// wave 3, F14 c, V4). The thumbnails keep each video's length (`ThumbnailCache`) from the asset
 /// their lookup fetched, a snapshot: a video trimmed in Photos keeps its old length until the
 /// change corrects it, and the cells on screen read theirs again when a length they may show
-/// changed, so the badge and VoiceOver's words follow at once.
+/// changed, so the badge and VoiceOver's words follow without the cell being made anew, once the
+/// change was walked (some seconds after it, after the photo library watcher's pause).
 public enum KeptVideoLength {
     /// What the change said of a kept video whose asset was in memory.
     public enum Found: Equatable, Sendable {

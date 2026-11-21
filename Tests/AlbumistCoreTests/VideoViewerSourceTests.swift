@@ -638,8 +638,9 @@ struct VideoViewerSourceTests {
                               "objectAfterChanges", "current = after", "found[key] = .changed(Asset(after))"], in: details), "\(details)")
     }
 
-    /// A trimmed video's cell on screen shows its new length at once, on its badge and to
-    /// VoiceOver (review V4): each record follows the core's rule (`KeptVideoLength`), and a
+    /// A trimmed video's cell on screen shows its new length, on its badge and to VoiceOver,
+    /// without being made anew, once the change was walked, some seconds after it (the watcher's
+    /// pause; review V4): each record follows the core's rule (`KeptVideoLength`), and a
     /// small observed revision, raised when a length a cell may show changed, makes the cells on
     /// screen read their record again. A record whose asset is no longer in memory cannot be
     /// checked: it goes with the thumbnail kept for it, so the next look asks Photos again (a

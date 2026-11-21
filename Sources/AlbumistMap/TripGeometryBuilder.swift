@@ -568,8 +568,13 @@ enum TripGeometryBuilder {
     /// Library) or with a wrong location. The order of a run of visits joined by such legs is no
     /// way anyone went, so the route passes each of the run's places once, at its first visit in
     /// the run: photos taken in turn in two places add no point and no kilometre, whichever of
-    /// them came last. A leg someone went starts a new run, from the route's last point; a visit
-    /// to that point's own place adds no point but lengthens it to the visit's last photo.
+    /// them came last. A leg someone went starts a new run, from where the last photos before it
+    /// were taken: when the run's last visit was left out (its place once), the route goes back
+    /// to that place first, so the leg on does not start where nobody was any more (review: an
+    /// afternoon in turn in Reykjavík and at Þingvellir, then the evening in Reykjavík and on to
+    /// Vík; with the afternoon's last photos in Reykjavík the route went from Þingvellir to Vík).
+    /// A visit to the route's last point's own place adds no point but lengthens it to the
+    /// visit's last photo.
     ///
     /// The legs are those between all the visits (`legs`). More than `TripGeometry.maxRoutePoints`
     /// visits are then cut (`simplified`), each leg of the cut route carrying the legs it stands
@@ -593,8 +598,12 @@ enum TripGeometryBuilder {
             if k == 0 {
                 visits.append(visit)
             } else if travelled[k - 1] {
-                // A new run, from the route's last point when it is here already.
+                // A new run, from where the last photos were taken: the run's last visit first
+                // when its place is not the route's last point. Then the visit, at that point
+                // when it is here already.
                 run += 1
+                let left = all[k - 1]
+                if visits[visits.count - 1].place != left.place { visits.append(left) }
                 if visits[visits.count - 1].place == visit.place {
                     visits[visits.count - 1].last = visit.last
                 } else {

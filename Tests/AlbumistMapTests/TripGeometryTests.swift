@@ -48,6 +48,25 @@ struct TripGeometryTests {
         return GeoCoordinate(latitude: lat2 * 180 / .pi, longitude: lon2)
     }
 
+    /// Photos taken in turn at `places`, one person at each (an iCloud Shared Library): from
+    /// `start` (UTC), `rounds` rounds of `period`, in each three photos 20 s apart at every place,
+    /// each place's turn `offset` after the one before (by default the round spread evenly).
+    static func inTurn(_ places: [(GeoCoordinate, String)], rounds: Int, period: TimeInterval, offset: TimeInterval? = nil,
+                       start: String = "2023-06-15 12:00") -> [AssetFacts] {
+        let offset = offset ?? period / Double(places.count)
+        var photos: [AssetFacts] = []
+        for round in 0..<rounds {
+            let t = MapFixture.date(start).addingTimeInterval(Double(round) * period)
+            for (c, place) in places.enumerated() {
+                for k in 0..<3 {
+                    photos.append(MapFixture.photo("\(place.1)-\(round)-\(k)", at: t.addingTimeInterval(offset * Double(c) + Double(k) * 20),
+                                                   Fixture.jitter(place.0, seed: k, meters: 50), country: "IS", town: place.1))
+                }
+            }
+        }
+        return photos
+    }
+
     static func shuffled<T>(_ items: [T], seed: UInt64) -> [T] {
         var random = MapRandom(seed: seed)
         var result = items
@@ -458,6 +477,34 @@ struct TripGeometryTests {
         #expect(abs(geometry.metersOnSite - GeoMath.distance(Places.reykjavik, Places.thingvellir)) < 500)
         for seed in 1...3 as ClosedRange<UInt64> {
             #expect(Self.build(Self.shuffled(photos, seed: seed), id: "iceland") == geometry)
+        }
+    }
+
+    /// After an afternoon of photos in turn in Reykjavík and at Þingvellir (a run of visits joined
+    /// by legs nobody went), the evening in Reykjavík and the next day in Vík. The leg on leaves
+    /// the run from where its last photos were taken (review: when the one in Reykjavík took three
+    /// more photos at 15:00, the evening's visit began inside the run and was left out as "its
+    /// place once", and the route went on to Vík from Þingvellir, where nobody was any more;
+    /// which camera took the afternoon's last photo decided it).
+    @Test func afterAnAfternoonApartTheRouteGoesOnFromWhereTheLastPhotosWere() {
+        let (reykjavik, thingvellir) = (Places.reykjavik, Places.thingvellir)
+        func stop(_ prefix: String, at place: GeoCoordinate, town: String, from start: String, minutes: [Double]) -> [AssetFacts] {
+            minutes.enumerated().map { k, m in
+                MapFixture.photo("\(prefix)-\(k)", at: MapFixture.date(start).addingTimeInterval(m * 60), Fixture.jitter(place, seed: k, meters: 50),
+                                 country: "IS", town: town)
+            }
+        }
+        // 12:00 to 14:50: three photos in Reykjavík, ten minutes later three at Þingvellir, in turn.
+        let afternoon = Self.inTurn([(reykjavik, "Reykjavík"), (thingvellir, "Þingvellir")], rounds: 9, period: 1_200)
+        let more = stop("more", at: reykjavik, town: "Reykjavík", from: "2023-06-15 15:00", minutes: [0, 0.33, 0.67])
+        let evening = stop("evening", at: reykjavik, town: "Reykjavík", from: "2023-06-15 18:00", minutes: [0, 30, 60, 180])
+        let vik = stop("vik", at: Places.vik, town: "Vík", from: "2023-06-16 12:00", minutes: [0, 10, 20])
+        let there = GeoMath.distance(reykjavik, thingvellir)
+        for (name, photos) in [("the last photo at Þingvellir", afternoon + evening + vik), ("three more in Reykjavík", afternoon + more + evening + vik)] {
+            let geometry = Self.build(photos, id: "iceland")
+            #expect(geometry.route.map { geometry.places[$0.placeIndex].name ?? "?" } == ["Reykjavík", "Þingvellir", "Reykjavík", "Vík"], "\(name)")
+            let km = (2 * there + GeoMath.distance(reykjavik, Places.vik)) / 1_000
+            #expect(abs(geometry.metersOnSite / 1_000 - km) < 2, "\(name): \(Int(geometry.metersOnSite / 1_000)) km vor Ort, not \(Int(km))")
         }
     }
 

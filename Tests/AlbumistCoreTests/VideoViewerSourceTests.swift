@@ -672,7 +672,20 @@ struct VideoViewerSourceTests {
         let shown = try #require(AppSource.body(of: ["struct AssetThumbnail", "var body: some View"], in: thumbnails))
         #expect(shown.contains(".onChange(of: ThumbnailCache.shared.lengthRevision.value) { readLengthAgain() }"), "\(shown)")
         let again = try #require(AppSource.body(of: ["struct AssetThumbnail", "private func readLengthAgain("], in: thumbnails))
-        #expect(Self.squeezed(again) == "{guardloadedID==idelse{return}video=ThumbnailCache.shared.videoLength(for:id)}", "\(again)")
+        #expect(Self.inOrder(["guard loadedID == id", "ThumbnailCache.shared.videoLength(for: id)"], in: again), "\(again)")
+    }
+
+    /// A cell on screen never loses its video's length because the thumbnails know nothing of it
+    /// (review X2): only a length they know replaces what it shows. Nothing known is not "no
+    /// video": after a memory warning, or once a record went unchecked, the records of unchanged
+    /// videos are gone too, and every older video cell alive lost its badge and its "Video, …"
+    /// for VoiceOver at the next correction, until it was made anew.
+    @Test func aCellKeepsItsLengthWhileTheThumbnailsKnowNone() throws {
+        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let again = try #require(AppSource.body(of: ["struct AssetThumbnail", "private func readLengthAgain("], in: thumbnails))
+        #expect(again.contains("video = known"), "a known length does not replace what the cell shows: \(again)")
+        #expect(!again.contains("video = ThumbnailCache.shared.videoLength(for: id)"), "nothing known takes the badge away: \(again)")
+        #expect(!again.contains("video = nil"), "\(again)")
     }
 
     // MARK: Search

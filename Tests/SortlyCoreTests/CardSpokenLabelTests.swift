@@ -9,7 +9,9 @@ import SortlyTestSupport
 struct CardSpokenLabelTests {
     @Test func theStartPageUsesTheListsWords() throws {
         let start = AppSource.code(try AppSource.read("App/Sortly/Views/Start/StartSections.swift"), keepStrings: true)
-        #expect(start.contains(".accessibilityLabel(text.spokenAction)"))
+        // While its album is made or its preview prepared, the list's words for that
+        // ("Album wird angelegt", "Wird vorbereitet"; review A of design wave 1, 7).
+        #expect(start.contains(".accessibilityLabel(working ? workingLabel : text.spokenAction)"))
         #expect(start.contains(".accessibilityInputLabels(text.actionInputLabels)"))
         #expect(start.contains(".accessibilityLabel(text.spokenMade)"))
         #expect(!start.contains("“ ergänzen\")"), "a second wording of the card's button")

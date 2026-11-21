@@ -39,13 +39,15 @@ extension AppModel {
     /// The sections of the start page for this visit. `analysedOnce`, `showsMosaic`, `rebuilding`
     /// and `analysing` come from the page above (`analysedOnce`, `showsScanShow`,
     /// `suggestionsRebuilding`, `analysisMayBringSuggestions`): read there, so the analysis'
-    /// frequent changes redraw the ring card and not every suggestion's card.
-    func startPage(visit: StartVisit, libraryHint: Bool, starterSet: [AlbumProposal], analysedOnce: Bool,
-                   showsMosaic: Bool, rebuilding: Bool, analysing: Bool) -> StartPage {
+    /// frequent changes redraw the ring card and not every suggestion's card. `starterSetLimit`:
+    /// how many albums "Dein Startpaket" may hold now (`StartPage.starterSetLimit`).
+    func startPage(visit: StartVisit, libraryHint: Bool, starterSet: [AlbumProposal], starterSetLimit: Int,
+                   analysedOnce: Bool, showsMosaic: Bool, rebuilding: Bool, analysing: Bool) -> StartPage {
         StartPage.make(.init(
             proposals: proposals, open: startOpenIDs,
             areas: OrganizationArea.available.filter { settings.enabledAreas.contains($0) },
             analysedOnce: analysedOnce, showsMosaic: showsMosaic, starterSet: starterSet.map(\.id),
+            starterSetLimit: starterSetLimit,
             nothingMadeYet: history.isEmpty && acceptedProposals.isEmpty, libraryHint: libraryHint,
             rebuilding: rebuilding, analysing: analysing, interruptedPlan: interruptedPlan != nil,
             inYourAlbums: suggestionsInYourAlbums, visit: visit))

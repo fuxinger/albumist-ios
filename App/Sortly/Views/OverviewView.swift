@@ -750,10 +750,15 @@ private struct SortedRingRow: View {
             .accessibilityValue(Text(shown, format: .percent.precision(.fractionLength(0))))
             .accessibilityIdentifier("overview.sortedInfo")
             .popover(isPresented: $showsWhat) {
-                LearnMore(short: explanation.short, full: explanation.full, title: Text("Was heißt sortiert?"))
-                    .padding(Theme.Spacing.l)
-                    .frame(idealWidth: 320)
-                    .presentationCompactAdaptation(.popover)
+                // At the largest text sizes on a small iPhone the two lines and "Mehr erfahren"
+                // can be taller than the room beside the ring: they scroll then (review A of
+                // design wave 1).
+                ViewThatFits(in: .vertical) {
+                    whatSorted
+                    ScrollView { whatSorted }
+                }
+                .frame(idealWidth: 320)
+                .presentationCompactAdaptation(.popover)
             }
             Button(action: onOpen) {
                 HStack(spacing: 14) {
@@ -787,6 +792,12 @@ private struct SortedRingRow: View {
             .buttonStyle(RingCardRowButtonStyle())
             .accessibilityIdentifier("overview.sorted")
         }
+    }
+
+    /// What "sortiert" means: two lines and "Mehr erfahren" (decision 8A).
+    private var whatSorted: some View {
+        LearnMore(short: explanation.short, full: explanation.full, title: Text("Was heißt sortiert?"))
+            .padding(Theme.Spacing.l)
     }
 }
 

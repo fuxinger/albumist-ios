@@ -43,16 +43,18 @@ struct StartPageTests {
     static let contracts = proposal("Verträge", .documentCategory("contracts"))
 
     /// `starterSet`: how many albums "Dein Startpaket" would hold now; the model offers the
-    /// first open ones here.
+    /// first open ones here. `freeLimit`: how many it may hold now (`StartPage.starterSetLimit`).
     static func page(_ proposals: [AlbumProposal], open: [AlbumProposal]? = nil, analysedOnce: Bool = true,
-                     mosaic: Bool = false, starterSet: Int = 0, nothingMade: Bool = true, libraryHint: Bool = false,
+                     mosaic: Bool = false, starterSet: Int = 0, freeLimit: Int = StartPage.starterSetMaximum,
+                     nothingMade: Bool = true, libraryHint: Bool = false,
                      rebuilding: Bool = false, analysing: Bool = false, interrupted: Bool = false,
                      inYourAlbums: Int = 0, areas: [OrganizationArea] = areas,
                      visit: StartVisit = StartVisit()) -> StartPage {
         let open = open ?? proposals
         return StartPage.make(.init(proposals: proposals, open: Set(open.map(\.id)), areas: areas,
                                     analysedOnce: analysedOnce, showsMosaic: mosaic,
-                                    starterSet: open.prefix(starterSet).map(\.id), nothingMadeYet: nothingMade,
+                                    starterSet: open.prefix(starterSet).map(\.id), starterSetLimit: freeLimit,
+                                    nothingMadeYet: nothingMade,
                                     libraryHint: libraryHint, rebuilding: rebuilding, analysing: analysing,
                                     interruptedPlan: interrupted, inYourAlbums: inYourAlbums, visit: visit))
     }
@@ -379,6 +381,32 @@ struct StartPageTests {
         #expect(Self.page(all, nothingMade: false, visit: unknown).made == [Self.rome.id])
     }
 
+    /// "Anlegen" with the free albums used up opens the purchase sheet; after the purchase the
+    /// album is made from there (`continueQuickCreate`) and its banner is all the page hears of
+    /// it (review A of design wave 1, finding 10). The banner of a card tapped in this visit
+    /// makes it "Angelegt" as the direct way does, also when its run left gaps; a banner for a
+    /// suggestion this visit did not create changes nothing.
+    @Test func aCardMadeAfterThePurchaseSheetSaysMade() {
+        let all = [Self.kyoto, Self.rome]
+        let plan = SortlyID("plan.kyoto")
+        var visit = StartVisit()
+        visit.create(Self.kyoto.id)
+        #expect(Self.page(all, nothingMade: false, visit: visit).made.isEmpty, "the purchase sheet is up")
+        visit.announced(Self.rome.id, by: SortlyID("plan.rome"))
+        #expect(visit.awaitingDone.isEmpty, "made from another screen")
+        #expect(!visit.created.contains(Self.rome.id))
+        visit.announced(Self.kyoto.id, by: plan)
+        #expect(Self.page(all, nothingMade: false, visit: visit).made == [Self.kyoto.id], "made with gaps: still open")
+        #expect(Self.page(all, open: [Self.rome], nothingMade: false, visit: visit).made == [Self.kyoto.id])
+        // Told twice (the direct way says it too): the same.
+        let once = visit
+        visit.announced(Self.kyoto.id, by: plan)
+        visit.made(Self.kyoto.id, by: plan)
+        #expect(visit == once)
+        visit.undone([plan])
+        #expect(Self.page(all, nothingMade: false, visit: visit).made.isEmpty, "\"Widerrufen\"")
+    }
+
     // MARK: "Dein Startpaket" for the visit
 
     /// Once shown, "Dein Startpaket" stays for the visit with what is left of it: an album of it
@@ -407,6 +435,31 @@ struct StartPageTests {
         picked.saw(Self.page(all, starterSet: 3, visit: picked))
         #expect(Self.page(all, starterSet: 3, nothingMade: false, visit: picked).starterSet
                 == [Self.kyoto.id, Self.rome.id, Self.split.id])
+    }
+
+    /// "Dein Startpaket" never offers more albums than are free now (review A of design wave 1,
+    /// finding 2): an album made from a card outside the set uses a free one, and "10 Alben
+    /// kostenlos anlegen" over 9 free albums opened a preview that asked for the purchase. The
+    /// set kept for the visit is cut to what is free, best first; with none left it goes and
+    /// "Neue Reisen" is the big part again. A set formed now is cut first and then needs three.
+    @Test func theStarterSetOffersNoMoreThanIsFree() {
+        let all = [Self.kyoto, Self.rome, Self.split, Self.italy, Self.japan]
+        var visit = StartVisit()
+        let first = Self.page(all, starterSet: 4, freeLimit: 10, visit: visit)
+        #expect(first.starterSet == [Self.kyoto.id, Self.rome.id, Self.split.id, Self.italy.id])
+        visit.saw(first)
+        #expect(Self.page(all, starterSet: 4, freeLimit: 4, nothingMade: false, visit: visit).starterSet?.count == 4)
+        #expect(Self.page(all, starterSet: 4, freeLimit: 3, nothingMade: false, visit: visit).starterSet
+                == [Self.kyoto.id, Self.rome.id, Self.split.id])
+        #expect(Self.page(all, starterSet: 4, freeLimit: 1, nothingMade: false, visit: visit).starterSet == [Self.kyoto.id])
+        let none = Self.page(all, starterSet: 4, freeLimit: 0, nothingMade: false, visit: visit)
+        #expect(none.starterSet == nil)
+        #expect(Self.names(none) == ["newTrips", "row.trips", "atlas", "row.places", "allSuggestions"])
+        // Unlocked meanwhile: what was shown comes back, nothing joins.
+        #expect(Self.page(all, starterSet: 5, freeLimit: 10, nothingMade: false, visit: visit).starterSet?.count == 4)
+        // Formed now.
+        #expect(Self.page(all, starterSet: 5, freeLimit: 3).starterSet == [Self.kyoto.id, Self.rome.id, Self.split.id])
+        #expect(Self.page(all, starterSet: 5, freeLimit: 2).starterSet == nil, "fewer than three")
     }
 
     /// An interrupted plan offers "Rest anlegen" as the page's one filled button: no

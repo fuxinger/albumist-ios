@@ -5,8 +5,9 @@ import Testing
 /// DS-08: the one quiet moment when the first full analysis reaches 100 % on screen. Exactly
 /// once per installation: not again after a relaunch, a later full re-analysis ("Analyse neu
 /// aufbauen", another part of the library), a restored backup or an undo, and never when the
-/// analysis ended while Albumist was not on screen (the notification "Analyse fertig" says it
-/// then, as before).
+/// analysis ended while Albumist was in the background (the notification "Analyse fertig" says it
+/// then, as before). A first analysis too quick for "Analyse fertig" leaves it for the first
+/// finish that is celebrated (second review, K7).
 @Suite("First analysis moment (DS-08)")
 struct FirstAnalysisMomentTests {
     static let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
@@ -19,9 +20,8 @@ struct FirstAnalysisMomentTests {
     /// The end of a run in the app, by default the first full analysis finishing on screen
     /// after a wait (`AnalysisCardState.celebratesFinish`).
     static func end(_ moment: inout FirstAnalysisMoment, finished: Bool = true, celebrates: Bool = true,
-                    completedBefore: Bool = false, onScreen: Bool = true, after seconds: TimeInterval = 0) {
-        moment.runEnded(finished: finished, celebrates: celebrates, completedBefore: completedBefore,
-                        onScreen: onScreen, at: start.addingTimeInterval(seconds))
+                    onScreen: Bool = true, after seconds: TimeInterval = 0) {
+        moment.runEnded(finished: finished, celebrates: celebrates, onScreen: onScreen, at: start.addingTimeInterval(seconds))
     }
 
     static func at(_ seconds: TimeInterval) -> Date { start.addingTimeInterval(seconds) }
@@ -69,7 +69,7 @@ struct FirstAnalysisMomentTests {
         // Relaunched: what was kept, and the analysis is complete.
         var relaunched = FirstAnalysisMoment(kept: moment.kept, completedBefore: true)
         #expect(relaunched.kept == .spent)
-        Self.end(&relaunched, completedBefore: true, after: 3600)
+        Self.end(&relaunched, after: 3600)
         #expect(!relaunched.shows(at: Self.at(3601)))
         // Ended by iOS or force-quit after the run ended, before the card was on screen: the
         // next launch does not catch up on it ("reaches 100 %" was then).
@@ -91,11 +91,11 @@ struct FirstAnalysisMomentTests {
         #expect(plays)
         moment.ended()
         // Rebuilt in the same launch: the marker says "not completed" again.
-        Self.end(&moment, completedBefore: false, after: 7200)
+        Self.end(&moment, after: 7200)
         #expect(!moment.isDue(at: Self.at(7201)))
         // Rebuilt and relaunched before it finished.
         var later = FirstAnalysisMoment(kept: moment.kept, completedBefore: false)
-        Self.end(&later, completedBefore: false, after: 9000)
+        Self.end(&later, after: 9000)
         #expect(!later.isDue(at: Self.at(9001)))
         let rebuilt = later.claim(at: Self.at(9002), onScreen: true)
         #expect(!rebuilt)
@@ -109,9 +109,9 @@ struct FirstAnalysisMomentTests {
         let plays = moment.claim(at: Self.at(1), onScreen: true)
         #expect(plays)
         moment.ended()
-        for (index, completedBefore) in [true, false].enumerated() {
+        for (index, onScreen) in [true, false].enumerated() {
             for celebrates in [true, false] {
-                Self.end(&moment, celebrates: celebrates, completedBefore: completedBefore, after: Double(100 + index))
+                Self.end(&moment, celebrates: celebrates, onScreen: onScreen, after: Double(100 + index))
                 #expect(!moment.isDue(at: Self.at(Double(101 + index))))
             }
         }
@@ -119,7 +119,7 @@ struct FirstAnalysisMomentTests {
 
     // MARK: Seen reaching 100 %
 
-    /// Finished while Albumist was not on screen (in the background, the screen locked): the user
+    /// Finished while Albumist was in the background (the screen locked, another app): the user
     /// comes back minutes or hours later to "Analyse fertig" (and found the notification), not to
     /// a 100 % that happened without them. The chance is gone for good.
     @Test func finishedInTheBackgroundItNeverComes() {
@@ -128,7 +128,6 @@ struct FirstAnalysisMomentTests {
         #expect(moment.kept == .spent)
         #expect(!moment.isDue(at: Self.at(1)))
         // Back hours later.
-        moment.cameToFront(completed: true)
         #expect(!moment.shows(at: Self.at(4 * 3600)))
         let back = moment.claim(at: Self.at(4 * 3600), onScreen: true)
         #expect(!back)
@@ -137,24 +136,24 @@ struct FirstAnalysisMomentTests {
         #expect(relaunched.kept == .spent)
     }
 
-    /// The analysis was completed where no run of the app ended (the overnight refinement, which
-    /// iOS runs without the screen): spent as Albumist comes to the front again, so a rebuild in
-    /// that launch cannot bring it either.
-    @Test func completedWhileAwayItNeverComes() {
+    /// The analysis was completed for the first time where no run of the app ended (the
+    /// overnight refinement, which iOS runs without the screen): its 100 % happened without the
+    /// user, spent for good, so a rebuild cannot bring it either. After a quick first analysis
+    /// (completed, not celebrated) a refinement is no first completion: the moment still waits for
+    /// the first finish that is celebrated.
+    @Test func completedAwayForTheFirstTimeItNeverComes() {
         var moment = Self.fresh()
-        moment.cameToFront(completed: true)
+        moment.completedAway(first: true)
         #expect(moment.kept == .spent)
-        Self.end(&moment, completedBefore: false, after: 60)
+        Self.end(&moment, after: 60)
         #expect(!moment.isDue(at: Self.at(61)))
-        // The same when a run in the app ends after it: the marker said "completed" before it.
-        var other = Self.fresh()
-        Self.end(&other, completedBefore: true)
-        #expect(other.kept == .spent)
-        #expect(!other.isDue(at: Self.at(1)))
-        // Nothing completed meanwhile: still owed.
-        var waiting = Self.fresh()
-        waiting.cameToFront(completed: false)
-        #expect(waiting.kept == .owed)
+        // After a quick first analysis: still owed, and the long analysis on screen brings it.
+        var quick = Self.fresh()
+        Self.end(&quick, celebrates: false)
+        quick.completedAway(first: false)
+        #expect(quick.kept == .owed)
+        Self.end(&quick, after: 120)
+        #expect(quick.isDue(at: Self.at(121)))
     }
 
     /// Due, but Albumist left the screen before the card showed it (the wait for the overview, or
@@ -164,7 +163,6 @@ struct FirstAnalysisMomentTests {
         Self.end(&moment)
         moment.leftScreen()
         #expect(!moment.isDue(at: Self.at(1)))
-        moment.cameToFront(completed: true)
         let back = moment.claim(at: Self.at(30), onScreen: true)
         #expect(!back)
         #expect(moment.kept == .spent)
@@ -205,8 +203,9 @@ struct FirstAnalysisMomentTests {
         #expect(FirstAnalysisMoment.window >= 60 && FirstAnalysisMoment.window <= 10 * 60)
     }
 
-    /// The card is there but Albumist is not on screen (Control Center, a call): it waits and
-    /// plays once it is.
+    /// The run ended with Control Center, an alert or a call banner in front (not in the
+    /// background, so on screen for the end of the run): the card waits for Albumist to be active
+    /// and plays then (second review, K7).
     @Test func offScreenTheCardWaits() {
         var moment = Self.fresh()
         Self.end(&moment)
@@ -252,14 +251,30 @@ struct FirstAnalysisMomentTests {
         #expect(resumed.isDue(at: Self.at(86_401)))
     }
 
-    /// A tiny library whose first analysis takes less than half a minute: no "Analyse fertig"
-    /// card (`AnalysisCardState.celebratesFinish`), so no moment on it, and none later.
-    @Test func aQuickFirstAnalysisHasNoMoment() {
+    /// A first analysis too quick for "Analyse fertig" (a small part of the library, a few photos
+    /// shared) does not take the moment away (second review, K7 a): it waits for the first finish
+    /// that is celebrated, such as the whole library's long analysis later. On screen it shows
+    /// then; ended in the background, it is spent as every celebrated finish off screen.
+    @Test func aQuickFirstAnalysisLeavesItForTheFirstCelebratedFinish() {
         var moment = Self.fresh()
         Self.end(&moment, celebrates: false)
-        #expect(moment.kept == .spent)
+        #expect(moment.kept == .owed)
         #expect(!moment.isDue(at: Self.at(1)))
+        // Relaunched in between: still owed, though the quick analysis completed the analysis.
+        var relaunched = FirstAnalysisMoment(kept: moment.kept, completedBefore: true)
+        #expect(relaunched.kept == .owed)
+        // The long analysis ends on screen: now, once.
+        Self.end(&relaunched, after: 3600)
+        #expect(relaunched.kept == .spent)
+        #expect(relaunched.isDue(at: Self.at(3601)))
+        // Ended in the background instead: spent.
+        var away = Self.fresh()
+        Self.end(&away, celebrates: false)
+        Self.end(&away, onScreen: false, after: 60)
+        #expect(away.kept == .spent)
+        #expect(!away.isDue(at: Self.at(61)))
     }
+
 
     // MARK: Updates and backups
 
@@ -268,7 +283,7 @@ struct FirstAnalysisMomentTests {
     @Test func anUpdateAfterTheAnalysisNeverBringsIt() {
         var moment = FirstAnalysisMoment(kept: nil, completedBefore: true)
         #expect(moment.kept == .spent)
-        Self.end(&moment, completedBefore: false)
+        Self.end(&moment)
         #expect(!moment.isDue(at: Self.at(1)))
         // Updated before the first analysis finished: still owed.
         #expect(FirstAnalysisMoment(kept: nil, completedBefore: false).kept == .owed)
@@ -280,14 +295,15 @@ struct FirstAnalysisMomentTests {
     /// spends it.
     @Test func aRestoredBackupKeepsWhatItSaid() {
         let restored: [(FirstAnalysisMoment.Kept?, Bool, FirstAnalysisMoment.Kept)] = [
-            (.spent, true, .spent), (.spent, false, .spent), (nil, true, .spent), (.owed, true, .spent),
-            // The phone it came from never finished its first analysis: this one may.
-            (.owed, false, .owed), (nil, false, .owed),
+            (.spent, true, .spent), (.spent, false, .spent), (nil, true, .spent),
+            // The phone it came from never celebrated a finished analysis (a quick first one at
+            // most): this one may.
+            (.owed, true, .owed), (.owed, false, .owed), (nil, false, .owed),
         ]
         for (kept, completed, expected) in restored {
             var moment = FirstAnalysisMoment(kept: kept, completedBefore: completed)
             #expect(moment.kept == expected, "\(String(describing: kept)), completed \(completed)")
-            Self.end(&moment, completedBefore: false)
+            Self.end(&moment)
             #expect(moment.isDue(at: Self.at(1)) == (expected == .owed), "\(String(describing: kept)), completed \(completed)")
         }
     }
@@ -297,18 +313,15 @@ struct FirstAnalysisMomentTests {
         var moment = FirstAnalysisMoment(kept: .spent, completedBefore: false)
         for finished in [true, false] {
             for celebrates in [true, false] {
-                for completedBefore in [true, false] {
-                    for onScreen in [true, false] {
-                        Self.end(&moment, finished: finished, celebrates: celebrates, completedBefore: completedBefore,
-                                 onScreen: onScreen)
-                        #expect(moment.kept == .spent)
-                        let claimed = moment.claim(at: Self.at(1), onScreen: true)
-                        #expect(!claimed)
-                    }
+                for onScreen in [true, false] {
+                    Self.end(&moment, finished: finished, celebrates: celebrates, onScreen: onScreen)
+                    #expect(moment.kept == .spent)
+                    let claimed = moment.claim(at: Self.at(1), onScreen: true)
+                    #expect(!claimed)
                 }
             }
         }
-        moment.cameToFront(completed: false)
+        for first in [true, false] { moment.completedAway(first: first) }
         moment.leftScreen()
         moment.ended()
         #expect(moment.kept == .spent && !moment.shows(at: Self.at(2)))

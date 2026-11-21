@@ -6,12 +6,16 @@ import Foundation
 /// parts into one bar; then it folds away and the card is the usual "Analyse fertig". Its one
 /// haptic is the success tap that "Analyse fertig" has always had; nothing flies.
 ///
-/// "Reaches 100 %" means the user sees it happen: a run in the app finishes the analysis for the
-/// first time (`AnalysisMarker.completedOnce` was false), after a wait long enough to celebrate
-/// (`AnalysisCardState.celebratesFinish`: the "Analyse fertig" card it rides on), with Albumist on
-/// screen as it ends. Finished in the background (or overnight, or left before the card showed
-/// it), the user comes back to "Analyse fertig" and the notification as before, and the moment is
-/// gone for good: a 100 % that happened without them is not replayed hours later.
+/// "Reaches 100 %" means the user sees it happen: the first run in the app that finishes the
+/// analysis after a wait long enough to celebrate (`AnalysisCardState.celebratesFinish`: the
+/// "Analyse fertig" card it rides on), with Albumist on screen as it ends (not in the background:
+/// Control Center or a call banner in front only make the card wait). A first analysis too quick
+/// for "Analyse fertig" (a small part of the library, a few photos shared) leaves it owed for the
+/// first finish that is celebrated, such as the whole library's later (second review, K7).
+/// Finished in the background, or completed for the first time overnight (`completedAway`), or
+/// left before the card showed it, the user comes back to "Analyse fertig" and the notification as
+/// before, and the moment is gone for good: a 100 % that happened without them is not replayed
+/// hours later.
 ///
 /// Exactly once per installation: whether it is still owed is kept in `UserDefaults`
 /// (`FirstAnalysisMomentStore`), written as `spent` the moment it becomes due, so neither a
@@ -39,29 +43,32 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     public static let window: TimeInterval = 5 * 60
 
     /// At launch, before anything resets where the analysis got to (`AnalysisMarker.reset`):
-    /// `kept` as stored (nil: never stored, the first launch of a version with the moment),
-    /// `completedBefore` whether an analysis was completed before (`AnalysisMarker.completedOnce`).
-    /// Completed before means it was not seen reaching 100 % in this version: spent (an update
-    /// after the analysis, a device backup of such a version, an analysis finished while
-    /// Albumist was closed).
+    /// `kept` as stored, `completedBefore` whether an analysis was completed before
+    /// (`AnalysisMarker.completedOnce`). Never stored is the first launch of a version with the
+    /// moment: an analysis completed before it was not seen reaching 100 % here, spent (an update
+    /// after the analysis, a device backup of such a version). What was stored stands: owed after
+    /// a quick first analysis, which completed the analysis without "Analyse fertig".
     public init(kept: Kept?, completedBefore: Bool) {
-        self.kept = kept == .spent || completedBefore ? .spent : .owed
+        self.kept = kept ?? (completedBefore ? .spent : .owed)
     }
 
-    /// Albumist is in front again. An analysis completed meanwhile (the overnight refinement, which
-    /// iOS runs without the screen) was not seen reaching 100 %: spent.
-    public mutating func cameToFront(completed: Bool) {
-        if completed { kept = .spent }
+    /// The analysis was completed where no run of the app ended (the overnight refinement, which
+    /// iOS runs without the screen). `first`: it had not been completed before
+    /// (`AnalysisMarker.completedOnce`, read before this sets it): its first 100 % happened
+    /// without the user, spent. After a quick first analysis it changes nothing.
+    public mutating func completedAway(first: Bool) {
+        if first { kept = .spent }
     }
 
     /// The end of a run in the app, decided before it waits for the overview. `finished`: it
     /// finished the analysis (`AnalysisRunEnd.isFinished`); `celebrates`: "Analyse fertig" is owed
-    /// for it (`AnalysisCardState.celebratesFinish`); `completedBefore`: an analysis was completed
-    /// before this run (`AnalysisMarker.completedOnce`, read before this run's end sets it);
-    /// `onScreen`: Albumist is on screen as it ends.
-    public mutating func runEnded(finished: Bool, celebrates: Bool, completedBefore: Bool, onScreen: Bool, at now: Date) {
-        guard finished else { return }
-        if kept == .owed, !completedBefore, celebrates, onScreen { dueSince = now }
+    /// for it (`AnalysisCardState.celebratesFinish`); `onScreen`: Albumist is not in the background
+    /// as it ends (in front of it Control Center or an alert only make the card wait, `claim`).
+    /// The first finish that is celebrated decides: due on screen, spent either way. One too quick
+    /// to be celebrated leaves it owed.
+    public mutating func runEnded(finished: Bool, celebrates: Bool, onScreen: Bool, at now: Date) {
+        guard finished, celebrates else { return }
+        if kept == .owed, onScreen { dueSince = now }
         kept = .spent
     }
 

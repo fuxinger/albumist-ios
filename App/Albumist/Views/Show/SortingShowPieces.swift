@@ -11,11 +11,19 @@ import AlbumistCore
 /// iCloud has only a small preview on the device, which is not sharp at this size and stays away
 /// (`ThumbnailRequest.isSharp`). Each photo is asked for once per size; one loaded for a larger
 /// size serves a smaller one (the scene is measured after it starts).
+///
+/// Holds only what the show draws (second review, K2): an album's photos go once it has landed
+/// (`release`; the pile's stay), and on a memory warning every photo goes, as from the other
+/// caches (`MemoryPressure`): the pile asks again (`generation`), the next album's flights load
+/// theirs. A plan of a few hundred albums no longer keeps every photo that flew.
 @MainActor @Observable
 final class ShowPhotos {
     private var images: [AssetID: UIImage] = [:]
     /// The largest side each photo was asked for, sharp or not: not asked again at that size.
     @ObservationIgnored private var asked: [AssetID: CGFloat] = [:]
+    /// Counts the memory warnings that took the photos: the pile asks again at a new one.
+    private(set) var generation = 0
+    @ObservationIgnored private var registered = false
 
     /// The photo, when it is sharp at `pixels`.
     func image(_ id: AssetID, sharpAt pixels: CGSize) -> UIImage? {
@@ -23,9 +31,35 @@ final class ShowPhotos {
         return image
     }
 
+    /// Lets go of photos that are drawn no more, an album's once it has landed (`kept`: the
+    /// pile's). Asked for again if another album of the plan shows the same photo later.
+    func release(_ ids: some Sequence<AssetID>, keeping kept: Set<AssetID>) {
+        for id in ids where !kept.contains(id) {
+            asked[id] = nil
+            if images[id] != nil { images[id] = nil }
+        }
+    }
+
+    /// iOS warned that memory runs low (`MemoryPressure`): every photo goes, and the pile asks
+    /// again (`generation`).
+    func letGo() {
+        images.removeAll()
+        asked.removeAll()
+        generation += 1
+    }
+
+    /// With the other caches on a memory warning, once, by the instance the show keeps (SwiftUI
+    /// may make others for its state that never load).
+    private func register() {
+        guard !registered else { return }
+        registered = true
+        MemoryPressure.shared.register("sorting show photos", owner: self) { $0.letGo() }
+    }
+
     /// Loads `ids` at `side` points, one after the other, keeping the sharp ones.
     func load(_ ids: some Sequence<AssetID>, side: CGFloat, scale: CGFloat) async {
         guard side >= 1, scale > 0 else { return }
+        register()
         let pixels = CGSize(width: side * scale, height: side * scale)
         for id in ids {
             if Task.isCancelled { return }

@@ -30,8 +30,9 @@ struct FirstAnalysisMomentSourceTests {
 
     /// Launch: what is kept is read while `AnalysisMarker` still says whether an analysis was
     /// completed before (the load resets it for a restored backup or a new database). End of a
-    /// run: told before the marker says "completed" and before the wait for the overview, with
-    /// whether Albumist is on screen. Two marked lines in `AppModel.swift`, nothing else there.
+    /// run: told before the wait for the overview, with whether Albumist is on screen. The
+    /// overnight refinement that completes the analysis tells it too (second review, K7). Three
+    /// marked lines in `AppModel.swift`, nothing else there.
     @Test func theModelTellsTheRuleAtLaunchAndAtTheEndOfARun() throws {
         let raw = try AppSource.read(Self.model)
         let model = try Self.code(Self.model)
@@ -53,17 +54,65 @@ struct FirstAnalysisMomentSourceTests {
             #expect(told.upperBound < at.lowerBound, "told after \(later)")
         }
         #expect(model.components(separatedBy: "firstAnalysisRunEnded(").count - 1 == 1, "told from another place too")
-        #expect(raw.components(separatedBy: Self.mark).count - 1 == 2, "the marked lines of DS-08 in AppModel.swift changed")
+        #expect(model.components(separatedBy: "FirstAnalysisMomentStore.shared.").count - 1 == 2, "told from another place too")
+        #expect(raw.components(separatedBy: Self.mark).count - 1 == 3, "the marked lines of DS-08 in AppModel.swift changed")
+    }
 
+    /// "On screen" as a run ends means not in the background (second review, K7 b): Control
+    /// Center, an alert or a call banner in front leave the scene inactive, not gone, and must not
+    /// spend the moment. The card claims it once Albumist is active again (`claim` waits for
+    /// `isOnScreen`); gone to the background before, it is not shown later (`leftScreen`).
+    @Test func aRunThatEndsBehindControlCenterStillCounts() throws {
         let store = try Self.code(Self.store)
         let tell = try Self.body(["extension AppModel", "func firstAnalysisRunEnded("], in: store)
-        #expect(tell.contains("completedBefore: AnalysisMarker.completedOnce, onScreen: isOnScreen"), "\(tell)")
+        #expect(tell.contains("UIApplication.shared.applicationState != .background"), "\(tell)")
+        #expect(!tell.contains("isOnScreen"), "the end of a run asks whether the scene is active: \(tell)")
+        let ring = try Self.code(Self.ringCard)
+        let start = try Self.body(["struct FirstAnalysisMomentHeader", "private func start()"], in: ring)
+        #expect(start.contains("store.claim(onScreen: model.isOnScreen)"), "\(start)")
+        #expect(ring.contains(".onChange(of: model.isOnScreen) { _, onScreen in if onScreen { start() } }"))
+        let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
+        #expect(initializer.contains("UIApplication.didEnterBackgroundNotification") && initializer.contains("self?.leftScreen()"))
+    }
+
+    /// The analysis completed where no run of the app ended (the overnight refinement): the store
+    /// hears it there, before the marker says so, and a first 100 % that happened without the
+    /// user is spent. Coming to the front no longer looks at the marker: a quick first analysis
+    /// completed it without "Analyse fertig", and the moment waits for the first celebrated
+    /// finish (second review, K7 a).
+    @Test func theRefinementThatCompletesTheAnalysisTellsTheStore() throws {
+        let model = try Self.code(Self.model)
+        let refine = try Self.body(["private func refinePass("], in: model)
+        let told = try #require(refine.range(of: "FirstAnalysisMomentStore.shared.completedAway(first: !AnalysisMarker.completedOnce)"),
+                                "the refinement does not tell the moment: \(refine)")
+        let marked = try #require(refine.range(of: "AnalysisMarker.finished()"), "\(refine)")
+        #expect(told.upperBound < marked.lowerBound, "told after the marker says completed")
+        let store = try Self.code(Self.store)
+        #expect(!store.contains("willEnterForegroundNotification"), "coming to the front spends it by the marker")
+        #expect(!store.contains("cameToFront"), "coming to the front spends it by the marker")
+    }
+
+    /// The observers are written `any NSObjectProtocol`, as every existential of the App
+    /// (`ExistentialAny` is on, App/project.yml; second review, K3).
+    @Test func everyNSObjectProtocolIsWrittenAsAnExistential() throws {
+        let project = try AppSource.read("App/project.yml")
+        #expect(project.contains("SWIFT_UPCOMING_FEATURE_EXISTENTIAL_ANY: YES"))
+        var bare: [String] = []
+        for path in AppSource.swiftFiles(under: "App") {
+            let code = AppSource.code(try AppSource.read(path))
+            for match in code.matches(of: /(\bany\s+)?\bNSObjectProtocol\b/) where match.output.1 == nil {
+                bare.append(URL(fileURLWithPath: path).lastPathComponent)
+            }
+        }
+        #expect(bare.isEmpty, "\(bare)")
+        let store = try Self.code(Self.store)
+        #expect(store.contains("@ObservationIgnored private var observers: [any NSObjectProtocol] = []"))
     }
 
     /// Kept in `UserDefaults` under a key of its own (`AnalysisMarker.reset` does not clear it,
     /// a rebuilt database does not lose it, a device backup brings it back), never in the
-    /// database. Leaving the screen ends a moment not seen; coming back after an analysis was
-    /// completed meanwhile spends it.
+    /// database. Leaving the screen ends a moment not seen. The store is made at launch, while the
+    /// marker still says whether an analysis was completed before this version kept the moment.
     @Test func whatIsKeptLivesInUserDefaults() throws {
         let store = try Self.code(Self.store)
         let type = try Self.body(["final class FirstAnalysisMomentStore"], in: store)
@@ -72,11 +121,10 @@ struct FirstAnalysisMomentSourceTests {
         let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
         #expect(initializer.contains("FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce)"), "\(initializer)")
         #expect(initializer.contains("UIApplication.didEnterBackgroundNotification") && initializer.contains("self?.leftScreen()"))
-        #expect(initializer.contains("UIApplication.willEnterForegroundNotification") && initializer.contains("self?.cameToFront()"))
-        let front = try Self.body(["final class FirstAnalysisMomentStore", "private func cameToFront()"], in: store)
-        #expect(front.contains("AnalysisMarker.completedOnce"), "\(front)")
         let launched = try Self.body(["final class FirstAnalysisMomentStore", "func launched()"], in: store)
-        #expect(launched.contains("cameToFront()"), "\(launched)")
+        #expect(launched.trimmingCharacters(in: .whitespacesAndNewlines) == "{}", "\(launched)")
+        let away = try Self.body(["final class FirstAnalysisMomentStore", "func completedAway(first: Bool)"], in: store)
+        #expect(away.contains("moment.completedAway(first: first)") && away.contains("keep()"), "\(away)")
         for database in ["AlbumistStore", "store.value(", "store.set(", "setValue("] {
             #expect(!store.contains(database), "the moment is kept in the database: \(database)")
         }
@@ -150,13 +198,11 @@ struct FirstAnalysisMomentSourceTests {
         let ring = try Self.code(Self.ringCard)
         let play = try Self.body(["struct FirstAnalysisMomentHeader", "private func play() async"], in: ring)
         #expect(play.contains("let hold = UITestSupport.showsFirstFinishMoment ? T.heldForUITest : T.hold"), "\(play)")
-        // Afresh: nothing kept is read, no analysis completed before counts, and the launch does
-        // not look at the marker (the test rebuilds the database, which resets it right after).
+        // Afresh: nothing kept is read and no analysis completed before counts (the test rebuilds
+        // the database, which resets the marker right after).
         let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
         #expect(initializer.contains("let fresh = UITestSupport.startsFirstFinishOwed"), "\(initializer)")
         #expect(initializer.contains("let kept = fresh ? nil : UserDefaults.standard.string(forKey: Self.key)"), "\(initializer)")
-        let launched = try Self.body(["final class FirstAnalysisMomentStore", "func launched()"], in: store)
-        #expect(launched.contains("guard !UITestSupport.startsFirstFinishOwed else { return }"), "\(launched)")
         // The UI test that asks for both, and finds the moment by its identifier.
         let test = try AppSource.read(Self.uiTest)
         for asked in ["\"-AlbumistUITestFirstFinishMoment\"", "\"-AlbumistUITestFirstFinishOwed\"",
@@ -187,7 +233,7 @@ struct FirstAnalysisMomentSourceTests {
                 + code.components(separatedBy: "UITestSupport.startsFirstFinishOwed").count - 1
             if count > 0 { readers[path] = count }
         }
-        #expect(readers == [Self.store: 3, Self.ringCard: 1], "\(readers)")
+        #expect(readers == [Self.store: 2, Self.ringCard: 1], "\(readers)")
         // No other trace of the old flag in the store.
         #expect(!(try Self.code(Self.store)).contains("ProcessInfo.processInfo.arguments"))
     }

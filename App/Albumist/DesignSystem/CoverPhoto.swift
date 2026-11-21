@@ -61,6 +61,12 @@ struct CoverPhoto: View {
 
     /// The ids that are tried: the first `CoverLoader.attempts` real ones.
     private var candidates: [AssetID] {
+        Self.candidates(ids)
+    }
+
+    /// The ids a cover for `ids` tries, in order: the first `CoverLoader.attempts` real ones. The
+    /// page's colour reads the same (`CoverTintReader`).
+    static func candidates(_ ids: [AssetID]) -> [AssetID] {
         Array(ids.lazy.filter { !$0.rawValue.isEmpty }.prefix(CoverLoader.attempts))
     }
 

@@ -33,8 +33,9 @@ struct QuickCreateMomentLayer: View {
     /// The layer on screen: it covers the whole screen (the cards are measured on screen).
     @State private var screen: CGRect = .zero
 
-    /// How long after the banner came the card is looked at: a list that keeps the made card in its
-    /// place while its banner shows has put it back by then.
+    /// How long after the banner came the card is looked at: a list that lost the made suggestion
+    /// while the album was made (the analysis made its suggestions anew) puts its card back as the
+    /// banner comes, and has done so by then.
     private static let lookDelay: Duration = .milliseconds(80)
 
     var body: some View {
@@ -153,8 +154,9 @@ final class QuickCreateMomentSources {
 
     /// A card on screen.
     struct Source {
-        /// Its suggestion, as the card shows it: the made one has left the model's list by the
-        /// time its banner shows, while its card stays in place.
+        /// Its suggestion as the card shows it: the moment never depends on the analysis still
+        /// having it as the banner comes (it may make its suggestions anew while the album is
+        /// made; a list keeps the made card meanwhile).
         var proposal: AlbumProposal
         /// The card's frame on screen (`.global`).
         var card: CGRect

@@ -175,7 +175,7 @@ struct MomentsSourceTests {
         let photo = try Self.body(["final class QuickCreateMomentSources", "func photo(for"], in: layer)
         #expect(photo.contains("proposal.isSensitive || model.previewHidden(for: proposal)"), "\(photo)")
         #expect(photo.contains("personal ? nil : keptCover("), "\(photo)")
-        // The card's own suggestion: the made one has left the model's list as its banner shows.
+        // The card's own suggestion, whether or not the analysis still has it as the banner comes.
         #expect(photo.contains("let proposal = source.proposal") && !photo.contains("model.proposals"), "\(photo)")
     }
 
@@ -318,9 +318,8 @@ struct MomentsSourceTests {
         #expect(main.contains("Tab(value: MainTab.search, role: .search)"), "no round search button beside the tabs")
     }
 
-    /// Each card that offers "Anlegen" marks itself with one line, with its suggestion (the made
-    /// suggestion has left the model's list by the time its banner shows, while its card stays) and
-    /// the cover's own aspect ratio; nothing else marks a card.
+    /// Each card that offers "Anlegen" marks itself with one line, with its suggestion as the card
+    /// shows it and the cover's own aspect ratio; nothing else marks a card.
     @Test func eachCardMarksWhereTheMomentStarts() throws {
         let expected = [Self.start: "style == .large ? 2 : 3.0 / 2.0", Self.list: "4.0 / 3.0"]
         for (path, ratio) in expected {

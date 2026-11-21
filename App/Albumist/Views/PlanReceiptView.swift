@@ -449,7 +449,13 @@ private struct ReceiptAlbumRow: View {
             VStack(alignment: .trailing, spacing: 2) {
                 badge
                 if album.added > 0 {
-                    Text("+\(album.added) \(album.added.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+                    // A new album holds its photos: "16 Fotos" beside "Neu", as the preview says
+                    // it; "+16" is for photos added to an album that was there.
+                    if album.change == .created {
+                        Text("\(album.added) \(album.added.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+                    } else {
+                        Text("+\(album.added) \(album.added.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+                    }
                 }
                 if album.removed > 0 {
                     Text("−\(album.removed) \(album.removed.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()

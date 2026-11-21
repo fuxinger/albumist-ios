@@ -57,6 +57,9 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Geändert
+- 21.11. Beleg „Änderungen“: ein neues Album zeigt neben „Neu“ „16 Fotos“, wie die Vorschau es sagt, statt
+  „+16 Fotos“; das „+“ bleibt für Fotos, die in ein schon vorhandenes Album kamen (Schliff nach den
+  Bildschirmfotos von UI-Lauf 44852630315).
 - 21.11. (Design-Welle 2, DS-10, noch in keinem Build): Foto-Ansicht wie in Fotos. Oben stehen Ort, Tag und Uhrzeit
   in der Ortszeit („Heute“, „Gestern“, Wochentag; bei noch nicht analysierten Fotos das Datum aus Fotos; auf
   schmalen iPhones kurz, die Uhrzeit bleibt) statt „1 von 176“. „Teilen“ gibt das Foto vom iPhone weiter (nie aus

@@ -159,6 +159,128 @@ struct SuggestionMenuTests {
             }
         }
     }
+
+    /// What the menu does not offer is neither ready nor waiting (review C of design wave 2, L6).
+    @Test func anItemTheMenuDoesNotOfferHasNoState() {
+        #expect(Self.menu(.create).isEnabled(.reshapeTrip) == nil)
+        #expect(Self.menu(.create, setAside: true).isEnabled(.notNow) == nil)
+        #expect(Self.menu(.create, made: true).isEnabled(.action(.create)) == nil)
+        #expect(Self.menu(.create).isEnabled(.action(.look)) == nil, "another word than the card's")
+    }
+
+    /// Set aside while another card works: no "Nicht jetzt", the word waits, "Anpassen" is ready.
+    @Test func setAsideWhileAnotherCardWorks() {
+        let menu = Self.menu(.create, waits: true, setAside: true)
+        #expect(Self.groups(menu) == [[.action(.create), .adjust]])
+        #expect(menu.isEnabled(.action(.create)) == false)
+        #expect(menu.isEnabled(.adjust) == true)
+    }
+
+    /// Made while the list selects, or working too: still nothing.
+    @Test func madeWhileTheListSelects() {
+        #expect(Self.menu(.create, made: true, selecting: true).isEmpty)
+        #expect(Self.menu(.look, made: true, working: true, selecting: true, canReshape: true).isEmpty)
+    }
+
+    // MARK: Switched off, and for assistive technologies (review C of design wave 2, M4, L1, L3)
+
+    /// Whether a card has a menu at all is known from the card alone, before anything else is
+    /// read: the app switches the long press off with it (no lift, no empty menu, no actions).
+    @Test func aMenuIsOfferedOnlyWhileTheCardCanChange() {
+        #expect(SuggestionMenu.isOffered(made: false, working: false, selecting: false))
+        for made in [false, true] {
+            for working in [false, true] {
+                for selecting in [false, true] {
+                    for waits in [false, true] {
+                        let offered = SuggestionMenu.isOffered(made: made, working: working, selecting: selecting)
+                        let menu = Self.menu(.create, made: made, working: working, waits: waits, selecting: selecting,
+                                             canReshape: true, offersNotATrip: true)
+                        #expect(menu.isEmpty == !offered, "made \(made), working \(working), selecting \(selecting)")
+                        #expect(offered == (!made && !working && !selecting))
+                    }
+                }
+            }
+        }
+    }
+
+    /// VoiceOver, Voice Control and Switch Control get the items as actions of the card's body,
+    /// but not the card's word (it is the card's own button, as a photo leaves out "Ansehen")
+    /// and nothing that waits (it could not be done).
+    @Test func assistiveTechnologiesGetWhatCanBeDoneBesideTheButton() {
+        #expect(Self.menu(.create).accessibilityItems == [.adjust, .notNow])
+        #expect(Self.menu(Self.toskana, canReshape: true, offersNotATrip: true).accessibilityItems
+                == [.adjust, .reshapeTrip, .notATrip, .notNow])
+        #expect(Self.menu(.create, canReshape: true, offersNotATrip: true, canAnswerNotATrip: false).accessibilityItems
+                == [.adjust, .reshapeTrip, .notNow], "„Keine Reise“ waits")
+        #expect(Self.menu(.create, waits: true).accessibilityItems == [.adjust, .notNow])
+        #expect(Self.menu(.look, setAside: true).accessibilityItems == [.adjust])
+        #expect(Self.menu(.create, made: true).accessibilityItems.isEmpty)
+        #expect(Self.menu(.create, selecting: true).accessibilityItems.isEmpty)
+    }
+
+    // MARK: Read only what the menu shows (review C of design wave 2, M5)
+
+    /// Nothing is read for a card without a menu, and whether "Keine Reise" can be answered (the
+    /// state of the analysis and of the plans) only where it is offered; otherwise the menu is
+    /// the card's menu.
+    @Test func onlyWhatTheMenuShowsIsRead() {
+        var reads: [String] = []
+        func menu(made: Bool = false, working: Bool = false, waits: Bool = false, selecting: Bool = false,
+                  setAside: Bool = false, canReshape: Bool = true, offers: Bool, canAnswer: Bool = true) -> SuggestionMenu {
+            SuggestionMenu(action: .create, made: made, working: working, waits: waits, selecting: selecting,
+                           setAside: { reads.append("setAside"); return setAside },
+                           canReshape: { reads.append("canReshape"); return canReshape },
+                           offersNotATrip: { reads.append("offers"); return offers },
+                           canAnswerNotATrip: { reads.append("canAnswer"); return canAnswer })
+        }
+        #expect(menu(made: true, offers: true).isEmpty)
+        #expect(menu(working: true, offers: true).isEmpty)
+        #expect(menu(selecting: true, offers: true).isEmpty)
+        #expect(reads.isEmpty, "read for a card without a menu: \(reads)")
+        _ = menu(offers: false)
+        #expect(reads.sorted() == ["canReshape", "offers", "setAside"], "\(reads)")
+        reads = []
+        _ = menu(offers: true)
+        #expect(reads.sorted() == ["canAnswer", "canReshape", "offers", "setAside"], "\(reads)")
+        for waits in [false, true] {
+            for setAside in [false, true] {
+                for canReshape in [false, true] {
+                    for offers in [false, true] {
+                        for canAnswer in [false, true] {
+                            let lazy = menu(waits: waits, setAside: setAside, canReshape: canReshape, offers: offers,
+                                            canAnswer: canAnswer)
+                            #expect(lazy == Self.menu(.create, waits: waits, setAside: setAside, canReshape: canReshape,
+                                                      offersNotATrip: offers, canAnswerNotATrip: canAnswer))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: The suggestion as it is now (review C of design wave 2, H1)
+
+    static func kyoto(_ photos: [AssetID], id: String = "kyoto") -> AlbumProposal {
+        AlbumProposal(id: AlbumistID(id), kind: .trip, title: "Kyoto", assetIDs: Set(photos))
+    }
+
+    /// A menu stays open while the analysis goes on: an item acts on the suggestion as the
+    /// analysis has it at the tap, found by its id, with its photos now.
+    @Test func anItemActsOnTheSuggestionAsItIsNow() {
+        let drawn = Self.kyoto(["a", "b"])
+        let now = Self.kyoto(["a", "b", "c"])
+        let other = Self.kyoto(["x"], id: "rome")
+        #expect(SuggestionMenu.current(drawn, in: [other, now]) == now)
+        #expect(SuggestionMenu.current(drawn, in: [drawn]) == drawn)
+    }
+
+    /// One the analysis no longer has (made anew, split, merged) is acted on no more.
+    @Test func aSuggestionThatWentIsNotActedOn() {
+        let drawn = Self.kyoto(["a", "b"])
+        #expect(SuggestionMenu.current(drawn, in: []) == nil)
+        #expect(SuggestionMenu.current(drawn, in: [Self.kyoto(["a", "b"], id: "kyoto-2")]) == nil,
+                "the same photos under another id are another suggestion")
+    }
 }
 
 /// The long press on a photo of a grid (design wave 2, DS-06a): what that place already offers
@@ -232,9 +354,106 @@ struct PhotoMenuTests {
         }
     }
 
-    // MARK: The lifted photo
+    // MARK: Switched off (review C of design wave 2, M4)
+
+    /// Whether a photo has a menu at all is known from the grid alone: the app switches the long
+    /// press off with it while the grid selects or the photo cannot be opened.
+    @Test(arguments: [PhotoMenu.Place.unsorted, .suggestion, .album, .search])
+    func aMenuIsOfferedOnlyWhileThePhotoCanBeOpened(_ place: PhotoMenu.Place) {
+        for selecting in [false, true] {
+            for available in [false, true] {
+                let offered = PhotoMenu.isOffered(selecting: selecting, available: available)
+                #expect(offered == (!selecting && available))
+                #expect(PhotoMenu(place: place, selecting: selecting, available: available).isEmpty == !offered)
+            }
+        }
+    }
+
+    // MARK: Ignored (review C of design wave 2, L6)
+
+    /// A photo the user ignored is ignored also without a state of its own (an album's photo the
+    /// analysis has not read yet: ignoring it gives it none), so its menu offers the way back;
+    /// a state that says ignored counts as well, and an excluded photo the user also ignored
+    /// can be un-ignored.
+    @Test func anIgnoredPhotoIsKnownWithOrWithoutAState() {
+        let id: AssetID = "a"
+        #expect(PhotoMenu.isIgnored(id, ignored: [id], state: nil))
+        #expect(!PhotoMenu.isIgnored(id, ignored: [], state: nil))
+        #expect(!PhotoMenu.isIgnored(id, ignored: ["b"], state: nil))
+        #expect(PhotoMenu.isIgnored(id, ignored: [], state: AssetOrganizationState(assetID: id, isIgnored: true)))
+        #expect(PhotoMenu.isIgnored(id, ignored: [], state: AssetOrganizationState(assetID: id, areas: [.trips: .ignored])))
+        #expect(!PhotoMenu.isIgnored(id, ignored: [], state: AssetOrganizationState(assetID: id, areas: [.trips: .organized])))
+        #expect(PhotoMenu.isIgnored(id, ignored: [id], state: AssetOrganizationState(assetID: id, isExcluded: true)))
+        let ignored = PhotoMenu.isIgnored(id, ignored: [id], state: nil)
+        #expect(PhotoMenu(place: .album, isIgnored: ignored).items.contains(.stopIgnoring))
+    }
+
+    // MARK: The lifted photo (review C of design wave 2, M2)
 
     static func close(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 0.01 }
+
+    /// Drawn no larger than the image allows: 70 % of the pixels it fills, per side.
+    static func isSharp(_ size: PhotoMenu.PreviewSize, imageWidth: Double, imageHeight: Double, scale: Double) -> Bool {
+        size.width * scale * PhotoMenu.sharpShare <= imageWidth + 0.01
+            && size.height * scale * PhotoMenu.sharpShare <= imageHeight + 0.01
+    }
+
+    /// The photo is lifted from the image its cell already shows, at once: whole, in its own
+    /// proportions, as large as that image is sharp (the covers' 70 %), so larger than its 110
+    /// pt cell and never a blurry enlargement or an empty surface. A grid's thumbnail of a photo
+    /// taken across (440 × 330 px on a 3x screen) lifts to 210 × 157 pt.
+    @Test func theLiftedPhotoIsTheCellsImageAsLargeAsItIsSharp() {
+        let across = PhotoMenu.liftSize(imageWidth: 440, imageHeight: 330, scale: 3, cellSide: 110)
+        #expect(Self.close(across.width, 440 / 2.1) && Self.close(across.height, 330 / 2.1))
+        #expect(Self.close(across.aspectRatio, 4.0 / 3.0))
+        #expect(Self.isSharp(across, imageWidth: 440, imageHeight: 330, scale: 3))
+        let upright = PhotoMenu.liftSize(imageWidth: 330, imageHeight: 440, scale: 3, cellSide: 110)
+        #expect(Self.close(upright.width, 330 / 2.1) && Self.close(upright.height, 440 / 2.1))
+        #expect(Self.isSharp(upright, imageWidth: 330, imageHeight: 440, scale: 3))
+        // A screenshot's thumbnail: tall and narrow, nothing cut.
+        let screenshot = PhotoMenu.liftSize(imageWidth: 330, imageHeight: 715, scale: 3, cellSide: 110)
+        #expect(Self.close(screenshot.aspectRatio, 330.0 / 715))
+        #expect(Self.isSharp(screenshot, imageWidth: 330, imageHeight: 715, scale: 3))
+        // The same size in points on a 2x screen, whose grid asks for fewer pixels.
+        let twice = PhotoMenu.liftSize(imageWidth: 440.0 * 2 / 3, imageHeight: 220, scale: 2, cellSide: 110)
+        #expect(Self.close(twice.width, across.width) && Self.close(twice.height, across.height))
+    }
+
+    /// A larger image is lifted as large as fits in 320 × 427 pt (the width of an album's lifted
+    /// preview; a photo taken upright, 3:4, fills it); a panorama keeps its width and is low.
+    @Test func aLargeImageFillsTheBoundsAtMost() {
+        let across = PhotoMenu.liftSize(imageWidth: 1200, imageHeight: 900, scale: 3, cellSide: 110)
+        #expect(Self.close(across.width, 320) && Self.close(across.height, 240))
+        let upright = PhotoMenu.liftSize(imageWidth: 1800, imageHeight: 2400, scale: 3, cellSide: 110)
+        #expect(Self.close(upright.width, 320) && Self.close(upright.height, 426.67))
+        let panorama = PhotoMenu.liftSize(imageWidth: 1320, imageHeight: 330, scale: 3, cellSide: 110)
+        #expect(Self.close(panorama.width, 320) && Self.close(panorama.height, 80))
+    }
+
+    /// A photo whose cell shows only a small preview (the original in iCloud): lifted as large as
+    /// its cell shows it, never smaller and never blown up beyond that.
+    @Test func aSmallPreviewIsLiftedAsLargeAsItsCell() {
+        let small = PhotoMenu.liftSize(imageWidth: 120, imageHeight: 90, scale: 3, cellSide: 110)
+        #expect(Self.close(small.height, 110) && Self.close(small.width, 110 * 4.0 / 3))
+        let tall = PhotoMenu.liftSize(imageWidth: 90, imageHeight: 120, scale: 3, cellSide: 140)
+        #expect(Self.close(tall.width, 140) && Self.close(tall.height, 140 * 4.0 / 3))
+    }
+
+    /// Without the cell's image (a memory warning took it, it is asked for again): a square of the
+    /// cell's size, the photo as its cell shows it. Far beyond any camera (a strip of a few
+    /// pixels), held at 6:1 or 1:4 so the preview is never a line.
+    @Test func anUnknownOrExtremeImageStaysAPhoto() {
+        for (w, h, scale) in [(0.0, 0.0, 3.0), (0, 330, 3), (440, 0, 3), (-1, 10, 3), (440, 330, 0)] {
+            let size = PhotoMenu.liftSize(imageWidth: w, imageHeight: h, scale: scale, cellSide: 110)
+            #expect(Self.close(size.width, 110) && Self.close(size.height, 110), "\(w)×\(h) at \(scale)")
+        }
+        let strip = PhotoMenu.liftSize(imageWidth: 3000, imageHeight: 10, scale: 3, cellSide: 110)
+        #expect(Self.close(strip.aspectRatio, 6))
+        #expect(strip.width <= 320.01)
+        let tower = PhotoMenu.liftSize(imageWidth: 10, imageHeight: 3000, scale: 3, cellSide: 110)
+        #expect(Self.close(tower.aspectRatio, 0.25))
+        #expect(Self.close(tower.height, 426.67))
+    }
 
     /// The photo larger and whole, in its own proportions, as large as fits in 320 × 427 pt
     /// (the width of an album's lifted preview; a photo taken upright, 3:4, fills it).

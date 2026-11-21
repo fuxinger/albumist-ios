@@ -48,7 +48,7 @@ public struct PhotoMenu: Equatable, Sendable {
     ///   - available: the photo can be opened now (a search hit has its facts; a suggestion's
     ///     photos are not waiting for its album).
     public init(place: Place, isIgnored: Bool = false, selecting: Bool = false, available: Bool = true) {
-        guard !selecting, available else {
+        guard Self.isOffered(selecting: selecting, available: available) else {
             sections = []
             return
         }
@@ -70,6 +70,22 @@ public struct PhotoMenu: Equatable, Sendable {
     /// the photo's own (a double tap opens it).
     public var accessibilityItems: [Item] { items.filter { $0 != .view } }
 
+    /// Whether the photo has a menu at all, known from its grid alone: none while the grid
+    /// selects or the photo cannot be opened. The app switches the long press off with it (an
+    /// empty menu closure: no lift, no menu, no actions; review C of design wave 2, M4).
+    public static func isOffered(selecting: Bool, available: Bool) -> Bool {
+        !selecting && available
+    }
+
+    /// Whether the photo is ignored, so its menu offers "Nicht mehr ignorieren": the user
+    /// ignored it (`ignored`, the store's with the taps since laid over it, `IgnoreChange`), or
+    /// its state says so. A photo without a state (an album's photo the analysis has not read
+    /// yet) gets none from "Ignorieren", only its place in `ignored` (review C of design wave 2,
+    /// L6); an excluded photo the user also ignored can be un-ignored as well.
+    public static func isIgnored(_ id: AssetID, ignored: Set<AssetID>, state: AssetOrganizationState?) -> Bool {
+        ignored.contains(id) || (state.map(OrganizationStatusResolver.isIgnored) ?? false)
+    }
+
     /// The size of the lifted photo, in points.
     public struct PreviewSize: Equatable, Sendable {
         public let width: Double
@@ -85,6 +101,29 @@ public struct PhotoMenu: Equatable, Sendable {
     public static let previewBounds = (width: 320.0, height: 320.0 * 4 / 3)
     /// Proportions beyond any camera are held here, so the preview is never a line.
     public static let previewAspectRange: ClosedRange<Double> = 0.25...6
+    /// How much of the pixels it fills an image must bring, per side, to count as sharp: the
+    /// covers' rule (`ThumbnailRequest.sharpShare` in the app, the same 70 %).
+    public static let sharpShare = 0.7
+
+    /// The size of the lifted photo, in points: the image its cell shows (the grid's thumbnail,
+    /// `imageWidth` × `imageHeight` pixels, on a screen of `scale`), whole, in its own
+    /// proportions, as large as it is sharp (`sharpShare`), at most `previewBounds` (review C of
+    /// design wave 2, M2: lifted at once from what the cell shows, never a placeholder or a
+    /// blurry enlargement). Never smaller than its cell (`cellSide` points on its short side),
+    /// which shows the image that large already; a square of the cell when the image is not
+    /// known.
+    public static func liftSize(imageWidth: Double, imageHeight: Double, scale: Double, cellSide: Double) -> PreviewSize {
+        guard imageWidth > 0, imageHeight > 0, scale > 0 else { return PreviewSize(width: cellSide, height: cellSide) }
+        let ratio = min(max(imageWidth / imageHeight, previewAspectRange.lowerBound), previewAspectRange.upperBound)
+        let pixelsPerPoint = scale * sharpShare
+        // As high as the image is sharp, on the side that decides in these proportions.
+        var height = min(imageHeight / pixelsPerPoint, imageWidth / pixelsPerPoint / ratio)
+        // At least as large as its cell shows it (filled: its short side is the cell's side).
+        let shortSide = min(height * ratio, height)
+        if shortSide < cellSide { height *= cellSide / shortSide }
+        height = min(height, previewBounds.height, previewBounds.width / ratio)
+        return PreviewSize(width: height * ratio, height: height)
+    }
 
     /// The lifted photo whole, in its own proportions, as large as fits in `previewBounds`; 4:3
     /// when its size is not known.

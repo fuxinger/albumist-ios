@@ -331,18 +331,25 @@ struct PhotoGridPlace: Equatable, Sendable {
 }
 
 /// A suggestion's days as the grid's sections, made again only when its page hands over other
-/// days (`ProposalPageCache` makes them anew when the suggestion or the facts change), not each
-/// time the page draws (at every letter of a name and every tick of a photo).
+/// days (`ProposalPageCache` makes them anew when the suggestion or the facts change) or what
+/// each photo's spoken time is read from changes (the facts' revision, `AppModel.factsVersion`:
+/// a place found later moves a photo to its clock; and the iPhone's clock, for facts without a
+/// zone; review L12), not each time the page draws (at every letter of a name and every tick of
+/// a photo).
 @MainActor
 final class PhotoGridSectionsCache {
     private var days: [PhotoDay] = []
+    private var facts = 0
+    private var zone: TimeZone?
     private var made: [PhotoGridSection] = []
     private var isMade = false
 
-    func sections(for days: [PhotoDay], make: () -> [PhotoGridSection]) -> [PhotoGridSection] {
-        if !isMade || !Self.same(days, self.days) {
+    func sections(for days: [PhotoDay], facts: Int, zone: TimeZone, make: () -> [PhotoGridSection]) -> [PhotoGridSection] {
+        if !isMade || !Self.same(days, self.days) || facts != self.facts || zone != self.zone {
             made = make()
             self.days = days
+            self.facts = facts
+            self.zone = zone
             isMade = true
         }
         return made

@@ -58,10 +58,13 @@ struct PhotoGridSourceTests {
         // The pages' photo view opens on the photos shown, in the grid's order (one page at most).
         let open = Self.squeezed(try Self.body(["struct LibraryView", "private func open("], in: Self.library))
         #expect(open.contains("viewing=PhotoViewer.Start(id:id,ids:PhotoGridSection.ids(of:days,below:limit))"), "\(open)")
-        // A suggestion's days with each photo's time on its own clock, made again only when they change.
+        // A suggestion's days with each photo's time on its own clock, made again only when they
+        // change, or what the times are read from (its facts, the iPhone's clock; review L12).
         let sections = Self.squeezed(try Self.body(["struct ProposalPhotosView", "private var sections:"], in: Self.suggestions))
-        #expect(sections.contains("grid.sections(for:days)"), "\(sections)")
+        #expect(sections.contains("grid.sections(for:days,facts:model.factsVersion,zone:.current)"), "\(sections)")
         #expect(sections.contains("PhotoGridSection.sections(days){facts[$0]?.wallClock(or:.current)}"), "\(sections)")
+        let cache = Self.squeezed(try Self.body(["final class PhotoGridSectionsCache", "func sections("], in: Self.grid))
+        #expect(cache.contains("if!isMade||!Self.same(days,self.days)||facts!=self.facts||zone!=self.zone{"), "\(cache)")
     }
 
     /// The days as Photos shows them: a header per day, its photos below it, the header pinned

@@ -1769,9 +1769,10 @@ struct ProposalPhotosView: View {
     }
 
     /// The days with each photo's date and time on the clock where it was taken, as its day's
-    /// header says it (what VoiceOver says of a photo).
+    /// header says it (what VoiceOver says of a photo), made again when the facts or the iPhone's
+    /// clock it is read from change (review L12).
     private var sections: [PhotoGridSection] {
-        grid.sections(for: days) {
+        grid.sections(for: days, facts: model.factsVersion, zone: .current) {
             let facts = model.factsByID
             return PhotoGridSection.sections(days) { facts[$0]?.wallClock(or: .current) }
         }

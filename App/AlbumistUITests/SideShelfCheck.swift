@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(CoreGraphics)
+// CGRect is Equatable only through CoreGraphics' own module on Apple platforms, which Foundation
+// alone does not make visible to SwiftPM's macOS build (CI 44862185266).
+import CoreGraphics
+#endif
 
 /// Text that runs off the side of the screen in the accessibility test, apart from text in a card
 /// that peeks in from the side of a shelf. Plain Foundation, so SwiftPM also builds it on Linux

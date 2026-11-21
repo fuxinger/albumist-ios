@@ -96,6 +96,29 @@ struct UITestHelperSourceTests {
         #expect(package.contains("\"SideShelfCheck.swift\""), "Linux does not build the side check")
     }
 
+    /// SwiftPM builds three files of the UI tests for tests of their own (target
+    /// `AlbumistUITestLogic`), on Linux and in CI's macOS job. On Apple platforms `CGRect` is
+    /// Equatable only through CoreGraphics' own Swift module, which Foundation alone does not
+    /// make visible to that build: CI 44862185266 failed to compile `SideShelfCheck.Ancestor:
+    /// Equatable` on the Mac, while Linux (whose Foundation has a CGRect of its own) and the
+    /// Xcode UI test target (which imports XCTest) built it. Every file of the target and of its
+    /// tests that names a CoreGraphics type imports CoreGraphics where it can.
+    @Test func theSwiftPMFilesOfTheUITestsImportCoreGraphicsWhereTheyUseIt() throws {
+        let package = AppSource.code(try AppSource.read("Package.swift"), keepStrings: true)
+        let target = try #require(package.range(of: #"name: "AlbumistUITestLogic""#), "no target AlbumistUITestLogic")
+        let sources = try #require(package[target.upperBound...].firstMatch(of: /sources:\s*\[([^\]]*)\]/), "the target lists no sources")
+        let files = sources.1.matches(of: /"([^"]+\.swift)"/).map { "App/AlbumistUITests/" + String($0.1) }
+        #expect(files.contains("App/AlbumistUITests/SideShelfCheck.swift"), "\(files)")
+        var missing: [String] = []
+        for path in files + AppSource.swiftFiles(under: "Tests/AlbumistUITestLogicTests") {
+            let code = AppSource.code(try AppSource.read(path))
+            guard code.contains(/\bCG(Rect|Point|Size|Float|Vector)\b/) else { continue }
+            let imports = code.contains(/#if canImport\(CoreGraphics\)\s*import CoreGraphics\s*#endif/)
+            if !imports { missing.append(path) }
+        }
+        #expect(missing.isEmpty, "these files use CoreGraphics types without importing CoreGraphics: \(missing)")
+    }
+
     /// At the largest text size of UI run 44852630315 a swipe left the suggestion's page and the
     /// preview where they were: their "lower" shots equal the first ones and so do their trees,
     /// so their lower parts were never checked. Both have a tall bar of their own at the bottom.

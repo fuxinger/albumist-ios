@@ -36,6 +36,12 @@ struct PlanReviewView: View {
     @State private var loading = true
     /// Albums of the plan that is running, for the "photos fly into albums" show.
     @State private var show: [SortingShow.Album]?
+    /// The result's moment is still to come (`ResultCard.onMoment`): the success tap waits for
+    /// the main cover to lie down on the stack (draft E3), as it waits for the show's end.
+    @State private var momentPending = false
+    /// What the result's stack of covers knows of the suggestions the plan came from, taken as
+    /// it starts (`AppModel.resultCoverSources`).
+    @State private var coverSources: ResultCoverSources?
     /// What the screen shows of `plan`, made by `makeFacts()`.
     @State private var facts: PlanReviewFacts?
     /// The plan and album list `facts` were made for.
@@ -45,6 +51,7 @@ struct PlanReviewView: View {
     /// At the accessibility text sizes and in landscape on an iPhone the bar is compact (`compactBar`).
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.displayScale) private var displayScale
     /// The screen loads once; coming back from another tab keeps the result and its undo.
     @State private var didLoad = false
     private static let top = "plan.top"
@@ -79,7 +86,7 @@ struct PlanReviewView: View {
                         }
                         .transition(.opacity)
                     } else if let result = model.execution.finished, !model.execution.isRunning {
-                        ResultCard(plan: result)
+                        resultCard(result)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     } else if model.execution.isRunning {
                         runningCard
@@ -135,7 +142,7 @@ struct PlanReviewView: View {
         // Leaving mid-way would look like cancelling; the work goes on either way.
         .navigationBarBackButtonHidden(model.execution.isRunning)
         .navigationBarTitleDisplayMode(.inline)
-        .modifier(ExecutionHaptics(execution: model.execution, holdSuccess: show != nil))
+        .modifier(ExecutionHaptics(execution: model.execution, holdSuccess: show != nil || momentPending))
         .task {
             await model.refreshAccess()
             guard !didLoad else { return }
@@ -430,12 +437,16 @@ struct PlanReviewView: View {
                     scrollToTop()
                 }
             }
+            beginMoment(plan)
             // Its own run does not make the plan stale; one that did not take it leaves it as it was.
             freshness.handOver()
             Task {
                 // Once it ran, the preview never offers it again (the result shows, and a result
                 // cleared later leaves "Nichts zu tun"), whatever runs on other tabs meanwhile.
-                if await model.execute(plan) { self.plan = nil } else { freshness.notTaken() }
+                if await model.execute(plan) { self.plan = nil } else {
+                    freshness.notTaken()
+                    momentPending = false
+                }
             }
         } label: {
             applyTitle(plan, facts.summary)
@@ -445,6 +456,27 @@ struct PlanReviewView: View {
         // not start, after the fly animation).
         .disabled(facts.isBlocking || facts.hasNoSteps || model.homeChangeRunning)
         .accessibilityIdentifier("plan.apply")
+    }
+
+    /// The result's moment (draft E3) as the plan starts: the success tap waits for it, what
+    /// the stack must know of the suggestions is taken now (the analysis may make them anew
+    /// before the result shows), and the covers load while the plan runs, so they are there
+    /// with the result (`ResultMomentLoader.prefetch`).
+    private func beginMoment(_ plan: ChangePlan) {
+        let sources = model.resultCoverSources(for: plan)
+        coverSources = sources
+        momentPending = true
+        let stack = model.resultCoverStack(for: plan, taken: sources, expected: true)
+        let scale = displayScale
+        Task { await ResultMomentLoader.prefetch(stack, scale: scale) }
+    }
+
+    /// The result of the plan that ran, with its moment (draft E3): the success tap comes as
+    /// the main cover lies down, or as the symbol shows.
+    private func resultCard(_ result: ChangePlan) -> some View {
+        ResultCard(plan: result, sources: coverSources, screenPadding: Self.contentPadding) {
+            momentPending = false
+        }
     }
 
     /// What the button needs said beside it at every size: why it waits, and that iOS asks
@@ -587,7 +619,8 @@ struct ExecutionProgressBar: View {
 /// (A separate modifier keeps the screen's body quick to type-check.)
 private struct ExecutionHaptics: ViewModifier {
     var execution: AppModel.ExecutionState
-    /// While the sorting show plays, the success tap waits for its end.
+    /// While the sorting show plays, the success tap waits for its end; then for the result's
+    /// moment (the main cover lies down on the stack, draft E3).
     var holdSuccess: Bool
 
     func body(content: Content) -> some View {
@@ -602,113 +635,75 @@ private struct ExecutionHaptics: ViewModifier {
     }
 }
 
-/// Result of an executed plan (design 7.1, N-07): what happened, counted as in its receipt and
-/// named by what the plan did (`ResultHeadline`): big "10 neue Alben", small "mit 342 Fotos",
+/// Result of an executed plan (design 7.1, N-07, draft E3): what happened, counted as in its
+/// receipt and named by what the plan did (`ResultHeadline`): the covers of the new albums
+/// fanned above the count (`ResultCoverMoment`), big "10 neue Alben", small "mit 342 Fotos",
 /// where the new albums are, a way to Photos, and "Rückgängig machen" with what it does. A
 /// removal says "1 Album entfernt", never "0 Fotos einsortiert" or where new albums are.
+///
+/// On the screen's ground, as in the draft (no card around it). The stack gives way to the
+/// count and "Fotos-App öffnen", which stay on screen: it takes only the height they leave
+/// (`stackRoom`), down to its smallest size.
 struct ResultCard: View {
     @Environment(AppModel.self) private var model
     @Environment(Navigator.self) private var navigator: Navigator?
     var plan: ChangePlan
+    /// What the stack knows of the suggestions the plan came from, taken as it started (nil:
+    /// taken now, `AppModel.resultCoverStack`).
+    var sources: ResultCoverSources? = nil
+    /// The padding the screen puts around the result (above and below it): kept free when the
+    /// stack fits itself to the screen.
+    var screenPadding: CGFloat = 0
+    /// The moment is there: the main cover lay down on the stack, or the symbol shows. The
+    /// screen's success tap waits for it (`ExecutionHaptics`).
+    var onMoment: () -> Void = {}
     @State private var confirmUndo = false
     /// The undo deletes albums or folders: the confirmation says that iOS asks next (P3-07).
     @State private var undoDeletes = false
     /// Albumist reads the albums to see whether the undo deletes any: a spinner beside the
     /// button, and no second tap meanwhile (third review of P3-07, SHOULD-2).
     @State private var askingUndo = false
-    @State private var appeared = false
     @State private var photosDidNotOpen = false
+    /// The height the screen shows of the scroll view the result stands in: between the
+    /// navigation bar and the tab bar (`containerRelativeFrame`). Nil until measured.
+    @State private var room: CGFloat?
+    /// The height of what stays in view below the stack: the count, the way to the new albums
+    /// and "Fotos-App öffnen".
+    @State private var essentialsHeight: CGFloat = 0
     @Environment(\.openURL) private var openURL
+
+    private static let spacing = Theme.Spacing.l
+
+    /// The height the stack may take: what the screen shows, less its padding above and below,
+    /// the count and "Fotos-App öffnen". Nil until measured.
+    private var stackRoom: CGFloat? {
+        guard let room else { return nil }
+        return room - 2 * screenPadding - essentialsHeight - Self.spacing
+    }
 
     var body: some View {
         // What really happened, counted as in the receipt ("Zahlen wie im Beleg"; photos that
         // were no longer there are not counted), named by what the plan did.
         let receipt = PlanReceipt(plan: plan, inventory: model.inventory)
         let headline = ResultHeadline(receipt, kind: PlanReceipt.Kind(plan))
-        let failed = receipt.failedSteps
-        Card {
+        // Where the new albums are, above the way to Photos (draft E3). Only after a run that
+        // made new albums: a removal or an undo has none (N-07).
+        let way = ResultText.whereNewAlbums(headline, root: model.settings.rootFolderTitle)
+        // What "Rückgängig machen" does, below it; an undo is not taken back itself.
+        let undoNote: String? = model.undonePlans.contains(plan.id) ? nil : headline.undoNote.map { ResultText.undoNote($0) }
+        VStack(spacing: Self.spacing) {
+            moment(headline, failed: receipt.failedSteps)
+            // The buttons close together below the way to Photos, as in the draft.
             VStack(spacing: Theme.Spacing.s) {
-                Image(systemName: failed > 0 ? "exclamationmark.circle.fill"
-                      : headline.kind == .undone ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(failed == 0 ? Theme.accent : Theme.tint(for: .documents))
-                    .symbolEffect(.bounce, value: appeared)
-                    .accessibilityHidden(true)
-                ResultLead(headline: headline, partly: failed > 0)
-                if failed > 0 {
-                    Text(ResultText.failed(failed, kind: headline.kind))
-                        .font(.footnote).foregroundStyle(.noteText)
-                        .multilineTextAlignment(.center)
-                }
-                if receipt.unavailablePhotos > 0 && headline.kind == .created {
-                    Text("\(receipt.unavailablePhotos) \(receipt.unavailablePhotos.formatted()) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
-                        .font(.footnote).foregroundStyle(.noteText)
-                        .multilineTextAlignment(.center)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Spacing.s)
-            // Where the new albums are, above the way to Photos (draft E3). Only after a run that
-            // made new albums: a removal or an undo has none (N-07).
-            if let way = ResultText.whereNewAlbums(headline, root: model.settings.rootFolderTitle) {
-                Text(way)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity)
-            }
-            if let photos = URL(string: "photos-redirect://") {
-                // iOS lets apps open Fotos, but not a particular album (first device test 15.11.:
-                // "Ich springe nicht zu meinen Alben"). So the button says what it does, and the
-                // way to the albums is written above it.
-                // "photos-redirect://" is not documented by Apple (plugin review N8). Should iOS
-                // one day not open it, the button says so instead of staying silent.
-                Button("Fotos-App öffnen") {
-                    openURL(photos) { accepted in photosDidNotOpen = !accepted }
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                if photosDidNotOpen {
-                    Text("Die Fotos-App ließ sich nicht öffnen. Öffne sie bitte selbst vom Home-Bildschirm.")
-                        .font(.footnote).foregroundStyle(.noteText)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            // Pushed by value (`AppScreen`): the receipt may push "Fehlendes erneut versuchen".
-            Button {
-                Navigator.push(.receipt(PlanToken(plan)), on: navigator)
-            } label: {
-                Text("Alle Änderungen ansehen")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 44)
-            }
-            .accessibilityIdentifier("result.receipt")
-            // A real button that says what it does (draft E3); an undo is not taken back itself.
-            if let note = headline.undoNote, !model.undonePlans.contains(plan.id) {
-                Button {
-                    guard !askingUndo else { return }
-                    askingUndo = true
-                    Task {
-                        // Full access first: not "not possible" after the dialog was confirmed.
-                        guard await model.changesHaveFullAccess() else { askingUndo = false; return }
-                        undoDeletes = await model.undoDeletesCollections(plan)
-                        askingUndo = false
-                        confirmUndo = true
-                    }
-                } label: {
-                    Label("Rückgängig machen", systemImage: "arrow.uturn.backward").checkingBeside(askingUndo)
-                }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .disabled(askingUndo)
-                Text(ResultText.undoNote(note))
-                    .font(.footnote).foregroundStyle(.noteText)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
+                essentials(receipt, headline, way: way)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { essentialsHeight = $0 }
+                more(undoNote: undoNote)
             }
         }
-        .onAppear {
-            appeared = true
-            ReviewPrompt.shared.screenAppeared()
-        }
+        .frame(maxWidth: .infinity)
+        // How high the screen is: the scroll view's visible height, without its bars.
+        .background { screenHeight }
+        .onAppear { ReviewPrompt.shared.screenAppeared() }
         // The App Store rating question never covers the result: it may come only once the user
         // has left it (and its receipt), a moment later (`ReviewPrompt`, `ReviewPromptPolicy`).
         .onDisappear { ReviewPrompt.shared.screenDisappeared() }
@@ -724,6 +719,113 @@ struct ResultCard: View {
         } message: {
             DeleteQuestionNote.message(Text(ResultText.undoQuestion(PlanReceipt.Kind(plan))), deletes: undoDeletes)
         }
+    }
+
+    // MARK: Parts
+
+    /// The covers of the new albums lying down on their stack (draft E3), or the symbol as
+    /// before: a check, the arrow of an undo, or the mark of steps that did not happen.
+    private func moment(_ headline: ResultHeadline, failed: Int) -> some View {
+        let symbol = failed > 0 ? "exclamationmark.circle.fill"
+            : headline.kind == .undone ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill"
+        let tint = failed == 0 ? Theme.accent : Theme.tint(for: .documents)
+        let stack = model.resultCoverStack(for: plan, taken: sources)
+        return ResultCoverMoment(plan: plan, stack: stack, symbol: symbol, tint: tint, room: stackRoom, onSettled: onMoment)
+    }
+
+    /// What stays in view below the stack: the count with its line, what did not happen, where
+    /// the new albums are and the way to Photos.
+    private func essentials(_ receipt: PlanReceipt, _ headline: ResultHeadline, way: String?) -> some View {
+        let failed = receipt.failedSteps
+        return VStack(spacing: Theme.Spacing.l) {
+            ResultLead(headline: headline, partly: failed > 0)
+            if failed > 0 {
+                note(ResultText.failed(failed, kind: headline.kind))
+            }
+            if receipt.unavailablePhotos > 0 && headline.kind == .created {
+                note(String(localized: "\(receipt.unavailablePhotos) \(receipt.unavailablePhotos.formatted()) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert."))
+            }
+            if let way {
+                Text(way)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+            }
+            photosButton
+        }
+    }
+
+    /// iOS lets apps open Fotos, but not a particular album (first device test 15.11.: "Ich
+    /// springe nicht zu meinen Alben"). So the button says what it does, and the way to the
+    /// albums is written above it. "photos-redirect://" is not documented by Apple (plugin
+    /// review N8): should iOS one day not open it, the button says so instead of staying silent.
+    @ViewBuilder
+    private var photosButton: some View {
+        if let photos = URL(string: "photos-redirect://") {
+            VStack(spacing: Theme.Spacing.s) {
+                Button("Fotos-App öffnen") {
+                    openURL(photos) { accepted in photosDidNotOpen = !accepted }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                if photosDidNotOpen {
+                    note(String(localized: "Die Fotos-App ließ sich nicht öffnen. Öffne sie bitte selbst vom Home-Bildschirm."))
+                }
+            }
+        }
+    }
+
+    /// Below the way to Photos: all changes, and "Rückgängig machen" with what it does.
+    private func more(undoNote: String?) -> some View {
+        VStack(spacing: Theme.Spacing.s) {
+            // Pushed by value (`AppScreen`): the receipt may push "Fehlendes erneut versuchen".
+            Button {
+                Navigator.push(.receipt(PlanToken(plan)), on: navigator)
+            } label: {
+                Text("Alle Änderungen ansehen")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .accessibilityIdentifier("result.receipt")
+            if let undoNote {
+                undoButton
+                note(undoNote)
+            }
+        }
+    }
+
+    /// A real button that says what it does (draft E3).
+    private var undoButton: some View {
+        Button {
+            guard !askingUndo else { return }
+            askingUndo = true
+            Task {
+                // Full access first: not "not possible" after the dialog was confirmed.
+                guard await model.changesHaveFullAccess() else { askingUndo = false; return }
+                undoDeletes = await model.undoDeletesCollections(plan)
+                askingUndo = false
+                confirmUndo = true
+            }
+        } label: {
+            Label("Rückgängig machen", systemImage: "arrow.uturn.backward").checkingBeside(askingUndo)
+        }
+        .buttonStyle(SecondaryButtonStyle())
+        .disabled(askingUndo)
+    }
+
+    /// A small note in the note grey, centred.
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.footnote).foregroundStyle(.noteText)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+    }
+
+    /// The scroll view's visible height (`stackRoom`): drawn behind the result, nothing to see.
+    private var screenHeight: some View {
+        Color.clear
+            .containerRelativeFrame(.vertical)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room = $0 }
     }
 }
 
@@ -779,7 +881,7 @@ enum ResultText {
     /// The big count; nil when the headline has none ("Rückgängig gemacht", "Fertig").
     static func count(_ lead: ResultHeadline.Lead) -> Int? {
         switch lead {
-        case .newAlbums(let count), .extendedAlbums(let count), .sortedPhotos(let count), .removedAlbums(let count),
+        case .newAlbums(let count), .addedPhotos(let count), .sortedPhotos(let count), .removedAlbums(let count),
              .takenOutPhotos(let count):
             count
         case .undone, .plain:
@@ -787,11 +889,12 @@ enum ResultText {
         }
     }
 
-    /// What the count counts, below the number (as the atlas's "1 Land", "2 Länder").
+    /// What the count counts, below the number (as the atlas's "1 Land", "2 Länder"). Photos
+    /// added to albums of the user's: "12" over "Fotos", the albums in the line below (draft E3).
     static func noun(_ lead: ResultHeadline.Lead) -> String {
         switch lead {
         case .newAlbums(let count): count == 1 ? String(localized: "neues Album") : String(localized: "neue Alben")
-        case .extendedAlbums(let count): count == 1 ? String(localized: "Album ergänzt") : String(localized: "Alben ergänzt")
+        case .addedPhotos(let count): count == 1 ? String(localized: "Foto") : String(localized: "Fotos")
         case .sortedPhotos(let count): count == 1 ? String(localized: "Foto einsortiert") : String(localized: "Fotos einsortiert")
         case .removedAlbums(let count): count == 1 ? String(localized: "Album entfernt") : String(localized: "Alben entfernt")
         case .takenOutPhotos(let count):
@@ -813,6 +916,9 @@ enum ResultText {
         switch detail {
         case .withPhotos(let count):
             String(localized: "mit \(count) \(count.formatted()) Fotos")
+        case .inYourAlbums(let albums):
+            // "in 3 deiner Alben ergänzt", "in einem deiner Alben ergänzt" (a plural in the catalog).
+            String(localized: "in \(albums) deiner Alben ergänzt")
         case .extendedAndSorted(let albums, let photos):
             Counted.join([String(localized: "\(albums) Alben ergänzt"),
                           String(localized: "\(photos) \(photos.formatted()) Fotos einsortiert")])

@@ -5,6 +5,8 @@ import Foundation
 /// ("10 neue Alben"), a smaller line below it ("mit 342 Fotos"; no arrow, "176 → 15" read as
 /// "176 photos became 15"), where the new albums are only when the run made some, and what
 /// "Rückgängig machen" below it does ("Entfernt die 10 neuen Alben. Deine Fotos bleiben.").
+/// Photos added only to albums of the user's read "12 Fotos in 3 deiner Alben ergänzt" (draft
+/// E3: the photos big, the user's albums in the line below).
 ///
 /// What the plan did decides the words (`PlanReceipt.Kind`): a removal from "Alben von
 /// Albumist" says what it removed ("1 Album entfernt"). Its result said "0 Fotos einsortiert"
@@ -15,8 +17,9 @@ public struct ResultHeadline: Hashable, Sendable {
     public enum Lead: Hashable, Sendable {
         /// "10 neue Alben", "1 neues Album".
         case newAlbums(Int)
-        /// "3 Alben ergänzt": photos went into albums of the user's, no album was made.
-        case extendedAlbums(Int)
+        /// "12 Fotos" over "in 3 deiner Alben ergänzt" (`Detail.inYourAlbums`): photos went into
+        /// albums of the user's, no album was made.
+        case addedPhotos(Int)
         /// "342 Fotos einsortiert": photos went in, but into no album that counts as new or
         /// extended (an album found after an interruption, `PlanReceipt.Album.Change.adopted`).
         case sortedPhotos(Int)
@@ -36,6 +39,9 @@ public struct ResultHeadline: Hashable, Sendable {
     public enum Detail: Hashable, Sendable {
         /// "mit 342 Fotos".
         case withPhotos(Int)
+        /// "in 3 deiner Alben ergänzt", "in einem deiner Alben ergänzt": below the photos added
+        /// to albums of the user's (`Lead.addedPhotos`).
+        case inYourAlbums(Int)
         /// New albums and albums of the user's in one run: "2 Alben ergänzt · 342 Fotos
         /// einsortiert" ("mit 342 Fotos" under "10 neue Alben" would count photos of the user's
         /// albums as photos of the new ones).
@@ -96,7 +102,8 @@ public struct ResultHeadline: Hashable, Sendable {
                 self.init(kind: kind, lead: .newAlbums(created), detail: detail, showsWhereNewAlbumsAre: true,
                           undoNote: extended > 0 ? .removesNewAlbumsAndAddedPhotos : .removesNewAlbums(created))
             } else if extended > 0 {
-                self.init(kind: kind, lead: .extendedAlbums(extended), detail: photos > 0 ? .withPhotos(photos) : nil,
+                // An album counts as extended only with photos the library confirmed in it.
+                self.init(kind: kind, lead: .addedPhotos(photos), detail: .inYourAlbums(extended),
                           showsWhereNewAlbumsAre: false, undoNote: .takesOutAddedPhotos(albums: extended))
             } else if photos > 0 {
                 self.init(kind: kind, lead: .sortedPhotos(photos), detail: nil, showsWhereNewAlbumsAre: false, undoNote: .general)

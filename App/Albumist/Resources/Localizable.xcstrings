@@ -1661,6 +1661,46 @@
         }
       }
     },
+    "in %lld deiner Alben ergänzt" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "in einem deiner Alben ergänzt"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "in %lld deiner Alben ergänzt"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "added to one of your albums"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "added to %lld of your albums"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "neue Alben" : {
       "localizations" : {
         "en" : {

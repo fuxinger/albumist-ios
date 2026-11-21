@@ -12,7 +12,7 @@ import AlbumistCore
 /// - Without sound until the user turns it on; the choice holds for the next videos of this
 ///   photo view (`VideoSound`, `LiveAudio.videoSound`).
 /// - Only from the iPhone (`VideoLoader`): a video only in iCloud is said to be there and not
-///   asked for again while the photo view is open.
+///   asked for again while the photo view is open; one its player cannot play says so too.
 /// - One player at most: the video that leaves the screen (a swipe, the photo view closing)
 ///   stops and lets its player go; the app going to the background pauses it.
 /// - The slider seeks to the exact frame, one seek at a time (`ChaseSeek`, Apple's QA1820), and
@@ -137,6 +137,10 @@ final class ViewerVideo {
 
     private func play() {
         guard let player else { return }
+        if failed {
+            fail()
+            return
+        }
         // At its end (a video that does not loop) it plays from the start again.
         if let item = player.value.currentItem, item.duration.seconds.isFinite,
            item.currentTime().seconds >= item.duration.seconds - 0.1 {
@@ -221,6 +225,11 @@ final class ViewerVideo {
 
     private func ticked(_ seconds: Double) {
         guard let player else { return }
+        // A file it cannot play (its rate drops, which ticks): said calmly (review F, F11).
+        if failed {
+            fail()
+            return
+        }
         // What plays may be longer than the asset says (slow motion) or shorter (trimmed): the
         // item's length, once it knows it and the core prefers it (review F, F7).
         if let item = player.value.currentItem {
@@ -281,6 +290,22 @@ final class ViewerVideo {
             guard let video else { return }
             Task { @MainActor in video.seekEnded(serial: serial, settles: settles) }
         }
+    }
+
+    /// The player cannot play what it has, a file it cannot decode: the player, its item or its
+    /// looper failed (review F, F11).
+    private var failed: Bool {
+        guard let player else { return false }
+        return player.value.status == .failed || player.value.currentItem?.status == .failed || looper?.status == .failed
+    }
+
+    /// The video cannot be played: its player goes, and the calm note says so under its still
+    /// (`VideoAvailability.unavailable`); not asked again until the user comes back to it.
+    private func fail() {
+        let failedID = id
+        stop()
+        id = failedID
+        availability = .unavailable
     }
 
     /// Stops the video and lets its player go: off screen nothing of it stays alive.

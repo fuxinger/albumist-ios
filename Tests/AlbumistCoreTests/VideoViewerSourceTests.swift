@@ -184,6 +184,25 @@ struct VideoViewerSourceTests {
                 "a pause right after the finger lifted is undone")
     }
 
+    /// A video its player cannot play (a file it cannot decode) says so calmly, as one Photos
+    /// had nothing for, instead of "Anhalten" over its still for good: its player goes, and the
+    /// page is not asked again until the user comes back to it (review F, F11).
+    @Test func aVideoThatCannotPlaySaysSo() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let failed = try #require(AppSource.body(of: "private var failed: Bool", in: model))
+        for part in ["player.value.status == .failed", "player.value.currentItem?.status == .failed", "looper?.status == .failed"] {
+            #expect(failed.contains(part), "\(part) is missing")
+        }
+        let fail = try #require(AppSource.body(of: "private func fail(", in: model))
+        #expect(Self.inOrder(["let failedID = id", "stop()", "id = failedID", "availability = .unavailable"], in: fail), "\(fail)")
+        let ticked = try #require(AppSource.body(of: "private func ticked(", in: model))
+        #expect(Self.inOrder(["guard let player else { return }", "if failed {", "fail()", "return"], in: ticked), "\(ticked)")
+        let play = try #require(AppSource.body(of: "private func play(", in: model))
+        #expect(Self.inOrder(["if failed {", "fail()", "return", "player.value.play()"], in: play), "\(play)")
+        let open = try #require(AppSource.body(of: "func open(", in: model))
+        #expect(open.contains("if self.id == id, player != nil || availability != .unknown { return }"), "asked again on every look")
+    }
+
     /// A video starts without sound; "Ton an" gives it sound, which stops the user's music and
     /// plays with the silent switch on, as in Photos; "Ton aus" lets the app's sound mix again,
     /// and once the photo view closes, after its player is gone, the user's music is told it may

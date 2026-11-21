@@ -9,8 +9,12 @@ import AlbumistWorldMap
 /// smaller than 30,000 km² (concept §8).
 @Suite("Country geometry")
 struct CountryGeometryTests {
-    static let map: OfflineWorldMap = try! WorldMapResource.load()
-    static let geometry = CountryGeometry(map: map)
+    /// The offline world map and its countries' geometry, made once for all tests here. A map that
+    /// does not load fails each test that reads them, instead of ending the whole test run.
+    static let loadedMap = Result { try WorldMapResource.load() }
+    static let builtGeometry = loadedMap.map { CountryGeometry(map: $0) }
+    static var map: OfflineWorldMap { get throws { try loadedMap.get() } }
+    static var geometry: CountryGeometry { get throws { try builtGeometry.get() } }
 
     func area(_ code: String) throws -> Double { try #require(Self.geometry.squareKilometers[code]) }
     func center(_ code: String) throws -> GeoCoordinate { try #require(Self.geometry.centers[code]) }
@@ -30,14 +34,14 @@ struct CountryGeometryTests {
         #expect(abs(area - official) / official < 0.1, "\(code): \(Int(area)) km²")
     }
 
-    @Test func smallCountriesAreSmall() {
+    @Test func smallCountriesAreSmall() throws {
         for code in ["LU", "MT", "LI", "SG", "AD", "MC", "SM", "VA"] {
-            #expect(Self.geometry.isSmall(code), "\(code)")
-            #expect(Self.geometry.shareOrigin(countryCode: code) == nil, "\(code)")
+            #expect(try Self.geometry.isSmall(code), "\(code)")
+            #expect(try Self.geometry.shareOrigin(countryCode: code) == nil, "\(code)")
         }
         for code in ["DE", "AT", "CH", "NL", "IT"] {
-            #expect(!Self.geometry.isSmall(code), "\(code)")
-            #expect(Self.geometry.shareOrigin(countryCode: code) != nil, "\(code)")
+            #expect(try !Self.geometry.isSmall(code), "\(code)")
+            #expect(try Self.geometry.shareOrigin(countryCode: code) != nil, "\(code)")
         }
     }
 
@@ -45,17 +49,17 @@ struct CountryGeometryTests {
     /// its areas come out up to 2 % below the official ones).
     @Test func borderlineCountriesArePinned() throws {
         // Albania, officially 28,748 km²: the map gives about 28,300.
-        #expect(Self.geometry.isSmall("AL"))
+        #expect(try Self.geometry.isSmall("AL"))
         #expect(try (28_000...28_600).contains(area("AL")))
         // Armenia, officially 29,743 km²: the map gives about 29,550 with the two Azerbaijani
         // exclaves taken away (counted as land, it would come close to 29,600).
-        #expect(Self.geometry.isSmall("AM"))
+        #expect(try Self.geometry.isSmall("AM"))
         #expect(try (29_300...29_800).contains(area("AM")))
         // Belgium, officially 30,689 km²: the map gives about 30,560.
-        #expect(!Self.geometry.isSmall("BE"))
+        #expect(try !Self.geometry.isSmall("BE"))
         #expect(try (30_300...30_700).contains(area("BE")))
         // Lesotho, officially 30,355 km²: the map gives about 30,150, just not small.
-        #expect(!Self.geometry.isSmall("LS"))
+        #expect(try !Self.geometry.isSmall("LS"))
     }
 
     @Test func holesAreTakenAwayAndKeptOutOfTheMiddle() throws {
@@ -69,10 +73,10 @@ struct CountryGeometryTests {
     /// The map's rings carry no hole flag; the geometry tells holes by the way they turn. Here
     /// every ring of the map is checked against containment: a ring inside an odd number of the
     /// region's other rings is a hole, and only such a ring turns against the region's largest.
-    @Test func holesTurnAgainstTheirLand() {
+    @Test func holesTurnAgainstTheirLand() throws {
         var holes = 0
-        for region in Self.map.regions where region.level == .country {
-            let rings = Self.map.outline(of: region)
+        for region in try Self.map.regions where region.level == .country {
+            let rings = try Self.map.outline(of: region)
             let shape = CountryGeometryBuilder.Shape(rings: rings)
             let boxes = rings.map(Box.init)
             for (i, ring) in rings.enumerated() {
@@ -95,8 +99,8 @@ struct CountryGeometryTests {
     @Test func everyLargeCountryHasItsMiddleInside() throws {
         var disputed: [String] = []
         var checked = 0
-        for (code, area) in Self.geometry.squareKilometers.sorted(by: { $0.key < $1.key }) where area >= CountryGeometry.smallCountrySquareKilometers {
-            let match = Self.map.lookup(try center(code))
+        for (code, area) in try Self.geometry.squareKilometers.sorted(by: { $0.key < $1.key }) where area >= CountryGeometry.smallCountrySquareKilometers {
+            let match = try Self.map.lookup(center(code))
             checked += 1
             if match.disputedArea != nil {
                 disputed.append(code)
@@ -112,7 +116,7 @@ struct CountryGeometryTests {
         // Croatia's crescent: the centroid of its main land lies in Bosnia, the middle does not.
         let croatia = try #require(Self.map.country(code: "HR"))
         let mainLand = try #require(Self.map.outline(of: croatia).max { $0.count < $1.count })
-        #expect(Self.map.lookup(try #require(GeoMath.centroid(mainLand))).country?.isoCode == "BA")
+        #expect(try Self.map.lookup(#require(GeoMath.centroid(mainLand))).country?.isoCode == "BA")
         #expect(try Self.map.lookup(center("HR")).country?.isoCode == "HR")
         // Vietnam's centroid lies in Laos.
         #expect(try Self.map.lookup(center("VN")).country?.isoCode == "VN")
@@ -138,7 +142,7 @@ struct CountryGeometryTests {
     /// first that is not disputed, which for "FR" is Clipperton Island; the geometry takes them
     /// all but the disputed ones.
     @Test func regionsSharingACodeMakeOneCountry() throws {
-        #expect(Self.map.country(code: "FR")?.nameEN == "Clipperton Island")
+        #expect(try Self.map.country(code: "FR")?.nameEN == "Clipperton Island")
         #expect(try area("FR") > 600_000)
         #expect(try area("AU") > 7_500_000)
         #expect(try area("KZ") > 2_700_000)
@@ -147,15 +151,15 @@ struct CountryGeometryTests {
         #expect(try Self.map.lookup(center("SO")).country?.isoCode == "SO")
         // Northern Cyprus is a disputed area, no part of Cyprus (nor a country).
         #expect(try area("CY") < 6_500)
-        let cyprus = Self.map.lookup(try center("CY"))
+        let cyprus = try Self.map.lookup(center("CY"))
         #expect(cyprus.disputedArea == nil && cyprus.country?.nameEN == "Cyprus")
     }
 
-    @Test func onlyTwoLetterCodesAreKept() {
-        let codes = Self.geometry.squareKilometers.keys
+    @Test func onlyTwoLetterCodesAreKept() throws {
+        let codes = try Self.geometry.squareKilometers.keys
         #expect(codes.count > 230)
         #expect(codes.allSatisfy { $0.count == 2 && $0.allSatisfy { ("A"..."Z").contains($0) } })
-        #expect(Set(codes) == Set(Self.geometry.centers.keys))
+        #expect(try Set(codes) == Set(Self.geometry.centers.keys))
         #expect(CountryGeometryBuilder.isCountryCode("DE"))
         for code in ["-99", "", "D", "DEU", "de", "D1"] { #expect(!CountryGeometryBuilder.isCountryCode(code), "\(code)") }
     }
@@ -193,19 +197,19 @@ struct CountryGeometryTests {
     /// test build too (about 0.3 s alone; the fastest of three runs counts, so a busy machine
     /// does not fail it). The search for the middles, most of the work, is also counted, which
     /// does not depend on the machine: about 18,000 squares and 1.5 million edge distances.
-    @Test func buildsTheWholeMapWellUnderASecond() {
+    @Test func buildsTheWholeMapWellUnderASecond() throws {
         let clock = ContinuousClock()
         var fastest = Duration.seconds(60)
         for _ in 0..<3 {
             var geometry = CountryGeometry()
-            let elapsed = clock.measure { geometry = CountryGeometry(map: Self.map) }
+            let elapsed = try clock.measure { geometry = try CountryGeometry(map: Self.map) }
             fastest = min(fastest, elapsed)
-            #expect(geometry == Self.geometry)
+            #expect(try geometry == Self.geometry)
         }
         #expect(fastest < .seconds(1), "\(fastest)")
         var work = CountryGeometryBuilder.SearchWork()
-        for region in Self.map.regions where region.level == .country && CountryGeometryBuilder.isCountryCode(region.isoCode) {
-            let shape = CountryGeometryBuilder.Shape(rings: Self.map.outline(of: region))
+        for region in try Self.map.regions where region.level == .country && CountryGeometryBuilder.isCountryCode(region.isoCode) {
+            let shape = try CountryGeometryBuilder.Shape(rings: Self.map.outline(of: region))
             work.cells += shape.work.cells
             work.edges += shape.work.edges
         }

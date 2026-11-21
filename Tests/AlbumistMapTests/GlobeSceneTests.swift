@@ -65,7 +65,8 @@ struct GlobeSceneTests {
     @Test func aSummarysSceneIsTheSummary() {
         let demo = GlobeScene.demo()
         let summary = MapSummary(computedAt: Date(timeIntervalSince1970: 0), home: demo.home, trips: [], countries: demo.countries,
-                                 arcs: demo.arcs, pins: demo.pins, numbers: WorldNumbers(year: 2026), years: [], focus: MapFocus(center: GeoCoordinate(latitude: 48, longitude: 11), radiusMeters: 900_000))
+                                 arcs: demo.arcs, pins: demo.pins, numbers: WorldNumbers(year: 2026), years: [],
+                                 focus: MapFocus(center: GeoCoordinate(latitude: 48, longitude: 11), radiusMeters: 900_000))
         let scene = GlobeScene(summary: summary)
         #expect(scene.arcs == summary.arcs && scene.pins == summary.pins && scene.countries == summary.countries)
         #expect(scene.home == summary.home && scene.focus == summary.focus && scene.trips.isEmpty)

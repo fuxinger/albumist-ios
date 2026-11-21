@@ -136,5 +136,54 @@ class XcodeGenTests(unittest.TestCase):
             toolchain.install_xcodegen(dict(pin, sha256=hashlib.sha256(bad).hexdigest()), dest, fetch=lambda url: bad)
 
 
+class SwiftLintTests(unittest.TestCase):
+    """The pinned SwiftLint (.github/lint-tools.json): checked like XcodeGen, kept out of the app
+    fingerprint."""
+
+    def test_pinned_in_its_own_file(self):
+        pin = toolchain.lint_pins()["swiftlint"]
+        self.assertRegex(pin["sha256"], r"^[0-9a-f]{64}$")
+        self.assertIn(f"/download/{pin['version']}/", pin["url"])
+        self.assertTrue(pin["url"].startswith("https://github.com/realm/SwiftLint/releases/download/"))
+        self.assertEqual(pin["binary"], "swiftlint-static")
+        self.assertNotIn("swiftlint", PINS)
+
+    def test_not_in_the_app_fingerprint(self):
+        import ui_groups
+        for path in (".github/lint-tools.json", ".github/swiftlint.yml"):
+            self.assertTrue(path.startswith(ui_groups.NOT_APP_PREFIXES), path)
+            self.assertNotIn(path, ui_groups.APP_EXCEPTIONS)
+
+    def test_install_checks_the_checksum_and_the_binary(self):
+        import hashlib
+        import tempfile
+        data = XcodeGenTests.archive({"swiftlint-static": "#!/bin/sh\necho 0.65.1\n", "LICENSE": "MIT"})
+        pin = {"version": "0.65.1", "url": "https://example/s.zip", "sha256": hashlib.sha256(data).hexdigest(),
+               "binary": "swiftlint-static"}
+        with tempfile.TemporaryDirectory() as dest:
+            folder = toolchain.install_swiftlint(pin, dest, fetch=lambda url: data)
+            self.assertTrue(os.access(os.path.join(folder, "swiftlint-static"), os.X_OK))
+        with tempfile.TemporaryDirectory() as dest, self.assertRaisesRegex(ValueError, "SwiftLint 0.65.1 download has sha256"):
+            toolchain.install_swiftlint(dict(pin, sha256="0" * 64), dest, fetch=lambda url: data)
+        with tempfile.TemporaryDirectory() as dest, self.assertRaisesRegex(ValueError, "has no swiftlint"):
+            toolchain.install_swiftlint(dict(pin, binary="swiftlint"), dest, fetch=lambda url: data)
+
+    def test_version_check_and_path(self):
+        import hashlib
+        import tempfile
+        from unittest import mock
+        for said, expected in (("0.65.1", 0), ("0.64.0", 1)):
+            data = XcodeGenTests.archive({"swiftlint-static": f"#!/bin/sh\necho {said}\n"})
+            pin = {"version": "0.65.1", "url": "u", "sha256": hashlib.sha256(data).hexdigest(), "binary": "swiftlint-static"}
+            with tempfile.TemporaryDirectory() as dest:
+                path_file = os.path.join(dest, "path")
+                with mock.patch.dict(os.environ, {"GITHUB_PATH": path_file}):
+                    status = toolchain.install_and_check(
+                        pin, lambda p, d: toolchain.install_swiftlint(p, d, fetch=lambda url: data),
+                        os.path.join(dest, "swiftlint"), "swiftlint-static", "SwiftLint")
+                self.assertEqual(status, expected, said)
+                self.assertEqual(os.path.exists(path_file), expected == 0, said)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,9 @@ struct ProposalListView: View {
     @State private var made: [AlbumistID: AlbumProposal] = [:]
     /// The cards zoom into the suggestion they open and back (`ProposalDetailView.zoom`).
     @Namespace private var zoom
+    /// What a card's long press opens, kept by the list, made when the list is made, not at each
+    /// of its drawings (`suggestionMenuFlows(_:)`; review C2 of design wave 2, N2).
+    @State private var menuFlows = SuggestionMenuFlowAction()
 
     /// The suggestions shown, in the app's one suggestion order (also the start page's and the
     /// preview's), with one just made from a card while its banner shows.
@@ -162,7 +165,7 @@ struct ProposalListView: View {
             made = made.filter { $0.key == banner }
         }
         // What a card's long press opens: "Anpassen", the trip workshop, "Keine Reise?" (DS-06a).
-        .suggestionMenuFlows()
+        .suggestionMenuFlows(menuFlows)
     }
 
     private var columns: [GridItem] {
@@ -263,7 +266,7 @@ struct ProposalListView: View {
 /// Photos will show it, its status, and its one action, or a tick while the list selects.
 private struct ProposalListCard: View {
     @Environment(AppModel.self) private var model
-    /// The list's sheets and question for the long press (`suggestionMenuFlows()`).
+    /// The list's sheets and question for the long press (`suggestionMenuFlows(_:)`).
     @Environment(\.openSuggestionMenuFlow) private var openFlow
     var proposal: AlbumProposal
     /// Its words (`AppModel.proposalCard`), made once for the whole list.

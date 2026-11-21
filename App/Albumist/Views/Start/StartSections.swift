@@ -13,8 +13,8 @@ import AlbumistEngine
 /// for one visit (`StartVisit`) begins afresh each time the page appears. The shelves run from
 /// edge to edge; everything else keeps the page's margin. What a card's long press opens
 /// ("Anpassen", the trip workshop, "Keine Reise?") is the page's scroll view's
-/// (`suggestionMenuFlows()` in `OverviewView`), not this tall stack's (review C of design wave
-/// 2, M1).
+/// (`suggestionMenuFlows(_:)` in `OverviewView`), not this tall stack's (review C of design
+/// wave 2, M1).
 struct StartSections: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases

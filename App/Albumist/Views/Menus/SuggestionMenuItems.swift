@@ -10,8 +10,8 @@ import AlbumistCore
 ///   (`quickCreateAtOnce`), the purchase sheet or the suggestion otherwise, "Ergänzen …" the
 ///   preview first.
 /// - "Anpassen", "Reise teilen oder zusammenlegen" and "Keine Reise, hier bin ich öfter" open
-///   what the open suggestion's "…" opens, on the page (`suggestionMenuFlows()`): its sheets, and
-///   the question before "Keine Reise", which waits and says why as it does there.
+///   what the open suggestion's "…" opens, on the page (`suggestionMenuFlows(_:)`): its sheets,
+///   and the question before "Keine Reise", which waits and says why as it does there.
 /// - "Nicht jetzt" sets the suggestion aside as its button does; photos and albums stay.
 ///
 /// The menu stays open as long as the user leaves it, while the analysis may change the
@@ -27,7 +27,7 @@ import AlbumistCore
 /// card's word, which is the card's own button there (review C of design wave 2, L1, L3).
 struct SuggestionMenuItems: View {
     var model: AppModel
-    /// The page's sheets and question (`suggestionMenuFlows()`); nil on a page without them.
+    /// The page's sheets and question (`suggestionMenuFlows(_:)`); nil on a page without them.
     var openFlow: SuggestionMenuFlowAction?
     var proposal: AlbumProposal
     var card: ProposalCardText

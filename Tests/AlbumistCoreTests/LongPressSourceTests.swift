@@ -100,23 +100,36 @@ struct LongPressSourceTests {
         // The page shows what the menu opens ("Anpassen", the trip workshop, "Keine Reise?"): on
         // its scroll view, so the question comes from the screen, not from the middle of all the
         // cards (review C of design wave 2, M1).
-        #expect(!(try Self.code(Self.start)).contains(".suggestionMenuFlows()"), "on the cards' tall stack")
+        #expect(!(try Self.code(Self.start)).contains(".suggestionMenuFlows("), "on the cards' tall stack")
         let overview = Self.squeezed(try Self.body(["struct OverviewView", "var body: some View"], in: Self.overview))
-        #expect(overview.contains("}.suggestionMenuFlows().background(Theme.background).navigationTitle(\"Vorschläge\")"), "\(overview)")
-        #expect(overview.components(separatedBy: ".suggestionMenuFlows()").count == 2, "once, on the scroll view")
+        #expect(overview.contains("}.suggestionMenuFlows(menuFlows).background(Theme.background).navigationTitle(\"Vorschläge\")"),
+                "\(overview)")
+        #expect(overview.components(separatedBy: ".suggestionMenuFlows(").count == 2, "once, on the scroll view")
     }
 
-    /// The page hands its cards one object for what their menus open, kept by the page: the same
-    /// one each time the page is drawn, so handing it down redraws no card (a closure made anew
-    /// would, at every change of the analysis, now that the start page's scroll view has it).
+    /// The page hands its cards one object for what their menus open: the same one each time the
+    /// page is drawn, so handing it down redraws no card (a closure made anew would, at every
+    /// change of the analysis, now that the start page's scroll view has it). The page keeps it
+    /// in its own state, made when the page is made: as the state of the modifier, its first
+    /// value was made anew at every drawing of the page and thrown away (review C2 of design
+    /// wave 2, N2).
     @Test func thePageHandsItsCardsOneLastingWayToOpen() throws {
         let flows = try Self.code(Self.flows)
         #expect(flows.contains("@MainActor @Observable\nfinal class SuggestionMenuFlowAction {"))
-        #expect(flows.contains("@State private var flows = SuggestionMenuFlowAction()"))
+        #expect(!flows.contains("SuggestionMenuFlowAction()"), "made by the modifier at each drawing of the page")
+        #expect(flows.contains("func suggestionMenuFlows(_ flows: SuggestionMenuFlowAction) -> some View {"))
+        let modifier = try Self.body(["private struct SuggestionMenuFlows: ViewModifier"], in: Self.flows)
+        #expect(modifier.contains("    var flows: SuggestionMenuFlowAction\n") && !modifier.contains("@State"), "\(modifier)")
         #expect(flows.contains(".environment(\\.openSuggestionMenuFlow, flows)"))
         #expect(!flows.contains("SuggestionMenuFlowAction(open:"), "a closure made anew at each drawing")
         #expect(flows.contains(".sheet(item: $flows.adjusting)") && flows.contains(".sheet(item: $flows.reshaping)"))
         #expect(flows.contains("presenting: flows.askingNotATrip"))
+        // Each page keeps its own and hands it to its sheets and question.
+        for (path, page) in [(Self.overview, "struct OverviewView"), (Self.suggestions, "struct ProposalListView")] {
+            let type = try Self.body([page], in: path)
+            #expect(type.contains("@State private var menuFlows = SuggestionMenuFlowAction()"), "\(path)")
+            #expect(type.components(separatedBy: ".suggestionMenuFlows(menuFlows)").count == 2, "\(path): handed once")
+        }
     }
 
     /// The list's cards: the same, in their state (made, the list selecting).
@@ -136,7 +149,7 @@ struct LongPressSourceTests {
         let spoken = Self.squeezed(try Self.body(["private struct ProposalListCard", "private var voiceOverItems: SuggestionMenuItems"], in: Self.suggestions))
         #expect(spoken.contains("forVoiceOver:true") && spoken.contains("act:{act(card.action)}"), "\(spoken)")
         let list = try Self.body(["struct ProposalListView", "var body: some View"], in: Self.suggestions)
-        #expect(list.contains(".suggestionMenuFlows()"))
+        #expect(list.contains(".suggestionMenuFlows(menuFlows)"))
     }
 
     /// Each item goes the way that exists: the word through the card's action, "Anpassen" and

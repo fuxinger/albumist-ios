@@ -17,10 +17,12 @@ struct SuggestionMenuFlow {
 }
 
 /// Opens a way of a card's long press on the page that shows the card, and holds which one is
-/// open (`suggestionMenuFlows()`). One per page, kept by it: the cards get the same object each
-/// time the page is drawn, so handing it down redraws no card. A closure made anew at each
-/// drawing would, at every change of the analysis, once the start page's scroll view hands it
-/// down (review C of design wave 2, M1).
+/// open (`suggestionMenuFlows(_:)`). One per page, kept in the page's own state (`OverviewView`,
+/// `ProposalListView`): the cards get the same object each time the page is drawn, so handing it
+/// down redraws no card. A closure made anew at each drawing would, at every change of the
+/// analysis, once the start page's scroll view hands it down (review C of design wave 2, M1).
+/// Made when the page is made, not by the modifier: a modifier's state made a new object at
+/// every drawing of the page, which SwiftUI threw away (review C2 of design wave 2, N2).
 @MainActor @Observable
 final class SuggestionMenuFlowAction {
     /// The suggestion whose "Anpassen" is open.
@@ -44,8 +46,8 @@ private struct SuggestionMenuFlowKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    /// Set by `suggestionMenuFlows()` for the cards of its page; elsewhere nil, and a card's menu
-    /// opens nothing.
+    /// Set by `suggestionMenuFlows(_:)` for the cards of its page; elsewhere nil, and a card's
+    /// menu opens nothing.
     var openSuggestionMenuFlow: SuggestionMenuFlowAction? {
         get { self[SuggestionMenuFlowKey.self] }
         set { self[SuggestionMenuFlowKey.self] = newValue }
@@ -55,9 +57,10 @@ extension EnvironmentValues {
 extension View {
     /// What the long press on this page's suggestion cards opens: "Anpassen", the trip workshop
     /// and the question before "Keine Reise, hier bin ich öfter", the sheets and the question
-    /// of the open suggestion's "…" (`ProposalDetailView`).
-    func suggestionMenuFlows() -> some View {
-        modifier(SuggestionMenuFlows())
+    /// of the open suggestion's "…" (`ProposalDetailView`). `flows`: the page's own, kept in its
+    /// state (`@State private var menuFlows = SuggestionMenuFlowAction()`).
+    func suggestionMenuFlows(_ flows: SuggestionMenuFlowAction) -> some View {
+        modifier(SuggestionMenuFlows(flows: flows))
     }
 }
 
@@ -68,7 +71,8 @@ extension View {
 /// same question with the same words; what they change shows on the cards.
 private struct SuggestionMenuFlows: ViewModifier {
     @Environment(AppModel.self) private var model
-    @State private var flows = SuggestionMenuFlowAction()
+    /// The page's (`suggestionMenuFlows(_:)`).
+    var flows: SuggestionMenuFlowAction
 
     func body(content: Content) -> some View {
         @Bindable var flows = flows

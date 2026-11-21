@@ -92,6 +92,31 @@ struct FirstAnalysisMomentSourceTests {
         #expect(!store.contains("cameToFront"), "coming to the front spends it by the marker")
     }
 
+    /// After a quick first analysis the store waits seven days for a run of the whole library
+    /// (verification review V6): the end of a run says whether it was one, from the marker before
+    /// this run's end sets it (no analysis completed since `AnalysisMarker.reset`: the first
+    /// analysis, "Analyse neu aufbauen", another part of the library), so `AppModel.swift` passes
+    /// nothing new. When the first completion was is kept next to the moment, and a wait that is
+    /// over spends it at launch.
+    @Test func aQuickFirstAnalysisWaitsAWeekForTheWholeLibrary() throws {
+        let store = try Self.code(Self.store)
+        let tell = try Self.body(["extension AppModel", "func firstAnalysisRunEnded("], in: store)
+        #expect(tell.contains("wholeLibrary: !AnalysisMarker.completedOnce"), "\(tell)")
+        let ended = try Self.body(["final class FirstAnalysisMomentStore", "func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, onScreen: Bool)"], in: store)
+        #expect(ended.contains("guard finished else { return }"), "\(ended)")
+        #expect(ended.contains("moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, onScreen: onScreen, at: Date())"), "\(ended)")
+        let type = try Self.body(["final class FirstAnalysisMomentStore"], in: store)
+        #expect(type.contains("private static let firstCompletedKey = \"analysis.firstFinishMoment.firstCompleted\""), "\(type)")
+        let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
+        #expect(initializer.contains("let since = fresh ? nil : UserDefaults.standard.object(forKey: Self.firstCompletedKey) as? Date"), "\(initializer)")
+        let lapse = try #require(initializer.range(of: "moment.lapse(at: Date())"), "the wait is not looked at, at launch: \(initializer)")
+        let kept = try #require(initializer.range(of: "keep()"), "\(initializer)")
+        #expect(lapse.upperBound < kept.lowerBound, "\(initializer)")
+        let keep = try Self.body(["final class FirstAnalysisMomentStore", "private func keep()"], in: store)
+        #expect(keep.contains("UserDefaults.standard.set(since, forKey: Self.firstCompletedKey)"), "\(keep)")
+        #expect(keep.contains("UserDefaults.standard.removeObject(forKey: Self.firstCompletedKey)"), "\(keep)")
+    }
+
     /// The observers are written `any NSObjectProtocol`, as every existential of the App
     /// (`ExistentialAny` is on, App/project.yml; second review, K3).
     @Test func everyNSObjectProtocolIsWrittenAsAnExistential() throws {
@@ -119,7 +144,8 @@ struct FirstAnalysisMomentSourceTests {
         #expect(type.contains("private static let key = \"analysis.firstFinishMoment\""))
         #expect(type.contains("UserDefaults.standard.set(moment.kept.rawValue, forKey: Self.key)"))
         let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
-        #expect(initializer.contains("FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce)"), "\(initializer)")
+        #expect(initializer.contains("FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce, firstCompleted: since)"),
+                "\(initializer)")
         #expect(initializer.contains("UIApplication.didEnterBackgroundNotification") && initializer.contains("self?.leftScreen()"))
         let launched = try Self.body(["final class FirstAnalysisMomentStore", "func launched()"], in: store)
         #expect(launched.trimmingCharacters(in: .whitespacesAndNewlines) == "{}", "\(launched)")

@@ -17,6 +17,8 @@ final class FirstAnalysisMomentStore {
     static let shared = FirstAnalysisMomentStore()
 
     private static let key = "analysis.firstFinishMoment"
+    /// When a first analysis too quick for "Analyse fertig" completed (`FirstAnalysisMoment.firstCompleted`).
+    private static let firstCompletedKey = "analysis.firstFinishMoment.firstCompleted"
 
     private(set) var moment: FirstAnalysisMoment
     @ObservationIgnored private var observers: [any NSObjectProtocol] = []
@@ -26,7 +28,10 @@ final class FirstAnalysisMomentStore {
         // always false in the shipped app) reads nothing kept and no analysis completed before.
         let fresh = UITestSupport.startsFirstFinishOwed
         let kept = fresh ? nil : UserDefaults.standard.string(forKey: Self.key).flatMap(FirstAnalysisMoment.Kept.init(rawValue:))
-        moment = FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce)
+        let since = fresh ? nil : UserDefaults.standard.object(forKey: Self.firstCompletedKey) as? Date
+        moment = FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce, firstCompleted: since)
+        // The week after a quick first analysis ended while Albumist was closed (verification review V6).
+        moment.lapse(at: Date())
         keep()
         // Coming to the front looks at nothing: what completed the analysis meanwhile told the
         // store itself (a run's end, the overnight refinement, `completedAway`), and a quick first
@@ -46,9 +51,9 @@ final class FirstAnalysisMomentStore {
     func launched() {}
 
     /// The end of a run in the app (`AppModel.firstAnalysisRunEnded`).
-    func runEnded(finished: Bool, celebrates: Bool, onScreen: Bool) {
-        guard finished, celebrates else { return }
-        moment.runEnded(finished: finished, celebrates: celebrates, onScreen: onScreen, at: Date())
+    func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, onScreen: Bool) {
+        guard finished else { return }
+        moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, onScreen: onScreen, at: Date())
         keep()
     }
 
@@ -84,6 +89,12 @@ final class FirstAnalysisMomentStore {
         if UserDefaults.standard.string(forKey: Self.key) != moment.kept.rawValue {
             UserDefaults.standard.set(moment.kept.rawValue, forKey: Self.key)
         }
+        let stored = UserDefaults.standard.object(forKey: Self.firstCompletedKey) as? Date
+        if let since = moment.firstCompleted {
+            if stored != since { UserDefaults.standard.set(since, forKey: Self.firstCompletedKey) }
+        } else if stored != nil {
+            UserDefaults.standard.removeObject(forKey: Self.firstCompletedKey)
+        }
     }
 }
 
@@ -93,8 +104,12 @@ extension AppModel {
     /// background (second review, K7): Control Center, an alert or a call banner in front leave
     /// the scene inactive, and the card claims the moment once it is active again
     /// (`FirstAnalysisMomentHeader`); gone to the background before, it is not shown later.
+    /// Whether it analysed the library as a whole, from the marker before this run's end sets it:
+    /// no analysis completed since `AnalysisMarker.reset` (the first one, "Analyse neu aufbauen",
+    /// another part of the library), not a check for new photos (verification review V6).
     func firstAnalysisRunEnded(finished: Bool, celebrates: Bool) {
         FirstAnalysisMomentStore.shared.runEnded(finished: finished, celebrates: celebrates,
+                                                 wholeLibrary: !AnalysisMarker.completedOnce,
                                                  onScreen: UIApplication.shared.applicationState != .background)
     }
 }

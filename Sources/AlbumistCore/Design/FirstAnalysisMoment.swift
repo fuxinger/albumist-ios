@@ -9,29 +9,39 @@ import Foundation
 /// "Reaches 100 %" means the user sees it happen: the first run in the app that finishes the
 /// analysis after a wait long enough to celebrate (`AnalysisCardState.celebratesFinish`: the
 /// "Analyse fertig" card it rides on), with Albumist on screen as it ends (not in the background:
-/// Control Center or a call banner in front only make the card wait). A first analysis too quick
-/// for "Analyse fertig" (a small part of the library, a few photos shared) leaves it owed for the
-/// first finish that is celebrated, such as the whole library's later (second review, K7).
-/// Finished in the background, or completed for the first time overnight (`completedAway`), or
-/// left before the card showed it, the user comes back to "Analyse fertig" and the notification as
-/// before, and the moment is gone for good: a 100 % that happened without them is not replayed
-/// hours later.
+/// Control Center or a call banner in front only make the card wait). Finished in the background,
+/// or completed for the first time overnight (`completedAway`), or left before the card showed
+/// it, the user comes back to "Analyse fertig" and the notification as before, and the moment is
+/// gone for good: a 100 % that happened without them is not replayed hours later.
+///
+/// A first analysis too quick for "Analyse fertig" (a small part of the library, a few photos
+/// shared) leaves it owed for `owedAfterQuickFinish`, seven days from that first completion
+/// (`firstCompleted`), and only a run that analyses the library as a whole can bring it then: the
+/// first full analysis once more of the library is taken in, or "Analyse neu aufbauen" (no
+/// analysis completed since `AnalysisMarker.reset`), never a check for new photos or a catch-up
+/// of new imports, however long it runs. After those seven days it is spent (second review, K7;
+/// the lead's decision on verification review V6).
 ///
 /// Exactly once per installation: whether it is still owed is kept in `UserDefaults`
-/// (`FirstAnalysisMomentStore`), written as `spent` the moment it becomes due, so neither a
-/// relaunch, a later full analysis ("Analyse neu aufbauen", another part of the library), an
-/// undo nor a restored device backup brings it back. Not in the database: that is set aside on a
-/// rebuild and not part of a device backup, and the moment must outlive both.
+/// (`FirstAnalysisMomentStore`), written as `spent` the moment it becomes due, so once it was due
+/// neither a relaunch, a later full analysis ("Analyse neu aufbauen", another part of the
+/// library), an undo nor a restored device backup brings it back. Not in the database: that is
+/// set aside on a rebuild and not part of a device backup, and the moment must outlive both.
 public struct FirstAnalysisMoment: Sendable, Equatable {
     /// What is kept across launches.
     public enum Kept: String, Sendable, CaseIterable {
-        /// No analysis finished on this installation yet: the first to finish on screen brings it.
+        /// Not shown yet: no analysis finished on this installation, or only one too quick for
+        /// "Analyse fertig" (`firstCompleted`). The first celebrated one on screen brings it.
         case owed
         /// It played, or its chance passed: never again on this installation.
         case spent
     }
 
     public private(set) var kept: Kept
+    /// A first analysis too quick for "Analyse fertig" completed then: the moment waits
+    /// `owedAfterQuickFinish` from then for a run of the whole library. Kept next to `kept`; nil
+    /// once spent.
+    public private(set) var firstCompleted: Date?
     /// The first full analysis finished on screen then; the card shows the moment from then until
     /// `window` has passed. In memory only.
     public private(set) var dueSince: Date?
@@ -42,14 +52,29 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// tab and comes back to "Vorschläge". Later it is no longer "just now".
     public static let window: TimeInterval = 5 * 60
 
+    /// How long after a first analysis too quick for "Analyse fertig" a run of the whole library
+    /// may still bring it: seven days. Later the first 100 % is no longer the first days with the
+    /// app (verification review V6).
+    public static let owedAfterQuickFinish: TimeInterval = 7 * 24 * 60 * 60
+
     /// At launch, before anything resets where the analysis got to (`AnalysisMarker.reset`):
     /// `kept` as stored, `completedBefore` whether an analysis was completed before
-    /// (`AnalysisMarker.completedOnce`). Never stored is the first launch of a version with the
-    /// moment: an analysis completed before it was not seen reaching 100 % here, spent (an update
-    /// after the analysis, a device backup of such a version). What was stored stands: owed after
-    /// a quick first analysis, which completed the analysis without "Analyse fertig".
-    public init(kept: Kept?, completedBefore: Bool) {
+    /// (`AnalysisMarker.completedOnce`), `firstCompleted` as stored. Never stored is the first
+    /// launch of a version with the moment: an analysis completed before it was not seen reaching
+    /// 100 % here, spent (an update after the analysis, a device backup of such a version). What
+    /// was stored stands: owed after a quick first analysis, which completed the analysis without
+    /// "Analyse fertig", until its wait is over (`lapse`).
+    public init(kept: Kept?, completedBefore: Bool, firstCompleted: Date? = nil) {
         self.kept = kept ?? (completedBefore ? .spent : .owed)
+        self.firstCompleted = self.kept == .owed ? firstCompleted : nil
+    }
+
+    /// The wait after a quick first analysis is over (`owedAfterQuickFinish` from
+    /// `firstCompleted`): spent. Looked at with every end of a run and at launch.
+    public mutating func lapse(at now: Date) {
+        guard kept == .owed, let firstCompleted, now.timeIntervalSince(firstCompleted) > Self.owedAfterQuickFinish else { return }
+        kept = .spent
+        self.firstCompleted = nil
     }
 
     /// The analysis was completed where no run of the app ended (the overnight refinement, which
@@ -57,19 +82,31 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// (`AnalysisMarker.completedOnce`, read before this sets it): its first 100 % happened
     /// without the user, spent. After a quick first analysis it changes nothing.
     public mutating func completedAway(first: Bool) {
-        if first { kept = .spent }
+        guard first else { return }
+        kept = .spent
+        firstCompleted = nil
     }
 
     /// The end of a run in the app, decided before it waits for the overview. `finished`: it
     /// finished the analysis (`AnalysisRunEnd.isFinished`); `celebrates`: "Analyse fertig" is owed
-    /// for it (`AnalysisCardState.celebratesFinish`); `onScreen`: Albumist is not in the background
-    /// as it ends (in front of it Control Center or an alert only make the card wait, `claim`).
-    /// The first finish that is celebrated decides: due on screen, spent either way. One too quick
-    /// to be celebrated leaves it owed.
-    public mutating func runEnded(finished: Bool, celebrates: Bool, onScreen: Bool, at now: Date) {
-        guard finished, celebrates else { return }
-        if kept == .owed, onScreen { dueSince = now }
+    /// for it (`AnalysisCardState.celebratesFinish`); `wholeLibrary`: it analysed the library as a
+    /// whole (no analysis completed since `AnalysisMarker.reset`: the first analysis, one of more
+    /// of the library, "Analyse neu aufbauen"), not a check for new photos or a catch-up;
+    /// `onScreen`: Albumist is not in the background as it ends (in front of it Control Center or
+    /// an alert only make the card wait, `claim`). The first celebrated finish of the whole library
+    /// decides: due on screen, spent either way. Any other finish starts the wait after a quick
+    /// first analysis (`firstCompleted`), and it changes nothing once that wait is over.
+    public mutating func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, onScreen: Bool, at now: Date) {
+        guard finished, kept == .owed else { return }
+        lapse(at: now)
+        guard kept == .owed else { return }
+        guard celebrates, wholeLibrary else {
+            if firstCompleted == nil { firstCompleted = now }
+            return
+        }
+        if onScreen { dueSince = now }
         kept = .spent
+        firstCompleted = nil
     }
 
     /// Albumist left the screen (the background, the screen locked): a moment not shown yet is not

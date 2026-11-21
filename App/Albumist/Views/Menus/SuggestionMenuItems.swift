@@ -138,13 +138,18 @@ struct SuggestionMenuItems: View {
         openFlow?.open(SuggestionMenuFlow(kind: kind, proposal: current))
     }
 
-    /// "Nicht jetzt" as its button does it, then said to VoiceOver in the button's words
-    /// (`ProposalCardText.spokenNotNow`): the card leaves the start page, or moves to "Nicht
-    /// jetzt" in the list, and the focus with it (review C of design wave 2, L2).
+    /// "Nicht jetzt" as its button does it, then said to VoiceOver: the card leaves the start
+    /// page, or moves to "Nicht jetzt" in the list, and the focus with it (review C of design
+    /// wave 2, L2). With high priority, so VoiceOver moving its focus to what comes next does not
+    /// cut it off (review C2 of design wave 2, N5). In the words VoiceOver names the suggestion's
+    /// own "Nicht jetzt" with (`ProposalCardText.spokenNotNow`, the same catalog key): a `Text`
+    /// cannot be posted, so the words are written twice, and a test holds them together.
     private func setAside() {
         guard let current = model.currentSuggestion(proposal) else { return }
         model.setDecision(.reject, for: current)
-        AccessibilityNotification.Announcement(String(localized: "Nicht jetzt: „\(card.title)“")).post()
+        var spoken = AttributedString(String(localized: "Nicht jetzt: „\(card.title)“"))
+        spoken.accessibilitySpeechAnnouncementPriority = .high
+        AccessibilityNotification.Announcement(spoken).post()
     }
 }
 

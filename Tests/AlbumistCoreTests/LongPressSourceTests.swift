@@ -236,14 +236,54 @@ struct LongPressSourceTests {
 
     /// "Nicht jetzt" from a card's menu is said to VoiceOver as its button is named ("Nicht jetzt:
     /// „Kyoto, Oktober 2024“"): the card leaves the start page (in the list it moves), and the
-    /// focus with it (L2).
+    /// focus with it (L2). With high priority, so the focus moving on does not cut it off (review
+    /// C2 of design wave 2, N5).
     @Test func nichtJetztIsSaidToVoiceOver() throws {
         let notNow = try Self.body(["struct SuggestionMenuItems", "private func setAside("], in: Self.suggestionItems)
-        let set = try #require(notNow.range(of: "model.setDecision(.reject, for: current)"))
-        let said = try #require(notNow.range(of: "AccessibilityNotification.Announcement(String(localized: \"Nicht jetzt: „\\(card.title)“\")).post()"))
-        #expect(set.lowerBound < said.lowerBound)
+        let steps = Self.squeezed(notNow)
+        let set = try #require(steps.range(of: "model.setDecision(.reject,for:current)"), "\(steps)")
+        let words = try #require(steps.range(of: "varspoken=AttributedString(String(localized:\"Nichtjetzt:„\\(card.title)“\"))"), "\(steps)")
+        let high = try #require(steps.range(of: "spoken.accessibilitySpeechAnnouncementPriority=.high"), "\(steps)")
+        let said = try #require(steps.range(of: "AccessibilityNotification.Announcement(spoken).post()"), "\(steps)")
+        #expect(set.lowerBound < words.lowerBound && words.lowerBound < high.lowerBound && high.lowerBound < said.lowerBound)
+        // One catalog key for the words said and the name of the suggestion's own "Nicht jetzt"
+        // (`spokenNotNow`): a `Text` cannot be posted, so the words are written twice, and held
+        // together here.
+        let posted = try #require(Self.key(after: "String(localized: ", in: notNow), "\(notNow)")
         let labels = try Self.code("App/Albumist/Views/Proposal/ProposalCardLabels.swift")
-        #expect(labels.contains("var spokenNotNow: Text { Text(\"Nicht jetzt: „\\(title)“\") }"), "the button's name, the same words")
+        let name = try #require(AppSource.body(of: "var spokenNotNow: Text", in: labels))
+        let named = try #require(Self.key(after: "Text(", in: name), "\(name)")
+        #expect(posted == named, "said „\(posted)“, the button named „\(named)“")
+        #expect(posted == "Nicht jetzt: „%@“")
+    }
+
+    /// The catalog key of the first string literal after `call` in `code`: its words, each
+    /// interpolation `\(…)` as "%@" (the names said here are strings).
+    static func key(after call: String, in code: String) -> String? {
+        guard let start = code.range(of: call + "\"") else { return nil }
+        var key = ""
+        var rest = code[start.upperBound...]
+        while let character = rest.first {
+            if character == "\"" { return key }
+            if rest.hasPrefix("\\(") {
+                var depth = 0
+                var index = rest.index(after: rest.startIndex)
+                repeat {
+                    if rest[index] == "(" { depth += 1 }
+                    if rest[index] == ")" { depth -= 1 }
+                    index = rest.index(after: index)
+                } while depth > 0 && index < rest.endIndex
+                key += "%@"
+                rest = rest[index...]
+            } else if rest.hasPrefix("\\\"") {
+                key += "\""
+                rest = rest.dropFirst(2)
+            } else {
+                key.append(character)
+                rest = rest.dropFirst()
+            }
+        }
+        return nil
     }
 
     /// What the menu offers is read where the open suggestion reads it: "Keine Reise" from one

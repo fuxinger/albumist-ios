@@ -288,7 +288,11 @@ final class AccessibilityUITests: XCTestCase {
         let overview = tabButton(w.overviewTab)
         if overview.waitForExistence(timeout: 20) { overview.tap() }
         UITestWait.appears(app.navigationBars[w.overviewTab], "\(tag) overview shown", timeout: 20)
-        let reviewSuggestions = app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.reviewSuggestions)).firstMatch
+        // Right after an analysis the "Analyse fertig" card carries "Vorschläge prüfen" without a
+        // number ("analysis.review") and the counted button waits until it is gone: in the
+        // contrast run of UI run 44880878362 the light walk found only the card's button.
+        let reviewSuggestions = app.buttons.matching(NSPredicate(format: "label MATCHES %@ OR identifier == %@",
+                                                                 w.reviewSuggestions, "analysis.review")).firstMatch
         // Its content, not only its bar: the suggestions button the walk taps next. Not asserted
         // here, the tap below says when it is missing.
         _ = reviewSuggestions.waitForExistence(timeout: 20)

@@ -48,8 +48,10 @@ struct PhotoViewer: View {
     @State private var top: CGFloat = 0
     /// Whether each photo looked at can be shared (asked once per photo).
     @State private var sharing: [AssetID: ShareAvailability] = [:]
-    @State private var preparingShare = false
-    /// Making the file for the share sheet; stopped when the viewer closes meanwhile.
+    /// The share being prepared for the photo on screen, and whether it failed
+    /// (`SharePreparation`; review D2, N1 and N7).
+    @State private var preparation = SharePreparation()
+    /// Making the file for the share sheet; stopped when the user leaves the share.
     @State private var shareTask: Task<Void, Never>?
     /// The photos whose Live Photo motion is on the iPhone: their title shows the symbol.
     @State private var livePhotos: Set<AssetID> = []
@@ -73,15 +75,26 @@ struct PhotoViewer: View {
             .accessibilityAction(.escape) { dismiss() }
             .sheet(item: $info) { facts in details(facts) }
             .sheet(isPresented: addingBinding) { addSheet }
-            // A share the app could not clean up after (it was ended while the sheet was open).
-            .onAppear { PhotoShare.removeLeftovers() }
-            .onDisappear {
-                shareTask?.cancel()
-                PhotoShare.removeLeftovers()
+            // Said here, over the photo: the app's own alert cannot show over this full-screen
+            // view and came up after it had closed (review D2, N1).
+            .alert("Das hat nicht geklappt", isPresented: shareFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal.")
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in
-                clock = AppModel.deviceClock()
-            }
+            .onAppear { opened() }
+            .onDisappear { closed() }
+            .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in clock = AppModel.deviceClock() }
+    }
+
+    /// A share the app could not clean up after (it was ended while the sheet was open) goes.
+    private func opened() {
+        PhotoShare.removeLeftovers()
+    }
+
+    private func closed() {
+        leaveShare()
+        PhotoShare.removeLeftovers()
     }
 
     // MARK: Pages
@@ -111,6 +124,8 @@ struct PhotoViewer: View {
         .tabViewStyle(.page(indexDisplayMode: .never))
         .onChange(of: current) {
             window = window.following(ids.firstIndex(of: current) ?? 0, count: ids.count)
+            // A share prepared for the photo left behind is not this one's (review D2, N7).
+            leaveShare()
         }
         // The photos lie on the whole screen, under a bar of fixed height (`top`).
         .ignoresSafeArea()
@@ -181,7 +196,7 @@ struct PhotoViewer: View {
     private var shareButton: some View {
         if isImage {
             Button { share() } label: { Label("Teilen", systemImage: "square.and.arrow.up") }
-                .disabled(!shareState.canShare || preparingShare)
+                .disabled(!shareState.canShare || preparation.isPreparing)
                 .accessibilityHint(shareHint)
                 .accessibilityIdentifier("viewer.share")
         }
@@ -198,7 +213,12 @@ struct PhotoViewer: View {
     @ViewBuilder
     private var infoButton: some View {
         if showsInfo, let facts = model.factsByID[current] {
-            Button { info = facts } label: { Label("Info", systemImage: "info.circle") }
+            Button {
+                // The details cover the photo: a share still being prepared would come up over
+                // them, or fail where it cannot be said (review D2, N1).
+                leaveShare()
+                info = facts
+            } label: { Label("Info", systemImage: "info.circle") }
                 .accessibilityIdentifier("viewer.info")
         }
     }
@@ -228,6 +248,11 @@ struct PhotoViewer: View {
 
     private var addingBinding: Binding<Bool> {
         Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })
+    }
+
+    /// The share of the photo on screen failed: said until the user taps OK.
+    private var shareFailed: Binding<Bool> {
+        Binding(get: { preparation.failed }, set: { if !$0 { preparation.failureSeen() } })
     }
 
     private var addSheet: some View {
@@ -288,27 +313,33 @@ struct PhotoViewer: View {
 
     /// The share sheet with the photo shown, once its file is ready (a moment for a large one).
     /// A photo found only in iCloud turns the button off with its reason; when Photos did not
-    /// answer or the file could not be written, the app says so as everywhere and the button
-    /// stays on for another try (review D, M6).
+    /// answer or the file could not be written, the photo view says so and the button stays on
+    /// for another try (review D, M6). Only for the photo still on screen (`SharePreparation`,
+    /// review D2, N7): a share the user left is neither shown nor said, its file goes.
     private func share() {
-        let id = current
-        preparingShare = true
+        guard let ticket = preparation.begin(current) else { return }
         shareTask = Task {
-            let prepared = await PhotoShare.prepare(id, fallbackName: String(localized: "Foto"))
-            preparingShare = false
-            switch prepared {
-            case .file(let file) where id == current && !Task.isCancelled:
-                PhotoShare.present(file)
-            case .file(let file):
-                // Swiped on or closed meanwhile: not the photo on screen.
-                PhotoShare.remove(file.deletingLastPathComponent())
-            case .unavailable(.unknown):
-                guard !Task.isCancelled else { return }
-                model.message = .failure(String(localized: "Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal."))
-            case .unavailable(let reason):
-                withAnimation(.easeInOut(duration: 0.2)) { sharing[id] = reason }
+            let prepared = await PhotoShare.prepare(ticket.photo, fallbackName: String(localized: "Foto"))
+            switch preparation.end(ticket, with: prepared.result, onScreen: current) {
+            case .present:
+                if case .file(let file) = prepared { PhotoShare.present(file) }
+            case .discard:
+                if case .file(let file) = prepared { PhotoShare.remove(file.deletingLastPathComponent()) }
+            case .remember(let reason):
+                withAnimation(.easeInOut(duration: 0.2)) { sharing[ticket.photo] = reason }
+            case .sayFailed:
+                // The alert on the root shows while `preparation.failed`.
+                break
             }
         }
+    }
+
+    /// The user left the share being prepared (a swipe, the details, closing the view): its
+    /// button is free again, and its end is neither shown nor said.
+    private func leaveShare() {
+        preparation.leave()
+        shareTask?.cancel()
+        shareTask = nil
     }
 }
 

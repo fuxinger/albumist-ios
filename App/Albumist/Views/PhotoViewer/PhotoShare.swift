@@ -25,6 +25,15 @@ enum PhotoShare {
         /// still image). `unknown`: Photos did not answer in time or the file could not be
         /// written; nothing is known, the user is told and may try again (M6).
         case unavailable(ShareAvailability)
+
+        /// What preparing ended with, for `SharePreparation`: no answer from Photos, or no file
+        /// written, is a failure; Photos' own reasons are kept.
+        var result: SharePreparation.Result {
+            switch self {
+            case .file: .file
+            case .unavailable(let reason): reason.canShare ? .failed : .unavailable(reason)
+            }
+        }
     }
 
     /// Where the files for the share sheet are made, each in a folder of its own.

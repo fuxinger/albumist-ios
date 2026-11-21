@@ -256,17 +256,62 @@ struct PhotoViewerSourceTests {
         // Only still images, by Photos' own kind once known.
         #expect(try #require(AppSource.body(of: "private var shareButton", in: viewer)).contains("if isImage"))
         #expect(try #require(AppSource.body(of: "private var isImage", in: viewer)).contains("basics[current]"))
-        // A failed share is said, not remembered; a file not shown is removed.
-        let sharing = try #require(AppSource.body(of: "private func share(", in: viewer))
-        #expect(sharing.contains("case .unavailable(.unknown):"))
-        #expect(sharing.contains("model.message = .failure("))
-        #expect(sharing.contains("Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal."))
-        #expect(sharing.contains("PhotoShare.remove(file.deletingLastPathComponent())"))
+        // Only a verdict is kept; leftovers go when the view opens and closes.
         #expect(try #require(AppSource.body(of: "private func checkSharing(", in: viewer)).contains("found != .unknown"))
-        let appear = try #require(AppSource.body(of: ".onAppear", in: viewer))
-        let disappear = try #require(AppSource.body(of: ".onDisappear", in: viewer))
-        #expect(appear.contains("PhotoShare.removeLeftovers()"))
-        #expect(disappear.contains("PhotoShare.removeLeftovers()"))
+        #expect(try #require(AppSource.body(of: "private func opened(", in: viewer)).contains("PhotoShare.removeLeftovers()"))
+        #expect(try #require(AppSource.body(of: "private func closed(", in: viewer)).contains("PhotoShare.removeLeftovers()"))
+    }
+
+    /// The share being prepared belongs to the photo on screen (`SharePreparation`, review D2,
+    /// N7): a swipe, the details or closing the view leave it, and only its end for the photo
+    /// still on screen shows the sheet or says that it failed; a file not shown is removed. The
+    /// failure is said by the photo view itself, on its root (N1): the app's alert
+    /// (`model.message`, on `RootView`) cannot show over the full-screen photo view and came up
+    /// after it had closed.
+    @Test func aShareIsForThePhotoOnScreenAndSaysItsFailureItself() throws {
+        let source = try Self.viewer()
+        let viewer = AppSource.code(source, keepStrings: true)
+        #expect(!AppSource.code(source).contains("model.message"), "the photo view uses the app's alert")
+        func position(_ text: String, in body: String, after: String.Index? = nil) throws -> String.Index {
+            let range = try #require(body.range(of: text, range: (after ?? body.startIndex)..<body.endIndex), "\(text) not found in place")
+            return range.lowerBound
+        }
+        // On the photo view's root, after the navigation root, not inside the pages.
+        let body = try #require(AppSource.body(of: ["struct PhotoViewer", "var body: some View"], in: viewer))
+        let root = try position("NavigationRoot { pager }", in: body)
+        let alert = try position(".alert(\"Das hat nicht geklappt\", isPresented: shareFailed)", in: body, after: root)
+        _ = try position("Button(\"OK\", role: .cancel) {}", in: body, after: alert)
+        _ = try position("Text(\"Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal.\")", in: body, after: alert)
+        for part in ["private var pager", "private var pages"] {
+            #expect(!(try #require(AppSource.body(of: part, in: viewer))).contains(".alert("), "\(part) has the alert")
+        }
+        let failed = try #require(AppSource.body(of: "private var shareFailed", in: viewer))
+        #expect(failed.contains("get: { preparation.failed }"))
+        #expect(failed.contains("preparation.failureSeen()"))
+        // The share: begun for the photo on screen, ended by the core's rule.
+        let share = try #require(AppSource.body(of: "private func share(", in: viewer))
+        let begun = try position("guard let ticket = preparation.begin(current) else { return }", in: share)
+        let prepared = try position("await PhotoShare.prepare(ticket.photo", in: share, after: begun)
+        let ended = try position("switch preparation.end(ticket, with: prepared.result, onScreen: current)", in: share, after: prepared)
+        let shown = try position("case .present:", in: share, after: ended)
+        _ = try position("PhotoShare.present(file)", in: share, after: shown)
+        let discarded = try position("case .discard:", in: share, after: ended)
+        _ = try position("PhotoShare.remove(file.deletingLastPathComponent())", in: share, after: discarded)
+        let kept = try position("case .remember(let reason):", in: share, after: ended)
+        _ = try position("sharing[ticket.photo] = reason", in: share, after: kept)
+        #expect(viewer.contains(".disabled(!shareState.canShare || preparation.isPreparing)"))
+        // Left on a swipe, when the details open and when the view closes.
+        let leave = try #require(AppSource.body(of: "private func leaveShare(", in: viewer))
+        #expect(leave.contains("preparation.leave()"))
+        #expect(leave.contains("shareTask?.cancel()"))
+        #expect(try #require(AppSource.body(of: ".onChange(of: current)", in: viewer)).contains("leaveShare()"))
+        let info = try #require(AppSource.body(of: "private var infoButton", in: viewer))
+        _ = try position("info = facts", in: info, after: try position("leaveShare()", in: info))
+        #expect(try #require(AppSource.body(of: "private func closed(", in: viewer)).contains("leaveShare()"))
+        // No answer, or no file written, is a failure; Photos' verdicts are kept.
+        let result = try #require(AppSource.body(of: "var result: SharePreparation.Result", in: AppSource.code(try Self.file("PhotoShare.swift"))))
+        #expect(result.contains("case .file: .file"))
+        #expect(result.contains("case .unavailable(let reason): reason.canShare ? .failed : .unavailable(reason)"))
     }
 
     // MARK: What stays

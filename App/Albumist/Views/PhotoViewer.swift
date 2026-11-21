@@ -542,7 +542,9 @@ private struct ZoomablePhoto: View {
             return
         }
         if live == nil {
-            let pixels = CGSize(width: size.width * displayScale * 2, height: size.height * displayScale * 2)
+            // The screen's pixels: the motion shows only while it plays (review D, L5: twice as
+            // many held a still of up to 12 megapixels beside the three stills of the pager).
+            let pixels = CGSize(width: size.width * displayScale, height: size.height * displayScale)
             guard let loaded = await LivePhotoLoader.load(id, pixels: pixels), !Task.isCancelled else { return }
             live = loaded
             onLive(id)

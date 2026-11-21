@@ -135,6 +135,20 @@ struct PhotoViewerSourceTests {
         #expect(player.contains("startPlayback(with: .full)"))
         #expect(player.contains("stopPlayback()"))
         #expect(player.contains("isOtherAudioPlaying"), "a Live Photo's sound would stop the user's music")
+        // The app's sound mixes with the user's and follows the silent switch, set once before
+        // the first Live Photo plays (review D, H2).
+        #expect(player.contains("setCategory(.ambient"))
+        let follow = try #require(AppSource.body(of: "func follow(", in: player))
+        #expect(follow.contains("LiveAudio.prepare()"))
+        // PhotoKit does not promise the main thread for its delegate calls: a hop, not a trap (M4).
+        let hop = try #require(AppSource.body(of: "nonisolated private func showOnMain(", in: player))
+        #expect(hop.contains("if Thread.isMainThread"))
+        #expect(hop.contains("Task { @MainActor in"))
+        #expect(Self.count("assumeIsolated", in: player) == 1)
+        // The motion at the screen's pixels: it shows only while it plays (L5).
+        let loadLive = try #require(AppSource.body(of: "private func loadLive(", in: AppSource.code(try Self.viewer())))
+        #expect(loadLive.contains("LivePhotoLoader.load("))
+        #expect(!loadLive.contains("* 2"))
         let viewer = AppSource.code(try Self.viewer(), keepStrings: true)
         let hint = try #require(viewer.range(of: "LiveMotion.playsHint("), "the short motion plays everywhere")
         let call = String(viewer[hint.lowerBound...].prefix(260))

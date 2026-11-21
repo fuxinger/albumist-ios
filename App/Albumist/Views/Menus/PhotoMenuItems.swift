@@ -158,6 +158,7 @@ struct PhotoPreview: View {
                 .accessibilityHidden(true)
         } else {
             AssetThumbnail(id: id, side: side)
+                .environment(\.thumbnailShowsVideoLength, false) // the lifted photo, as from memory
                 .frame(width: side, height: side)
         }
     }

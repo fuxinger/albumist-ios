@@ -37,6 +37,7 @@ struct ScanShow: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columns), spacing: 4) {
                     ForEach(Array(photos.enumerated()), id: \.element) { index, id in
                         AssetThumbnail(id: id, side: 64)
+                            .environment(\.thumbnailShowsVideoLength, false) // decorative: no "0:15"
                             .aspectRatio(1, contentMode: .fill)
                             .clipShape(shape)
                             .compositingGroup() // fade photo and its placeholder as one

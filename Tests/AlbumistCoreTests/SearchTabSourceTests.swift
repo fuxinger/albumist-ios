@@ -118,7 +118,7 @@ struct SearchTabSourceTests {
         var fields: [String] = []
         for path in AppSource.swiftFiles(under: "App/Albumist") {
             let code = try Self.code(path)
-            let calls = Self.arguments(of: ".searchable(", in: code)
+            let calls = Self.arguments(of: "searchable(", in: code)
             if path == Self.search {
                 #expect(calls == Array(repeating: "text: $input.text, isPresented: $input.isPresented, prompt: SearchView.prompt", count: 2), "\(calls)")
                 continue
@@ -146,7 +146,8 @@ struct SearchTabSourceTests {
         #expect(search.components(separatedBy: ".tabViewSearchActivation(").count - 1 == 1)
     }
 
-    /// The arguments of every call of `function` (ending in "(") in `code`, as written: strings kept.
+    /// The arguments of every call of `function` (ending in "(") in `code`, as written: strings
+    /// kept. Without its dot, so a call right after a name (`content.searchable(`) counts too.
     static func arguments(of function: String, in code: String) -> [String] {
         let masked = Array(AppSource.code(code).unicodeScalars)
         let kept = Array(code.unicodeScalars)

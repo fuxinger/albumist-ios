@@ -11,8 +11,9 @@ owner asked on 21.11. that this is done through the API ("Mach selber").
 
 Changes only an address that starts with the old site, to the same path on the new one; every
 other value stays as it is, an empty one too (it is listed, not filled in). Idempotent: a second
-run finds nothing to change. A localization App Store Connect does not let change (a version that
-is live or in review) is listed and left alone.
+run finds nothing to change. Where App Store Connect refuses a change because of the state of a
+version (STATE_ERROR, for example one in review), it is listed and left alone; any other refusal
+is a warning with Apple's answer.
 
 Runs in the upload job of testflight.yml (release), the only job that gets the App Store Connect
 key (test_workflows.py), after "Was testen", with continue-on-error: it never touches the upload.
@@ -22,16 +23,14 @@ failure is a warning and exit 0; the next TestFlight run tries again.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
-import subprocess
 import sys
 import urllib.error
 
 from testflight_notes import call as asc_call
 
-OLD_SITE = re.compile(r"^https?://fuxinger\.github\.io/sortly-ios(?=/|$)")
+OLD_SITE = re.compile(r"^\s*https?://fuxinger\.github\.io/sortly-ios(?=/|$)", re.IGNORECASE)
 NEW_SITE = "https://fuxinger.github.io/albumist-ios"
 
 # The address fields of each kind of localization, and what the owner calls them.
@@ -53,21 +52,23 @@ def moved(value: str | None) -> str | None:
     """The address on the new site for one on the old site, None for any other value."""
     if not value or not OLD_SITE.match(value):
         return None
-    return OLD_SITE.sub(NEW_SITE, value, count=1)
+    return OLD_SITE.sub(NEW_SITE, value, count=1).strip()
 
 
 def localizations(call, bundle_id: str) -> list[tuple[str, str, dict]]:
     """(kind, context, localization) of every place an address can be."""
     apps = call("GET", "apps", **{"filter[bundleId]": bundle_id, "fields[apps]": "bundleId"})["data"]
-    if not apps:
-        raise LookupError(f"no app with bundle id {bundle_id}")
+    # Exactly this bundle id: the filter is said to match loosely (a second app "app.albumist.ios.x").
+    apps = [a for a in apps if a.get("attributes", {}).get("bundleId") == bundle_id]
+    if len(apps) != 1:
+        raise LookupError(f"{len(apps)} apps with bundle id {bundle_id}")
     app = apps[0]["id"]
     found = []
-    for info in call("GET", f"apps/{app}/appInfos", limit="10")["data"]:
+    for info in call("GET", f"apps/{app}/appInfos", limit="200")["data"]:
         state = info.get("attributes", {}).get("state") or info.get("attributes", {}).get("appStoreState") or "?"
         for loc in call("GET", f"appInfos/{info['id']}/appInfoLocalizations", limit="50")["data"]:
             found.append(("appInfoLocalizations", f"app info {state}", loc))
-    for version in call("GET", f"apps/{app}/appStoreVersions", limit="10")["data"]:
+    for version in call("GET", f"apps/{app}/appStoreVersions", limit="200")["data"]:
         attributes = version.get("attributes", {})
         context = f"version {attributes.get('versionString', '?')} {attributes.get('appVersionState') or attributes.get('appStoreState') or '?'}"
         for loc in call("GET", f"appStoreVersions/{version['id']}/appStoreVersionLocalizations", limit="50")["data"]:
@@ -95,8 +96,9 @@ def plan(found: list[tuple[str, str, dict]]) -> tuple[list[dict], list[str]]:
 
 
 def not_editable(error: urllib.error.HTTPError, body: str) -> bool:
-    """App Store Connect refuses a change of a version that is live or in review (409 STATE_ERROR)."""
-    return error.code == 409 or "STATE_ERROR" in body
+    """App Store Connect refuses a change because of a version's state (409 STATE_ERROR); a 409
+    for an invalid value is a real failure."""
+    return error.code == 409 and "STATE_ERROR" in body
 
 
 def fix(call, bundle_id: str, dry_run: bool = False, out=print) -> dict:
@@ -118,11 +120,15 @@ def fix(call, bundle_id: str, dry_run: bool = False, out=print) -> dict:
         except urllib.error.HTTPError as error:
             body = error.read().decode(errors="replace")[:300]
             if not_editable(error, body):
-                out(f"ASC_URL not editable (left as it is) {line}")
+                out(f"ASC_URL not editable (left as it is) {line}: {body}")
                 result["not_editable"].append(change)
             else:
                 out(f"::warning title=App Store Connect address::{change['label']} not changed: HTTP {error.code} {body}")
                 result["failed"].append(change)
+            continue
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+            out(f"::warning title=App Store Connect address::{change['label']} not changed: {error}")
+            result["failed"].append(change)
             continue
         out(f"ASC_URL changed {line}")
         result["changed"].append(change)
@@ -132,7 +138,7 @@ def fix(call, bundle_id: str, dry_run: bool = False, out=print) -> dict:
 def summary(result: dict, dry_run: bool) -> str:
     verb = "Would change" if dry_run else "Changed"
     lines = ["### App Store Connect: Adressen der Website", ""]
-    for key, title in (("changed", verb), ("not_editable", "Not editable (version live or in review)"),
+    for key, title in (("changed", verb), ("not_editable", "Not editable in its state (STATE_ERROR)"),
                        ("failed", "Failed (next TestFlight run tries again)")):
         for change in result[key]:
             lines.append(f"- {title}: {change['label']}: `{change['old']}` → `{change['new']}`")
@@ -149,15 +155,20 @@ def main(argv: list[str] | None = None, call=asc_call) -> int:
     run.add_argument("--bundle-id", required=True)
     run.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    # Never a red step, whatever goes wrong (a missing openssl, an answer of an unexpected shape):
+    # the build is uploaded already, and the next TestFlight run tries again.
     try:
         result = fix(call, args.bundle_id, args.dry_run)
-    except (urllib.error.URLError, TimeoutError, LookupError, KeyError, ValueError, json.JSONDecodeError,
-            subprocess.CalledProcessError) as error:
+    except Exception as error:  # noqa: BLE001
         detail = error.read().decode(errors="replace")[:300] if isinstance(error, urllib.error.HTTPError) else str(error)
-        print(f"::warning title=App Store Connect addresses::not checked: {detail}; the next TestFlight run tries again")
+        print(f"::warning title=App Store Connect addresses::not checked ({type(error).__name__}): {detail}; "
+              "the next TestFlight run tries again")
         return 0
-    with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as f:
-        f.write(summary(result, args.dry_run))
+    try:
+        with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as f:
+            f.write(summary(result, args.dry_run))
+    except OSError as error:
+        print(f"::warning title=App Store Connect addresses::no job summary: {error}")
     if result["failed"]:
         print(f"::warning title=App Store Connect addresses::{len(result['failed'])} not changed (see above)")
     return 0

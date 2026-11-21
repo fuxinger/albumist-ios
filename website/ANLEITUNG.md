@@ -44,7 +44,8 @@ Seite automatisch (zu sehen unter **Actions › Website**, dauert etwa
 
 Diese Adressen trägst du in **App Store Connect** ein: Datenschutz-URL
 unter *App-Datenschutz*, Support-URL und Marketing-URL bei der jeweiligen
-Sprache der App-Version.
+Sprache der App-Version. Nach der Umbenennung des Repositorys (21.11.2026) stellt der
+nächste TestFlight-Lauf die alten Adressen dort selbst um (`.github/scripts/asc_urls.py`).
 
 Jede spätere Änderung in `website/` wird automatisch neu veröffentlicht.
 
@@ -56,9 +57,7 @@ Alle Seiten übernehmen ihn.
 
 Das Repository heißt `albumist-ios`, die Adressen oben gelten seit der Umbenennung. Die
 Adresse mit dem früheren Namen leitet GitHub Pages nicht weiter: In App Store Connect
-müssen Datenschutz-, Support- und Marketing-URL die Adressen oben sein. Das erledigt der
-nächste TestFlight-Lauf selbst (`.github/scripts/asc_urls.py`, Schritt „App Store Connect addresses
-of the website“): Er stellt jede Adresse der alten Seite auf dieselbe Seite unter der neuen um.
+müssen Datenschutz-, Support- und Marketing-URL die Adressen oben sein.
 Eine eigene Adresse ist weiter möglich:
 - Eine eigene Domain kaufen (etwa 1 € im Monat) und unter Settings › Pages
   bei *Custom domain* eintragen.

@@ -19,7 +19,7 @@ NEW = "https://fuxinger.github.io/albumist-ios"
 class FakeASC:
     """App Store Connect as the calls of asc_urls.py see it; records every PATCH."""
 
-    def __init__(self, info=None, versions=None, beta=None, refuse=(), fail=()):
+    def __init__(self, info=None, versions=None, beta=None, refuse=(), fail=(), invalid=(), offline=(), apps=None):
         self.info = info if info is not None else [
             {"id": "il-de", "attributes": {"locale": "de-DE", "privacyPolicyUrl": f"{OLD}/de/datenschutz.html"}},
             {"id": "il-en", "attributes": {"locale": "en-US", "privacyPolicyUrl": f"{OLD}/en/privacy.html",
@@ -32,12 +32,18 @@ class FakeASC:
             {"id": "bl-de", "attributes": {"locale": "de-DE", "privacyPolicyUrl": f"{OLD}/de/datenschutz.html",
                                            "feedbackEmail": "someone@example.org"}}]
         self.refuse, self.fail, self.patches = set(refuse), set(fail), []
+        self.invalid, self.offline = set(invalid), set(offline)
+        self.apps = apps if apps is not None else [{"id": "app1", "attributes": {"bundleId": "app.albumist.ios"}}]
 
     def __call__(self, method, path, body=None, **params):
         if method == "PATCH":
             kind, ident = path.split("/")
             if ident in self.refuse:
                 raise urllib.error.HTTPError(path, 409, "Conflict", {}, io.BytesIO(b'{"errors":[{"code":"STATE_ERROR"}]}'))
+            if ident in self.invalid:
+                raise urllib.error.HTTPError(path, 409, "Conflict", {}, io.BytesIO(b'{"errors":[{"code":"ENTITY_ERROR.ATTRIBUTE.INVALID"}]}'))
+            if ident in self.offline:
+                raise urllib.error.URLError("timed out")
             if ident in self.fail:
                 raise urllib.error.HTTPError(path, 500, "Error", {}, io.BytesIO(b"boom"))
             assert body["data"]["id"] == ident and body["data"]["type"] == kind
@@ -48,7 +54,7 @@ class FakeASC:
             return {}
         if path == "apps":
             assert params["filter[bundleId]"] == "app.albumist.ios"
-            return {"data": [{"id": "app1"}]}
+            return {"data": self.apps}
         if path == "apps/app1/appInfos":
             return {"data": [{"id": "info1", "attributes": {"state": "PREPARE_FOR_SUBMISSION"}}]}
         if path == "appInfos/info1/appInfoLocalizations":
@@ -75,6 +81,7 @@ class MovedTests(unittest.TestCase):
         self.assertEqual(asc_urls.moved(f"{OLD}/"), f"{NEW}/")
         self.assertEqual(asc_urls.moved(OLD), NEW)
         self.assertEqual(asc_urls.moved("http://fuxinger.github.io/sortly-ios/en/privacy.html"), f"{NEW}/en/privacy.html")
+        self.assertEqual(asc_urls.moved(" https://Fuxinger.GitHub.io/sortly-ios/de/support.html "), f"{NEW}/de/support.html")
         for other in (None, "", f"{NEW}/de/datenschutz.html", "https://example.org/sortly-ios/",
                       "https://fuxinger.github.io/sortly-ios-old/", "https://github.com/fuxinger/sortly-ios"):
             self.assertIsNone(asc_urls.moved(other), other)
@@ -122,6 +129,22 @@ class FixTests(unittest.TestCase):
         self.assertIn("not editable (left as it is)", out)
         self.assertIn("::warning title=App Store Connect address::", out)
 
+    def test_a_409_for_an_invalid_value_is_a_failure_and_a_lost_connection_does_not_stop_the_rest(self):
+        fake = FakeASC(invalid={"il-de"}, offline={"il-en"})
+        result, out = run(fake)
+        self.assertEqual(sorted(c["id"] for c in result["failed"]), ["il-de", "il-en"])
+        self.assertEqual(result["not_editable"], [])
+        self.assertEqual(len(result["changed"]), 3)
+        self.assertIn("ENTITY_ERROR.ATTRIBUTE.INVALID", out)
+
+    def test_only_the_app_with_exactly_this_bundle_id(self):
+        fake = FakeASC(apps=[{"id": "other", "attributes": {"bundleId": "app.albumist.ios.widget"}},
+                             {"id": "app1", "attributes": {"bundleId": "app.albumist.ios"}}])
+        result, _ = run(fake)
+        self.assertEqual(len(result["changed"]), 5)
+        with self.assertRaises(LookupError):
+            run(FakeASC(apps=[{"id": "other", "attributes": {"bundleId": "app.albumist.ios.widget"}}]))
+
     def test_an_empty_needed_address_is_named_not_filled(self):
         fake = FakeASC(info=[{"id": "il-de", "attributes": {"locale": "de-DE", "privacyPolicyUrl": None}}],
                        versions={"v1": [{"id": "vl-de", "attributes": {"locale": "de-DE", "supportUrl": ""}}]}, beta=[])
@@ -137,14 +160,19 @@ class FixTests(unittest.TestCase):
         from contextlib import redirect_stdout
         with redirect_stdout(out):
             self.assertEqual(asc_urls.main(["fix", "--bundle-id", "app.albumist.ios"], call=broken), 0)
-        self.assertIn("::warning title=App Store Connect addresses::not checked: NOT_AUTHORIZED", out.getvalue())
+        self.assertIn("::warning title=App Store Connect addresses::not checked (HTTPError): NOT_AUTHORIZED", out.getvalue())
+
+        def odd(method, path, body=None, **params):
+            raise FileNotFoundError("openssl")
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(asc_urls.main(["fix", "--bundle-id", "app.albumist.ios"], call=odd), 0)
 
     def test_the_summary(self):
         fake = FakeASC(refuse={"vl-de"})
         result, _ = run(fake)
         text = asc_urls.summary(result, dry_run=False)
         self.assertIn("- Changed: App-Informationen", text)
-        self.assertIn("- Not editable (version live or in review): Version", text)
+        self.assertIn("- Not editable in its state (STATE_ERROR): Version", text)
 
 
 class WorkflowTests(unittest.TestCase):

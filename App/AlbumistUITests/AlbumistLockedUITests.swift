@@ -99,51 +99,7 @@ final class AlbumistLockedUITests: XCTestCase {
     /// most `limit`), so their suggestions are open again. Returns how many were taken back; the
     /// start page shows again afterwards.
     private func takeBackNewestPlans(limit: Int) -> Int {
-        guard tap(app.tabBars.buttons["Alben"], "albums tab (locked)") else { return 0 }
-        let history = app.navigationBars["Verlauf und Rückgängig"]
-        guard UITestScreens.Albums.openHistory(app, "history screen (locked)") else { return 0 }
-        // Its rows (not asserted: an empty history has none, and then nothing is taken back).
-        _ = app.buttons.matching(identifier: "history.row").firstMatch.waitForExistence(timeout: 5)
-        var undone = 0
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for index in 0..<(limit + 4) where undone < limit {
-            let rows = app.buttons.matching(identifier: "history.row")
-            guard index < rows.count else { break }
-            rows.element(boundBy: index).tap()
-            // A history row opens its change receipt (PlanReceiptView).
-            UITestWait.appears(app.navigationBars["Änderungen"], "receipt of history row \(index + 1) (locked)", timeout: 10)
-            let undo = app.buttons["receipt.undo"]
-            var more = 0
-            // Up to 10: the receipt's album rows are taller since design wave 3 (DS-15 covers).
-            while !undo.exists && more < 10 { app.swipeUp(); more += 1 }
-            if undo.exists && undo.isEnabled {
-                undo.tap()
-                if let confirm = app.buttons.matching(identifier: "Rückgängig machen").allElementsBoundByIndex.first(where: \.isHittable) {
-                    confirm.tap()
-                    // iOS asks once before an app deletes albums.
-                    let end = Date().addingTimeInterval(40)
-                    while Date() < end && !app.staticTexts["Rückgängig gemacht"].exists {
-                        let alert = springboard.alerts.firstMatch
-                        if alert.waitForExistence(timeout: 3) {
-                            let delete = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Delete", "Löschen"])).firstMatch
-                            if delete.exists {
-                                delete.tap()
-                                // The alert has gone (it may ask again: the loop looks once more).
-                                _ = UITestWait.holds(timeout: 5) { !alert.exists }
-                            } else { break }
-                        }
-                    }
-                    if app.staticTexts["Rückgängig gemacht"].waitForExistence(timeout: 30) { undone += 1 }
-                }
-            }
-            back()
-            UITestWait.appears(history, "back on the history (locked)", timeout: 10)
-        }
-        print("UI_FACT locked: plans taken back to have suggestions again: \(undone)")
-        back()
-        UITestWait.disappears(history, "history closed (locked)", timeout: 10)
-        tap(app.tabBars.buttons["Vorschläge"], "start page after taking back (locked)")
-        return undone
+        UITestScreens.Albums.takeBackNewestPlans(app, limit: limit, "locked")
     }
 
     /// Ends the app and starts it again with the same arguments, then waits for the start page.
@@ -344,17 +300,27 @@ final class AlbumistLockedUITests: XCTestCase {
         XCTAssertTrue(done, "The plan within the free albums did not finish")
     }
 
-    /// A card whose action is "Anlegen": on the start page (`suggestion.card.create`), else in an
-    /// area's list (`suggestion.row` whose button says „Name“ anlegen).
-    private func cardThatCreates() -> XCUIElement? {
-        if let card = UITestScreens.Cards.first(app, action: "create", swipes: 4, timeout: 5) { return card }
-        guard UITestScreens.StartPage.openList(app, "a list for a card with Anlegen (locked)", timeout: 5) else { return nil }
-        let card = UITestScreens.SuggestionList.cards(app).containing(UITestScreens.Cards.saying("anlegen")).firstMatch
+    /// The card after `skipped` others whose action is "Anlegen": on the start page
+    /// (`suggestion.card.create`), else in an area's list (`suggestion.row` whose button says
+    /// „Name“ anlegen; once open, the next tries stay in it, as in `FrameUITests`). Nil when
+    /// neither has one.
+    private func cardThatCreates(skipping skipped: Int) -> XCUIElement? {
+        let inList = UITestScreens.SuggestionList.cards(app).containing(UITestScreens.Cards.saying("anlegen"))
+        if !UITestScreens.SuggestionList.cards(app).firstMatch.exists {
+            let onPage = UITestScreens.Cards.cards(app, action: "create")
+            if onPage.firstMatch.waitForExistence(timeout: 5)
+                || UITestScreens.Cards.first(app, action: "create", swipes: 4, timeout: 1) != nil {
+                let card = onPage.element(boundBy: skipped)
+                if card.exists { return card }
+            }
+            guard UITestScreens.StartPage.openList(app, "a list for a card with Anlegen (locked)", timeout: 5) else { return nil }
+        }
         var swipes = 0
-        while !card.waitForExistence(timeout: 2) && swipes < 6 {
+        while !inList.element(boundBy: skipped).waitForExistence(timeout: 2) && swipes < 6 {
             app.swipeUp()
             swipes += 1
         }
+        let card = inList.element(boundBy: skipped)
         return card.exists ? card : nil
     }
 
@@ -370,39 +336,67 @@ final class AlbumistLockedUITests: XCTestCase {
         waitForIdleStartPage("locked start page without free albums")
 
         // After a complete flow most suggestions are made: the newest plans are taken back then.
-        var found = cardThatCreates()
-        if found == nil {
+        if cardThatCreates(skipping: 0) == nil {
             print("UI_FACT locked: no card with \"Anlegen\", taking back the newest plans")
             if takeBackNewestPlans(limit: 2) > 0 {
                 _ = UITestWait.holds(timeout: 120) {
                     offersSeveral() || UITestScreens.Cards.cards(app, action: "create").firstMatch.exists
                 }
                 relaunch()
-                found = cardThatCreates()
             }
         }
-        guard let card = found else {
+        // "Anlegen" makes at once only what needs no look first: a suggestion whose plan has
+        // something to point out opens its page before the free albums are counted
+        // (`AppModel.createNow`; UI run 44878163259 tapped „København V, Mai 2023“, whose page
+        // opened, as in UI run 44862187776). Then the next card, at most three, as
+        // `FrameUITests.test3` does.
+        let sheet = UITestScreens.Purchase.sheet(app)
+        let preview = app.navigationBars["Vorschau"]
+        var tapped: (identifier: String, name: String, title: String)?
+        var cardsFound = 0
+        for attempt in 0..<3 {
+            guard let card = cardThatCreates(skipping: attempt) else { break }
+            cardsFound += 1
+            let identifier = card.identifier
+            let name = card.buttons["photoCard.body"].label
+            // The album's name as its button says it; the card is found by it afterwards.
+            let title = UITestScreens.Cards.albumName(of: card) ?? name
+            print("UI_FACT locked: card '\(name)' (\(identifier))")
+            shot(attempt == 0 ? "76-locked-card" : "76-locked-card-\(attempt + 1)")
+            guard UITestScreens.Cards.tapAction(of: card, in: app, "Anlegen without free albums (locked)") else { return }
+            _ = UITestWait.holds(timeout: 15) {
+                sheet.exists || UITestScreens.SuggestionPage.isShown(app) || preview.exists || app.alerts.firstMatch.exists
+            }
+            if sheet.exists {
+                tapped = (identifier, name, title)
+                break
+            }
+            if preview.exists || UITestScreens.SuggestionPage.isShown(app) {
+                print("UI_FACT locked: '\(name)' opened \(preview.exists ? "its preview" : "its page") instead (it is looked at first)")
+                back()
+                _ = UITestWait.holds(timeout: 5) { !preview.exists && !UITestScreens.SuggestionPage.isShown(app) }
+                continue
+            }
+            // What came instead (UI run 44862187776 left no picture of it): a message, or the
+            // start page as it was.
+            let alert = app.alerts.firstMatch
+            print("UI_FACT locked: after Anlegen \(alert.exists ? "the message '\(alert.label)'" : "no message"), screen '\(app.navigationBars.firstMatch.identifier)'")
+            break
+        }
+        guard cardsFound > 0 else {
             print("UI_STEP_MISSING a card with Anlegen (locked)")
             XCTFail("No card with \"Anlegen\" on the start page or in a list, not even after taking plans back")
             return
         }
-        let identifier = card.identifier
-        let name = card.buttons["photoCard.body"].label
-        // The album's name as its button says it; the card is found by it afterwards.
-        let title = UITestScreens.Cards.albumName(of: card) ?? name
-        print("UI_FACT locked: card '\(name)' (\(identifier))")
-        shot("76-locked-card")
-        guard UITestScreens.Cards.tapAction(of: card, in: app, "Anlegen without free albums (locked)") else { return }
-
         // The sheet instead of the album, saying why and that the suggestion stays.
-        guard UITestWait.appears(UITestScreens.Purchase.sheet(app), "purchase sheet after Anlegen (locked)", timeout: 15) else {
-            // What came instead (UI run 44862187776 left no picture of it): a message, the
-            // suggestion's page, or the start page as it was.
-            let alert = app.alerts.firstMatch
-            print("UI_FACT locked: after Anlegen \(alert.exists ? "the message '\(alert.label)'" : "no message"), screen '\(app.navigationBars.firstMatch.identifier)'")
+        guard let tapped else {
+            print("UI_STEP_MISSING purchase sheet after Anlegen (locked)")
             shot("x-no-purchase-sheet-after-anlegen")
+            XCTFail("No card's \"Anlegen\" opened the purchase sheet without free albums (\(cardsFound) tried)")
             return
         }
+        print("UI_STEP_OK purchase sheet after Anlegen (locked)")
+        let (identifier, name, title) = tapped
         shot("77-locked-card-purchase-sheet")
         let why = anything("kostenlosen Alben sind angelegt").waitForExistence(timeout: 3)
         print(why ? "UI_STEP_OK the sheet says the free albums are used up" : "UI_STEP_MISSING the sheet says the free albums are used up")

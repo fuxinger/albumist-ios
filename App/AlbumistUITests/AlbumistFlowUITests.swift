@@ -2495,8 +2495,26 @@ final class AlbumistFlowUITests: XCTestCase {
         continueAfterFailure = true
         completeOnboardingIfCutOff("testRemovePhotoFromSuggestion")
         prepare()
-        guard UITestScreens.StartPage.openList(app, area: "trips", "open suggestions to remove a photo", timeout: 30) else {
-            XCTFail("Missing: the list of suggestions (\"Alle N\" of an area on the start page)")
+        // The last test of its group in flow-other: the flows before it made nearly every
+        // suggestion, no area has two open and so no "Alle N" (every UI run of design waves 1
+        // to 3, the last 44878163259; test7 found its personal place alone on the page). The
+        // newest plans are taken back then, as the locked tests do (four: the newest need not
+        // come from suggestions), and the app starts again on the suggestions they gave back.
+        var listed = UITestScreens.StartPage.openList(app, area: "trips", "open suggestions to remove a photo", timeout: 10)
+        if !listed {
+            print("UI_FACT remove a photo: no \"Alle N\" on the start page, taking back the newest plans")
+            if UITestScreens.Albums.takeBackNewestPlans(app, limit: 4, "remove a photo") > 0 {
+                let offered = UITestWait.holds(timeout: 120) {
+                    app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "startPage.all.")).firstMatch.exists
+                }
+                print("UI_FACT remove a photo: \"Alle N\" after taking back: \(offered)")
+                prepare()
+                listed = UITestScreens.StartPage.openList(app, area: "trips", "open suggestions to remove a photo", timeout: 30)
+            }
+        }
+        guard listed else {
+            shot("x-no-list-to-remove-a-photo")
+            XCTFail("Missing: the list of suggestions (\"Alle N\" of an area on the start page), not even after taking plans back")
             return
         }
         guard UITestScreens.Cards.open(suggestionRow(), in: app, "open a suggestion to remove a photo"),

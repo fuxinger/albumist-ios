@@ -401,7 +401,7 @@ enum UITestScreens {
                 all = allSuggestions(app, area: area)
             }
             guard all.waitForExistence(timeout: timeout) else {
-                print("UI_FACT \(what): no \"Alle N\" of an area on the start page")
+                print("UI_FACT \(what): no \"Alle N\" of an area on the start page; it shows \(facts(app))")
                 return false
             }
             Cards.reach(all, in: app)
@@ -411,6 +411,29 @@ enum UITestScreens {
             all.tap()
             print("UI_STEP_OK \(what): \(identifier)")
             return UITestWait.holds(timeout: 10) { SuggestionList.cards(app).firstMatch.exists }
+        }
+
+        /// What the start page shows, for the line of a step that found nothing there: its parts
+        /// (`startPage.…`, at most twelve), how many suggestion cards, the bar's title and the
+        /// selected tab. Read from one snapshot, so nothing goes away between two reads.
+        static func facts(_ app: XCUIApplication) -> String {
+            guard let root = try? app.snapshot() else { return "nothing (no snapshot of the app)" }
+            var parts: [String] = []
+            var cards = 0
+            var bar = "-"
+            var tab = "-"
+            var stack: [(node: any XCUIElementSnapshot, inTabBar: Bool)] = [(root, false)]
+            while let entry = stack.popLast() {
+                let node = entry.node
+                let identifier = node.identifier
+                if identifier.hasPrefix("startPage."), parts.count < 12 { parts.append(identifier) }
+                if identifier.hasPrefix("suggestion.card.") { cards += 1 }
+                if node.elementType == .navigationBar, bar == "-" { bar = identifier.isEmpty ? node.label : identifier }
+                if entry.inTabBar, node.elementType == .button, node.isSelected { tab = node.label }
+                let below = entry.inTabBar || node.elementType == .tabBar
+                for child in node.children.reversed() { stack.append((child, below)) }
+            }
+            return "parts [\(parts.joined(separator: ", "))], \(cards) suggestion cards, bar '\(bar)', tab '\(tab)'"
         }
 
         /// The preview of several suggestions, as a new user makes it: "Dein Startpaket" while
@@ -770,6 +793,80 @@ enum UITestScreens {
             row.tap()
             print("UI_STEP_OK \(what)")
             return app.navigationBars[title].waitForExistence(timeout: timeout)
+        }
+
+        /// Takes back the newest plans in "Verlauf und Rückgängig" (at most `limit`), so their
+        /// suggestions are open again: after the flows before them most suggestions are made
+        /// (the locked tests, `testRemovePhotoFromSuggestion`). iOS asks once before an app
+        /// deletes albums: answered "Löschen". Returns how many were taken back; the start page
+        /// shows again afterwards. `label` names the caller in the log ("locked").
+        @discardableResult
+        static func takeBackNewestPlans(_ app: XCUIApplication, limit: Int, _ label: String,
+                                        file: StaticString = #filePath, line: UInt = #line) -> Int {
+            func back() {
+                let bar = app.navigationBars.firstMatch
+                if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
+            }
+            let albumsTab = app.tabBars.buttons["Alben"]
+            guard albumsTab.waitForExistence(timeout: 15) else {
+                print("UI_STEP_MISSING albums tab (\(label))")
+                XCTFail("Missing: albums tab (\(label))", file: file, line: line)
+                return 0
+            }
+            albumsTab.tap()
+            print("UI_STEP_OK albums tab (\(label))")
+            let history = app.navigationBars["Verlauf und Rückgängig"]
+            guard openHistory(app, "history screen (\(label))", file: file, line: line) else { return 0 }
+            // Its rows (not asserted: an empty history has none, and then nothing is taken back).
+            _ = app.buttons.matching(identifier: "history.row").firstMatch.waitForExistence(timeout: 5)
+            var undone = 0
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            for index in 0..<(limit + 4) where undone < limit {
+                let rows = app.buttons.matching(identifier: "history.row")
+                guard index < rows.count else { break }
+                rows.element(boundBy: index).tap()
+                // A history row opens its change receipt (PlanReceiptView).
+                UITestWait.appears(app.navigationBars["Änderungen"], "receipt of history row \(index + 1) (\(label))", timeout: 10,
+                                   file: file, line: line)
+                let undo = app.buttons["receipt.undo"]
+                var more = 0
+                // Up to 10: the receipt's album rows are taller since design wave 3 (DS-15 covers).
+                while !undo.exists && more < 10 { app.swipeUp(); more += 1 }
+                if undo.exists && undo.isEnabled {
+                    undo.tap()
+                    if let confirm = app.buttons.matching(identifier: "Rückgängig machen").allElementsBoundByIndex.first(where: \.isHittable) {
+                        confirm.tap()
+                        // iOS asks once before an app deletes albums.
+                        let end = Date().addingTimeInterval(40)
+                        while Date() < end && !app.staticTexts["Rückgängig gemacht"].exists {
+                            let alert = springboard.alerts.firstMatch
+                            if alert.waitForExistence(timeout: 3) {
+                                let delete = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Delete", "Löschen"])).firstMatch
+                                if delete.exists {
+                                    delete.tap()
+                                    // The alert has gone (it may ask again: the loop looks once more).
+                                    _ = UITestWait.holds(timeout: 5) { !alert.exists }
+                                } else { break }
+                            }
+                        }
+                        if app.staticTexts["Rückgängig gemacht"].waitForExistence(timeout: 30) { undone += 1 }
+                    }
+                }
+                back()
+                UITestWait.appears(history, "back on the history (\(label))", timeout: 10, file: file, line: line)
+            }
+            print("UI_FACT \(label): plans taken back to have suggestions again: \(undone)")
+            back()
+            UITestWait.disappears(history, "history closed (\(label))", timeout: 10, file: file, line: line)
+            let startTab = app.tabBars.buttons["Vorschläge"]
+            if startTab.waitForExistence(timeout: 15) {
+                startTab.tap()
+                print("UI_STEP_OK start page after taking back (\(label))")
+            } else {
+                print("UI_STEP_MISSING start page after taking back (\(label))")
+                XCTFail("Missing: start page after taking back (\(label))", file: file, line: line)
+            }
+            return undone
         }
 
         /// The tile of the album named `title` (`album.tile`, its body says "Title, 2 Fotos"), in

@@ -70,24 +70,36 @@ struct AlbumTile: View {
         // whose added photos the user took out again has nothing of Albumist's left.
         let undoable = mark == nil ? nil : managed
         let hasPhotos = !album.assetIDs.isEmpty
-        PhotoCard(coverIDs: cover.ids, title: Text(verbatim: album.title), subtitle: Self.photoCount(album),
-                  badge: mark.map { CardBadge($0) }, hidesPreview: cover.hidden, aspectRatio: 1, style: .tile,
-                  placeholderSymbol: "rectangle.stack",
-                  onOpen: { Navigator.push(.album(album.id), on: navigator) }) {
-            // No buttons: a tap opens the album, the long press has the rest.
-        } menu: {
-            if hasPhotos {
-                Button { showPhotos(cover) } label: {
-                    Label("Fotos ansehen", systemImage: "photo")
+        Group {
+            if hasPhotos || undoable != nil {
+                PhotoCard(coverIDs: cover.ids, title: Text(verbatim: album.title), subtitle: Self.photoCount(album),
+                          badge: mark.map { CardBadge($0) }, hidesPreview: cover.hidden, aspectRatio: 1, style: .tile,
+                          placeholderSymbol: "rectangle.stack",
+                          onOpen: { Navigator.push(.album(album.id), on: navigator) }) {
+                    // No buttons: a tap opens the album, the long press has the rest.
+                } menu: {
+                    if hasPhotos {
+                        Button { showPhotos(cover) } label: {
+                            Label("Fotos ansehen", systemImage: "photo")
+                        }
+                        .accessibilityIdentifier("album.viewPhotos")
+                    }
+                    if let undoable {
+                        if hasPhotos { Divider() }
+                        AlbumUndoMenuItem(state: undoable, album: album) { undo(undoable) }
+                    }
+                } preview: {
+                    AlbumPreview(cover: cover, title: album.title, line: Self.line(album, managed: managed))
                 }
-                .accessibilityIdentifier("album.viewPhotos")
+            } else {
+                // Nothing to offer (an empty album of the user's): no context menu at all, so a
+                // long press lifts nothing. A menu that returns nothing switches the long press off
+                // only for a view that lifts itself, not beside a preview of its own (review C2 of
+                // design wave 2, N1). Without Albumist's changes the album has no badge either.
+                PhotoCard(coverIDs: cover.ids, title: Text(verbatim: album.title), subtitle: Self.photoCount(album),
+                          hidesPreview: cover.hidden, aspectRatio: 1, style: .tile, placeholderSymbol: "rectangle.stack",
+                          onOpen: { Navigator.push(.album(album.id), on: navigator) })
             }
-            if let undoable {
-                if hasPhotos { Divider() }
-                AlbumUndoMenuItem(state: undoable, album: album) { undo(undoable) }
-            }
-        } preview: {
-            AlbumPreview(cover: cover, title: album.title, line: Self.line(album, managed: managed))
         }
         // Names the card, a container: its body ("Rom, 16 Fotos", "Neu") is the button that opens
         // the album, with the long press's items as its actions.

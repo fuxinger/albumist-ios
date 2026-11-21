@@ -399,7 +399,8 @@ final class FrameUITests: XCTestCase {
     }
 
     /// While "Auswählen" a long press is a tap: it ticks the photo, and no menu opens and
-    /// nothing lifts (a lifted photo would take the touch, so the tick is the proof).
+    /// nothing lifts (a lifted photo would take the touch, so the tick is the proof). After
+    /// "Fertig" the same photo's long press shows its menu again.
     private func longPressWhileSelecting() {
         guard tap(app.buttons["Auswählen"], "Auswählen for the long press") else { return }
         let photo = unsortedPhotos().element(boundBy: 1)
@@ -421,6 +422,23 @@ final class FrameUITests: XCTestCase {
             print("UI_FACT the selection was still on after one tap on Fertig")
             done.tap()
         }
+        // After "Fertig" the photo has its menu again: its cell is built anew with the long press
+        // switched back on (review C2 of design wave 2, N1).
+        guard UITestWait.appears(app.buttons["Auswählen"], "Auswählen back after Fertig", timeout: 5) else { return }
+        let again = unsortedPhotos().element(boundBy: 1)
+        guard again.exists else {
+            print("UI_STEP_MISSING the second photo after Fertig")
+            XCTFail("The second photo is gone after Fertig")
+            return
+        }
+        let pressed = again.frame
+        pressLong(again, "the same photo after Fertig")
+        guard UITestWait.appears(view, "the photo's menu again after Fertig", timeout: 5) else {
+            shot("x-photo-without-menu-after-selecting")
+            return
+        }
+        shot("longpress-after-selecting")
+        closeMenu(view, pressed: pressed, items: [view.frame], "close the photo's menu after Fertig")
     }
 
     /// A photo of a suggestion: "Aus Vorschlag entfernen" asks first, then the suggestion has one

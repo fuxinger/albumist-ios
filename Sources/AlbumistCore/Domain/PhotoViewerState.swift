@@ -154,3 +154,92 @@ public enum SharedPhotoFile {
         return shown
     }
 }
+
+/// The share the photo view prepares (DS-10; review D2, N1 and N7). A tap on "Teilen" begins
+/// it for the photo on screen, and its button waits until the file is ready. A swipe to
+/// another photo, opening the photo's details or closing the photo view leaves it: the button
+/// is free at once for the photo now on screen, and whatever the left share ends with is
+/// neither shown nor said (a file made meanwhile is removed). Only its end for the photo still
+/// on screen shows the share sheet or says that it failed, and the photo view says it itself:
+/// the app's own alert cannot show over the full-screen photo view and came up after it had
+/// closed instead. Why a photo cannot be shared ("only in iCloud") is kept for it either way.
+public struct SharePreparation: Equatable, Sendable {
+    /// What preparing ended with.
+    public enum Result: Equatable, Sendable {
+        /// The file is ready.
+        case file
+        /// Why the photo cannot be shared, as Photos says (only in iCloud, gone).
+        case unavailable(ShareAvailability)
+        /// Photos did not answer in time, or the file could not be written: nothing is known,
+        /// and the user may try again.
+        case failed
+    }
+
+    /// What the photo view does with the end.
+    public enum Step: Equatable, Sendable {
+        /// Show the share sheet with the file.
+        case present
+        /// Say nothing, show nothing; remove a file made meanwhile.
+        case discard
+        /// Keep the reason for the photo: its button stays off and says why.
+        case remember(ShareAvailability)
+        /// Say that sharing did not work (`failed`), over the photo view.
+        case sayFailed
+    }
+
+    /// One share begun: its photo, and which tap it was (a left share and a new one of the same
+    /// photo are two).
+    public struct Ticket: Equatable, Sendable {
+        public let photo: AssetID
+        let number: Int
+    }
+
+    /// The share being prepared: its button waits.
+    public private(set) var preparing: Ticket?
+    /// The share of the photo on screen failed: said until the user has seen it (`failureSeen`).
+    public private(set) var failed = false
+    private var taps = 0
+
+    public init() {}
+
+    public var isPreparing: Bool { preparing != nil }
+
+    /// A tap on "Teilen" for `id`, the photo on screen. Nil while a share is prepared (its
+    /// button waits then).
+    public mutating func begin(_ id: AssetID) -> Ticket? {
+        guard preparing == nil else { return nil }
+        taps += 1
+        let ticket = Ticket(photo: id, number: taps)
+        preparing = ticket
+        failed = false
+        return ticket
+    }
+
+    /// The user left the share: swiped to another photo, opened the details, closed the view.
+    public mutating func leave() {
+        preparing = nil
+        failed = false
+    }
+
+    /// The share `ticket` ended with `result`; `onScreen` is the photo shown now.
+    public mutating func end(_ ticket: Ticket, with result: Result, onScreen: AssetID) -> Step {
+        let stillHere = preparing == ticket && onScreen == ticket.photo
+        if preparing == ticket { preparing = nil }
+        switch result {
+        case .file:
+            return stillHere ? .present : .discard
+        case .unavailable(let reason) where !reason.canShare:
+            return .remember(reason)
+        case .unavailable, .failed:
+            // "Unknown" is no reason to keep: it failed.
+            guard stillHere else { return .discard }
+            failed = true
+            return .sayFailed
+        }
+    }
+
+    /// The user has seen that sharing failed (OK).
+    public mutating func failureSeen() {
+        failed = false
+    }
+}

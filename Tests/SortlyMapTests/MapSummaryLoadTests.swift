@@ -38,9 +38,27 @@ struct MapSummaryLoadTests {
         #expect(result.trips.count >= 100)
         #expect(result.arcs.count <= MapSummary.maxArcs)
         #expect(result.trips.allSatisfy { $0.geometry.route.count <= TripGeometry.maxRoutePoints })
-        // Every photo out of the plane window was found, and no photo on the ground.
-        #expect(library.windowPhotos.count >= 9)
-        #expect(airborne == library.windowPhotos)
+
+        // The flights are what the airborne filter meets in a real library: long-haul ones, some
+        // with a photo every 2.5 hours, layovers, one burst or two photos only, by train to the
+        // airport.
+        let flights = library.flights
+        print("MAP_FLIGHTS flights \(flights.count) (long-haul \(flights.longHaul), sparse \(flights.sparse), burst only \(flights.burstOnly), "
+              + "two \(flights.two), layovers \(flights.layovers), by train \(flights.byTrain)): window photos \(library.windowPhotos.count), "
+              + "unseen \(library.unseenWindowPhotos.count), airport and train photos \(library.travelPhotos.count)")
+        #expect(flights.count >= 100)
+        #expect(flights.longHaul >= 10)
+        #expect([flights.sparse, flights.burstOnly, flights.two, flights.layovers, flights.byTrain].allSatisfy { $0 >= 2 })
+        // What the rule promises: every window photo it can see is found, none on the ground is,
+        // and those it cannot see by design are exactly the documented ones (a regression and an
+        // accidental improvement both show here).
+        #expect(library.windowPhotos.count >= 1_000)
+        #expect(airborne.isSubset(of: library.windowPhotos), "on the ground: \(airborne.subtracting(library.windowPhotos).sorted().prefix(10))")
+        #expect(airborne.isDisjoint(with: library.travelPhotos))
+        #expect(!library.unseenWindowPhotos.isEmpty)
+        let missed = library.windowPhotos.subtracting(airborne).subtracting(library.unseenWindowPhotos).sorted().prefix(10)
+        let found = library.unseenWindowPhotos.intersection(airborne).sorted().prefix(10)
+        #expect(library.windowPhotos.subtracting(airborne) == library.unseenWindowPhotos, "missed \(missed), found though unseen \(found)")
         // Debug build on a shared CI machine: the bound catches a quadratic step, the printed
         // figure is the one that matters (the app runs a release build).
         #expect(Self.ms(best) < 3_000)

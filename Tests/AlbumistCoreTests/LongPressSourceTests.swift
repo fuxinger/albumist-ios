@@ -41,6 +41,24 @@ struct LongPressSourceTests {
         String(text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.map(Character.init))
     }
 
+    /// How often `pattern` (ICU, as `NSRegularExpression` reads it) matches in `text`.
+    static func count(_ pattern: String, in text: String) -> Int {
+        (try? NSRegularExpression(pattern: pattern))?.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text)) ?? 0
+    }
+
+    /// Whether a function's body (comments blanked) acts only on the suggestion it looked up:
+    /// its first statement is `guard let current = model.currentSuggestion(proposal) else {
+    /// return }`, and after it `current` is used and the drawn `proposal` is never named again
+    /// (`proposal:` as an argument's label is no use of it).
+    static func actsOnTheLookedUp(_ body: String) -> Bool {
+        let lookUp = #"\A\{\s*guard\s+let\s+current\s*=\s*model\.currentSuggestion\(\s*proposal\s*\)\s*else\s*\{\s*return\s*\}"#
+        guard let regex = try? NSRegularExpression(pattern: lookUp),
+              let match = regex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)),
+              let end = Range(match.range, in: body)?.upperBound else { return false }
+        let after = String(body[end...])
+        return count(#"(?<![\w.])proposal\b(?!\s*:)"#, in: after) == 0 && count(#"(?<![\w.])current\b"#, in: after) > 0
+    }
+
     /// The labels of a call's arguments, read at the call's own level ("id: id, side: 80" →
     /// ["id", "side"]; "_" for an argument without one).
     static func labels(_ arguments: String) -> [String] {
@@ -208,17 +226,26 @@ struct LongPressSourceTests {
         #expect(resolved.lowerBound < turn.lowerBound, "resolved after the turn is taken")
         #expect(try AppSource.read(Self.quickCreate).contains("// Design W2 H7: current suggestion."))
         // The card's action, from its button or its menu's word: the page's way, first of all.
+        // The suggestion found takes the parameter's name, so nothing after it can reach the
+        // drawn copy (as in `createNow`).
         let start = Self.squeezed(try Self.body(["struct StartSections", "private func perform("], in: Self.start))
         #expect(start.hasPrefix("{guardletproposal=model.currentSuggestion(proposal)else{return}"), "\(start)")
         let list = Self.squeezed(try Self.body(["struct ProposalListView", "private func act("], in: Self.suggestions))
         #expect(list.hasPrefix("{guardletproposal=model.currentSuggestion(proposal)else{return}"), "\(list)")
-        // The menu's other items, and the answer to "Keine Reise?" (the question can stay open too).
-        let open = Self.squeezed(try Self.body(["struct SuggestionMenuItems", "private func open("], in: Self.suggestionItems))
-        #expect(open.hasPrefix("{guardletcurrent=model.currentSuggestion(proposal)else{return}"), "\(open)")
-        let notNow = Self.squeezed(try Self.body(["struct SuggestionMenuItems", "private func setAside("], in: Self.suggestionItems))
-        #expect(notNow.hasPrefix("{guardletcurrent=model.currentSuggestion(proposal)else{return}"), "\(notNow)")
-        let answer = Self.squeezed(try Self.body(["private func answer("], in: Self.flows))
-        #expect(answer.hasPrefix("{guardletcurrent=model.currentSuggestion(proposal)else{return}"), "\(answer)")
+        // The menu's other items, and the answer to "Keine Reise?" (the question can stay open
+        // too): the suggestion found (`current`), never the drawn copy after it. A check of the
+        // first line alone passed with a later `for: proposal` (review C2 of design wave 2, N6);
+        // this one fails on it.
+        let lookedUp = [
+            ("open", try Self.body(["struct SuggestionMenuItems", "private func open("], in: Self.suggestionItems)),
+            ("setAside", try Self.body(["struct SuggestionMenuItems", "private func setAside("], in: Self.suggestionItems)),
+            ("answer", try Self.body(["private func answer("], in: Self.flows)),
+        ]
+        for (name, body) in lookedUp {
+            #expect(Self.actsOnTheLookedUp(body), "\(name): \(body)")
+            let stale = body.replacingOccurrences(of: "current)", with: "proposal)")
+            #expect(stale != body && !Self.actsOnTheLookedUp(stale), "\(name): the check misses the drawn copy acted on")
+        }
         // Nothing in the menu or its ways acts on the drawn copy any more.
         let items = try Self.code(Self.suggestionItems)
         #expect(!items.contains("for: proposal)") && !items.contains("proposal: proposal)"), "the drawn copy acted on")
@@ -331,8 +358,19 @@ struct LongPressSourceTests {
         #expect(card.contains("private var isMenuOffered = true"))
         #expect(card.contains("private var accessibilityMenuItems: MenuItems?"))
         let body = Self.squeezed(try Self.body(["struct PhotoCard<", "var body: some View"], in: Self.photoCard))
-        #expect(body.contains("shaped.contextMenu{ifisMenuOffered{menuItems}}preview:{menuPreview}"), "\(body)")
-        #expect(body.contains("shaped.contextMenu{ifisMenuOffered{menuItems}}"), "\(body)")
+        // Both kinds of card, each branch checked on its own (review C2 of design wave 2, N6: the
+        // check for the card that lifts itself was a prefix of the other and passed without it).
+        let offered = "shaped.contextMenu{ifisMenuOffered{menuItems}}"
+        #expect(body.components(separatedBy: offered).count - 1 == 2, "\(body)")
+        #expect(body.contains("elseifhasMenuPreview{\(offered)preview:{menuPreview}}"), "with a preview of its own: \(body)")
+        #expect(body.hasSuffix("}else{\(offered)}}"), "the card that lifts itself: \(body)")
+        // Only cards that lift themselves are switched off (the suggestion cards): beside a
+        // preview of its own, a menu that returns nothing is not documented to lift nothing (N1).
+        var switched: [String] = []
+        for path in AppSource.swiftFiles(under: "App/Albumist") where path != Self.photoCard {
+            if !AppSource.calls(of: "menuOffered(", in: try AppSource.read(path)).isEmpty { switched.append(path) }
+        }
+        #expect(switched == [Self.suggestions, Self.start], "\(switched)")
         let actions = Self.squeezed(try Self.body(["struct PhotoCard<", "private func describedAsBody("], in: Self.photoCard))
         #expect(actions.contains("described.accessibilityActions{ifisMenuOffered{accessibilityMenuItems??menuItems}}"), "\(actions)")
         let code = try Self.code(Self.photoCard)

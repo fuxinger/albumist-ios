@@ -458,7 +458,8 @@ struct PhotoViewer: View {
 
 /// One photo that fits the screen; pinch or double-tap to zoom, drag to look around, pull
 /// down to close, tap to hide or show the bars, press and hold to play a Live Photo
-/// (`LivePress`). A video plays over its still (`VideoSurface`), zoomed and pulled with it.
+/// (`LivePress`). A video plays over its still (`VideoSurface`), zoomed and pulled with it, also
+/// before the still came and when none came sharp: the video is its own sharp picture.
 ///
 /// While the photo comes, the thumbnail the grid showed stands in for it, from memory, as in
 /// Photos; without one the page is black. No spinner (DS-18). The large picture shows only when
@@ -558,9 +559,11 @@ private struct ZoomablePhoto: View {
             .simultaneousGesture(pullDown, including: scale > 1 ? .subviews : .all)
     }
 
+    /// A video that plays is its own sharp picture: it shows while its still comes and when none
+    /// came sharp (a small poster frame), never under the note (review F, F6).
     @ViewBuilder
     private func shown(in size: CGSize) -> some View {
-        if let image {
+        if image != nil || player != nil {
             photo(image, in: size)
         } else if unavailable {
             ContentUnavailableView {
@@ -599,13 +602,12 @@ private struct ZoomablePhoto: View {
             .accessibilityLabel(isVideo ? Text("Video wird geladen") : Text("Foto wird geladen"))
     }
 
-    /// The still, and over it the Live Photo's motion while it plays; zoomed and moved together.
-    /// One element for VoiceOver, with the title's words, the position and the zoom.
-    private func photo(_ image: UIImage, in size: CGSize) -> some View {
+    /// The still, and over it the Live Photo's motion while it plays or the video's picture;
+    /// zoomed and moved together. One element for VoiceOver, with the title's words, the position
+    /// and the zoom.
+    private func photo(_ image: UIImage?, in size: CGSize) -> some View {
         ZStack {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
+            still(image)
             if let live {
                 LivePhotoPlayer(livePhoto: live.value, command: command)
                     .allowsHitTesting(false)
@@ -629,6 +631,19 @@ private struct ZoomablePhoto: View {
         .accessibilityZoomAction { action in zoom(action) }
         .accessibilityActions { liveActions }
         .modifier(PlayPauseOnMagicTap(isVideo: isVideo, action: onPlayPause))
+    }
+
+    /// The sharp still; under a video that plays without one, the grid's thumbnail from memory
+    /// as while it waits, else the black page. The video's first frame covers it.
+    @ViewBuilder
+    private func still(_ image: UIImage?) -> some View {
+        if let still = image ?? ThumbnailCache.shared.thumbnailInMemory(for: id) {
+            Image(uiImage: still)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Color.clear
+        }
     }
 
     /// A Live Photo plays from VoiceOver's actions too (swipe up or down), as the long press.

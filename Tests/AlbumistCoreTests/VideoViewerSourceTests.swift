@@ -123,9 +123,19 @@ struct VideoViewerSourceTests {
         #expect(surface.contains("videoGravity = .resizeAspect"))
         #expect(surface.contains("isUserInteractionEnabled = false"))
         #expect(surface.contains("player = nil"), "the layer holds the player after it went")
-        let photo = try #require(AppSource.body(of: "private func photo(_ image: UIImage, in size: CGSize)", in: viewer))
+        let photo = try #require(AppSource.body(of: "private func photo(_ image: UIImage?, in size: CGSize)", in: viewer))
         #expect(Self.squeezed(photo).contains("ifletplayer{VideoSurface(player:player).allowsHitTesting(false).accessibilityHidden(true)"))
-        #expect(Self.inOrder(["Image(uiImage: image)", "VideoSurface(", ".scaleEffect("], in: photo), "the video does not zoom with its still")
+        #expect(Self.inOrder(["still(image)", "VideoSurface(", ".scaleEffect("], in: photo), "the video does not zoom with its still")
+        // A video that plays is its own sharp picture (review F, F6): it shows while its still
+        // comes and when none came sharp (a small poster frame), over the grid's thumbnail from
+        // memory or the black page; the page says "not available" only without a player.
+        let zoomable = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: viewer))
+        let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: zoomable))
+        #expect(Self.inOrder(["if image != nil || player != nil {", "photo(image, in: size)", "} else if unavailable {",
+                              "ContentUnavailableView", "} else {", "waiting(in: size)"], in: shown), "\(shown)")
+        let still = try #require(AppSource.body(of: "private func still(_ image: UIImage?)", in: zoomable))
+        #expect(Self.inOrder(["if let still = image ?? ThumbnailCache.shared.thumbnailInMemory(for: id) {", "Image(uiImage: still)",
+                              ".scaledToFit()", "} else {", "Color.clear"], in: still), "\(still)")
     }
 
     /// A video starts without sound; "Ton an" gives it sound, which stops the user's music and
@@ -223,7 +233,7 @@ struct VideoViewerSourceTests {
         #expect(panel.contains("!unavailablePictures.contains(current)"), "the note twice when the page says it")
         // VoiceOver's two-finger double tap plays and pauses a video, on its page and on its
         // controls; on a photo it stays the system's, which pauses the user's music.
-        let page = try #require(AppSource.body(of: "private func photo(_ image: UIImage, in size: CGSize)", in: viewer))
+        let page = try #require(AppSource.body(of: "private func photo(_ image: UIImage?, in size: CGSize)", in: viewer))
         #expect(page.contains(".modifier(PlayPauseOnMagicTap(isVideo: isVideo, action: onPlayPause))"))
         let magic = try #require(AppSource.body(of: ["struct PlayPauseOnMagicTap", "func body(content: Content)"], in: viewer))
         #expect(Self.squeezed(magic).contains("ifisVideo{content.accessibilityAction(.magicTap,action)}else{content}"))
@@ -272,7 +282,7 @@ struct VideoViewerSourceTests {
                 && waiting.contains(".offset(x: offset.width, y: offset.height + pull)"), "the preview stands still under a pull")
         #expect(waiting.contains("Text(\"Foto wird geladen\")") && waiting.contains("Text(\"Video wird geladen\")"))
         let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: photo))
-        #expect(Self.inOrder(["if let image {", "} else if unavailable {", "} else {", "waiting(in: size)"], in: shown))
+        #expect(Self.inOrder(["if image != nil || player != nil {", "} else if unavailable {", "} else {", "waiting(in: size)"], in: shown))
         let load = try #require(AppSource.body(of: "private func load(in size: CGSize)", in: photo))
         #expect(Self.inOrder(["await PhotoBasics.of(id)", "ThumbnailCache.shared.largeImage(for: id, pixels: pixels)",
                               "guard !Task.isCancelled", "ViewerPicture.choose(", "case .sharp:", "image = loaded",

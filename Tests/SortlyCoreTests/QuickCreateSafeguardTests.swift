@@ -15,6 +15,8 @@ import SortlyTestSupport
 ///   the moment it was tapped.
 /// - Finding 10: after the purchase sheet, the album was made from the sheet's copy of a
 ///   suggestion the analysis no longer had.
+/// - Finding 11: "Widerrufen" did not hold the turn while it checked whether the album is deleted,
+///   and an "Anlegen" meanwhile ended the undo without a word.
 @Suite("Quick create: where and when it may make an album")
 struct QuickCreateSafeguardTests {
     static let model = "App/Sortly/Model/AppModel+QuickCreate.swift"
@@ -224,5 +226,20 @@ struct QuickCreateSafeguardTests {
         #expect(after.contains("await createNow(current)"))
         let request = try Self.body("struct QuickCreatePurchase", in: Self.model)
         #expect(!request.contains("AlbumProposal"), "the purchase sheet keeps a copy of the suggestion")
+    }
+
+    // MARK: Finding 11: "Widerrufen" holds the turn
+
+    /// While a banner checks or takes back its album, "Anlegen" is refused as busy, before it
+    /// takes the turn; an undo whose banner went meanwhile says so instead of ending silently.
+    @Test func widerrufenHoldsTheTurn() throws {
+        let create = try Self.body("func createNow(", in: Self.model)
+        let refused = try Self.between("if let banner = state.banner, !banner.canUndo {", "return .notNow", in: create)
+        #expect(refused.contains("message = .busy"))
+        let taken = try #require(create.range(of: "state.creating = proposal.id"))
+        #expect(refused.endIndex <= taken.lowerBound, "refused only after taking the turn")
+        let undo = try Self.body("func undoQuickCreate(", in: Self.model)
+        let replaced = try Self.between("guard state.banner?.id == banner.id else {", "return", in: undo)
+        #expect(replaced.contains("message = .busy"), "the undo ends without a word")
     }
 }

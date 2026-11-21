@@ -81,6 +81,12 @@ extension AppModel {
         let state = QuickCreateState.shared
         // One at a time: a second tap meanwhile is no second album.
         guard state.creating == nil else { return .notNow }
+        // "Widerrufen" is finding out whether the album is deleted, or taking it back: it holds
+        // the turn, and its banner, until it is done (review B of design wave 1).
+        if let banner = state.banner, !banner.canUndo {
+            message = .busy
+            return .notNow
+        }
         // Something else changes Photos or the suggestions right now: said, not dropped.
         guard !isExecutionClaimed, !execution.isRunning, !homeChangeRunning, !analysisResetting else {
             message = .busy
@@ -166,7 +172,12 @@ extension AppModel {
         state.expiry?.cancel()
         state.banner?.phase = .checking
         let deletes = await undoDeletesCollections(banner.plan)
-        guard state.banner?.id == banner.id else { return }
+        // Gone meanwhile (no "Anlegen" replaces a banner while it is checked: `createNow` says
+        // busy): said, never ended without a word.
+        guard state.banner?.id == banner.id else {
+            message = .busy
+            return
+        }
         state.banner?.phase = .undoing(deletesAlbum: deletes)
         let before = execution
         await undo(banner.plan)

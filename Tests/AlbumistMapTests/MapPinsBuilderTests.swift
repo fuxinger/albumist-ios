@@ -115,7 +115,8 @@ struct MapPinsBuilderTests {
     }
 
     @Test func disputedAreasNeverMakeACountryPin() {
-        let kashmir = MapHandmade.trip("kashmir", "2012-07-01", [MapHandmade.place(MapFixture.at(34.0837, 74.7973), "Srinagar", "disputed-kashmir", photos: 40)])
+        let kashmir = MapHandmade.trip("kashmir", "2012-07-01",
+                                       [MapHandmade.place(MapFixture.at(34.0837, 74.7973), "Srinagar", "disputed-kashmir", photos: 40)])
         // Even if a disputed key came in as a country, it makes no country pin and no region badge.
         let countries = [MapHandmade.country("disputed-kashmir", "2012-07-01", trips: ["kashmir"], region: .southernAsia)]
         let pins = MapPins.build(trips: [kashmir], countries: countries)

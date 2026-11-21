@@ -26,7 +26,9 @@ struct MapShareTests {
                 MapHandmade.place(MapFixture.Places.tokyo, "Tokio", "JP", photos: 60, covers: ["tokyo-1", "tokyo-2"]),
                 MapHandmade.place(Place.kyoto, "Kyoto", "JP", photos: 30, covers: ["kyoto-1"]),
             ], title: "Japan", timeZone: "Asia/Tokyo"),
-            MapHandmade.trip("rome-2024", "2024-04-10", [MapHandmade.place(Place.ciampino, "Ciampino", "IT", photos: 120, covers: ["ciampino-1", "ciampino-2"])]),
+            MapHandmade.trip("rome-2024", "2024-04-10", [
+                MapHandmade.place(Place.ciampino, "Ciampino", "IT", photos: 120, covers: ["ciampino-1", "ciampino-2"]),
+            ]),
         ]
         let countries = [
             MapHandmade.country("JP", "2024-03-31 20:00", trips: ["japan-2024"], region: .easternAsia),

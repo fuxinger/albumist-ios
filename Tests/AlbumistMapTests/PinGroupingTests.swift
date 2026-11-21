@@ -238,7 +238,9 @@ struct PinGroupingTests {
     /// faster than the pins.
     @Test func manyPinsAreGroupedQuickly() {
         var random = MapRandom(seed: 1)
-        let pins = (0..<20_000).map { Self.pin("place:\($0)", Self.at(46 + random.unit() * 6, 9.3 + random.unit() * 4.4), count: 1 + random.int(0..<100), level: .place) }
+        let pins = (0..<20_000).map {
+            Self.pin("place:\($0)", Self.at(46 + random.unit() * 6, 9.3 + random.unit() * 4.4), count: 1 + random.int(0..<100), level: .place)
+        }
         let view = Self.view(Self.at(49, 11.5), widthMeters: 300_000)
         let clock = ContinuousClock()
         var groups: [MapPinGroup] = []

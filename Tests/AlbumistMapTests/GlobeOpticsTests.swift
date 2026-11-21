@@ -169,7 +169,8 @@ struct GlobeOpticsTests {
                 #expect(abs(center.x - Self.width / 2) < 1e-9 && abs(center.y - Self.height / 2) < 1e-9)
                 #expect(abs(center.horizonMargin - 1) < 1e-12)
                 // The antipode is hidden, as is everything beyond the horizon.
-                let antipode = GeoCoordinate(latitude: -optics.camera.center.latitude, longitude: MapHome.normalizedLongitude(optics.camera.center.longitude + 180))
+                let antipode = GeoCoordinate(latitude: -optics.camera.center.latitude,
+                                             longitude: MapHome.normalizedLongitude(optics.camera.center.longitude + 180))
                 #expect(!optics.project(antipode).isVisible)
             }
         }

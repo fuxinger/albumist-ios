@@ -20,8 +20,10 @@ struct SharePrivacyTests {
     /// Abensberg; a 2024 visit to Hamburg.
     static func library() -> MapSummary {
         let trips = [
-            MapHandmade.trip("weekend", "2023-04-15", [MapHandmade.place(Place.straubing, "Straubing", "DE", photos: 30, covers: ["straubing-1", "straubing-2"]),
-                                                       MapHandmade.place(Place.bogen, "Bogen", "DE", photos: 12, covers: ["bogen-1"])]),
+            MapHandmade.trip("weekend", "2023-04-15", [
+                MapHandmade.place(Place.straubing, "Straubing", "DE", photos: 30, covers: ["straubing-1", "straubing-2"]),
+                MapHandmade.place(Place.bogen, "Bogen", "DE", photos: 12, covers: ["bogen-1"]),
+            ]),
             MapHandmade.trip("road-trip", "2023-07-01", [
                 MapHandmade.place(Place.abensberg, "Abensberg", "DE", photos: 20, covers: ["abensberg-1"]),
                 MapHandmade.place(MapFixture.Places.munich, "München", "DE", photos: 40, covers: ["munich-1"]),

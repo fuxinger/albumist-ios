@@ -106,6 +106,9 @@ struct VideoViewerSourceTests {
         #expect(make.contains("actionAtItemEnd = .pause"), "a video that does not loop moves on at its end")
         #expect(make.contains("isMuted = !sound.isOn"))
         #expect(make.contains("addPeriodicTimeObserver("))
+        // As often as the thumb glides, 30 times a second for a short clip (review F, F13).
+        #expect(Self.inOrder(["let interval = CMTime(seconds: VideoPosition.tickInterval(for: length), preferredTimescale: 600)",
+                              "addPeriodicTimeObserver(forInterval: interval,"], in: make), "\(make)")
         // A looping video lets the iPhone lock after its first play (review F, F8).
         let tick = try #require(AppSource.body(of: "private func ticked(", in: model))
         #expect(Self.inOrder(["let keepsOn = start.keepsScreenOn(loopsDone: looper?.loopCount ?? 0)",

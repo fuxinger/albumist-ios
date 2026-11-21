@@ -146,6 +146,20 @@ struct VideoPlaybackTests {
         #expect(VideoPosition.step(for: try #require(VideoDuration(seconds: 3600))) == 10)
     }
 
+    /// The slider's thumb glides: the photo view reads where a playing video is about every
+    /// 300th of its length, 30 times a second for a short clip, and at least twice a second for
+    /// a long one, so the times change on the second (review F, F13: a three-second clip jumped
+    /// twelve times). Before its length is known, as for a short clip.
+    @Test func theThumbGlides() throws {
+        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 3))) == 1.0 / 30)
+        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 10))) == 1.0 / 30)
+        #expect(abs(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 30))) - 0.1) < 1e-9)
+        #expect(abs(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 90))) - 0.3) < 1e-9)
+        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 150))) == 0.5)
+        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 3600))) == 0.5)
+        #expect(VideoPosition.tickInterval(for: nil) == 1.0 / 30)
+    }
+
     // MARK: Starting by itself
 
     /// As in Photos a video plays when it comes into view and starts over at its end, but only

@@ -81,6 +81,15 @@ public struct VideoPosition: Equatable, Sendable {
     public static func step(for duration: VideoDuration) -> Double {
         min(10, max(1, Double(duration.seconds) / 10))
     }
+
+    /// How often the photo view reads where a playing video is, in seconds (review F, F13): so
+    /// often that the slider's thumb moves by about a 300th of its track at a time and glides,
+    /// at most 30 times a second (a short clip), at least twice a second (the times show whole
+    /// seconds). Before its length is known, as for a short clip.
+    public static func tickInterval(for duration: VideoDuration?) -> Double {
+        guard let duration else { return 1.0 / 30 }
+        return min(0.5, max(1.0 / 30, Double(duration.seconds) / 300))
+    }
 }
 
 /// Seconds as a clock reads them, and in words.

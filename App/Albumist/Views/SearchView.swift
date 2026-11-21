@@ -42,13 +42,6 @@ struct SearchView: View {
 
     private var isEmptyQuery: Bool { query.trimmingCharacters(in: .whitespaces).isEmpty }
 
-    /// What the starting points are made from: the facts, and the analysis that fills them in
-    /// (photos it has looked at become pictures, their topics starting points).
-    private struct StartingPointsInputs: Equatable {
-        var facts: Int
-        var analysis: AppModel.AnalysisCounts
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
@@ -100,11 +93,18 @@ struct SearchView: View {
         .searchable(text: $query, isPresented: $searchActive,
                     prompt: SmartAssistant.isAvailable ? Text("z. B. Grillen bei Oma letzten Sommer") : Text("z. B. Hunde Italien 2023"))
         .onAppear { if query.isEmpty { searchActive = true } }
-        // Starting points follow the library (a finished analysis brings places and topics, and
-        // the pictures of photos it has looked at since).
-        .task(id: StartingPointsInputs(facts: model.facts.count, analysis: model.analysisCounts)) {
-            featured = await model.featuredSearches()
-            starts = await model.searchStartingPoints()
+        // Starting points follow every change of the facts (a finished analysis brings places and
+        // topics, the pictures of photos it has looked at since), also one of a photo's rank
+        // alone: the text step finds a sensitive document without changing a count, and its
+        // tile does not keep showing it (review G2). Both lists are shown together; a task
+        // cancelled meanwhile starts no more work and keeps nothing.
+        .task(id: model.factsVersion) {
+            let words = await model.featuredSearches()
+            guard !Task.isCancelled else { return }
+            let made = await model.searchStartingPoints()
+            guard !Task.isCancelled else { return }
+            featured = words
+            starts = made
         }
         .task(id: query) {
             let text = query

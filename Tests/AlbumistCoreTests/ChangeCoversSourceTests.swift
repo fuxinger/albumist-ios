@@ -8,7 +8,8 @@ import AlbumistTestSupport
 /// Linux. Which photos each cover tries is decided in the core (`PlanCoversTests`); the receipt's
 /// words keep their guard (`ReceiptAlbumRowTests`), its ways back and confirmations theirs
 /// (`DeleteQuestionNoteTests`, `FullAccessForChangesTests`). Here: the covers are worked out off
-/// the main thread and again when the photos' dates or ranks change; each history row and each
+/// the main thread and again when the facts change (the photos' dates and ranks with them, keyed
+/// on the facts' revision); each history row and each
 /// album of the receipt shows its own, larger than the 44 pt pictures of before and laid out as
 /// the tab "Alben" lays out albums; the rows stay what VoiceOver and the UI tests know.
 @Suite("Covers of the history and the receipt in the app (source)")
@@ -33,16 +34,16 @@ struct ChangeCoversSourceTests {
     // MARK: The history
 
     /// The history works out the cover of each change it lists off the main thread, again when
-    /// the changes or the photos' dates or ranks change (a photo the analysis finds to be a
-    /// sensitive document leaves its cover at once), and hands each row its own; the change cut
-    /// off on its way shows what it sets out to add.
+    /// the changes or the facts change (the photos' dates and ranks are made from them: a photo
+    /// the analysis finds to be a sensitive document leaves its cover at once), and hands each
+    /// row its own; the change cut off on its way shows what it sets out to add.
     @Test func theHistoryWorksOutACoverForEachChange() throws {
         let view = Self.squeezed(try Self.body(["struct HistoryView", "var body"], in: Self.settings))
         #expect(view.contains(".task(id:model.changeCoverInputs(model.history,interrupted:model.interruptedPlan)){letmade=awaitmodel.historyCovers(model.history,interrupted:model.interruptedPlan)guard!Task.isCancelledelse{return}covers=made}"))
         #expect(view.contains("InterruptedHistoryRow(plan:interrupted,cover:covers[interrupted.id])"))
         #expect(view.contains("HistoryRow(plan:plan,cover:covers[plan.id])"))
         let inputs = Self.squeezed(try Self.body(["func changeCoverInputs("], in: Self.model))
-        #expect(inputs.contains("ChangeCoverInputs(plans:plans.map(\\.id)+(interrupted.map{[$0.id]}??[]),dates:creationDates,ranks:previewRanks)"))
+        #expect(inputs.contains("ChangeCoverInputs(plans:plans.map(\\.id)+(interrupted.map{[$0.id]}??[]),facts:factsVersion)"))
         let history = Self.squeezed(try Self.body(["func historyCovers("], in: Self.model))
         // Before the first facts of a launch every photo would count as an ordinary one: no cover
         // until they say which are sensitive documents.
@@ -50,6 +51,17 @@ struct ChangeCoversSourceTests {
         #expect(history.contains("Task.detached(priority:.userInitiated)"))
         #expect(history.contains("covers[plan.id]=PlanCovers.mosaic(of:plan,dates:dates,ranks:ranks)"))
         #expect(history.contains("covers[interrupted.id]=PlanCovers.mosaic(of:interrupted,applied:false,dates:dates,ranks:ranks)"))
+    }
+
+    /// What the covers are keyed on is cheap to keep and compare: the changes and the facts'
+    /// revision (`AppModel.factsVersion`), never the dictionaries of all dates and ranks, which
+    /// SwiftUI would hold on to while the screen is open (a memory warning freed nothing there)
+    /// and compare entry by entry once the model made them anew (review G7).
+    @Test func theCoversAreKeyedOnTheFactsRevisionNotOnTheirDictionaries() throws {
+        let inputs = Self.squeezed(try Self.body(["struct ChangeCoverInputs"], in: Self.model))
+        #expect(inputs == "{varplans:[AlbumistID]varfacts:Int}")
+        let model = Self.squeezed(try Self.code(Self.model))
+        #expect(!model.contains("dates:creationDates,ranks:previewRanks)"), "a task id that holds all dates and ranks")
     }
 
     /// A row of the history: the change's cover beside when and what it did, "Rückgängig gemacht"
@@ -106,8 +118,8 @@ struct ChangeCoversSourceTests {
 
     // MARK: The receipt
 
-    /// The receipt works out the cover of each album off the main thread, again when the photos'
-    /// dates or ranks change, and hands each row its own.
+    /// The receipt works out the cover of each album off the main thread, again when the facts
+    /// change (`ChangeCoverInputs`), and hands each row its own.
     @Test func theReceiptWorksOutACoverForEachAlbum() throws {
         let view = Self.squeezed(try Self.body(["struct PlanReceiptView", "var body"], in: Self.receipt))
         #expect(view.contains(".task(id:model.changeCoverInputs([plan])){letmade=awaitmodel.receiptCovers(for:plan)guard!Task.isCancelledelse{return}covers=made}"))

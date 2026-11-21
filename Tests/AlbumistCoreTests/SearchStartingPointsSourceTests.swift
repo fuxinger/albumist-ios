@@ -43,13 +43,20 @@ struct SearchStartingPointsSourceTests {
         #expect(page.components(separatedBy: ".accessibilityIdentifier(\"search.example\")").count - 1 == 2)
     }
 
-    /// The tiles follow the library: its facts and what the analysis has looked at since.
-    @Test func theStartingPointsFollowTheFactsAndTheAnalysis() throws {
+    /// The tiles follow every change of the facts (`AppModel.factsVersion`), also one of a
+    /// photo's rank or date alone: the text step makes a photo a sensitive document without
+    /// changing any count, and its tile must not keep showing it (review G2). A task cancelled
+    /// meanwhile starts no more work and keeps nothing; both lists are shown together.
+    @Test func theStartingPointsFollowEveryChangeOfTheFacts() throws {
         let view = Self.squeezed(try Self.code(Self.search))
-        #expect(view.contains(".task(id:StartingPointsInputs(facts:model.facts.count,analysis:model.analysisCounts)){featured=awaitmodel.featuredSearches()starts=awaitmodel.searchStartingPoints()}"))
-        #expect(!view.contains(".task(id:model.facts.count)"))
-        let inputs = Self.squeezed(try Self.body(["struct SearchView", "private struct StartingPointsInputs"], in: Self.search))
-        #expect(inputs == "{varfacts:Intvaranalysis:AppModel.AnalysisCounts}")
+        #expect(view.contains(".task(id:model.factsVersion){letwords=awaitmodel.featuredSearches()guard!Task.isCancelledelse{return}letmade=awaitmodel.searchStartingPoints()guard!Task.isCancelledelse{return}featured=wordsstarts=made}"))
+        #expect(!view.contains("StartingPointsInputs"), "keyed on counts, which a change of rank leaves as they are")
+        #expect(!view.contains("model.facts.count"))
+        // The revision is observed, so a screen keyed on it works its part out again; only the
+        // model counts it.
+        let model = Self.squeezed(AppSource.code(try AppSource.read("App/Albumist/Model/AppModel.swift")))
+        #expect(model.contains("private(set)varfactsVersion=0"))
+        #expect(!model.contains("@ObservationIgnoredprivatevarfactsVersion"))
     }
 
     /// The work is one search per starting point on the search's own index, off the main thread.

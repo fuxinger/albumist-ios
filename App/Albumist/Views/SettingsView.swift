@@ -324,8 +324,9 @@ struct HistoryView: View {
         }
         .navigationTitle("Verlauf und Rückgängig")
         .navigationBarTitleDisplayMode(.inline)
-        // The covers of the changes listed, again when the photos' dates or ranks change: a photo
-        // the analysis finds to be a sensitive document leaves its cover at once.
+        // The covers of the changes listed, again when the facts change (the photos' dates and
+        // ranks with them): a photo the analysis finds to be a sensitive document leaves its
+        // cover at once.
         .task(id: model.changeCoverInputs(model.history, interrupted: model.interruptedPlan)) {
             let made = await model.historyCovers(model.history, interrupted: model.interruptedPlan)
             guard !Task.isCancelled else { return }

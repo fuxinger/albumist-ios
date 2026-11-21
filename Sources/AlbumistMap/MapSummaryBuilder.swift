@@ -142,7 +142,9 @@ extension MapSummary {
 
     /// `facts` with every asset id once, at the place where the id first comes. Of facts sharing
     /// an id (a library or a test listing one photo twice) the one first in `precedes` order
-    /// stays, so the same facts in any order keep the same one.
+    /// stays, so the same facts in any order keep the same one. Equal facts need no picking:
+    /// `precedes` would compare them down to their whole text (review: a library listing every
+    /// photo twice took 9.9 s instead of 0.2 s for 50,000 photos).
     static func uniqueFacts(_ facts: [AssetFacts]) -> [AssetFacts] {
         // Mostly every id comes once (the store keys facts by id): then they are all kept as they
         // are, without copying them.
@@ -154,7 +156,7 @@ extension MapSummary {
         result.reserveCapacity(facts.count)
         for fact in facts {
             if let index = kept[fact.id] {
-                if precedes(fact, result[index]) { result[index] = fact }
+                if fact != result[index] && precedes(fact, result[index]) { result[index] = fact }
             } else {
                 kept[fact.id] = result.count
                 result.append(fact)

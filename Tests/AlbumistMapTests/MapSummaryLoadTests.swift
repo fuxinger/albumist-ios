@@ -80,4 +80,25 @@ struct MapSummaryLoadTests {
         #expect(Self.ms(best) < 300, "release build: \(Self.ms(best)) ms")
         #endif
     }
+
+    /// A library listing every photo twice (the same facts, as a caller passing them twice by
+    /// mistake) gives the summary of the library listed once, about as quickly (third review: for
+    /// 50,000 photos 9.9 s instead of 0.2 s in a release build, nearly all of it picking one of
+    /// each two equal facts by their whole text, `MapSummary.precedes`). Equal facts need no
+    /// picking.
+    @Test func aLibraryListingEveryPhotoTwiceIsSummarizedAsQuicklyAsOnce() {
+        let library = MapLibrary(count: 5_000)
+        func input(_ facts: [AssetFacts]) -> MapInput {
+            MapInput(facts: facts, trips: library.trips, homeSettings: library.homeSettings, calendar: MapFixture.calendar,
+                     now: MapFixture.date("2026-11-20"))
+        }
+        let clock = ContinuousClock()
+        var once: MapSummary?, twice: MapSummary?
+        _ = MapSummary.build(input(library.facts))
+        let onceTime = clock.measure { once = MapSummary.build(input(library.facts)) }
+        let twiceTime = clock.measure { twice = MapSummary.build(input(library.facts + library.facts)) }
+        #expect(twice == once)
+        #expect(MapSummary.uniqueFacts(library.facts + library.facts) == library.facts)
+        #expect(twiceTime < onceTime * 3, "\(library.facts.count) photos: \(Int(Self.ms(onceTime))) ms listed once, \(Int(Self.ms(twiceTime))) ms twice")
+    }
 }

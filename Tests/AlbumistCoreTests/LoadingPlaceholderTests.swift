@@ -12,20 +12,24 @@ struct LoadingPlaceholderTests {
     /// An iPhone 15's screen in pixels.
     let screen = PixelSize(width: 1179, height: 2556)
 
-    private func picture(delivered: PixelSize?, original: PixelSize? = nil, answered: Bool = true,
-                         preview: Bool = false) -> ViewerPicture {
-        ViewerPicture.choose(preview: preview, delivered: delivered, answered: answered, original: original, screen: screen)
+    private func picture(delivered: PixelSize?, original: PixelSize? = nil) -> ViewerPicture {
+        ViewerPicture.choose(delivered: delivered, original: original, screen: screen)
     }
 
     // MARK: Photo view
 
-    /// While the photo comes, the thumbnail the grid showed, from memory, as Photos does; without
-    /// one the black page. Never a spinner.
-    @Test func whileThePhotoComesThePreviewFromMemoryShows() {
-        #expect(picture(delivered: nil, answered: false, preview: true) == .waiting(preview: true))
-        #expect(picture(delivered: nil, answered: false, preview: false) == .waiting(preview: false))
-        // A picture that came replaces the preview.
-        #expect(picture(delivered: PixelSize(width: 2358, height: 1768), answered: true, preview: true) == .sharp)
+    /// The rule speaks once Photos answered: the picture, or the note. While the photo comes the
+    /// page waits by itself with the grid's thumbnail from memory, black without one
+    /// (`VideoViewerSourceTests`); the rule's own "waiting", which the photo view never asked
+    /// for, is gone (review F, F19).
+    @Test func theRuleSpeaksOnceAPictureCame() {
+        for chosen in [picture(delivered: PixelSize(width: 2358, height: 1768)), picture(delivered: nil)] {
+            switch chosen {
+            case .sharp, .unavailable: break
+            }
+        }
+        #expect(picture(delivered: PixelSize(width: 2358, height: 1768)) == .sharp)
+        #expect(picture(delivered: nil) == .unavailable)
     }
 
     /// A picture sharp at the screen's size shows: it brings at least 70 % of the pixels it
@@ -64,8 +68,8 @@ struct LoadingPlaceholderTests {
 
     /// Before the page has a size nothing is called blurry.
     @Test func withoutAScreenNothingIsCalledBlurry() {
-        let none = ViewerPicture.choose(preview: false, delivered: PixelSize(width: 160, height: 120), answered: true,
-                                        original: nil, screen: PixelSize(width: 0, height: 0))
+        let none = ViewerPicture.choose(delivered: PixelSize(width: 160, height: 120), original: nil,
+                                        screen: PixelSize(width: 0, height: 0))
         #expect(none == .sharp)
     }
 

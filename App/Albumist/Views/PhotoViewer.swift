@@ -787,13 +787,11 @@ private struct ZoomablePhoto: View {
         // not replace the new photo's.
         guard !Task.isCancelled else { return }
         let screen = PixelSize(width: Double(size.width * displayScale), height: Double(size.height * displayScale))
-        switch ViewerPicture.choose(preview: false, delivered: loaded.map(Self.pixelSize(of:)), answered: true,
-                                    original: basics?.pixels, screen: screen) {
+        switch ViewerPicture.choose(delivered: loaded.map(Self.pixelSize(of:)), original: basics?.pixels, screen: screen) {
         case .sharp:
             image = loaded
             onPicture(id, true)
         case .unavailable: becameUnavailable()
-        case .waiting: break
         }
     }
 

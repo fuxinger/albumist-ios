@@ -376,7 +376,11 @@ struct VideoViewerSourceTests {
         #expect(Self.inOrder(["await PhotoBasics.of(id)", "ThumbnailCache.shared.largeImage(for: id, pixels: pixels)",
                               "guard !Task.isCancelled", "ViewerPicture.choose(", "case .sharp:", "image = loaded",
                               "onPicture(id, true)", "case .unavailable:", "becameUnavailable()"], in: load), "\(load)")
-        #expect(load.contains("original: basics?.pixels"))
+        // The rule judges what Photos delivered; the page waits by itself until then (review F,
+        // F19: the rule's own "waiting" was never asked for).
+        #expect(Self.squeezed(load).contains("ViewerPicture.choose(delivered:loaded.map(Self.pixelSize(of:)),original:basics?.pixels,screen:screen)"),
+                "\(load)")
+        #expect(!load.contains(".waiting"))
         #expect(try #require(AppSource.body(of: "private func giveUp(", in: photo)).contains("becameUnavailable()"))
         #expect(try #require(AppSource.body(of: "private func becameUnavailable(", in: photo)).contains("onPicture(id, false)"))
         // The photo view leaves out a video's note only under a page that says it is not

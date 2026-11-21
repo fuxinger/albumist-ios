@@ -4691,39 +4691,59 @@
         }
       }
     },
-    "%lld Tage ohne Fotos" : {
+    "%lld %@ Tage ohne Fotos" : {
       "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Tag ohne Fotos"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Tage ohne Fotos"
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@days@"
+          },
+          "substitutions" : {
+            "days" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ day without photos"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ days without photos"
+                    }
+                  }
                 }
               }
             }
           }
         },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld day without photos"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld days without photos"
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@days@"
+          },
+          "substitutions" : {
+            "days" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Tag ohne Fotos"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Tage ohne Fotos"
+                    }
+                  }
                 }
               }
             }
@@ -4731,39 +4751,59 @@
         }
       }
     },
-    "%lld Tage dazwischen" : {
+    "%lld %@ Tage dazwischen" : {
       "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Tag dazwischen"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Tage dazwischen"
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@days@"
+          },
+          "substitutions" : {
+            "days" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ day in between"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ days in between"
+                    }
+                  }
                 }
               }
             }
           }
         },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld day in between"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld days in between"
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@days@"
+          },
+          "substitutions" : {
+            "days" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Tag dazwischen"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Tage dazwischen"
+                    }
+                  }
                 }
               }
             }

@@ -215,20 +215,20 @@ struct TripWorkshopView: View {
             if let before = around.before {
                 neighbourNode(before, side: .before)
                 if let gap = quietDays(before: before, span: span), gap > 0 {
-                    TripTimelineGapRow(text: Text("\(gap) Tage dazwischen"))
+                    TripTimelineGapRow(text: Text("\(gap) \(gap.formatted()) Tage dazwischen"))
                         .tripTimelineRow()
                 }
             }
             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                 if entry.quietDaysBefore > 0 {
-                    TripTimelineGapRow(text: Text("\(entry.quietDaysBefore) Tage ohne Fotos"))
+                    TripTimelineGapRow(text: Text("\(entry.quietDaysBefore) \(entry.quietDaysBefore.formatted()) Tage ohne Fotos"))
                         .tripTimelineRow()
                 }
                 dayRow(entry, index: index, entries: entries, around: around)
             }
             if let after = around.after {
                 if let gap = quietDays(after: after, span: span), gap > 0 {
-                    TripTimelineGapRow(text: Text("\(gap) Tage dazwischen"))
+                    TripTimelineGapRow(text: Text("\(gap) \(gap.formatted()) Tage dazwischen"))
                         .tripTimelineRow()
                 }
                 neighbourNode(after, side: .after)

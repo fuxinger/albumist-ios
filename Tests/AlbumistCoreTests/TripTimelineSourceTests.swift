@@ -39,8 +39,9 @@ struct TripTimelineSourceTests {
         let after = try #require(section.range(of: "neighbourNode(after,side:.after)"))
         #expect(before.lowerBound < daysAt.lowerBound && daysAt.lowerBound < after.lowerBound)
         // Days without photos between days and between the trips.
-        #expect(section.contains("TripTimelineGapRow(text:Text(\"\\(entry.quietDaysBefore)TageohneFotos\"))"))
-        #expect(section.components(separatedBy: "TripTimelineGapRow(text:Text(\"\\(gap)Tagedazwischen\"))").count - 1 == 2)
+        // Counted with a thousands separator (`CatalogWordingTests`): a neighbouring trip can be years away.
+        #expect(section.contains("TripTimelineGapRow(text:Text(\"\\(entry.quietDaysBefore)\\(entry.quietDaysBefore.formatted())TageohneFotos\"))"))
+        #expect(section.components(separatedBy: "TripTimelineGapRow(text:Text(\"\\(gap)\\(gap.formatted())Tagedazwischen\"))").count - 1 == 2)
         // The body shows it where the split and merge sections were.
         let body = Self.squeezed(try Self.body(["struct TripWorkshopView", "var body"], in: Self.workshop))
         #expect(body.contains("header(days)changesSection(saysWhy:!mergeShown)timelineSection(days,around:around)"))
@@ -118,20 +119,29 @@ struct TripTimelineSourceTests {
         }
     }
 
-    /// The new words, with English and their one and many forms.
-    @Test(arguments: [("%lld Tage ohne Fotos", "%lld Tag ohne Fotos", "%lld day without photos", "%lld days without photos"),
-                      ("%lld Tage dazwischen", "%lld Tag dazwischen", "%lld day in between", "%lld days in between")])
-    func theNewWordsAreInTheCatalog(key: String, germanOne: String, englishOne: String, englishOther: String) throws {
+    /// The new words, with English and their one and many forms, the number shown with a
+    /// thousands separator (`%lld %@`: the integer picks the form, the text shows it).
+    @Test(arguments: [("%lld %@ Tage ohne Fotos", "%2$@ Tag ohne Fotos", "%2$@ Tage ohne Fotos", "%2$@ day without photos", "%2$@ days without photos"),
+                      ("%lld %@ Tage dazwischen", "%2$@ Tag dazwischen", "%2$@ Tage dazwischen", "%2$@ day in between", "%2$@ days in between")])
+    func theNewWordsAreInTheCatalog(key: String, germanOne: String, germanOther: String, englishOne: String, englishOther: String) throws {
         let catalog = try StringCatalogTests.catalog()
         let entry = try #require(catalog[key], "\(key) is not in the catalog")
-        func plural(_ language: String, _ form: String) -> String? {
+        func days(_ language: String) -> [String: Any]? {
             let localization = StringCatalogTests.localization(entry, language)
-            let variations = (localization?["variations"] as? [String: Any])?["plural"] as? [String: Any]
+            #expect((localization?["stringUnit"] as? [String: Any])?["value"] as? String == "%#@days@", "\(language)")
+            return (localization?["substitutions"] as? [String: Any])?["days"] as? [String: Any]
+        }
+        func plural(_ language: String, _ form: String) -> String? {
+            let substitution = days(language)
+            #expect(substitution?["argNum"] as? Int == 1 && substitution?["formatSpecifier"] as? String == "lld", "\(language)")
+            let variations = (substitution?["variations"] as? [String: Any])?["plural"] as? [String: Any]
             return ((variations?[form] as? [String: Any])?["stringUnit"] as? [String: Any])?["value"] as? String
         }
         #expect(plural("de", "one") == germanOne)
-        #expect(plural("de", "other") == key)
+        #expect(plural("de", "other") == germanOther)
         #expect(plural("en", "one") == englishOne)
         #expect(plural("en", "other") == englishOther)
+        // The ungrouped keys of before are gone.
+        #expect(catalog[key.replacingOccurrences(of: "%lld %@", with: "%lld")] == nil)
     }
 }

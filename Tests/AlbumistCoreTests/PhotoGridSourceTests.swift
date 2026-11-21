@@ -209,8 +209,9 @@ struct PhotoGridSourceTests {
 
     /// Drag to select is UIKit's own pan beside the scroll view, only while the page selects: it
     /// begins only on a mostly sideways start (`PhotoGridDrag.startsSelection`), the scroll
-    /// view's pan (and any other pan, such as going back) waits for it to fail, so a vertical
-    /// swipe scrolls as before; a tap never begins it, so a tap still ticks one photo.
+    /// view's pan (and any other pan but the swipe back from the screen's edge, which it waits
+    /// for instead, review L7) waits for it to fail, so a vertical swipe scrolls as before; a tap
+    /// never begins it, so a tap still ticks one photo.
     @Test func dragToSelectIsUIKitsPanBesideTheScrollView() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
         #expect(view.contains(".gesture(PhotoGridSelectDrag(isEnabled:selecting&&!disabled,space:PhotoGridPlace.space,"
@@ -222,7 +223,11 @@ struct PhotoGridSourceTests {
                                                  in: Self.recognizers))
         #expect(begins.contains("PhotoGridDrag.startsSelection(dx:Double(moved.x),dy:Double(moved.y))"), "\(begins)")
         let waits = Self.squeezed(try Self.body(["final class PhotoGridSelectRecognizer", "shouldBeRequiredToFailBy"], in: Self.recognizers))
-        #expect(waits == "{otherGestureRecognizer!==self&&otherGestureRecognizerisUIPanGestureRecognizer}", "\(waits)")
+        #expect(waits == "{otherGestureRecognizer!==self&&otherGestureRecognizerisUIPanGestureRecognizer"
+                         + "&&!(otherGestureRecognizerisUIScreenEdgePanGestureRecognizer)}", "\(waits)")
+        // The swipe back from the screen's edge is never taken: the pan waits for it (review L7).
+        let edge = Self.squeezed(try Self.body(["final class PhotoGridSelectRecognizer", "shouldRequireFailureOf"], in: Self.recognizers))
+        #expect(edge == "{otherGestureRecognizerisUIScreenEdgePanGestureRecognizer}", "\(edge)")
         let made = Self.squeezed(try Self.body(["struct PhotoGridSelectDrag", "func makeUIGestureRecognizer("], in: Self.recognizers))
         #expect(made.contains("recognizer.maximumNumberOfTouches=1") && made.contains("recognizer.delegate=recognizer"), "\(made)")
         // The range is the core's, from where the finger touched, given back as it shrinks.

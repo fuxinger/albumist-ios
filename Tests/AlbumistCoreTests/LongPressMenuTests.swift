@@ -372,20 +372,36 @@ struct PhotoMenuTests {
     // MARK: Ignored (review C of design wave 2, L6)
 
     /// A photo the user ignored is ignored also without a state of its own (an album's photo the
-    /// analysis has not read yet: ignoring it gives it none), so its menu offers the way back;
-    /// a state that says ignored counts as well, and an excluded photo the user also ignored
-    /// can be un-ignored.
+    /// analysis has not read yet: ignoring it gives it none, `IgnoreChange`), so its menu offers
+    /// the way back. With a state, the state decides, as the photo's "Info" says it
+    /// (`OrganizationStatusResolver.overall`): an excluded photo is shown as excluded, also when
+    /// the user ignored it too.
     @Test func anIgnoredPhotoIsKnownWithOrWithoutAState() {
         let id: AssetID = "a"
         #expect(PhotoMenu.isIgnored(id, ignored: [id], state: nil))
         #expect(!PhotoMenu.isIgnored(id, ignored: [], state: nil))
         #expect(!PhotoMenu.isIgnored(id, ignored: ["b"], state: nil))
-        #expect(PhotoMenu.isIgnored(id, ignored: [], state: AssetOrganizationState(assetID: id, isIgnored: true)))
-        #expect(PhotoMenu.isIgnored(id, ignored: [], state: AssetOrganizationState(assetID: id, areas: [.trips: .ignored])))
-        #expect(!PhotoMenu.isIgnored(id, ignored: [], state: AssetOrganizationState(assetID: id, areas: [.trips: .organized])))
-        #expect(PhotoMenu.isIgnored(id, ignored: [id], state: AssetOrganizationState(assetID: id, isExcluded: true)))
         let ignored = PhotoMenu.isIgnored(id, ignored: [id], state: nil)
         #expect(PhotoMenu(place: .album, isIgnored: ignored).items.contains(.stopIgnoring))
+
+        let resolver = OrganizationStatusResolver(primaryAreas: [.places, .trips])
+        let states = [
+            AssetOrganizationState(assetID: id, isIgnored: true),
+            AssetOrganizationState(assetID: id, areas: [.trips: .ignored]),
+            AssetOrganizationState(assetID: id, areas: [.trips: .organized]),
+            AssetOrganizationState(assetID: id, areas: [.trips: .unorganized, .places: .ignored]),
+            AssetOrganizationState(assetID: id, areas: [.trips: .excluded], isExcluded: true),
+            AssetOrganizationState(assetID: id, areas: [.trips: .excluded, .places: .ignored]),
+            AssetOrganizationState(assetID: id),
+        ]
+        for state in states {
+            let info = resolver.overall(state) == .ignored
+            for set in [Set<AssetID>(), [id]] {
+                #expect(PhotoMenu.isIgnored(id, ignored: set, state: state) == info, "\(state), ignored \(set)")
+            }
+        }
+        #expect(PhotoMenu.isIgnored(id, ignored: [], state: states[0]))
+        #expect(!PhotoMenu.isIgnored(id, ignored: [id], state: states[4]), "excluded comes first, as in the Info")
     }
 
     // MARK: The lifted photo (review C of design wave 2, M2)

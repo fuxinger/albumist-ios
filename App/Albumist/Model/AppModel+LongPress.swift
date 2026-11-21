@@ -31,9 +31,11 @@ extension AppModel {
             offersNotATrip: offersNotATrip(proposal), canAnswerNotATrip: canChangeHome))
     }
 
-    /// The photo is ignored, as its "Info" tells it (`AssetDetailView`): its long press offers
-    /// "Nicht mehr ignorieren" instead of "Ignorieren".
+    /// The photo is ignored: its long press offers "Nicht mehr ignorieren" instead of
+    /// "Ignorieren". As its "Info" tells it (`AssetDetailView`) where it has a state; a photo
+    /// without one (an album's photo the analysis has not read yet) by the photos the user
+    /// ignored, as "Ignorieren" gives it no state (review C of design wave 2, L6).
     func isIgnored(_ id: AssetID) -> Bool {
-        states[id].map { resolver.overall($0) == .ignored } ?? false
+        PhotoMenu.isIgnored(id, ignored: ignoredIDs, state: states[id])
     }
 }

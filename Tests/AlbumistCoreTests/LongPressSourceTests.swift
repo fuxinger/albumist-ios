@@ -237,6 +237,18 @@ struct LongPressSourceTests {
         #expect(detail.contains("}remove:{idinTask{awaitmodel.removeFromProposal([id],proposal:proposal)}}"), "\(detail)")
     }
 
+    /// A photo the user ignored offers "Nicht mehr ignorieren" also without a state of its own
+    /// (an album's photo the analysis has not read yet: "Ignorieren" gives it none): the model
+    /// reads the photos the user ignored (`PhotoMenu.isIgnored`), and keeps them observed, so the
+    /// menu follows a tap at once (review C of design wave 2, L6).
+    @Test func anIgnoredPhotoWithoutAStateOffersTheWayBack() throws {
+        let ignored = Self.squeezed(try Self.body(["func isIgnored(_ id: AssetID) -> Bool"], in: Self.model))
+        #expect(ignored == "{PhotoMenu.isIgnored(id,ignored:ignoredIDs,state:states[id])}", "\(ignored)")
+        let model = try AppSource.read("App/Albumist/Model/AppModel.swift")
+        #expect(model.contains("    private(set) var ignoredIDs: Set<AssetID> = [] // Design W2 H7"))
+        #expect(!model.contains("@ObservationIgnored private var ignoredIDs"), "the menu would not follow a tap")
+    }
+
     // MARK: Words
 
     /// The new words are in the catalog with English, in Apple's title case for the menu items.

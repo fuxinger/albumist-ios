@@ -77,13 +77,15 @@ public struct PhotoMenu: Equatable, Sendable {
         !selecting && available
     }
 
-    /// Whether the photo is ignored, so its menu offers "Nicht mehr ignorieren": the user
-    /// ignored it (`ignored`, the store's with the taps since laid over it, `IgnoreChange`), or
-    /// its state says so. A photo without a state (an album's photo the analysis has not read
-    /// yet) gets none from "Ignorieren", only its place in `ignored` (review C of design wave 2,
-    /// L6); an excluded photo the user also ignored can be un-ignored as well.
+    /// Whether the photo is ignored, so its menu offers "Nicht mehr ignorieren". With a state, as
+    /// its "Info" says it (`OrganizationStatusResolver.overall`: an excluded photo shows as
+    /// excluded, also when the user ignored it too). A photo without a state (an album's photo
+    /// the analysis has not read yet) gets none from "Ignorieren", only its place in `ignored`
+    /// (the store's, with the taps since laid over it, `IgnoreChange`): that decides for it
+    /// (review C of design wave 2, L6).
     public static func isIgnored(_ id: AssetID, ignored: Set<AssetID>, state: AssetOrganizationState?) -> Bool {
-        ignored.contains(id) || (state.map(OrganizationStatusResolver.isIgnored) ?? false)
+        guard let state else { return ignored.contains(id) }
+        return !OrganizationStatusResolver.isExcluded(state) && OrganizationStatusResolver.isIgnored(state)
     }
 
     /// The size of the lifted photo, in points.

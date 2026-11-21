@@ -271,10 +271,11 @@ private struct ProposalListCard: View {
                   placeholderSymbol: proposal.placeholderSymbol, onOpen: opens) {
             actionButton
                 // While the list selects, a tap ticks the card: the button keeps its place, so
-                // nothing moves, but cannot be seen or tapped.
+                // nothing moves, but cannot be seen, tapped or reached any other way.
                 .opacity(selecting ? 0 : 1)
                 .allowsHitTesting(!selecting)
                 .accessibilityHidden(selecting)
+                .disabled(selecting)
         }
         .selected(selecting && isSelected)
         // Names the card's container (UI tests: the card, its body and its one button).
@@ -441,6 +442,10 @@ struct ProposalDetailView: View {
     @State private var left = false
     /// Its photos by day and its cover's candidates, kept while they stay the same.
     @State private var cache = ProposalPageCache()
+    /// The heights of the two words in the bar, measured: side by side each gets the taller
+    /// one's, so both buttons are as tall when "1.354 Fotos ergänzen" takes two lines (the
+    /// button styles grow with their words, not with the height the bar offers; review B, 7).
+    @State private var barWords = BarWordHeights()
     /// The keyboard is in the name field; "Namen eingeben" puts it there.
     @FocusState private var nameFocused: Bool
     /// VoiceOver goes along to the name field.
@@ -655,8 +660,10 @@ struct ProposalDetailView: View {
         // Swiped away while the change was being stored: told after the sheet closed, the trip
         // view still closes instead of staying on the trip that goes.
         .onChange(of: reshaped) { _, now in if now && !showWorkshop { dismiss() } }
+        // Done once the plan of its own preview ran: a plan that ended on another tab meanwhile
+        // does not close the page (review B of design wave 1, 12).
         .onChange(of: model.execution.finished) { _, finished in
-            if showsDirect && finished != nil { applied = true }
+            if showsDirect, let finished, finished.id == directPlan?.plan.id { applied = true }
         }
         .onChange(of: showsDirect) { _, showing in
             guard !showing else { return }
@@ -1074,16 +1081,16 @@ struct ProposalDetailView: View {
             if needsFullAccess {
                 // Nothing can be made before full access: the page's one filled button is
                 // "Einstellungen öffnen" (`FullAccessCard`).
-                notNowButton
+                notNowButton(card, beside: false)
             } else if typeSize.isAccessibilitySize {
                 VStack(spacing: Theme.Spacing.s) {
-                    primaryButton(card)
-                    notNowButton
+                    primaryButton(card, beside: false)
+                    notNowButton(card, beside: false)
                 }
             } else {
                 ActionBarLayout(spacing: Theme.Spacing.s) {
-                    notNowButton
-                    primaryButton(card)
+                    notNowButton(card, beside: true)
+                    primaryButton(card, beside: true)
                 }
             }
         }
@@ -1109,32 +1116,52 @@ struct ProposalDetailView: View {
     }
 
     /// Takes only the suggestion away; its photos and albums stay as they are (Scheibe 2).
-    private var notNowButton: some View {
-        Button("Nicht jetzt") {
+    /// VoiceOver hears what it sets aside ("Nicht jetzt: „Kyoto, Oktober 2024“"), also where it
+    /// reads the bar before the page's header; Voice Control knows it by its words too (review
+    /// B, 6). `beside`: next to the main button, as tall as it (`barWords`).
+    private func notNowButton(_ card: ProposalCardText, beside: Bool) -> some View {
+        Button {
             model.setDecision(.reject, for: proposal)
             leave()
+        } label: {
+            Text("Nicht jetzt")
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { barWords.notNow = $0 }
+                .frame(minHeight: beside ? barWords.tallest : nil)
         }
         .buttonStyle(SecondaryButtonStyle())
         .disabled(busy || !isCurrent)
+        .accessibilityLabel(card.spokenNotNow)
+        .accessibilityInputLabels([Text("Nicht jetzt"), card.spokenNotNow])
         .accessibilityIdentifier("proposal.notNow")
     }
 
     /// The one filled button of the page: what the suggestion needs next, in words that say
     /// what happens ("Album anlegen", "12 Fotos ergänzen", "Namen eingeben", "Album auswählen").
-    private func primaryButton(_ card: ProposalCardText) -> some View {
-        Button {
+    /// VoiceOver hears the album it acts on with them (`ProposalCardText.spokenMainAction`), or
+    /// what runs; Voice Control knows it by its words too (review B, 6). `beside`: next to
+    /// "Nicht jetzt", as tall as it (`barWords`).
+    private func primaryButton(_ card: ProposalCardText, beside: Bool) -> some View {
+        let word = primaryTitle(card)
+        let named = card.spokenMainAction ?? Text(word)
+        let spoken = creating ? Text("Album wird angelegt") : preparing ? Text("Wird vorbereitet") : named
+        return Button {
             primaryAction(card)
         } label: {
             if preparing || creating {
-                ProgressView().frame(maxWidth: .infinity)
-                    .accessibilityLabel(Text(creating ? "Album wird angelegt" : "Wird vorbereitet"))
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: beside ? barWords.tallest : nil)
+                    .accessibilityHidden(true) // the button's label says what runs
             } else {
-                Text(primaryTitle(card))
+                Text(word)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { barWords.main = $0 }
+                    .frame(minHeight: beside ? barWords.tallest : nil)
             }
         }
         .buttonStyle(PrimaryButtonStyle())
         // One album at a time, also one made from a card meanwhile (`AppModel.createNow`).
         .disabled(busy || model.quickCreating != nil || !canAct(card) || !isCurrent)
+        .accessibilityLabel(spoken)
+        .accessibilityInputLabels([Text(word), named])
         .accessibilityIdentifier("proposal.create")
     }
 
@@ -1415,8 +1442,10 @@ private struct ZoomedFromCard: ViewModifier {
     }
 }
 
-/// Two buttons side by side, the second (the main one) wider: 1.4 parts to 1, as in draft E2,
-/// so "1.354 Fotos ergänzen" stays on one line beside "Nicht jetzt". Both as tall as the taller.
+/// Two buttons side by side, the second (the main one) wider: 1.4 parts to 1, as in draft E2.
+/// A long main word ("1.354 Fotos ergänzen") still takes two lines on most iPhones: the bar is
+/// as tall as the taller button, the words of both get the taller word's height
+/// (`BarWordHeights`), and both sit centred on the bar (review B of design wave 1, 7).
 private struct ActionBarLayout: Layout {
     var spacing: CGFloat
     /// The main button's share of the width.
@@ -1441,11 +1470,22 @@ private struct ActionBarLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard subviews.count == 2 else { return }
         let (first, second) = widths(bounds.width)
-        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
+        // Centred on the bar's height: each button style keeps a height of its own.
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
                           proposal: ProposedViewSize(width: first, height: bounds.height))
-        subviews[1].place(at: CGPoint(x: bounds.minX + first + spacing, y: bounds.minY), anchor: .topLeading,
+        subviews[1].place(at: CGPoint(x: bounds.minX + first + spacing, y: bounds.midY), anchor: .leading,
                           proposal: ProposedViewSize(width: second, height: bounds.height))
     }
+}
+
+/// The measured heights of the two words in the open suggestion's bar
+/// (`ProposalDetailView.barWords`): side by side, both words get the taller one's height.
+private struct BarWordHeights: Equatable {
+    var notNow: CGFloat = 0
+    var main: CGFloat = 0
+
+    /// The taller word's height; 0 until a word was measured.
+    var tallest: CGFloat { max(notNow, main) }
 }
 
 /// Choose between creating a new album and using one of the matching albums.

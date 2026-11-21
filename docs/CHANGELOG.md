@@ -182,6 +182,14 @@
   beiseitegelegten Vorschlag trotzdem an. Eine Vorschau, die geöffnet wurde, während ein „Anlegen“ oder sein
   „Widerrufen“ noch lief, macht ihren Plan, sobald das fertig ist (sie blieb bei „Nichts zu tun“). Bleibt beim Neu-
   Planen nichts übrig, sagt sie „Nichts zu tun“ und warum, statt Nullen und einen grauen Knopf zu zeigen.
+- 21.11.: Die Zeilen im Tab „Alben“ trennen bei großer Schrift kein Wort mehr (Fable-Prüfung von Welle 1): Die Zahl
+  steht neben dem Titel, solange beide in eine Zeile passen, sonst darunter, wie in den Einstellungen; vorher brach ab
+  der Textgröße xxLarge „Unterbrochen“ neben „Verlauf und Rückgängig“ mitten im Wort. Bei den Bedienungshilfe-Größen
+  stehen Symbol und Pfeil über den Wörtern, die dann die ganze Breite haben.
+- 21.11.: Vorschläge (Fable-Prüfung von Welle 1): Persönliche Karten zeigen „Persönlicher Inhalt“ auch unter langen
+  Namen, VoiceOver sagt es ohne Symbol. Die Knöpfe eines offenen Vorschlags nennen für VoiceOver das Album und sind
+  gleich hoch; nur die eigene Vorschau schließt einen Vorschlag, und der Knopf einer Karte wartet, solange die Liste
+  auswählt.
 - 20.11.: Größte Schrift (P3-18): Das Mosaik eines Vorschlags zeigt „+24“ statt „+…“; die Zahl wächst nur bis
   zur ersten Bedienungshilfe-Größe, steht in einer Zeile und wird eher etwas
   kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht

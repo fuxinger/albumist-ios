@@ -2991,6 +2991,116 @@
         }
       }
     },
+    "Album für „%@“ auswählen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Album for “%@”"
+          }
+        }
+      }
+    },
+    "„%@“ um %lld %@ Fotos ergänzen" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%1$@“ um %#@photos@ ergänzen"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%3$@ Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%3$@ Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add %#@photos@ to “%1$@”"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%3$@ Photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%3$@ Photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Album „%@“ so lassen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leave Album “%@” as Is"
+          }
+        }
+      }
+    },
+    "Album „%@“ umbenennen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rename Album “%@”"
+          }
+        }
+      }
+    },
+    "Album „%@“ verschieben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move Album “%@”"
+          }
+        }
+      }
+    },
+    "Nicht jetzt: „%@“" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not Now: “%@”"
+          }
+        }
+      }
+    },
     "Anpassen" : {
       "localizations" : {
         "en" : {

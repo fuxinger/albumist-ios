@@ -33,23 +33,43 @@ extension AirborneFilterTests {
     /// the same life high up in the Andes or in Tibet: trains at 160 to 250 km/h, cars at 60 to
     /// 150 km/h.
     static func ground(seed: UInt64, count: Int, accuracy: Bool, aloft: Bool = false) -> [AssetSnapshot] {
+        var life = Ground(seed: seed, accuracy: accuracy, aloft: aloft)
+        while life.photos.count < count { life.session() }
+        return life.photos
+    }
+
+    /// The ground photos of `ground` so far, their random numbers and the time.
+    struct Ground {
+        let accuracy: Bool, aloft: Bool
         // The claims draw from their own numbers: with and without them, the photos are the same.
-        var random = MapRandom(seed: seed), claims = MapRandom(seed: seed &+ 1)
+        var random: MapRandom, claims: MapRandom
         var photos: [AssetSnapshot] = []
         var time = MapFixture.date("2020-01-01").timeIntervalSinceReferenceDate
         let home = Places.regensburg
-        func uniform(_ low: Double, _ high: Double) -> Double { low + (high - low) * random.unit() }
-        func add(_ scenario: String, _ coordinate: GeoCoordinate, error: Double, spot: Bool = false) {
+
+        init(seed: UInt64, accuracy: Bool, aloft: Bool) {
+            self.accuracy = accuracy
+            self.aloft = aloft
+            random = MapRandom(seed: seed)
+            claims = MapRandom(seed: seed &+ 1)
+        }
+
+        mutating func uniform(_ low: Double, _ high: Double) -> Double { low + (high - low) * random.unit() }
+
+        mutating func add(_ scenario: String, _ coordinate: GeoCoordinate, error: Double, spot: Bool = false) {
             let claim = claims.unit(), claimed = spot ? 30 + 70 * claim : max(5, error * (0.5 + claim))
             photos.append(shot("\(scenario)-\(photos.count)", Date(timeIntervalSinceReferenceDate: time), coordinate,
                                accuracy: accuracy ? claimed : nil))
         }
+
         /// A fix off `c` by GPS noise of `sigma` metres in each direction, and how far off.
-        func noisy(_ c: GeoCoordinate, sigma: Double) -> (GeoCoordinate, Double) {
+        mutating func noisy(_ c: GeoCoordinate, sigma: Double) -> (GeoCoordinate, Double) {
             let r = sigma * (-2 * log(max(1e-12, random.unit()))).squareRoot()
             return (offset(c, km: r / 1_000, bearing: uniform(0, 360)), r)
         }
-        func context(_ center: GeoCoordinate, after: Bool) {
+
+        /// Before or after a session: a photo at home, or one 5 to 50 km from the session, or neither.
+        mutating func context(_ center: GeoCoordinate, after: Bool) {
             let draw = random.int(0..<10)
             let gap = draw < 5 ? uniform(1, 4) * 3_600 : uniform(0.3, 3) * 3_600
             if after { time += gap }
@@ -62,102 +82,128 @@ extension AirborneFilterTests {
             }
             if !after { time += gap }
         }
-        func length() -> Int { random.int(0..<2) == 0 ? 3 + random.int(0..<6) : 9 + random.int(0..<92) }
 
-        while photos.count < count {
+        mutating func length() -> Int { random.int(0..<2) == 0 ? 3 + random.int(0..<6) : 9 + random.int(0..<92) }
+
+        /// A session of one scenario, 2 to 30 hours after the one before, with what comes before
+        /// and after it.
+        mutating func session() {
             time += uniform(2, 30) * 3_600
             let center = offset(home, km: uniform(5, 200), bearing: uniform(0, 360))
             context(center, after: false)
             let scenario = random.int(0..<6)
             switch scenario {
             case 0:
-                for k in 0..<length() {
-                    if k > 0 { time += uniform(1, 30) }
-                    let error = uniform(1_000, 3_000)
-                    add("jump", offset(center, km: error / 1_000, bearing: uniform(0, 360)), error: error)
-                }
+                jumpIndoors(center)
             case 1:
-                let bearing = uniform(0, 360)
-                let spots = [center, offset(center, km: uniform(1.5, 2.5), bearing: bearing),
-                             offset(center, km: uniform(1.5, 2.5), bearing: bearing + uniform(50, 130))]
-                let used = 2 + random.int(0..<2)
-                for k in 0..<length() {
-                    if k > 0 { time += uniform(2, 20) }
-                    let (c, _) = noisy(spots[random.int(0..<used)], sigma: 100)
-                    add("spots", c, error: GeoMath.distance(c, center), spot: true)
-                }
+                spotsIndoors(center)
             case 2:
-                var error = uniform(300, 3_000), bearing = uniform(0, 360)
-                let tau = uniform(2, 15)
-                for k in 0..<(3 + random.int(0..<4)) {
-                    if k > 0 {
-                        let seconds = uniform(1, 5)
-                        time += seconds
-                        error *= exp(-seconds / tau)
-                        bearing += uniform(-15, 15)
-                    }
-                    add("closing", offset(center, km: error / 1_000, bearing: bearing), error: error)
-                }
-                if random.int(0..<3) > 0 {
-                    for _ in 0..<(1 + random.int(0..<10)) {
-                        time += uniform(5, 60)
-                        let (c, e) = noisy(center, sigma: 15)
-                        add("closing", c, error: e)
-                    }
-                }
+                closeIn(center)
             case 3, 4:
-                let isTrain = scenario == 3
-                let name = isTrain ? "train" : "car"
-                let speed = (isTrain ? (aloft ? uniform(160, 250) : uniform(250, 350)) : (aloft ? uniform(60, 150) : uniform(80, 200))) / 3.6
-                let bearing = uniform(0, 360), sigma = uniform(5, 25)
-                let duration = uniform(15, 60) * 60
-                var t = 0.0
-                while t < duration {
-                    let series = random.int(0..<3) == 0 ? 2 + random.int(0..<7) : 1
-                    let lag = series > 1 && random.int(0..<4) == 0 ? uniform(100, 800) : 0, tau = uniform(2, 10)
-                    var since = 0.0
-                    for k in 0..<series {
-                        if k > 0 {
-                            let seconds = uniform(1, 4)
-                            since += seconds
-                            t += seconds
-                            time += seconds
-                        }
-                        let behind = lag * exp(-since / tau)
-                        let truth = offset(center, km: (speed * t - behind) / 1_000, bearing: bearing)
-                        var (c, e) = noisy(truth, sigma: sigma)
-                        if random.int(0..<20) == 0 {
-                            let off = uniform(100, 400)
-                            c = offset(c, km: off / 1_000, bearing: uniform(0, 360))
-                            e += off
-                        }
-                        add(lag > 0 ? "tunnel" : name, c, error: e + behind)
-                    }
-                    let gap = uniform(1, 10) * 60
-                    t += gap
-                    time += gap
-                }
+                ride(center, isTrain: scenario == 3)
             default:
-                let other = offset(center, km: uniform(3, 300), bearing: uniform(0, 360))
-                let indoors = random.int(0..<3) == 0
-                for round in 0..<(4 + random.int(0..<12)) {
-                    let here = round % 2 == 0 ? center : other
-                    for k in 0..<(1 + random.int(0..<5)) {
-                        if k > 0 { time += uniform(1, 5) }
-                        if indoors && round % 2 == 0 {
-                            let error = uniform(1_000, 3_000)
-                            add("shared", offset(here, km: error / 1_000, bearing: uniform(0, 360)), error: error)
-                        } else {
-                            let (c, e) = noisy(here, sigma: uniform(10, 100))
-                            add("shared", c, error: e)
-                        }
-                    }
-                    time += uniform(1, 30) * 60
-                }
+                twoPeople(center)
             }
             context(center, after: true)
         }
-        return photos
+
+        /// `jump`: indoors, each fix 1 to 3 km off the true place in any direction.
+        mutating func jumpIndoors(_ center: GeoCoordinate) {
+            for k in 0..<length() {
+                if k > 0 { time += uniform(1, 30) }
+                let error = uniform(1_000, 3_000)
+                add("jump", offset(center, km: error / 1_000, bearing: uniform(0, 360)), error: error)
+            }
+        }
+
+        /// `spots`: indoors, the location jumping between two or three spots.
+        mutating func spotsIndoors(_ center: GeoCoordinate) {
+            let bearing = uniform(0, 360)
+            let spots = [center, offset(center, km: uniform(1.5, 2.5), bearing: bearing),
+                         offset(center, km: uniform(1.5, 2.5), bearing: bearing + uniform(50, 130))]
+            let used = 2 + random.int(0..<2)
+            for k in 0..<length() {
+                if k > 0 { time += uniform(2, 20) }
+                let (c, _) = noisy(spots[random.int(0..<used)], sigma: 100)
+                add("spots", c, error: GeoMath.distance(c, center), spot: true)
+            }
+        }
+
+        /// `closing`: a coarse first fix closing in on the true place, then none or a few photos there.
+        mutating func closeIn(_ center: GeoCoordinate) {
+            var error = uniform(300, 3_000), bearing = uniform(0, 360)
+            let tau = uniform(2, 15)
+            for k in 0..<(3 + random.int(0..<4)) {
+                if k > 0 {
+                    let seconds = uniform(1, 5)
+                    time += seconds
+                    error *= exp(-seconds / tau)
+                    bearing += uniform(-15, 15)
+                }
+                add("closing", offset(center, km: error / 1_000, bearing: bearing), error: error)
+            }
+            if random.int(0..<3) > 0 {
+                for _ in 0..<(1 + random.int(0..<10)) {
+                    time += uniform(5, 60)
+                    let (c, e) = noisy(center, sigma: 15)
+                    add("closing", c, error: e)
+                }
+            }
+        }
+
+        /// `train` or `car`, and `tunnel` for a series right after a tunnel.
+        mutating func ride(_ center: GeoCoordinate, isTrain: Bool) {
+            let name = isTrain ? "train" : "car"
+            let speed = (isTrain ? (aloft ? uniform(160, 250) : uniform(250, 350)) : (aloft ? uniform(60, 150) : uniform(80, 200))) / 3.6
+            let bearing = uniform(0, 360), sigma = uniform(5, 25)
+            let duration = uniform(15, 60) * 60
+            var t = 0.0
+            while t < duration {
+                let series = random.int(0..<3) == 0 ? 2 + random.int(0..<7) : 1
+                let lag = series > 1 && random.int(0..<4) == 0 ? uniform(100, 800) : 0, tau = uniform(2, 10)
+                var since = 0.0
+                for k in 0..<series {
+                    if k > 0 {
+                        let seconds = uniform(1, 4)
+                        since += seconds
+                        t += seconds
+                        time += seconds
+                    }
+                    let behind = lag * exp(-since / tau)
+                    let truth = offset(center, km: (speed * t - behind) / 1_000, bearing: bearing)
+                    var (c, e) = noisy(truth, sigma: sigma)
+                    if random.int(0..<20) == 0 {
+                        let off = uniform(100, 400)
+                        c = offset(c, km: off / 1_000, bearing: uniform(0, 360))
+                        e += off
+                    }
+                    add(lag > 0 ? "tunnel" : name, c, error: e + behind)
+                }
+                let gap = uniform(1, 10) * 60
+                t += gap
+                time += gap
+            }
+        }
+
+        /// `shared`: two people's photos in one library, in turn.
+        mutating func twoPeople(_ center: GeoCoordinate) {
+            let other = offset(center, km: uniform(3, 300), bearing: uniform(0, 360))
+            let indoors = random.int(0..<3) == 0
+            for round in 0..<(4 + random.int(0..<12)) {
+                let here = round % 2 == 0 ? center : other
+                for k in 0..<(1 + random.int(0..<5)) {
+                    if k > 0 { time += uniform(1, 5) }
+                    if indoors && round % 2 == 0 {
+                        let error = uniform(1_000, 3_000)
+                        add("shared", offset(here, km: error / 1_000, bearing: uniform(0, 360)), error: error)
+                    } else {
+                        let (c, e) = noisy(here, sigma: uniform(10, 100))
+                        add("shared", c, error: e)
+                    }
+                }
+                time += uniform(1, 30) * 60
+            }
+        }
     }
 
     /// How many ground photos of each scenario of `ground` the rules take for window photos, and

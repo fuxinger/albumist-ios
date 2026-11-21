@@ -130,15 +130,25 @@ struct AirborneFilterTests {
         #expect(AirborneFilter.airborne(flight.photos) == flight.window)
     }
 
+    /// A flight of `theFirstAndLastWindowPhotosAreFound`: from and to which airport, how many
+    /// minutes before take-off the gate photo is taken, and the cruising speed.
+    struct FlightPlan {
+        var from: GeoCoordinate
+        var to: GeoCoordinate
+        var gate: Double
+        var cruise: Double
+    }
+
     /// Finding 1: with the gate photo 30 to 45 minutes before take-off and a window photo every 10
     /// minutes, the first and the last window photo of every flight were missed.
     @Test(arguments: ["rome", "lisbon", "tokyo"])
     func theFirstAndLastWindowPhotosAreFound(route: String) {
-        let (from, to, gate, cruise): (GeoCoordinate, GeoCoordinate, Double, Double) = switch route {
-        case "rome": (Self.munichAirport, Self.romeAirport, 30, 800)
-        case "lisbon": (Self.munichAirport, Self.lisbonAirport, 40, 850)
-        default: (Self.frankfurtAirport, Self.naritaAirport, 45, 880)
+        let plan = switch route {
+        case "rome": FlightPlan(from: Self.munichAirport, to: Self.romeAirport, gate: 30, cruise: 800)
+        case "lisbon": FlightPlan(from: Self.munichAirport, to: Self.lisbonAirport, gate: 40, cruise: 850)
+        default: FlightPlan(from: Self.frankfurtAirport, to: Self.naritaAirport, gate: 45, cruise: 880)
         }
+        let (from, to, gate, cruise) = (plan.from, plan.to, plan.gate, plan.cruise)
         let takeoff = MapFixture.date("2024-03-02 09:00")
         let journey = Self.flight(route, from: from, to: to, takeoff: takeoff, cruiseKmh: cruise, gate: [gate + 30, gate], arrival: [25, 40]) {
             Self.every(10, of: $0)
@@ -149,7 +159,8 @@ struct AirborneFilterTests {
         }
         let airborne = AirborneFilter.airborne(journey.photos + [home] + city)
         #expect(journey.window.count >= (route == "tokyo" ? 60 : route == "lisbon" ? 14 : 6))
-        #expect(airborne == journey.window, "\(route): missed \(journey.window.subtracting(airborne).count), on the ground \(airborne.subtracting(journey.window))")
+        #expect(airborne == journey.window,
+                "\(route): missed \(journey.window.subtracting(airborne).count), on the ground \(airborne.subtracting(journey.window))")
     }
 
     /// Munich → Lisbon at 830 km/h: window photos over France `windowAt` seconds after 09:15 (by

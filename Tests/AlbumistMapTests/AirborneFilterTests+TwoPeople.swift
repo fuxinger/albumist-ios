@@ -152,7 +152,8 @@ extension AirborneFilterTests {
         for k in 0..<18 {
             let count = k % 3 == 1 ? 1 : 3
             for s in 0..<count {
-                stays.append(Self.shot("stay-\(k)-\(s)", time.addingTimeInterval(Double(s) * 180), Fixture.jitter([Places.munich, Places.florence, Places.rome][k % 3], seed: s, meters: 800)))
+                stays.append(Self.shot("stay-\(k)-\(s)", time.addingTimeInterval(Double(s) * 180),
+                                       Fixture.jitter([Places.munich, Places.florence, Places.rome][k % 3], seed: s, meters: 800)))
             }
             time = Self.minutes(time, 25 + Double(count - 1) * 3)
         }

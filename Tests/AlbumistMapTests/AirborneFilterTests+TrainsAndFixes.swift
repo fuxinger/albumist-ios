@@ -58,9 +58,13 @@ extension AirborneFilterTests {
         // from and to a stay.
         let a = MapFixture.at(48.2000, 11.6000), c = Self.offset(a, km: 3.1, bearing: 90), e = Self.offset(c, km: 3.1, bearing: 90)
         let t0 = MapFixture.date("2024-02-03 10:00")
-        var line = (0..<8).map { Self.shot("a-\($0)", t0.addingTimeInterval(Double($0) * 10), Fixture.jitter(Self.offset(a, km: 1.2, bearing: 270), seed: $0, meters: 300)) }
+        var line = (0..<8).map {
+            Self.shot("a-\($0)", t0.addingTimeInterval(Double($0) * 10), Fixture.jitter(Self.offset(a, km: 1.2, bearing: 270), seed: $0, meters: 300))
+        }
         line += [Self.shot("a", t0.addingTimeInterval(80), a), Self.shot("c", t0.addingTimeInterval(90), c), Self.shot("e", t0.addingTimeInterval(100), e)]
-        line += (0..<8).map { Self.shot("e-\($0)", t0.addingTimeInterval(110 + Double($0) * 10), Fixture.jitter(Self.offset(e, km: 1.2, bearing: 90), seed: $0, meters: 300)) }
+        line += (0..<8).map {
+            Self.shot("e-\($0)", t0.addingTimeInterval(110 + Double($0) * 10), Fixture.jitter(Self.offset(e, km: 1.2, bearing: 90), seed: $0, meters: 300))
+        }
         #expect(AirborneFilter.airborne(line).isEmpty)
         // Documented: the same three photos alone, without a photo near either end, are just what
         // three window photos ten seconds apart look like.
@@ -78,7 +82,8 @@ extension AirborneFilterTests {
         var photos: [AssetSnapshot] = []
         while photos.count < 900 {
             time += 2 + random.unit() * 18
-            photos.append(Self.shot("spots-\(photos.count)", Date(timeIntervalSinceReferenceDate: time), Fixture.jitter(spots[random.int(0..<3)], seed: photos.count, meters: 200)))
+            photos.append(Self.shot("spots-\(photos.count)", Date(timeIntervalSinceReferenceDate: time),
+                                    Fixture.jitter(spots[random.int(0..<3)], seed: photos.count, meters: 200)))
         }
         // Evenings whose location lands 1 to 3 km off in any direction, a photo every 2 to 30
         // (on the last evening 2 to 60) seconds, with photos before and after at home 15 km away.
@@ -99,11 +104,25 @@ extension AirborneFilterTests {
         return photos
     }
 
+    /// A step of a fix in `gpsErrorsMakeNoSeries`: seconds after the photo before, and how far the
+    /// fix moves on (kilometres) and which way (degrees clockwise from north).
+    struct FixStep {
+        var seconds: Double
+        var km: Double
+        var bearing: Double
+
+        init(_ seconds: Double, _ km: Double, _ bearing: Double) {
+            self.seconds = seconds
+            self.km = km
+            self.bearing = bearing
+        }
+    }
+
     /// Rule 3 against GPS errors: a fix jumping away and back, a coarse fix closing in on the true
     /// place, a slow drift indoors, and a steady slide with its stated accuracy.
     @Test func gpsErrorsMakeNoSeries() {
         let t0 = MapFixture.date("2024-03-03 12:00"), here = MapFixture.at(48.3000, 11.4000)
-        func series(_ name: String, _ steps: [(seconds: Double, km: Double, bearing: Double)], accuracy: Double? = nil) -> [AssetSnapshot] {
+        func series(_ name: String, _ steps: [FixStep], accuracy: Double? = nil) -> [AssetSnapshot] {
             var position = here, time = t0
             var photos = [Self.shot("\(name)-0", time, position, accuracy: accuracy)]
             for (k, step) in steps.enumerated() {
@@ -114,17 +133,17 @@ extension AirborneFilterTests {
             return photos
         }
         // Away 700 m and back, every 2 seconds (1,260 km/h each step).
-        let jumping = series("jump", (0..<7).map { (2, 0.7, $0 % 2 == 0 ? 60 : 240) })
+        let jumping = series("jump", (0..<7).map { FixStep(2, 0.7, $0 % 2 == 0 ? 60 : 240) })
         // Closing in: 800, 520, 340, 220 and 140 m, 2 seconds apart, in one direction.
-        let closing = series("close", [(2, 0.8, 10), (2, 0.52, 10), (2, 0.34, 10), (2, 0.22, 10), (2, 0.14, 10)])
+        let closing = series("close", [FixStep(2, 0.8, 10), FixStep(2, 0.52, 10), FixStep(2, 0.34, 10), FixStep(2, 0.22, 10), FixStep(2, 0.14, 10)])
         // Drifting at 5 m/s.
-        let drift = series("drift", (0..<8).map { _ in (3, 0.015, 200) })
+        let drift = series("drift", (0..<8).map { _ in FixStep(3, 0.015, 200) })
         // Sliding 400 m every 2 seconds (720 km/h) in a straight line, each fix stating 250 m.
-        let stated = series("stated", (0..<4).map { _ in (2, 0.4, 135) }, accuracy: 250)
+        let stated = series("stated", (0..<4).map { _ in FixStep(2, 0.4, 135) }, accuracy: 250)
         #expect(AirborneFilter.airborne(jumping + closing + drift + stated).isEmpty)
         // Documented: the same slide without a stated accuracy is what a series out of the window
         // at 720 km/h looks like.
-        let slide = series("slide", (0..<4).map { _ in (2, 0.4, 135) })
+        let slide = series("slide", (0..<4).map { _ in FixStep(2, 0.4, 135) })
         #expect(AirborneFilter.airborne(slide) == Set(slide.map(\.id)))
     }
 

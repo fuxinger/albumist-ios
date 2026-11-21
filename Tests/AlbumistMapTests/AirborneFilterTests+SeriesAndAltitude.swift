@@ -59,6 +59,22 @@ extension AirborneFilterTests {
         #expect(summary.trips.map(\.geometry.airborneCount) == [3])
     }
 
+    /// A quick series of window photos of `quickSeriesOfWindowPhotosMakeNoCountry`: its photos'
+    /// seconds after 09:15, the fix each photo gets for its seconds, and whether the rules find it.
+    struct QuickSeries {
+        var name: String
+        var seconds: [Double]
+        var fix: (Double) -> Double
+        var found: Bool
+
+        init(_ name: String, _ seconds: [Double], _ fix: @escaping (Double) -> Double, _ found: Bool) {
+            self.name = name
+            self.seconds = seconds
+            self.fix = fix
+            self.found = found
+        }
+    }
+
     /// Finding 2.2 of the third review: a quick series was a burst only when every step from one
     /// photo to the next was 200 m and more and the steps were within a factor of 1.5. Two photos
     /// of one moment (HDR with "Keep Normal Photo", a duplicate) broke the chain, and a photo half
@@ -74,15 +90,16 @@ extension AirborneFilterTests {
     /// for nothing (`FlightJudgement`): no country, no place, no town.
     @Test func quickSeriesOfWindowPhotosMakeNoCountry() {
         let lastFullSecond: (Double) -> Double = { $0.rounded(.down) }
-        let cases: [(name: String, seconds: [Double], fix: (Double) -> Double, found: Bool)] = [
-            ("three 4 s apart, each kept twice", [0, 0, 4, 4, 8, 8], { $0 }, true),
-            ("three 4 s apart and a fourth half a second after the third", [0, 4, 8, 8.5], { $0 }, true),
-            ("three 0.8 s apart", [0, 0.8, 1.6], { $0 }, false),
-            ("three kept of a burst, 0.3 s apart", [0, 0.3, 0.6], { $0 }, false),
-            ("three 1.5 s apart, each with the fix of the last full second", [0, 1.5, 3], lastFullSecond, false),
-            ("a pair half a second apart and a third 4 s later", [0, 0.5, 4.5], { $0 }, false),
+        let cases = [
+            QuickSeries("three 4 s apart, each kept twice", [0, 0, 4, 4, 8, 8], { $0 }, true),
+            QuickSeries("three 4 s apart and a fourth half a second after the third", [0, 4, 8, 8.5], { $0 }, true),
+            QuickSeries("three 0.8 s apart", [0, 0.8, 1.6], { $0 }, false),
+            QuickSeries("three kept of a burst, 0.3 s apart", [0, 0.3, 0.6], { $0 }, false),
+            QuickSeries("three 1.5 s apart, each with the fix of the last full second", [0, 1.5, 3], lastFullSecond, false),
+            QuickSeries("a pair half a second apart and a third 4 s later", [0, 0.5, 4.5], { $0 }, false),
         ]
-        for (name, seconds, fix, found) in cases {
+        for quick in cases {
+            let (name, seconds, fix, found) = (quick.name, quick.seconds, quick.fix, quick.found)
             let input = Self.lisbonLibrary(gateSecondsBefore: 9_900, windowAt: seconds, fix: fix)
             let window = Set(seconds.indices.map { AssetID("window-\($0)") })
             let judged = AirborneFilter.judge(input.facts.map(\.asset))
@@ -169,6 +186,21 @@ extension AirborneFilterTests {
     static let genevaAirport = MapFixture.at(46.2381, 6.1090)
     static let geneva = MapFixture.at(46.2044, 6.1432)
 
+    /// A flight of `photosOnFinalApproachAndRightAfterTakeOffCountForNothing`: from and to which
+    /// airport, the town at its end, the minutes after take-off of its series (negative: before
+    /// landing), the country and town of its gate photo, of its series and at its end, and the
+    /// airports' altitude.
+    struct SeriesFlight {
+        var from: GeoCoordinate
+        var to: GeoCoordinate
+        var town: GeoCoordinate
+        var seriesAt: Double
+        var origin: (String, String)
+        var below: (String, String)
+        var destination: (String, String)
+        var field: Double
+    }
+
     /// Finding 2.1 of the third review: the series people take out of the window on final
     /// approach and right after take-off. Lisbon → Geneva comes in over France: three photos four
     /// seconds apart three minutes before landing (380 km/h, 16 km out) moved on slower than
@@ -185,8 +217,9 @@ extension AirborneFilterTests {
         /// take-off (negative: before landing), the arrival photo 25 minutes after landing, four
         /// days in town. Altitudes: the airports' own, 10,500 m at cruise, three degrees up from
         /// the nearer airport.
-        func library(from: GeoCoordinate, to: GeoCoordinate, town: GeoCoordinate, seriesAt minutes: Double, origin: (String, String),
-                     below: (String, String), destination: (String, String), field: Double) -> MapInput {
+        func library(_ flight: SeriesFlight) -> MapInput {
+            let (from, to, town, minutes) = (flight.from, flight.to, flight.town, flight.seriesAt)
+            let (origin, below, destination, field) = (flight.origin, flight.below, flight.destination, flight.field)
             let trip = AlbumistID("trip"), takeoff = MapFixture.date("2024-04-02 08:00")
             let path = Flight(from: from, to: to, takeoff: takeoff)
             var photos = [MapFixture.photo("gate", at: Self.minutes(takeoff, -40), from, country: origin.0, town: origin.1)]
@@ -210,13 +243,14 @@ extension AirborneFilterTests {
             return MapInput(facts: members, trips: [MapFixture.trip(trip, members)], altitudes: storedAltitudes ? altitudes : [:],
                             calendar: MapFixture.calendar, now: MapFixture.date("2024-07-01"))
         }
-        let approach = library(from: Self.lisbonAirport, to: Self.genevaAirport, town: Self.geneva, seriesAt: -3, origin: ("PT", "Lissabon"),
-                               below: ("FR", "Saint-Julien"), destination: ("CH", "Genf"), field: 420)
-        let climb = library(from: Self.munichAirport, to: Self.lisbonAirport, town: Places.lisbon, seriesAt: 3, origin: ("DE", "Freising"),
-                            below: ("DE", "Erding"), destination: ("PT", "Lissabon"), field: 450)
+        let approach = library(SeriesFlight(from: Self.lisbonAirport, to: Self.genevaAirport, town: Self.geneva, seriesAt: -3,
+                                            origin: ("PT", "Lissabon"), below: ("FR", "Saint-Julien"), destination: ("CH", "Genf"), field: 420))
+        let climb = library(SeriesFlight(from: Self.munichAirport, to: Self.lisbonAirport, town: Places.lisbon, seriesAt: 3,
+                                         origin: ("DE", "Freising"), below: ("DE", "Erding"), destination: ("PT", "Lissabon"), field: 450))
         for (name, input, town) in [("approach to Geneva", approach, "Saint-Julien"), ("climb out of Munich", climb, "Erding")] {
             let airborne = AirborneFilter.airborne(input.facts.map(\.asset), altitudes: input.altitudes)
-            #expect(airborne.isSuperset(of: ["series-0", "series-1", "series-2"]), "\(name): in flight \(airborne.filter { $0.rawValue.hasPrefix("series") }.sorted())")
+            #expect(airborne.isSuperset(of: ["series-0", "series-1", "series-2"]),
+                    "\(name): in flight \(airborne.filter { $0.rawValue.hasPrefix("series") }.sorted())")
             let summary = MapSummary.build(input)
             #expect(!summary.trips.contains { $0.geometry.places.contains { $0.name == town } }, "\(name)")
             let records = summary.numbers.records.filter { $0.placeName == town }.map { "\($0.kind.rawValue) \(Int($0.value))" }
@@ -225,6 +259,17 @@ extension AirborneFilterTests {
         let summary = MapSummary.build(approach)
         #expect(!summary.countries.map(\.code).contains("FR"), "countries \(summary.countries.map(\.code))")
         #expect(summary.numbers.cities == 2, "\(summary.numbers.cities) towns")
+    }
+
+    /// A ride of `summitsCableCarsAndMountainRailwaysKeepTheirPhotos`: where it starts, which way
+    /// (degrees clockwise from north) and how fast it goes, when it starts and how many minutes it
+    /// takes.
+    struct Ride {
+        var from: GeoCoordinate
+        var bearing: Double
+        var kmh: Double
+        var start: String
+        var minutes: Double
     }
 
     /// What moves on the ground up there keeps its photos when altitudes are stored: nothing above
@@ -237,27 +282,27 @@ extension AirborneFilterTests {
     @Test func summitsCableCarsAndMountainRailwaysKeepTheirPhotos() {
         var random = MapRandom(seed: 17)
         var photos: [AssetSnapshot] = [], altitudes: [AssetID: Double] = [:]
-        func ride(_ name: String, from: GeoCoordinate, bearing: Double, kmh: Double, start: String, minutes: Double, altitude: (Double) -> Double) {
-            let t0 = MapFixture.date(start)
+        func ride(_ name: String, _ way: Ride, altitude: (Double) -> Double) {
+            let t0 = MapFixture.date(way.start)
             var t = 0.0
-            while t <= minutes * 60 {
+            while t <= way.minutes * 60 {
                 for k in 0..<6 {
                     if k > 0 { t += 1 + 3 * random.unit() }
                     let id = "\(name)-\(photos.count)"
-                    let truth = Self.offset(from, km: kmh * t / 3_600, bearing: bearing)
+                    let truth = Self.offset(way.from, km: way.kmh * t / 3_600, bearing: way.bearing)
                     photos.append(Self.shot(id, t0.addingTimeInterval(t), Fixture.jitter(truth, seed: photos.count, meters: 50)))
-                    altitudes[AssetID(id)] = altitude(min(1, t / (minutes * 60)))
+                    altitudes[AssetID(id)] = altitude(min(1, t / (way.minutes * 60)))
                 }
                 t += 30 + 90 * random.unit()
             }
         }
         let uhuru = MapFixture.at(-3.0758, 37.3533)
-        ride("kibo-up", from: Self.offset(uhuru, km: 1.2, bearing: 60), bearing: 240, kmh: 1.6, start: "2024-02-10 06:00",
-             minutes: 45) { 5_756 + 139 * $0 }
-        ride("kibo-top", from: uhuru, bearing: 0, kmh: 0, start: "2024-02-10 06:46", minutes: 20) { _ in 5_895 }
-        ride("midi", from: MapFixture.at(45.9046, 6.8869), bearing: 179, kmh: 43, start: "2024-07-20 09:00", minutes: 4) { 2_317 + 1_460 * $0 }
-        ride("qingzang", from: MapFixture.at(33.0700, 91.9800), bearing: 200, kmh: 120, start: "2024-08-03 11:00", minutes: 30) { 5_072 - 200 * $0 }
-        ride("lanxin", from: MapFixture.at(37.7000, 101.3000), bearing: 330, kmh: 250, start: "2024-09-14 15:00", minutes: 30) { 3_400 + 200 * $0 }
+        ride("kibo-up", Ride(from: Self.offset(uhuru, km: 1.2, bearing: 60), bearing: 240, kmh: 1.6, start: "2024-02-10 06:00",
+                             minutes: 45)) { 5_756 + 139 * $0 }
+        ride("kibo-top", Ride(from: uhuru, bearing: 0, kmh: 0, start: "2024-02-10 06:46", minutes: 20)) { _ in 5_895 }
+        ride("midi", Ride(from: MapFixture.at(45.9046, 6.8869), bearing: 179, kmh: 43, start: "2024-07-20 09:00", minutes: 4)) { 2_317 + 1_460 * $0 }
+        ride("qingzang", Ride(from: MapFixture.at(33.0700, 91.9800), bearing: 200, kmh: 120, start: "2024-08-03 11:00", minutes: 30)) { 5_072 - 200 * $0 }
+        ride("lanxin", Ride(from: MapFixture.at(37.7000, 101.3000), bearing: 330, kmh: 250, start: "2024-09-14 15:00", minutes: 30)) { 3_400 + 200 * $0 }
         #expect(altitudes.values.filter { $0 > AirborneFilter.aloftAltitude }.count > 300)
         #expect(AirborneFilter.airborne(photos, altitudes: altitudes).isEmpty)
     }

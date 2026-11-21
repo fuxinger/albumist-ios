@@ -92,6 +92,23 @@ extension AirborneFilterTests {
         }
     }
 
+    /// A pace of `lonelySeriesAtThePacePeopleTapAreFound`: the seconds between the photos of a
+    /// series, whether the iPhone updates the fix once a second, and how many series of three and of
+    /// four are found whole at least.
+    struct Pace {
+        var spacing: ClosedRange<Double>
+        var clock: Bool
+        var three: Int
+        var four: Int
+
+        init(_ spacing: ClosedRange<Double>, _ clock: Bool, _ three: Int, _ four: Int) {
+            self.spacing = spacing
+            self.clock = clock
+            self.three = three
+            self.four = four
+        }
+    }
+
     /// Finding 2.2 of the third review at scale: the same flights, the photos of a series 1 to 3
     /// seconds apart as people tap, or 0.3 to 2 seconds, with the tests' fixes (`fix`) and with a
     /// fix updated once a second. Found whole, of 500 (tests' fixes, one-second clock):
@@ -112,10 +129,11 @@ extension AirborneFilterTests {
     /// timestamp, which the analysis does not store yet) would make their steps exact.
     @Test(arguments: [3, 4])
     func lonelySeriesAtThePacePeopleTapAreFound(size: Int) {
-        let floors: [(spacing: ClosedRange<Double>, clock: Bool, three: Int, four: Int)] = [
-            (1...3, false, 300, 225), (1...3, true, 285, 220), (0.3...2, false, 110, 180), (0.3...2, true, 130, 180),
+        let floors = [
+            Pace(1...3, false, 300, 225), Pace(1...3, true, 285, 220), Pace(0.3...2, false, 110, 180), Pace(0.3...2, true, 130, 180),
         ]
-        for (spacing, clock, three, four) in floors {
+        for pace in floors {
+            let (spacing, clock, three, four) = (pace.spacing, pace.clock, pace.three, pace.four)
             let (photos, series) = Self.seriesFlights(seed: 21, flights: 500, size: size, spacing: spacing, clock: clock)
             let airborne = AirborneFilter.airborne(photos)
             let found = series.filter { $0.allSatisfy(airborne.contains) }.count
@@ -125,6 +143,14 @@ extension AirborneFilterTests {
         }
     }
 
+    /// The photos of `flightsAndLayovers`, and which of them are window photos and which are taken
+    /// at a layover.
+    struct FlightsAndLayovers {
+        var photos: [AssetSnapshot]
+        var window: Set<AssetID>
+        var layover: Set<AssetID>
+    }
+
     /// Flights between `europe`'s airports with window photos as people take them, every 5 to 15
     /// minutes from 8 to 14 minutes after take-off to 8 minutes before landing (`fix`): one photo
     /// seven times in ten, else two or three a fraction of a second apart, or three to five 2 to 5
@@ -132,7 +158,7 @@ extension AirborneFilterTests {
     /// minutes after landing. And as many short-haul layovers: a photo at Berlin airport, two to
     /// four at Vienna airport within 5 to 40 seconds 65 to 80 minutes later, one at Athens airport
     /// 1.5 to 2 hours after them.
-    static func flightsAndLayovers(seed: UInt64, flights: Int) -> (photos: [AssetSnapshot], window: Set<AssetID>, layover: Set<AssetID>) {
+    static func flightsAndLayovers(seed: UInt64, flights: Int) -> FlightsAndLayovers {
         var random = MapRandom(seed: seed)
         func uniform(_ low: Double, _ high: Double) -> Double { low + (high - low) * random.unit() }
         var photos: [AssetSnapshot] = [], window = Set<AssetID>(), layover = Set<AssetID>()
@@ -177,7 +203,7 @@ extension AirborneFilterTests {
             let arrival = t0.addingTimeInterval(start + span + uniform(5_400, 7_200))
             photos.append(shot("ath-\(h)", arrival, Fixture.jitter(athens, seed: h, meters: 300)))
         }
-        return (photos, window, layover)
+        return FlightsAndLayovers(photos: photos, window: window, layover: layover)
     }
 
     /// Finding 9 of the second review, at scale: 300 flights with window photos as people take
@@ -186,7 +212,8 @@ extension AirborneFilterTests {
     /// two or three photos a fraction of a second apart as a flight's first or last window photos
     /// (rule 4) could show a stay: their fixes, up to a second old, had barely moved on.
     @Test func windowPhotosSecondsApartAreFoundAndQuickSeriesAtLayoversAreNot() {
-        let (photos, window, layover) = Self.flightsAndLayovers(seed: 31, flights: 300)
+        let library = Self.flightsAndLayovers(seed: 31, flights: 300)
+        let (photos, window, layover) = (library.photos, library.window, library.layover)
         let airborne = AirborneFilter.airborne(photos)
         #expect(window.count > 5_000 && layover.count > 800)
         #expect(window.isSubset(of: airborne), "missed \(window.subtracting(airborne).count) of \(window.count)")

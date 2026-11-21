@@ -56,7 +56,9 @@ Alle Seiten übernehmen ihn.
 
 Das Repository heißt `albumist-ios`, die Adressen oben gelten seit der Umbenennung. Die
 Adresse mit dem früheren Namen leitet GitHub Pages nicht weiter: In App Store Connect
-müssen Datenschutz-, Support- und Marketing-URL die Adressen oben sein.
+müssen Datenschutz-, Support- und Marketing-URL die Adressen oben sein. Das erledigt der
+nächste TestFlight-Lauf selbst (`.github/scripts/asc_urls.py`, Schritt „App Store Connect addresses
+of the website“): Er stellt jede Adresse der alten Seite auf dieselbe Seite unter der neuen um.
 Eine eigene Adresse ist weiter möglich:
 - Eine eigene Domain kaufen (etwa 1 € im Monat) und unter Settings › Pages
   bei *Custom domain* eintragen.

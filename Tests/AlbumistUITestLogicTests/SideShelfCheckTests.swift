@@ -99,6 +99,41 @@ struct SideShelfCheckTests {
                                            screen: screen) == nil)
     }
 
+    /// A shelf wider than the screen holds cards no swipe brings in whole: no peek (second review
+    /// of the side check). So does a scroll view laid out off the side in another one.
+    @Test func aShelfWiderThanTheScreenPassesNoCard() {
+        let wide = SideShelfCheck.Ancestor(frame: CGRect(x: 0, y: 208, width: 500, height: 220), isScrollView: true)
+        #expect(SideShelfCheck.peekingCard(of: CGRect(x: 374, y: 218, width: 42, height: 22),
+                                           ancestors: [window, page, wide, .init(frame: third, isScrollView: false)],
+                                           screen: screen) == nil)
+        #expect(SideShelfCheck.shelf([window, page, wide], screen: screen) == nil)
+        #expect(SideShelfCheck.shelf([window, page, shelf], screen: screen) == shelf.frame)
+        #expect(SideShelfCheck.shelf([window, page], screen: screen) == nil)
+    }
+
+    /// The tree may list a card's hidden texts beside the card instead of under it (its cover and
+    /// texts are hidden from VoiceOver, the card's body speaks for them): then the card is found
+    /// by its frame among the shelf's cards of the same snapshot.
+    @Test func aTextBesideItsCardIsMatchedByFrame() {
+        let text = CGRect(x: 366, y: 380, width: 142, height: 18)
+        #expect(SideShelfCheck.peekingCard(of: text, ancestors: [window, page, shelf], cards: [third], screen: screen) == third)
+        // Also when the text hangs under the page only.
+        #expect(SideShelfCheck.peekingCard(of: text, ancestors: [window, page], cards: [third], screen: screen) == third)
+        // Without a card that holds it: fails as before.
+        #expect(SideShelfCheck.peekingCard(of: text, ancestors: [window, page, shelf], cards: [], screen: screen) == nil)
+        // A card on screen holds no peek.
+        let onScreen = CGRect(x: 200, y: 210, width: 163, height: 210)
+        #expect(SideShelfCheck.peekingCard(of: CGRect(x: 210, y: 380, width: 180, height: 18), ancestors: [window, page, shelf],
+                                           cards: [onScreen], screen: screen) == nil)
+    }
+
+    /// Only an element of a shelf narrower than the screen is a card for the match by frame.
+    @Test func aShelfCardIsNarrowerThanTheScreenAndInAShelf() {
+        #expect(SideShelfCheck.isShelfCard(third, ancestors: [window, page, shelf], screen: screen))
+        #expect(!SideShelfCheck.isShelfCard(third, ancestors: [window, page], screen: screen))
+        #expect(!SideShelfCheck.isShelfCard(CGRect(x: 16, y: 208, width: 700, height: 220), ancestors: [window, page, shelf], screen: screen))
+    }
+
     /// The audit names an element by its frame only: it matches a card noted in the tree when
     /// it runs off the side and lies in that card.
     @Test func theAuditsFindingMatchesTheCardItLiesIn() {

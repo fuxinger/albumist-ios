@@ -17,12 +17,18 @@ struct UITestHelperSourceTests {
         for path in AppSource.swiftFiles(under: "App/AlbumistUITests") {
             let lines = try AppSource.read(path).components(separatedBy: "\n")
             for (index, line) in lines.enumerated() {
-                guard let tap = line.firstMatch(of: /\b(\w+)\.tap\(\)/) else { continue }
-                let name = String(tap.1)
-                guard name != "app" else { continue }
-                for later in lines[(index + 1)..<min(lines.count, index + 4)]
-                where later.contains("print(") && later.contains("\\(\(name).") {
-                    found.append("\(path):\(index + 1): \(later.trimmingCharacters(in: .whitespaces))")
+                // `x.tap()` and the tests' own `tap(x, "step")`. Reads that check the same
+                // screen (a selection, a field's value) stay allowed: they read neither the
+                // identifier nor the label, which only name the element in a report.
+                var names = Set(line.matches(of: /\b(\w+)\.tap\(\)/).map { String($0.1) })
+                names.formUnion(line.matches(of: /\btap\((\w+)\s*,/).map { String($0.1) })
+                for name in names.subtracting(["app", "self"]) {
+                    for later in lines[(index + 1)..<min(lines.count, index + 9)] {
+                        if later.contains(" \(name) = ") { break }
+                        if later.contains("\(name).identifier") || later.contains("\(name).label") {
+                            found.append("\(path):\(index + 1): \(later.trimmingCharacters(in: .whitespaces))")
+                        }
+                    }
                 }
             }
         }
@@ -58,6 +64,8 @@ struct UITestHelperSourceTests {
         #expect(test6.contains("UITestScreens.TrialYear.allYearsButton(app)"), "test6 does not take in all years by every wording")
         let prepare = try #require(AppSource.body(of: "private func prepare(", in: flow))
         #expect(prepare.contains("UITestScreens.TrialYear.allYearsButton(app)"), "prepare leaves a trial year on")
+        // Since prepare repairs it for the tests after, test6 itself must fail when the year stays.
+        #expect(test6.contains(/XCTAssertTrue\(gone,/), "test6 only prints whether the trial year went")
     }
 
     /// The shelves of design wave 1 show two cards and the edge of the third, so the third
@@ -73,8 +81,17 @@ struct UITestHelperSourceTests {
         #expect(tree.contains("SideShelfCheck.peekingCard(of:"), "the tree check does not know the shelves")
         #expect(tree.contains("fail(\"text runs off the side of the screen\""), "text running off the side no longer fails")
         #expect(tree.contains("peekingCards = []"), "the cards of the last screen stay noted")
+        #expect(tree.contains("SideShelfCheck.isShelfCard("), "the tree check finds no card beside its text")
+        #expect(tree.contains("A11Y_DETAIL"), "a text that fails does not say what lies above it")
         let record = try #require(AppSource.body(of: "private func record(", in: walk))
-        #expect(record.contains("SideShelfCheck.inPeekingCard("), "the audit does not know the shelves")
+        // Only what the audit measures on the part on screen: contrast and clipped text. A small
+        // target or a missing label on a peeking card fails as anywhere else.
+        let exemption = try #require(record.split(separator: "\n").first { $0.contains("SideShelfCheck.inPeekingCard(") })
+        #expect(exemption.contains("type == .contrast || type == .textClipped"), "\(exemption)")
+        // The second contrast audit must not confirm a finding on screen by a peeking card's
+        // text of the same label ("Neu" on every new album).
+        let confirm = try #require(AppSource.body(of: "private func confirmContrast(", in: walk))
+        #expect(confirm.contains("SideShelfCheck.inPeekingCard("), "the confirmation counts the peeking card")
         let package = try AppSource.read("Package.swift")
         #expect(package.contains("\"SideShelfCheck.swift\""), "Linux does not build the side check")
     }

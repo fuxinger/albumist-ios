@@ -681,9 +681,14 @@ final class AccessibilityUITests: XCTestCase {
         // moves no frame, so there is no state to wait for; text that lacks contrast fails both.
         sleep(2)
         var again = Set<String>()
+        // A peeking card's text of the same label ("Neu" on every new album) fails every audit; it
+        // must not confirm a finding on screen that did not repeat (`SideShelfCheck`).
+        let cards = peekingCards
+        let bounds = app.frame
         do {
             try app.performAccessibilityAudit(for: .contrast) { issue in
-                if !issue.compactDescription.localizedCaseInsensitiveContains("nearly") {
+                let peeking = issue.element.map { SideShelfCheck.inPeekingCard($0.frame, cards: cards, screen: bounds) } ?? false
+                if !issue.compactDescription.localizedCaseInsensitiveContains("nearly") && !peeking {
                     again.insert(issue.element?.label ?? "-")
                 }
                 return true
@@ -729,7 +734,7 @@ final class AccessibilityUITests: XCTestCase {
                 reason = "emoji only (a flag is a picture, not text)"
             } else if pictureFrames.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(frame) }) {
                 reason = "inside a labelled picture (share image preview)"
-            } else if frames.contains(where: { SideShelfCheck.inPeekingCard($0, cards: peekingCards, screen: bounds) }) {
+            } else if (type == .contrast || type == .textClipped) && frames.contains(where: { SideShelfCheck.inPeekingCard($0, cards: peekingCards, screen: bounds) }) {
                 reason = "in a card peeking in from the side of a shelf (measured on the part on screen)"
             } else if type == .textClipped && !accessibilitySize {
                 reason = "text clipped at a standard size (the audit enlarges text; the largest-size run decides)"
@@ -815,6 +820,10 @@ final class AccessibilityUITests: XCTestCase {
         framesBeforeAudit = [:]
         pictureFrames = []
         peekingCards = []
+        // Texts off the side and the shelves' cards off the side, decided once the whole tree is
+        // read: the tree may list a card's texts beside the card (`SideShelfCheck`).
+        var offSide: [(label: String, frame: CGRect, ancestors: [SideShelfCheck.Ancestor])] = []
+        var shelfCards: [CGRect] = []
 
         func fail(_ kind: String, _ label: String, _ frame: CGRect) {
             print("A11Y_FAIL \(screen) | \(kind) | label '\(label)' | \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
@@ -861,24 +870,34 @@ final class AccessibilityUITests: XCTestCase {
                     }
                 case .staticText:
                     texts.append((label, frame))
-                    // Wider than the screen or starting off its side: the layout does not fit,
-                    // unless the text is in a card that peeks in from the side of a shelf.
-                    if SideShelfCheck.runsOffSide(frame, screen: bounds) {
-                        if let card = SideShelfCheck.peekingCard(of: frame, ancestors: ancestors, screen: bounds) {
-                            peekingCards.append(card)
-                            print("A11Y_WARN \(screen) | text in a card peeking in from the side of a shelf | label '\(label)' | \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
-                        } else {
-                            fail("text runs off the side of the screen", label, frame)
-                        }
-                    }
+                    // Wider than the screen or starting off its side: decided below.
+                    if SideShelfCheck.runsOffSide(frame, screen: bounds) { offSide.append((label, frame, ancestors)) }
                 default:
                     break
                 }
             }
-            let below = ancestors + [SideShelfCheck.Ancestor(frame: frame, isScrollView: type == .scrollView)]
+            if visible, type != .staticText, type != .scrollView, SideShelfCheck.runsOffSide(frame, screen: bounds),
+               SideShelfCheck.isShelfCard(frame, ancestors: ancestors, screen: bounds) {
+                shelfCards.append(frame)
+            }
+            let below = ancestors + [SideShelfCheck.Ancestor(frame: frame, isScrollView: type == .scrollView,
+                                                             name: "type \(type.rawValue) '\(node.identifier)'")]
             for child in node.children { visit(child, ancestors: below) }
         }
         visit(root, ancestors: [])
+
+        // Text off the side: the layout does not fit, unless the text is in a card that peeks in
+        // from the side of a shelf (design wave 1, `SideShelfCheck`).
+        for text in offSide {
+            if let card = SideShelfCheck.peekingCard(of: text.frame, ancestors: text.ancestors, cards: shelfCards, screen: bounds) {
+                peekingCards.append(card)
+                let f = text.frame
+                print("A11Y_WARN \(screen) | text in a card peeking in from the side of a shelf | label '\(text.label)' | \(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height))")
+            } else {
+                fail("text runs off the side of the screen", text.label, text.frame)
+                print("A11Y_DETAIL \(screen) | above '\(text.label.prefix(40))': \(SideShelfCheck.chain(text.ancestors))")
+            }
+        }
 
         // Overlapping texts (reported): two labels drawn over each other.
         for i in texts.indices {

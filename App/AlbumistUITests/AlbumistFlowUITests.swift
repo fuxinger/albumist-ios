@@ -2197,6 +2197,8 @@ final class AlbumistFlowUITests: XCTestCase {
             if tap(UITestScreens.TrialYear.allYearsButton(app), "take in all years") {
                 let gone = waitGone(note, timeout: 20)
                 print(gone ? "UI_STEP_OK trial year taken back" : "UI_STEP_MISSING trial year taken back")
+                // prepare() repairs a year left on for the tests after this one; here it fails.
+                XCTAssertTrue(gone, "The trial year did not go after taking in all years")
                 _ = waitStable("analysis idle after all years", timeout: 300) { analysisIdle }
                 shot("67-overview-all-years")
             }

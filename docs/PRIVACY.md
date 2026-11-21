@@ -103,7 +103,7 @@ Atlas-Lands und das Foto im teilbaren Reise-Atlas-Bild.
   antippt („Anlegen“ für ein neues Album, sonst der Knopf unter der Vorschau), und nur mit vollem
   Zugriff. Ohne Zugriff funktioniert die App nicht. Der Berechtigungstext
   (`NSPhotoLibraryUsageDescription`, Deutsch in `App/project.yml`, Englisch in
-  `App/Sortly/Resources/InfoPlist.xcstrings`) nennt beides.
+  `App/Albumist/Resources/InfoPlist.xcstrings`) nennt beides.
 - Keine Standortberechtigung: Orte stammen aus den GPS-Daten der Fotos.
 - Hintergrundverarbeitung (nachts beim Laden) und Fortsetzen der Analyse im Hintergrund mit
   Fortschritt auf dem Sperrbildschirm (`BGContinuedProcessingTask`, vom Nutzer gestartet).
@@ -128,7 +128,7 @@ Atlas-Lands und das Foto im teilbaren Reise-Atlas-Bild.
 Gesichtsgruppen sind besondere personenbezogene Daten (DSGVO Art. 9) und werden nur nach
 ausdrücklichem Einschalten verarbeitet (noch nicht verfügbar). Ausgeblendete Fotos sind
 standardmäßig ausgeschlossen. Sensible Dokumente werden nicht automatisch vorgeschlagen.
-Datenschutz-Manifest: `App/Sortly/Resources/PrivacyInfo.xcprivacy` (keine erhobenen Daten).
+Datenschutz-Manifest: `App/Albumist/Resources/PrivacyInfo.xcprivacy` (keine erhobenen Daten).
 
 ## Teilen
 Das Reise-Atlas-Bild wird auf dem Gerät gerendert und über das iOS-Teilen-Menü weitergegeben.

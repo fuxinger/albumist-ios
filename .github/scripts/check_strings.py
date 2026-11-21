@@ -1,6 +1,6 @@
 """Fails when a UI string in the app is missing from Localizable.xcstrings, has no
 English translation, or breaks an English wording rule (english_rule.py: "Certain", not "Safe";
-American spelling; buttons in title case), or when a test of the app target (App/SortlyTests)
+American spelling; buttons in title case), or when a test of the app target (App/AlbumistTests)
 looks up a text by a key the catalog no longer has (second review of P3-09: three Mac tests
 still built their expected text from the removed keys "von %lld Fotos", "%lld Orte" and
 "%lld Fotos von zu Hause"). Usage: python3 check_strings.py <repo root>"""
@@ -8,7 +8,7 @@ import json, os, re, sys, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import english_rule
 
-CATALOG = 'App/Sortly/Resources/Localizable.xcstrings'
+CATALOG = 'App/Albumist/Resources/Localizable.xcstrings'
 pat = re.compile(r'(?:(?:Text|Button|Label|Section|navigationTitle|Toggle|TextField|NavigationLink|ContentUnavailableView|Picker|confirmationDialog|LabeledContent|LocalizedStringKey|accessibilityLabel|Link|Tab|alert|IntentDescription)\(|String\(localized: |LocalizedStringResource = |TypeDisplayRepresentation \{ |dialog: |shortTitle: |@Parameter\(title: )\s*"((?:[^"\\]|\\.)*)"')
 # In the tests only what they look up in the catalog: `String(localized: "…")`, a `Text("…")`
 # (not `recognizedText("…")` or other test data) and `localizedString(forKey: "…")`.
@@ -34,7 +34,7 @@ def key_of(literal):
 
 def missing_in_app(root, keys):
     missing = {}
-    for f in glob.glob(f'{root}/App/Sortly/**/*.swift', recursive=True):
+    for f in glob.glob(f'{root}/App/Albumist/**/*.swift', recursive=True):
         src = open(f).read()
         for m in pat.finditer(src):
             lit = m.group(1)
@@ -53,7 +53,7 @@ def missing_in_tests(root, catalog_keys):
     reason."""
     keys = {norm(k) for k in catalog_keys}
     found = []
-    for f in sorted(glob.glob(f'{root}/App/SortlyTests/**/*.swift', recursive=True)):
+    for f in sorted(glob.glob(f'{root}/App/AlbumistTests/**/*.swift', recursive=True)):
         src = open(f).read()
         def where(m):
             return f'{os.path.relpath(f, root)}:{src.count(chr(10), 0, m.start()) + 1}'

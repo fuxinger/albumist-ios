@@ -14,7 +14,7 @@ class NavigationRuleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             for name, text in files.items():
-                path = root / "App" / "Sortly" / "Views" / name
+                path = root / "App" / "Albumist" / "Views" / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8")
             return [(file.split("/")[-1], line) for file, line, _ in navigation_rule.offenders(root)]

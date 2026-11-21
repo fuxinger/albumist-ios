@@ -26,8 +26,8 @@ CATALOG = {"strings": {
 
 def found(test_source):
     with tempfile.TemporaryDirectory() as root:
-        os.makedirs(f"{root}/App/SortlyTests")
-        with open(f"{root}/App/SortlyTests/SomeTests.swift", "w") as f:
+        os.makedirs(f"{root}/App/AlbumistTests")
+        with open(f"{root}/App/AlbumistTests/SomeTests.swift", "w") as f:
             f.write(test_source)
         return check_strings.missing_in_tests(root, set(CATALOG["strings"]))
 
@@ -35,7 +35,7 @@ def found(test_source):
 class TestKeysTests(unittest.TestCase):
     def test_a_removed_key_is_found_with_its_line(self):
         src = 'import Testing\n#expect(x == String(localized: "von \\(1) Fotos"))\n'
-        self.assertEqual(found(src), [("App/SortlyTests/SomeTests.swift:2", "von # Fotos")])
+        self.assertEqual(found(src), [("App/AlbumistTests/SomeTests.swift:2", "von # Fotos")])
 
     def test_the_count_pair_finds_its_key(self):
         src = ('#expect(x == String(localized: "von \\(1) \\(1.formatted()) Fotos"))\n'
@@ -46,8 +46,8 @@ class TestKeysTests(unittest.TestCase):
         src = ('let a = Text("Gleich fertig")\nlet b = Text("Bald fertig")\n'
                'bundle.localizedString(forKey: "Abbrechen", value: nil, table: nil)\n'
                'bundle.localizedString(forKey: "Abbruch", value: nil, table: nil)\n')
-        self.assertEqual(found(src), [("App/SortlyTests/SomeTests.swift:2", "Bald fertig"),
-                                      ("App/SortlyTests/SomeTests.swift:4", "Abbruch")])
+        self.assertEqual(found(src), [("App/AlbumistTests/SomeTests.swift:2", "Bald fertig"),
+                                      ("App/AlbumistTests/SomeTests.swift:4", "Abbruch")])
 
     def test_test_data_and_defaults_keys_are_not_texts(self):
         src = ('let page = recognizedText("Rechnung Nr. 4711")\n'

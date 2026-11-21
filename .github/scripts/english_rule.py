@@ -21,7 +21,7 @@ import json
 import re
 import sys
 
-CATALOG = "App/Sortly/Resources/Localizable.xcstrings"
+CATALOG = "App/Albumist/Resources/Localizable.xcstrings"
 
 # Button titles the code hands over in a variable (ProposalViews.swift `primaryTitle`, the card
 # actions of ProposalCardLabels.swift `ProposalCardAction.title`) or shows behind a condition
@@ -160,7 +160,7 @@ def button_keys(root):
     for key in catalog:
         keys.setdefault(norm(key), key)
     used = {}
-    for path in sorted(glob.glob(f"{root}/App/Sortly/**/*.swift", recursive=True)):
+    for path in sorted(glob.glob(f"{root}/App/Albumist/**/*.swift", recursive=True)):
         with open(path, encoding="utf-8") as file:
             src = file.read()
         for line, literal in button_titles_in(src):

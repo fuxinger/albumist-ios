@@ -138,7 +138,7 @@ Actions > **TestFlight feedback** > Run workflow.
 - Release-Kurztest (Prüfbefund P5-03, 19.11.2026): alle UI-Tests laufen auf einem Debug-Build mit
   Test-Schaltern; die Release-Fassung, die hochgeladen wird, startete vorher kein Test. Der Job
   „Release build smoke test (UI)“ baut die UI-Tests mit `-configuration Release` und lässt einen
-  Test laufen (`App/SortlyUITests/ReleaseSmokeUITests.swift`): Einführung, Beispiel-Mediathek und
+  Test laufen (`App/AlbumistUITests/ReleaseSmokeUITests.swift`): Einführung, Beispiel-Mediathek und
   Analyse, empfohlene Vorschläge, ein Plan in den Gratis-Alben, in Fotos angelegt, ohne
   Test-Schalter wie bei einem neuen Nutzer. Bei beiden Toren, neben UI-Tests und Härtetest (rund
   25–35 Minuten, kürzer als der Härtetest), und er muss grün sein, sonst wird nicht hochgeladen; ein
@@ -230,11 +230,11 @@ eine Gruppe nur noch, wenn es für sie kein grünes Ergebnis für genau diese Ap
 Testcode gibt.
 
 - **Fingerabdruck der App**: eine Prüfsumme über alle Dateien, aus denen die App gebaut wird.
-  Gezählt wird alles außer UI-Tests (`App/SortlyUITests`), Unit-Tests (`App/SortlyTests`,
+  Gezählt wird alles außer UI-Tests (`App/AlbumistUITests`), Unit-Tests (`App/AlbumistTests`,
   `Tests`), `docs/`, Markdown-Dateien im obersten Ordner (`README.md` usw.; eine `.md` in
   `App/` zählt mit), `.github/` (außer `.github/toolchain.json` mit dem festgelegten Xcode und
   XcodeGen, das zählt mit), `scripts/`, `tools/` und `design/`. Also zählen unter anderem
-  `App/Sortly/**`, `Sources/**`, `Package.swift`, `App/project.yml` mit den Build-Einstellungen,
+  `App/Albumist/**`, `Sources/**`, `Package.swift`, `App/project.yml` mit den Build-Einstellungen,
   Ressourcen und die StoreKit-Datei. Eine neue, unbekannte Datei zählt zur App: im Zweifel
   läuft eine Gruppe einmal zu viel, nie einmal zu wenig. Gleicher Fingerabdruck heißt:
   Byte für Byte dieselben Dateien.
@@ -298,7 +298,7 @@ Testcode gibt.
   von GitHubs Laufliste gibt es nicht (es bräuchte ein Schreib-Token in den Testläufen;
   Artefakte laufen ab wie die Läufe).
 - **Beispiel** (die Nacht zum 18.11.): Commit 4bb7fdd änderte nur eine Wartezeit in
-  `SortlyFlowUITests.swift`. Bisher liefen danach alle fünf Gruppen (über 80 Minuten). Jetzt
+  `AlbumistFlowUITests.swift`. Bisher liefen danach alle fünf Gruppen (über 80 Minuten). Jetzt
   laufen „voller Ablauf“ und „übrige Abläufe“ (beide haben Tests in dieser Datei);
   Gerätezustände, Barrierefreiheit und Kontrast übernimmt der Lauf aus dem letzten grünen Lauf
   mit derselben App und demselben Testcode. Die Zusammenfassung des Jobs „UI plan“ zeigt für
@@ -359,7 +359,7 @@ Testcode gibt.
   keine Korrektur.
 - **Eine Zeitgrenze wird nur mit Eintrag gelockert** (Regel 19.11., Prüfer 5, P5-13: Build 36
   kam aus 4bb7fdd, das nur eine Wartezeit von 5 auf 20 s verlängerte; die langsame App war damit
-  leiser): wer in einem Test (`App/SortlyUITests`, `App/SortlyTests`, `Tests`) ein `timeout:`,
+  leiser): wer in einem Test (`App/AlbumistUITests`, `App/AlbumistTests`, `Tests`) ein `timeout:`,
   ein `limit:` von `timed(...)`, eine Obergrenze `< .seconds(…)` oder ein `.timeLimit` erhöht,
   oder in einem Workflow ein `timeout-minutes`, legt im selben Pull Request oder Push eine Zeile
   in `docs/IMPROVEMENTS.md` an, die „Zeitgrenze gelockert“ sagt und die Datei nennt: warum, die
@@ -381,7 +381,7 @@ Testcode gibt.
   Das Freigabe-Gate (`ci_gate.py`, Workflow „Release“) verlangt einen grünen Job
   „UI verdict (full)“.
 - **Schnellmodus** (`quick`): Pull Requests laufen schnell. Die Tests bekommen
-  `SORTLY_UI_QUICK=1` (im Workflow als `TEST_RUNNER_SORTLY_UI_QUICK`), und
+  `ALBUMIST_UI_QUICK=1` (im Workflow als `TEST_RUNNER_ALBUMIST_UI_QUICK`), und
   `DeviceConditionUITests.test11_LargeLibrary` (große Mediathek, rund 25 Minuten) überspringt
   sich. Im Schnellmodus hat jede Gruppe einen anderen Test-Fingerabdruck (sicherheitshalber
   alle, nicht nur die, deren Dateien den Schalter sichtbar lesen), und ihr Job heißt
@@ -432,7 +432,7 @@ Umgesetzt (18.11.):
 
 | Änderung | Ersparnis |
 |---|---|
-| Nur betroffene UI-Gruppen (oben) | Teständerung nur in `AccessibilityUITests.swift`: rund 37 statt 73 Minuten; Änderung nur in `SortlyFlowUITests.swift`: zwei statt fünf Gruppen, rund 115 Mac-Minuten weniger (die Dauer bestimmt dann „übrige Abläufe“, rund 62 Minuten) |
+| Nur betroffene UI-Gruppen (oben) | Teständerung nur in `AccessibilityUITests.swift`: rund 37 statt 73 Minuten; Änderung nur in `AlbumistFlowUITests.swift`: zwei statt fünf Gruppen, rund 115 Mac-Minuten weniger (die Dauer bestimmt dann „übrige Abläufe“, rund 62 Minuten) |
 | TestFlight ohne Änderung an App und Tests seit dem letzten grünen UI-Lauf | UI-Tests rund 2 statt 75–100 Minuten; der Lauf dauert dann etwa CI 20 + Härtetest 45 + Hochladen 15 Minuten |
 | TestFlight: die Kern-Tests unter Linux laufen nicht zweimal (CI hat sie für denselben Commit gerade bestanden) | rund 5 Minuten bis zum UI-Bau |
 | CodeQL Swift nicht mehr bei jedem Pull Request, sondern nachts, und nur das Kernpaket | 26 Mac-Minuten je Push; im gemessenen Lauf hätte Barrierefreiheit 14 Minuten früher begonnen |
@@ -577,7 +577,7 @@ nur bei genau erkannten Umgebungsfehlern; im Zweifel ist es ein echter Fehler.
   lässt sich zurzeit nicht analysieren: unter dem CodeQL-Werkzeug kann der Compiler Xcodes
   Makro-Helfer nicht starten („swift-plugin-server … Bad CPU type in executable“, Lauf
   44202319351), und die App braucht Makros (`@Observable`, `@State`). Das Kernpaket braucht
-  keine. **Der Swift-Code der App (`App/Sortly`) wird von CodeQL also zurzeit nicht geprüft.**
+  keine. **Der Swift-Code der App (`App/Albumist`) wird von CodeQL also zurzeit nicht geprüft.**
   Die Kern-Analyse meldet unter der eigenen Kategorie `/language:swift-core`; Warnungen aus
   früheren App-Analysen (Kategorie `/language:swift`) werden von ihr weder bestätigt noch
   geschlossen (Schritt 1 unten).
@@ -594,7 +594,7 @@ nur bei genau erkannten Umgebungsfehlern; im Zweifel ist es ein echter Fehler.
    Alte Swift-Warnungen in `App/…` aus der früheren Kategorie `/language:swift`: Security >
    Code scanning > **Tool status** > CodeQL > die Konfiguration `/language:swift` > **Delete
    configuration** (ihre Warnungen schließen sich dann). Oder jede einzeln > **Dismiss alert**
-   > „Won't fix“, Begründung: „App/Sortly wird zurzeit nicht analysiert (Makros unter
+   > „Won't fix“, Begründung: „App/Albumist wird zurzeit nicht analysiert (Makros unter
    CodeQL, docs/TESTFLIGHT.md); Befund von Hand geprüft.“ Vorher kurz lesen: ein echter
    Befund dort ist weiter ein Befund, nur prüft ihn niemand mehr automatisch.
 2. Falls in den Branch-Regeln (Settings > Branches oder Rules) „Analyze (swift)“ als

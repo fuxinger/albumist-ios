@@ -8,7 +8,7 @@ the tab bar instead (ui-16-selection). Apple's way, as in the Photos app: while 
 tab bar is hidden (`.toolbarVisibility(selecting ? .hidden : .automatic, for: .tabBar)`) and the
 actions are in the system bottom bar.
 
-Rules for every view (each top-level type) in App/Sortly, read without comments and string
+Rules for every view (each top-level type) in App/Albumist, read without comments and string
 contents (navigation_rule.code_only):
   1. a view with a selection mode (`@State … var selecting` or `isSelecting`) puts its actions
      in the system bottom bar (`placement: .bottomBar`), not in a bar of its own;
@@ -118,10 +118,10 @@ def offenders_in(text: str):
 
 
 def offenders(root):
-    """(file, line, view, advice) for every view in App/Sortly that breaks a rule."""
+    """(file, line, view, advice) for every view in App/Albumist that breaks a rule."""
     root = pathlib.Path(root)
     found = []
-    for path in sorted((root / "App" / "Sortly").rglob("*.swift")):
+    for path in sorted((root / "App" / "Albumist").rglob("*.swift")):
         for line, name, advice in offenders_in(path.read_text(encoding="utf-8")):
             found.append((str(path.relative_to(root)), line, name, advice))
     return found

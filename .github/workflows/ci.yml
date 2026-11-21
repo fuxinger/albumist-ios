@@ -121,7 +121,7 @@ jobs:
         timeout-minutes: 9
         run: |
           set +e
-          SORTLY_LOAD_TEST=1 python3 .github/scripts/swift_test_watch.py --minutes 7 --quiet --log load.log -- \
+          ALBUMIST_LOAD_TEST=1 python3 .github/scripts/swift_test_watch.py --minutes 7 --quiet --log load.log -- \
             swift test --skip-build --filter LoadTests
           status=$?
           grep -E "LOAD_|passed|failed|error" load.log
@@ -186,8 +186,8 @@ jobs:
         run: |
           cd App
           xcodebuild build-for-testing \
-            -project Sortly.xcodeproj \
-            -scheme Sortly \
+            -project Albumist.xcodeproj \
+            -scheme Albumist \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1 \
@@ -199,7 +199,7 @@ jobs:
         # there. Right after the app's build (tempo plan 20.11.), before the core tests and the
         # simulator, with the same build settings, so the app is not compiled a second time.
         # Not in a TestFlight run (release): there ui.yml's "UI build" builds exactly this
-        # (scheme SortlyUI, build-for-testing) right after this job, in the same run, and a
+        # (scheme AlbumistUI, build-for-testing) right after this job, in the same run, and a
         # compile error stops the upload there (about 1 min of this Mac, TestFlight run
         # 44461253154). test_workflows.py ReleaseSkipTests: a step left out in release mode is
         # one whose build ui.yml really does itself.
@@ -207,13 +207,13 @@ jobs:
         run: |
           cd App
           xcodebuild build-for-testing \
-            -project Sortly.xcodeproj \
-            -scheme SortlyUI \
+            -project Albumist.xcodeproj \
+            -scheme AlbumistUI \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO > ../build-ui-log.txt 2>&1 \
             || { grep -E "error:" -A3 ../build-ui-log.txt | grep -v "/SourcePackages/" | head -80; echo "--- last 30 lines of the build log"; tail -30 ../build-ui-log.txt; exit 1; }
-          grep -E "warning: .*SortlyUITests" ../build-ui-log.txt | head -40 || true
+          grep -E "warning: .*AlbumistUITests" ../build-ui-log.txt | head -40 || true
           tail -2 ../build-ui-log.txt
       - name: Core tests (macOS)
         # Also after a failed "Build UI tests" (its error is in the log above; the app's own
@@ -284,8 +284,8 @@ jobs:
           set +e
           cd App
           xcodebuild test \
-            -project Sortly.xcodeproj \
-            -scheme Sortly \
+            -project Albumist.xcodeproj \
+            -scheme Albumist \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -resultBundlePath ../build/TestResults.xcresult \
             COMPILER_INDEX_STORE_ENABLE=NO \
@@ -294,7 +294,7 @@ jobs:
           # StoreKit's own lines too (SKTestSession, StoreKitServiceError with its environment):
           # "[SKTestSession] Error saving configuration file: ... SKInternalErrorDomain" names no
           # "error:" and stayed in the artifact, where it cannot be read when the download fails.
-          grep -E "error:|warning: .*Sortly|test host signed ad hoc|STOREKIT|SKTestSession|SKInternalErrorDomain|StoreKitServiceError|Test Suite|Test case|Executed|TAXONOMY|VISION_IDENTIFIERS|PREVIEW_JPEG|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -3000
+          grep -E "error:|warning: .*Albumist|test host signed ad hoc|STOREKIT|SKTestSession|SKInternalErrorDomain|StoreKitServiceError|Test Suite|Test case|Executed|TAXONOMY|VISION_IDENTIFIERS|PREVIEW_JPEG|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -3000
           # Whether the test session's configuration reached the simulator: storekitd keeps it in
           # its app group under Persistence/Octane/<bundle id>/Configuration.storekit (Apple
           # forum 826971, FB22237318: "Missing" when SKTestSession could not save it). In green
@@ -334,7 +334,7 @@ jobs:
         run: |
           set -o pipefail
           cd App
-          xcodebuild -exportLocalizations -project Sortly.xcodeproj -localizationPath ../build/loc -exportLanguage en CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO | tail -3
+          xcodebuild -exportLocalizations -project Albumist.xcodeproj -localizationPath ../build/loc -exportLanguage en CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO | tail -3
           find ../build/loc -name "*.xliff" -exec sh -c 'base64 -i "$1" | tr -d "\n" | fold -w 4000 | sed "s/^/XLIFF /"' _ {} \;
       - name: Upload strings
         if: success() && steps.sim.outputs.udid != ''
@@ -390,8 +390,8 @@ jobs:
           mkdir -p build
           cd App
           xcodebuild build \
-            -project Sortly.xcodeproj \
-            -scheme Sortly \
+            -project Albumist.xcodeproj \
+            -scheme Albumist \
             -configuration Release \
             -sdk iphonesimulator \
             -destination "generic/platform=iOS Simulator" \
@@ -400,21 +400,21 @@ jobs:
             || { grep -E "error:" -A3 ../build/sim-build.log | head -60; exit 1; }
           tail -5 ../build/sim-build.log
           cd ../build/sim/Build/Products/Release-iphonesimulator
-          ditto -c -k --sequesterRsrc --keepParent Sortly.app ../../../../Sortly-simulator.zip
-          ls -la ../../../../Sortly-simulator.zip
+          ditto -c -k --sequesterRsrc --keepParent Albumist.app ../../../../Albumist-simulator.zip
+          ls -la ../../../../Albumist-simulator.zip
       - name: Upload simulator app
-        if: success() && hashFiles('build/Sortly-simulator.zip') != ''
+        if: success() && hashFiles('build/Albumist-simulator.zip') != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: Sortly-simulator-app
-          path: build/Sortly-simulator.zip
+          name: Albumist-simulator-app
+          path: build/Albumist-simulator.zip
           retention-days: 30
           # "Re-run failed jobs" may upload it again under the same name.
           overwrite: true
       - name: Upload to Appetize for browser testing
         # Runs only when the repository has the secret APPETIZE_TOKEN. Keeps one app
         # (note "sortly-ci") and updates it, so the test link stays the same.
-        if: success() && hashFiles('build/Sortly-simulator.zip') != ''
+        if: success() && hashFiles('build/Albumist-simulator.zip') != ''
         continue-on-error: true
         env:
           APPETIZE_TOKEN: ${{ secrets.APPETIZE_TOKEN }}
@@ -424,7 +424,7 @@ jobs:
             | jq -r '[.data[]? | select(.note == "sortly-ci")][0].publicKey // empty')
           url=https://api.appetize.io/v1/apps${key:+/$key}
           curl -sS --fail-with-body -X POST "$url" -H "X-API-KEY: $APPETIZE_TOKEN" \
-            -F "file=@build/Sortly-simulator.zip" -F "platform=ios" -F "note=sortly-ci" > appetize.json
+            -F "file=@build/Albumist-simulator.zip" -F "platform=ios" -F "note=sortly-ci" > appetize.json
           key=$(jq -r '.publicKey' appetize.json)
           echo "APPETIZE_LINK https://appetize.io/app/$key"
           echo "### Im Browser testen: https://appetize.io/app/$key" >> "$GITHUB_STEP_SUMMARY"

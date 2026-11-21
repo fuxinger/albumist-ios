@@ -3,7 +3,7 @@
 ## Anleitung für dich (an die KI: diesen Abschnitt überspringen, dein Auftrag beginnt unter der Linie)
 
 Das Prüfpaket ist **eine ZIP-Datei**. Darin liegen dieser Prüfauftrag (`PRUEFAUFTRAG.md`) und
-der komplette Code (Ordner `sortly/`).
+der komplette Code (Ordner `albumist/`).
 
 1. **ZIP herunterladen** (Link aus dem Chat mit Claude; landet auf dem iPhone unter
    Dateien > Downloads). Nicht entpacken.
@@ -49,7 +49,7 @@ Lob, Füllsätze und allgemeine Ratschläge ohne Bezug zum Code sind nicht gefra
 ## 2. Grundregeln (bitte strikt einhalten)
 
 1. **Beweispflicht.** Jeder Befund nennt Datei, Zeilen und ein kurzes Code-Zitat (höchstens
-   etwa 10 Zeilen) aus der ZIP-Datei. Der Code liegt im Ordner `sortly/`; Pfade in diesem
+   etwa 10 Zeilen) aus der ZIP-Datei. Der Code liegt im Ordner `albumist/`; Pfade in diesem
    Auftrag sind relativ dazu. Ohne Zitat ist es kein Befund, sondern gehört in den
    Abschnitt „Vermutungen ohne Beleg“.
 2. **Sicherheit angeben.** Markiere jeden Befund als **bestätigt** (Code gelesen, Szenario
@@ -69,18 +69,17 @@ Lob, Füllsätze und allgemeine Ratschläge ohne Bezug zum Code sind nicht gefra
    „Entscheidungen, die ich hinterfragen würde“ auf.
 7. **Kein Rauschen.** Keine Stilfragen, keine Namensdiskussionen, kein „schreib alles mit einer
    anderen Architektur neu“, keine Fremdbibliotheken (die App nutzt bewusst keine).
-8. **Tests beachten.** Prüfe, ob ein Test den Fall schon abdeckt (`Tests/`, `App/SortlyTests`,
-   `App/SortlyUITests`). Wenn ja und du hältst den Fehler trotzdem für echt, erkläre, warum der Test
+8. **Tests beachten.** Prüfe, ob ein Test den Fall schon abdeckt (`Tests/`, `App/AlbumistTests`,
+   `App/AlbumistUITests`). Wenn ja und du hältst den Fehler trotzdem für echt, erkläre, warum der Test
    ihn nicht erfasst.
 9. **Sprache.** Antworte auf Deutsch, sachlich und präzise. Jeder Befund enthält zusätzlich einen
    Satz in einfacher Sprache für Nicht-Programmierer. Code-Vorschläge dürfen englisch sein.
-10. **Ignorieren:** `Sources/SortlyWorldMap/Resources` (Kartendaten), Bilder, `design/`,
+10. **Ignorieren:** `Sources/AlbumistWorldMap/Resources` (Kartendaten), Bilder, `design/`,
     `docs/launch/` und `.build/`.
 
 ## 3. Die App
 
-**Albumist** (im Code heißen Ordner, Module und Targets noch nach dem alten Arbeitsnamen
-„Sortly“) sortiert die Fotos-Mediathek eines iPhones in echte Alben der Fotos-App, vollständig
+**Albumist** sortiert die Fotos-Mediathek eines iPhones in echte Alben der Fotos-App, vollständig
 auf dem Gerät.
 
 - **Analyse:** erkennt Reisen (mit Zuhause-Erkennung), Länder und optional Städte, häufige Orte,
@@ -126,23 +125,23 @@ Diese Zusagen darf **kein** Weg im Code brechen. Ein Bruch ist immer „kritisch
 
 | Bereich | Dateien |
 |---|---|
-| Domäne | `Sources/SortlyCore/Domain/*` (Assets, Sammlungen, IDs, Bereiche) |
-| Reisen | `Sources/SortlyCore/Trips/TripDetector.swift`, `TripIdentity.swift`, `TripWorkshop.swift`, `Geo/GeoClusterer.swift`, `Geo/GeoMath.swift` |
-| Orte und Atlas | `Sources/SortlyCore/Places/*` (Offline-Karte, Ortsauflösung, häufige Orte, Atlas) |
-| Analyse | `Sources/SortlyCore/Analysis/*`, `Sources/SortlyEngine/AnalysisPipeline.swift` (actor, fortsetzbar), `FactsAssembler.swift`, `LibraryStatus.swift` |
-| Vorschläge | `Sources/SortlyCore/Proposals/ProposalEngine.swift`, `AlbumProposal.swift`, `OrganizationSettings.swift`, `ProposalOrder.swift`, `PreviewPicker.swift` |
-| Abgleich mit vorhandenen Alben | `Sources/SortlyCore/Matching/AlbumMatcher.swift` (+ `docs/ALBUM_MATCHING.md`) |
-| Plan | `Sources/SortlyCore/Planning/OrganizationPlanner.swift`, `ChangePlan.swift`, `PlanPreview.swift`, `PlanReceipt.swift`, `RetryPlanner.swift` |
-| Ausführung, Rückgängig | `Sources/SortlyCore/Execution/ChangeExecutor.swift` (inkl. `UndoPlanner`, `deleteBatch`), `PlanDiagnostics.swift` |
-| Status, Fortschritt | `Sources/SortlyCore/Status/ManagedAlbumTracker.swift`, `OrganizationStatusResolver.swift` |
+| Domäne | `Sources/AlbumistCore/Domain/*` (Assets, Sammlungen, IDs, Bereiche) |
+| Reisen | `Sources/AlbumistCore/Trips/TripDetector.swift`, `TripIdentity.swift`, `TripWorkshop.swift`, `Geo/GeoClusterer.swift`, `Geo/GeoMath.swift` |
+| Orte und Atlas | `Sources/AlbumistCore/Places/*` (Offline-Karte, Ortsauflösung, häufige Orte, Atlas) |
+| Analyse | `Sources/AlbumistCore/Analysis/*`, `Sources/AlbumistEngine/AnalysisPipeline.swift` (actor, fortsetzbar), `FactsAssembler.swift`, `LibraryStatus.swift` |
+| Vorschläge | `Sources/AlbumistCore/Proposals/ProposalEngine.swift`, `AlbumProposal.swift`, `OrganizationSettings.swift`, `ProposalOrder.swift`, `PreviewPicker.swift` |
+| Abgleich mit vorhandenen Alben | `Sources/AlbumistCore/Matching/AlbumMatcher.swift` (+ `docs/ALBUM_MATCHING.md`) |
+| Plan | `Sources/AlbumistCore/Planning/OrganizationPlanner.swift`, `ChangePlan.swift`, `PlanPreview.swift`, `PlanReceipt.swift`, `RetryPlanner.swift` |
+| Ausführung, Rückgängig | `Sources/AlbumistCore/Execution/ChangeExecutor.swift` (inkl. `UndoPlanner`, `deleteBatch`), `PlanDiagnostics.swift` |
+| Status, Fortschritt | `Sources/AlbumistCore/Status/ManagedAlbumTracker.swift`, `OrganizationStatusResolver.swift` |
 | Regeln, Suche, Namen, Zeit | `Rules/RuleEngine.swift`, `Search/Search.swift`, `Naming/*`, `Time/Chronology.swift`, `Similarity/Similarity.swift` |
-| Speicher | `Sources/SortlyStore/SQLiteDatabase.swift`, `SortlyStore.swift`, `Migrations.swift`, `SafetyBackup.swift` |
-| App-Zustand | `App/Sortly/Model/AppModel.swift` (@MainActor, @Observable) |
-| Plattform | `App/Sortly/Platform/PhotoKitLibrary.swift`, `VisionAnalyzer.swift`, `BackgroundWork.swift`, `ContinuedAnalysis.swift`, `LibraryChangeWatcher.swift`, `Purchases.swift`, `SystemServices.swift`, `SmartAssistant.swift`, `DemoLibrary.swift`, `UITestSupport.swift` |
-| Einstieg, Siri, Spotlight | `App/Sortly/App/*` |
-| Oberfläche | `App/Sortly/Views/*`, `App/Sortly/DesignSystem/*` |
-| Ressourcen | `App/Sortly/Resources/Localizable.xcstrings`, `PrivacyInfo.xcprivacy`, `App/project.yml` (Info.plist-Werte, Hintergrundmodi) |
-| Tests | `Tests/SortlyCoreTests`, `Tests/SortlyEngineTests`, `Tests/SortlyStoreTests`, `App/SortlyTests`, `App/SortlyUITests`, Testhilfen in `Sources/SortlyTestSupport` |
+| Speicher | `Sources/AlbumistStore/SQLiteDatabase.swift`, `AlbumistStore.swift`, `Migrations.swift`, `SafetyBackup.swift` |
+| App-Zustand | `App/Albumist/Model/AppModel.swift` (@MainActor, @Observable) |
+| Plattform | `App/Albumist/Platform/PhotoKitLibrary.swift`, `VisionAnalyzer.swift`, `BackgroundWork.swift`, `ContinuedAnalysis.swift`, `LibraryChangeWatcher.swift`, `Purchases.swift`, `SystemServices.swift`, `SmartAssistant.swift`, `DemoLibrary.swift`, `UITestSupport.swift` |
+| Einstieg, Siri, Spotlight | `App/Albumist/App/*` |
+| Oberfläche | `App/Albumist/Views/*`, `App/Albumist/DesignSystem/*` |
+| Ressourcen | `App/Albumist/Resources/Localizable.xcstrings`, `PrivacyInfo.xcprivacy`, `App/project.yml` (Info.plist-Werte, Hintergrundmodi) |
+| Tests | `Tests/AlbumistCoreTests`, `Tests/AlbumistEngineTests`, `Tests/AlbumistStoreTests`, `App/AlbumistTests`, `App/AlbumistUITests`, Testhilfen in `Sources/AlbumistTestSupport` |
 | Build | `.github/workflows/ci.yml`, `.github/workflows/ui.yml`, `.github/scripts/*`, `Package.swift` |
 
 ## 6. Zuletzt geändert (bitte besonders genau prüfen)
@@ -156,7 +155,7 @@ wenn die Behebung nicht trägt, und sag dann genau, warum. Neu seit der ersten P
   übernommen statt angelegt, nie gelöscht), Speicher-Invalidierung, Reise-Identität über Läufe
   (`Trips/TripIdentity.swift`), Paging, Fehlversuche bei Bilderkennung und Texterkennung.
   Bitte prüfen, ob die Behebungen selbst neue Fehler einbauen.
-- **Sicherung der Entscheidungen** (`Sources/SortlyStore/SafetyBackup.swift`,
+- **Sicherung der Entscheidungen** (`Sources/AlbumistStore/SafetyBackup.swift`,
   `AppModel.saveSafetyBackup` / `writeSafetyBackupNow` / `restoreFromBackupIfNeeded`):
   Entscheidungen, Regeln, eigene Namen, Reise-Korrekturen, die Alben von Albumist und der Verlauf
   liegen als kleine Kopie im Geräte-Backup. Beim Neuaufbau der Datenbank kommen die
@@ -164,7 +163,7 @@ wenn die Behebung nicht trägt, und sag dann genau, warum. Neu seit der ersten P
   Alben in der Mediathek noch existiert. Bitte prüfen: Kann eine alte oder fremde Kopie dazu
   führen, dass Rückgängig ein Album löscht, das nicht von Albumist ist (Z2, Z4)? Wird die Kopie
   während des Wartens überschrieben? Datenschutz der Kopie (Z6).
-- **Änderungsbeleg** (`Planning/PlanReceipt.swift`, `App/Sortly/Views/PlanReceiptView.swift`):
+- **Änderungsbeleg** (`Planning/PlanReceipt.swift`, `App/Albumist/Views/PlanReceiptView.swift`):
   zählt nur, was nach dem Umsetzen in der Mediathek nachgeprüft wurde. Rückgängig sitzt jetzt im
   Beleg. Bitte prüfen: Stimmen die Zahlen mit dem Journal überein, auch bei Teilerfolg,
   Unterbrechung und nach Rückgängig?
@@ -175,7 +174,7 @@ wenn die Behebung nicht trägt, und sag dann genau, warum. Neu seit der ersten P
   (`ChangePlan.freeAlbumUse`), Rückgängig eines Plans, der selbst eine Reparatur war (Z4).
 - **Reise-Werkstatt** (`Trips/TripWorkshop.swift`, `TripDetector` mit `TripCorrections`,
   `AppModel.splitTrip` / `mergeTrips` / `undoTripChange` / `resetTripCorrections`,
-  `App/Sortly/Views/TripWorkshopView.swift`): Eine Reise an einem Tag teilen, zwei benachbarte
+  `App/Albumist/Views/TripWorkshopView.swift`): Eine Reise an einem Tag teilen, zwei benachbarte
   zusammenlegen, Änderungen einzeln oder alle aufheben. Nur solange Albumist für die Reise noch
   kein Album angelegt hat (`canReshape`). Teilen schlägt Zusammenlegen. Bitte prüfen:
   Zeitzonen und Tagesgrenzen, Reisen über Mitternacht, Zusammenlegen mit einem Aufenthalt zu
@@ -195,8 +194,8 @@ vollständig. Die Fragen sind Mindestumfang, keine abschließende Liste.
 
 ### Teil 1: Datensicherheit und Rückgängig (wichtigster Teil, Z1 bis Z5)
 Dateien: `Execution/ChangeExecutor.swift`, `Planning/*`, `Status/ManagedAlbumTracker.swift`,
-`App/Sortly/Platform/PhotoKitLibrary.swift`, Ausführungs- und Rückgängig-Teile in `AppModel.swift`,
-`Sources/SortlyStore/*` (Journal), `Sources/SortlyTestSupport/InMemoryPhotoLibrary.swift`.
+`App/Albumist/Platform/PhotoKitLibrary.swift`, Ausführungs- und Rückgängig-Teile in `AppModel.swift`,
+`Sources/AlbumistStore/*` (Journal), `Sources/AlbumistTestSupport/InMemoryPhotoLibrary.swift`.
 Spiele mindestens diese Szenarien durch:
 1. Die App wird **mitten in der Ausführung** beendet (Absturz, iOS beendet sie, Akku leer). Wird
    beim nächsten Start sauber fortgesetzt? Entstehen doppelte Alben oder doppelte Einträge?
@@ -236,13 +235,13 @@ Dateien: `Trips/*`, `Geo/*`, `Places/*`, `Proposals/*`, `Matching/AlbumMatcher.s
 - Fortschritt und Status: Stimmen Zahlen in Übersicht, Vorschau und Ergebnis überein?
 
 ### Teil 3: Speicher und Persistenz
-Dateien: `Sources/SortlyStore/*`, Speicherzugriffe in `AppModel.swift` und `AnalysisPipeline.swift`.
+Dateien: `Sources/AlbumistStore/*`, Speicherzugriffe in `AppModel.swift` und `AnalysisPipeline.swift`.
 - Transaktionen, Migrationen von älteren Schemas, Verhalten bei beschädigter Datenbank oder vollem
   Speicher, gleichzeitiger Zugriff aus mehreren Tasks, Datenschutzklasse der Datei, was beim
   Neuinstallieren und bei iCloud-Backup passiert, Speicherwachstum über Monate.
 
 ### Teil 4: Swift 6 und Nebenläufigkeit
-Dateien: `AppModel.swift`, `AnalysisPipeline.swift`, `Platform/*`, `SortlyApp.swift`.
+Dateien: `AppModel.swift`, `AnalysisPipeline.swift`, `Platform/*`, `AlbumistApp.swift`.
 - Datenrennen, falsche `Sendable`-Annahmen, `nonisolated(unsafe)`, `@unchecked Sendable`.
 - Actor-Wiedereintritt: Zustand, der nach einem `await` veraltet ist.
 - Tasks, die nie enden, nie abgebrochen werden oder doppelt laufen; Continuations, die nicht genau
@@ -267,7 +266,7 @@ Rechne mit 100.000 Fotos, davon 80 % nur in iCloud:
 
 ### Teil 6: Datenschutz und App-Store-Prüfung
 Dateien: `App/project.yml`, `PrivacyInfo.xcprivacy`, `Purchases.swift`, `UITestSupport.swift`,
-`DemoLibrary.swift`, `SystemServices.swift`, `SmartAssistant.swift`, `App/Sortly/App/*`,
+`DemoLibrary.swift`, `SystemServices.swift`, `SmartAssistant.swift`, `App/Albumist/App/*`,
 `docs/PRIVACY.md`.
 - App Review Guidelines, besonders 2.1 (Vollständigkeit), 2.3 (genaue Angaben), 2.5.1 (nur
   öffentliche APIs), 2.5.4 (Hintergrundmodi begründet), 3.1.1 und 3.1.2 (In-App-Kauf,
@@ -283,7 +282,7 @@ Dateien: `App/project.yml`, `PrivacyInfo.xcprivacy`, `Purchases.swift`, `UITestS
   Aktionen ohne Bestätigung).
 
 ### Teil 7: Oberfläche, Bedienung, Barrierefreiheit
-Dateien: `App/Sortly/Views/*`, `DesignSystem/*`, `Localizable.xcstrings`.
+Dateien: `App/Albumist/Views/*`, `DesignSystem/*`, `Localizable.xcstrings`.
 - Erster Start aus Sicht eines neuen Nutzers: Ist jeder Bildschirm ohne Erklärung verständlich?
   Ändert irgendein Knopf heimlich einen Zustand?
 - Human Interface Guidelines: Navigation, Zurück-Verhalten, Bestätigungen vor destruktiven
@@ -296,7 +295,7 @@ Dateien: `App/Sortly/Views/*`, `DesignSystem/*`, `Localizable.xcstrings`.
   Zahlenformate.
 
 ### Teil 8: Tests, Build und Wartbarkeit
-Dateien: `Tests/*`, `App/SortlyTests`, `App/SortlyUITests`, `.github/workflows/*`,
+Dateien: `Tests/*`, `App/AlbumistTests`, `App/AlbumistUITests`, `.github/workflows/*`,
 `.github/scripts/*`, `Package.swift`, `App/project.yml`.
 - Welche Zusagen Z1 bis Z8 sind **nicht** durch Tests abgesichert? Schlage die wichtigsten
   fehlenden Tests konkret vor (Name, Aufbau, erwartetes Ergebnis).

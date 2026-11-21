@@ -51,6 +51,11 @@ public struct ProposalCardText: Equatable, Sendable {
     public let hidesPreview: Bool
     /// The parts of `subtitle`, in order: "Name fehlt" is the first part of `.nameMissing`.
     public let subtitleParts: [String]
+    /// What VoiceOver says after the name: the status line's parts in words, never a symbol
+    /// drawn with them (the lock of "Persönlicher Inhalt"), and "Vorschau ausgeblendet", which
+    /// only the cover shows. A card reads "name, status" (`PhotoCard`), so the status line
+    /// speaks this (review B of design wave 1, 5).
+    public let spokenStatus: String
     /// The card as VoiceOver reads it, one element: name, status, count.
     public let accessibilityLabel: String
 
@@ -132,7 +137,9 @@ public struct ProposalCardText: Equatable, Sendable {
         self.photoCount = count
         self.isPersonal = personal
         self.hidesPreview = hidesPreview
-        self.accessibilityLabel = ([self.title] + parts + (hidesPreview ? [words.previewHidden] : [])).joined(separator: ", ")
+        let spoken = parts + (hidesPreview ? [words.previewHidden] : [])
+        self.spokenStatus = spoken.joined(separator: ", ")
+        self.accessibilityLabel = ([self.title] + spoken).joined(separator: ", ")
     }
 }
 

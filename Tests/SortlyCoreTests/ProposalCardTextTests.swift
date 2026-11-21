@@ -366,6 +366,20 @@ struct ProposalCardTextTests {
         #expect(english.accessibilityLabel == "Verträge, 9 photos, Personal content, Preview hidden")
     }
 
+    /// What VoiceOver says after a card's name (`PhotoCard` reads "name, status"): the status
+    /// line in words, "Persönlicher Inhalt" without the name of the lock drawn before it, and
+    /// "Vorschau ausgeblendet", which only the cover shows (review B of design wave 1, 5).
+    @Test func theStatusIsSpokenInWords() {
+        let personal = Self.card(Self.contracts(), hidesPreview: true)
+        #expect(personal.spokenStatus == "9 Fotos, Persönlicher Inhalt, Vorschau ausgeblendet")
+        #expect(personal.accessibilityLabel == "Verträge, " + personal.spokenStatus)
+        let english = Self.card(Self.contracts(), hidesPreview: true, words: .english)
+        #expect(english.spokenStatus == "9 photos, Personal content, Preview hidden")
+        let trip = Self.card(Self.trip())
+        #expect(trip.spokenStatus == "16 Fotos, Neues Album")
+        #expect(trip.accessibilityLabel == "Kyoto, Oktober 2024, " + trip.spokenStatus)
+    }
+
     /// Every photo a sensitive document, though the suggestion is not marked personal (a
     /// screenshot category of bank cards): personal too.
     @Test func aHiddenPreviewIsPersonal() {

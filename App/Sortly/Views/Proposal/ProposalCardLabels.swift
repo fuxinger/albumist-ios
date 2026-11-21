@@ -30,27 +30,32 @@ extension ProposalCardText {
     /// The status line as a card shows it, its parts joined with " · ": "Name fehlt" in the app's
     /// warning colour and bold, as its badge said it before (design review D1: 5.0–7.6:1 on cards,
     /// light and dark); the rest takes the card's note grey. Personal content says so on a line
-    /// of its own with the lock before it, under the count (drafts E6: "9 Fotos", "🔒 Persönlicher
-    /// Inhalt").
+    /// of its own with the lock before it (drafts E6: "🔒 Persönlicher Inhalt", "9 Fotos"), first:
+    /// under a two-line name a card has one line for its status, and the count is what gets cut,
+    /// never what makes the card "Ansehen …" (review B of design wave 1, 5). VoiceOver says the
+    /// status in words (`spokenStatus`), not the lock's symbol.
     var styledSubtitle: Text {
+        let shown: Text
         if status == .personal, subtitleParts.count == 2 {
-            let count = Text(verbatim: subtitleParts[0] + "\n")
             let lock = Image(systemName: "lock.fill")
             let personal = Text(verbatim: subtitleParts[1])
             let marked = Text("\(lock) \(personal)")
-            return Text("\(count)\(marked)")
-        }
-        var line = AttributedString()
-        for (index, part) in subtitleParts.enumerated() {
-            if index > 0 { line.append(AttributedString(" · ")) }
-            var run = AttributedString(part)
-            if index == 0, status == .nameMissing {
-                run[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.tint(for: .documents)
-                run.inlinePresentationIntent = .stronglyEmphasized
+            let count = Text(verbatim: "\n" + subtitleParts[0])
+            shown = Text("\(marked)\(count)")
+        } else {
+            var line = AttributedString()
+            for (index, part) in subtitleParts.enumerated() {
+                if index > 0 { line.append(AttributedString(" · ")) }
+                var run = AttributedString(part)
+                if index == 0, status == .nameMissing {
+                    run[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.tint(for: .documents)
+                    run.inlinePresentationIntent = .stronglyEmphasized
+                }
+                line.append(run)
             }
-            line.append(run)
+            shown = Text(line)
         }
-        return Text(line)
+        return shown.accessibilityLabel(Text(verbatim: spokenStatus))
     }
 }
 
@@ -83,6 +88,33 @@ extension ProposalCardText {
     /// The tick of a card the list can select, named with the album (every tick was
     /// "Auswählen", like the button that starts selecting; second review of the cards).
     var spokenTick: Text { Text("„\(title)“ auswählen") }
+
+    /// What VoiceOver calls the open suggestion's main button: its words with the album they
+    /// act on ("Album „Kyoto, Oktober 2024“ anlegen", "„Toskana“ um 1.354 Fotos ergänzen"), so
+    /// the bar says it wherever VoiceOver reads it, also before the page's header (review B of
+    /// design wave 1, 6). Nil for "Namen eingeben": its words name the field it acts on.
+    var spokenMainAction: Text? {
+        switch outcome {
+        case .needsName:
+            return nil
+        case .chooseAlbum:
+            return Text("Album für „\(title)“ auswählen")
+        case .newAlbum(let name, _):
+            return Text("Album „\(name)“ anlegen")
+        case .addsTo(_, let name, let missing):
+            return Text("„\(name)“ um \(missing) \(missing.formatted()) Fotos ergänzen")
+        case .alreadyIn(_, let name):
+            return Text("Album „\(name)“ so lassen")
+        case .renames(_, let from, _):
+            return Text("Album „\(from)“ umbenennen")
+        case .moves(_, let name, _):
+            return Text("Album „\(name)“ verschieben")
+        }
+    }
+
+    /// "Nicht jetzt" with what it sets aside, for VoiceOver ("Nicht jetzt: „Kyoto, Oktober
+    /// 2024“"), as the main button names its album.
+    var spokenNotNow: Text { Text("Nicht jetzt: „\(title)“") }
 }
 
 extension AlbumProposal {

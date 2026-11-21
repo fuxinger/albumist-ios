@@ -61,13 +61,15 @@
   spätestens beim nächsten Start). Tippen blendet Leisten, Statusleiste und Home-Balken aus und wieder ein,
   Hineinzoomen ebenso, mit VoiceOver bleiben sie. Live Photos bewegen sich kurz beim Ansehen und ganz bei langem
   Drücken, ohne die Musik anzuhalten.
-- 21.11. (Design-Welle 2, DS-06a, Entwurf E4, noch in keinem Build): Langes Drücken wie in Fotos. Eine Vorschlagskarte hebt sich groß ab
-  (Titelbild, Name, Statuszeile; bei persönlichem Inhalt „Vorschau ausgeblendet“) und bietet ihr eigenes Wort
-  („Anlegen“, „Ergänzen …“, „Benennen …“, „Ansehen …“), „Anpassen“, bei Reisen „Reise teilen oder zusammenlegen“
-  und „Keine Reise, hier bin ich öfter“ und zuletzt „Nicht jetzt“: dieselben Wege wie ihr Knopf und „…“ im
-  Vorschlag. Ein Foto in „Unsortiert“, in Alben, in der Suche und im Vorschlag hebt sich größer ab, mit „Ansehen“,
-  „Zu Album hinzufügen …“ und „Ignorieren“ (im Vorschlag „Aus Vorschlag entfernen“ mit Rückfrage). Beim Auswählen
-  gibt es kein Menü; alle Punkte gibt es auch als VoiceOver-Aktionen.
+- 21.11. (Design-Welle 2, DS-06a, Entwurf E4, noch in keinem Build): Langes Drücken wie in Fotos. Eine Vorschlagskarte
+  hebt sich ab, wie sie ist (dasselbe Titelbild; bei persönlichem Inhalt „Vorschau ausgeblendet“), und bietet ihr
+  eigenes Wort („Anlegen“, „Ergänzen …“, „Benennen …“, „Ansehen …“), „Anpassen“, bei Reisen „Reise teilen oder
+  zusammenlegen“ und „Keine Reise, hier bin ich öfter“ und zuletzt „Nicht jetzt“: dieselben Wege wie ihr Knopf und
+  „…“ im Vorschlag, immer für den Vorschlag, wie er beim Tippen ist; ist er inzwischen weg, legt Albumist nichts an
+  und sagt „Der Vorschlag hat sich geändert“. Ein Foto in „Unsortiert“, in Alben, in der Suche und im Vorschlag hebt
+  sich mit dem Bild seiner Zelle ab, so groß, wie es scharf ist, mit „Ansehen“, „Zu Album hinzufügen …“ und
+  „Ignorieren“ (im Vorschlag „Aus Vorschlag entfernen“ mit Rückfrage). Beim Auswählen gibt es kein Menü; die Punkte
+  gibt es auch als VoiceOver-Aktionen.
 - 20.11. (Design-Welle 1, Entwurf für Fuchs, noch in keinem Build): die Bildschirme im fotozentrierten Look.
   - Tabs „Vorschläge · Unsortiert · Alben · Suche“; „Unsortiert“ mit drei Filtern.
   - Startseite: während der ersten Analyse ein Mosaik und die schon gefundenen Reisen, danach „Dein

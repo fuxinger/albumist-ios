@@ -9,8 +9,9 @@ import AlbumistCore
 /// For everyone: the buttons say what they do (VoiceOver and Voice Control read the words, the
 /// symbols alone show), the slider says where the video is in words and moves by a step that
 /// fits the length (`VideoPosition`), and VoiceOver's two-finger double tap plays and pauses on
-/// each of them as on the video's page; the times stand on a line of their own, so a large text
-/// size never cuts them, and the symbols stop growing at the second accessibility size.
+/// each of them as on the video's page; the times stand on a line of their own, stacked where a
+/// large text size leaves no room for both, so it never cuts them, and the symbols stop growing
+/// at the second accessibility size.
 struct VideoControls: View {
     var video: ViewerVideo
     var words: ProposalWords
@@ -38,18 +39,31 @@ struct VideoControls: View {
 
     private var position: VideoPosition { VideoPosition(at: video.time, of: length) }
 
-    /// "0:03" and "−0:12", the slider says them to VoiceOver.
+    /// "0:03" and "−0:12", the slider says them to VoiceOver. Side by side as in Photos;
+    /// stacked where a large text size leaves no room for both on a line (a video of an hour or
+    /// more), so neither is ever cut.
     private var times: some View {
-        HStack {
-            Text(verbatim: position.elapsedText)
-            Spacer(minLength: Theme.Spacing.s)
-            Text(verbatim: position.remainingText)
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                elapsedTime
+                Spacer(minLength: Theme.Spacing.s)
+                remainingTime
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                elapsedTime
+                remainingTime
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
         }
         .font(.caption)
         .monospacedDigit()
         .foregroundStyle(.noteText)
         .accessibilityHidden(true)
     }
+
+    private var elapsedTime: Text { Text(verbatim: position.elapsedText) }
+
+    private var remainingTime: Text { Text(verbatim: position.remainingText) }
 
     private var playButton: some View {
         Button { video.togglePlay() } label: {

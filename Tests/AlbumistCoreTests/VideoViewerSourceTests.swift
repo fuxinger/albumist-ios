@@ -274,7 +274,16 @@ struct VideoViewerSourceTests {
                      "VideoPosition(at:", ".spoken(words)", "VideoPosition.step(for:", ".accessibilityAdjustableAction"] {
             #expect(controls.contains(text), "\(text) is missing")
         }
-        #expect(!controls.contains(".lineLimit(1)"), "a time cut off at a large text size")
+        // The times side by side, as in Photos, and stacked where a large text size leaves no
+        // room for both on a line ("0:12:03" and "−1:02:03" at AX5 are wider than the panel on
+        // a 375-pt iPhone): never cut (review F, F12). One line alone is cut there.
+        let times = try #require(AppSource.body(of: "private var times", in: controls))
+        #expect(Self.inOrder(["ViewThatFits(in: .horizontal) {", "HStack {", "elapsedTime", "Spacer(minLength:", "remainingTime", "}",
+                              "VStack(alignment: .leading", "elapsedTime", "remainingTime"], in: times), "\(times)")
+        #expect(!times.contains(".lineLimit(") && !times.contains(".truncationMode(") && !times.contains(".minimumScaleFactor("),
+                "a time cut or shrunk instead of stacked")
+        #expect(try #require(AppSource.body(of: "private var elapsedTime", in: controls)).contains("Text(verbatim: position.elapsedText)"))
+        #expect(try #require(AppSource.body(of: "private var remainingTime", in: controls)).contains("Text(verbatim: position.remainingText)"))
         #expect(Self.count(#"\.buttonStyle\(\.borderless\)"#, in: controls) == 2)
         // The 44-pt tap area is the label's own: a frame around a borderless button only adds
         // empty space, and a near miss moves the slider instead (review F, F3).

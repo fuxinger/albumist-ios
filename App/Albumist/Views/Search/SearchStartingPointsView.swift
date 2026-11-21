@@ -45,7 +45,8 @@ struct SearchStartingPointTile: View {
         } label: {
             VStack(alignment: .leading, spacing: 7) {
                 // Sharp from the device or a calm placeholder with the chip's symbol, never a big
-                // blurry image (`CoverPhoto`); the candidates are never sensitive.
+                // blurry image (`CoverPhoto`); the candidates are ordinary photos only, so
+                // "Screenshots" always shows its symbol (`SearchStartingPoint.coverIDs`).
                 CoverPhoto(ids: point.coverIDs, aspectRatio: typeSize.isAccessibilitySize ? 3 : 1,
                            cornerRadius: Theme.Radius.photoTile, placeholderSymbol: SearchView.symbol(suggestion.kind))
                 VStack(alignment: .leading, spacing: 2) {

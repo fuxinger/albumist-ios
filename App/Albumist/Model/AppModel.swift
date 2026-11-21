@@ -605,8 +605,10 @@ final class AppModel {
     /// Observed: the screen that asked draws again when they are made (`homeCandidates`).
     private var homeCandidatesCache: [HomeCandidate]?
     @ObservationIgnored private var homeCandidatesTask: Task<Void, Never>?
-    /// Counts the values of the facts (`makeHomeCandidates`).
-    @ObservationIgnored private var factsVersion = 0
+    /// Counts the values of the facts (`makeHomeCandidates`): their revision. The photos' ranks
+    /// and dates are made from the facts alone, so a screen that works something out of them keys
+    /// it on this cheap number (`.task(id:)`: search tiles, change covers). Observed.
+    private(set) var factsVersion = 0 // Design W3 H12 r2: observed and readable (review G2, G7)
     /// The detected home with its name, made when a screen asks (`detectedHomePlace`). Observed:
     /// the screen that asked draws again when it is named.
     private var detectedHomePlaceCache: HomePlace?

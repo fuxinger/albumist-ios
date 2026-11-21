@@ -7,9 +7,10 @@ import AlbumistTestSupport
 /// sources as the app does not build on Linux. What each day shows is decided in the core
 /// (`TripTimelineTests`); the split, the merges, the undo and the waiting keep their own guards
 /// (`TripWorkshopTests`, `TripChangeLedgerTests`). Here: the days come from the same days the
-/// split takes, every day after the first chooses where the second trip begins as before (the
-/// UI tests' identifiers stay), the neighbours sit at the ends of the line with their merge rows,
-/// the photos are larger and never a sensitive one, and the new words are in the catalog.
+/// split takes, made off the main thread (review G6), every day after the first chooses where the
+/// second trip begins as before (the UI tests' identifiers stay), the neighbours are sections of
+/// their own at the ends, each part under its own heading (review G3), the photos are larger and
+/// never a sensitive one, and the new words are in the catalog.
 @Suite("Trip timeline in the app (source)")
 struct TripTimelineSourceTests {
     static let workshop = "App/Albumist/Views/TripWorkshopView.swift"
@@ -27,48 +28,80 @@ struct TripTimelineSourceTests {
         String(text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.map(Character.init))
     }
 
-    /// The timeline takes the days the split takes, in the same calendar, and shows the trip
-    /// before at the top and the trip after at the bottom, the days between them.
-    @Test func theTimelineShowsTheDaysTheSplitTakesWithTheNeighboursAtItsEnds() throws {
-        let view = Self.squeezed(try Self.code(Self.workshop))
-        #expect(view.contains("TripWorkshop.days(of:proposal.assetIDs,dates:model.creationDates,calendar:.current)"))
-        let section = Self.squeezed(try Self.body(["func timelineSection("], in: Self.workshop))
-        #expect(section.contains("letentries=TripTimeline.days(days,facts:model.factsByID,ranks:model.previewRanks,dates:dates,calendar:.current)"))
-        let before = try #require(section.range(of: "neighbourNode(before,side:.before)"))
-        let daysAt = try #require(section.range(of: "ForEach(Array(entries.enumerated()),id:\\.element.id)"))
-        let after = try #require(section.range(of: "neighbourNode(after,side:.after)"))
-        #expect(before.lowerBound < daysAt.lowerBound && daysAt.lowerBound < after.lowerBound)
-        // Days without photos between days and between the trips.
-        // Counted with a thousands separator (`CatalogWordingTests`): a neighbouring trip can be years away.
-        #expect(section.contains("TripTimelineGapRow(text:Text(\"\\(entry.quietDaysBefore)\\(entry.quietDaysBefore.formatted())TageohneFotos\"))"))
-        #expect(section.components(separatedBy: "TripTimelineGapRow(text:Text(\"\\(gap)\\(gap.formatted())Tagedazwischen\"))").count - 1 == 2)
-        // The body shows it where the split and merge sections were.
+    static let model = "App/Albumist/Model/AppModel+TripTimeline.swift"
+
+    /// The trip reads in the order of time, each part a section under its own heading (review
+    /// G3): the trip before it ("Reise davor"), its days ("An einem Tag teilen", or "Diese Reise"
+    /// for a trip of one day, which cannot be split) with the hint under them, the trip after it
+    /// ("Reise danach"). What merging is for stands under the first merge row shown, with why it
+    /// waits (review G4); the days between the trips are said in the merge rows.
+    @Test func theTripReadsInTheOrderOfTimeEachPartUnderItsOwnHeading() throws {
         let body = Self.squeezed(try Self.body(["struct TripWorkshopView", "var body"], in: Self.workshop))
-        #expect(body.contains("header(days)changesSection(saysWhy:!mergeShown)timelineSection(days,around:around)"))
-        #expect(!body.contains("splitSection(") && !body.contains("mergeSection("))
+        #expect(body.contains("header(timeline?.days.count??days.count)changesSection(saysWhy:!mergeShown)iflettimeline{ifletbefore=around.before{neighbourSection(before,side:.before,gap:timeline.quietDaysFromBefore,explains:true)}daysSection(timeline)ifletafter=around.after{neighbourSection(after,side:.after,gap:timeline.quietDaysToAfter,explains:around.before==nil)}}"))
+        #expect(!body.contains("timelineSection(") && !body.contains("splitSection(") && !body.contains("mergeSection("))
+        // The days: their heading and the hint belong to them.
+        let days = Self.squeezed(try Self.body(["func daysSection("], in: Self.workshop))
+        #expect(days.contains("}header:{iftimeline.days.count>1{Text(\"AneinemTagteilen\")}else{Text(\"DieseReise\")}}footer:{iftimeline.days.count>1{Text(\"TippeaufdenTag,andemdiezweiteReisebeginnt.\")}}"))
+        #expect(!days.contains("mergeButton(") && !days.contains("neighbour") && !days.contains("Pause"))
+        // A neighbour: a heading of its own; under the first one shown why it waits and what it is for.
+        let neighbour = Self.squeezed(try Self.body(["func neighbourSection("], in: Self.workshop))
+        #expect(neighbour.contains("Section{mergeButton(other,side:side,gap:gap)}header:{ifside==.before{Text(\"Reisedavor\")}else{Text(\"Reisedanach\")}}footer:{ifexplains{VStack(alignment:.leading,spacing:Theme.Spacing.s){TripChangeWaitNote()Text(\"FüreineReisemitPause,zumBeispieleinWochenendezuHausezwischenzweiStationen.\")}}}"))
+        let view = try Self.code(Self.workshop)
+        #expect(view.components(separatedBy: "Für eine Reise mit Pause").count - 1 == 1, "what merging is for is said twice")
+        // The days between the trips, in the merge row ("Island · 120 Fotos · 3 Tage dazwischen").
+        let button = Self.squeezed(try Self.body(["func mergeButton("], in: Self.workshop))
+        #expect(button.contains("letdetail:Textifletgap,gap>0{letbetween=Text(\"\\(gap)\\(gap.formatted())Tagedazwischen\")detail=Text(\"\\(title(other))·\\(photos)·\\(between)\")}else{detail=Text(\"\\(title(other))·\\(photos)\")}"))
+        // Days without photos between two days, on the line.
+        #expect(days.contains("TripTimelineGapRow(text:Text(\"\\(entry.quietDaysBefore)\\(entry.quietDaysBefore.formatted())TageohneFotos\"),line:lines.gap)"))
+    }
+
+    /// The timeline is made off the main thread, once for the trip, its neighbours and the facts
+    /// (review G6: the body worked out every day, the trip's span and each neighbour's at every
+    /// tap): from the days the split takes, in the same calendar. The split acts on the days
+    /// shown; a day chosen on a timeline made anew is let go.
+    @Test func theTimelineIsMadeOffTheMainThreadNotInTheBody() throws {
+        let view = Self.squeezed(try Self.code(Self.workshop))
+        for work in ["TripTimeline.days(", "TripTimeline.span(", "TripTimeline.content(", "TripTimeline.quietDays(", "funcquietDays("] {
+            #expect(!view.contains(work), "\(work) in the sheet")
+        }
+        #expect(view.contains(".task(id:TimelineInputs(trip:proposal.id,photos:proposal.assetIDs.count,before:around.before?.id,after:around.after?.id,facts:model.factsVersion)){letmade=awaitmodel.tripTimeline(of:proposal,before:around.before,after:around.after)guard!Task.isCancelledelse{return}ifmade.days.map(\\.id)!=timeline?.days.map(\\.id){splitIndex=nil}timeline=made}"))
+        let inputs = Self.squeezed(try Self.body(["struct TripWorkshopView", "private struct TimelineInputs"], in: Self.workshop))
+        #expect(inputs == "{vartrip:AlbumistIDvarphotos:Intvarbefore:AlbumistID?varafter:AlbumistID?varfacts:Int}")
+        #expect(view.contains("@Stateprivatevartimeline:TripTimeline.Content?"))
+        // The split takes the days shown.
+        #expect(view.contains("letindex=splitIndex,letentries=timeline?.days,letpreview=TripWorkshop.split(entries.map(\\.day),before:index,dates:model.creationDates){splitBar(preview,day:entries[index].day)"))
+        let model = Self.squeezed(try Self.body(["func tripTimeline("], in: Self.model))
+        #expect(model.contains("letfacts=factsByID,ranks=previewRanks,dates=creationDates,calendar=Calendar.current"))
+        #expect(model.contains("returnawaitTask.detached(priority:.userInitiated){TripTimeline.content(of:photos,before:earlier,after:later,facts:facts,ranks:ranks,dates:dates,calendar:calendar)}.value"))
     }
 
     /// Every day after the first is the button that chooses it as the start of the second trip,
     /// as before (identifier, hint, selected trait); the first says "Beginn der Reise".
     @Test func everyDayAfterTheFirstChoosesWhereTheSecondTripBegins() throws {
         let row = Self.squeezed(try Self.body(["func dayRow("], in: Self.workshop))
-        #expect(row.contains("ifentry.canStartNewTrip{Button{withAnimation(.smooth(duration:0.25)){splitIndex=splitIndex==index?nil:index}}label:{TripTimelineDayRow(entry:entry,note:selected?String(localized:\"NeueReiseabhier\"):nil,selected:selected,above:above,below:below)}.buttonStyle(.plain).accessibilityIdentifier(\"workshop.day\").accessibilityHint(Text(\"NeueReiseabdiesemTag\")).accessibilityAddTraits(selected?.isSelected:[])"))
-        #expect(row.contains("TripTimelineDayRow(entry:entry,note:String(localized:\"BeginnderReise\"),selected:false,above:above,below:below)"))
-        // The line breaks where the second trip begins.
-        let above = Self.squeezed(try Self.body(["func lineAbove("], in: Self.workshop))
-        #expect(above.hasPrefix("{ifsplitIndex==index{returnnil}"))
-        let below = Self.squeezed(try Self.body(["func lineBelow("], in: Self.workshop))
-        #expect(below.contains("returnsplitIndex==index+1?nil:.solid"))
+        #expect(row.contains("ifentry.canStartNewTrip{Button{withAnimation(.smooth(duration:0.25)){splitIndex=splitIndex==index?nil:index}}label:{TripTimelineDayRow(entry:entry,note:selected?String(localized:\"NeueReiseabhier\"):nil,selected:selected,above:lines.above,below:lines.below)}.buttonStyle(.plain).accessibilityIdentifier(\"workshop.day\").accessibilityHint(Text(\"NeueReiseabdiesemTag\")).accessibilityAddTraits(selected?.isSelected:[])"))
+        #expect(row.contains("TripTimelineDayRow(entry:entry,note:String(localized:\"BeginnderReise\"),selected:false,above:lines.above,below:lines.below)"))
+        // The line breaks where the second trip begins, also over days without photos before it
+        // (review G8): the core's rule (`TripTimeline.lines`), not one of the sheet's own.
+        let days = Self.squeezed(try Self.body(["func daysSection("], in: Self.workshop))
+        #expect(days.contains("letlines=TripTimeline.lines(entries,at:index,cut:splitIndex)"))
+        #expect(days.contains("dayRow(entry,index:index,lines:lines)"))
+        let view = try Self.code(Self.workshop)
+        #expect(!view.contains("func lineAbove(") && !view.contains("func lineBelow("))
     }
 
     /// A neighbour's merge row shows its cover (never a sensitive photo, "Vorschau ausgeblendet"
     /// for one of nothing else), dimmed while it waits; at the accessibility sizes a strip above.
+    /// The size of the covers of the history and the receipt, which grows with the text up to the
+    /// same point (review G8: 64 pt without a cap).
     @Test func aNeighboursMergeRowShowsItsCover() throws {
         let button = Self.squeezed(try Self.body(["func mergeButton("], in: Self.workshop))
-        #expect(button.contains("coverIDs:model.proposalCoverIDs(for:other),hidesPreview:model.previewHidden(for:other),coverSide:neighbourCover"))
+        #expect(button.contains("coverIDs:model.proposalCoverIDs(for:other),hidesPreview:model.previewHidden(for:other))"))
         let label = Self.squeezed(try Self.body(["struct MergeRowLabel", "var body"], in: Self.workshop))
         #expect(label.contains("AdaptiveStack(horizontalAlignment:.leading,verticalAlignment:.top,spacing:Theme.Spacing.m)"))
-        #expect(label.contains("CoverPhoto(ids:coverIDs,aspectRatio:typeSize.isAccessibilitySize?3:1,cornerRadius:Theme.Radius.tile,hidesPreview:hidesPreview,placeholderSymbol:\"airplane\").frame(width:typeSize.isAccessibilitySize?nil:coverSide).opacity(isEnabled?1:0.5)"))
+        #expect(label.contains("AlbumRowCover(ids:coverIDs,hidesPreview:hidesPreview,placeholderSymbol:\"airplane\").opacity(isEnabled?1:0.5)"))
+        let view = try Self.code(Self.workshop)
+        #expect(!view.contains("neighbourCover") && !view.contains("coverSide"), "a cover size of the sheet's own")
     }
 
     /// A day: date, place, count and note as one element; up to three larger photos below it
@@ -99,14 +132,19 @@ struct TripTimelineSourceTests {
         #expect(rowModifier == "{listRowInsets(EdgeInsets(top:0,leading:Theme.Spacing.l,bottom:0,trailing:Theme.Spacing.l)).listRowSeparator(.hidden)}")
         let row = Self.squeezed(try Self.body(["struct TripTimelineRow", "var body"], in: Self.timeline))
         #expect(row.contains(".frame(maxWidth:.infinity,minHeight:44,alignment:.leading)"))
-        // Every row of the timeline is laid out so.
-        let section = try Self.body(["func timelineSection("], in: Self.workshop)
+        // Every row of the timeline is laid out so; the neighbours are rows of their own sections.
+        let section = try Self.body(["func daysSection("], in: Self.workshop)
         let rows = section.components(separatedBy: "TripTimelineGapRow(").count - 1
+        #expect(rows == 1)
         #expect(section.components(separatedBy: ".tripTimelineRow()").count - 1 == rows)
-        for declaration in ["func dayRow(", "func neighbourNode("] {
-            let body = try Self.body([declaration], in: Self.workshop)
-            #expect(body.contains(".tripTimelineRow()"), "\(declaration)")
-        }
+        let day = try Self.body(["func dayRow("], in: Self.workshop)
+        #expect(day.components(separatedBy: ".tripTimelineRow()").count - 1 == 2)
+        #expect(!(try Self.body(["func neighbourSection("], in: Self.workshop)).contains(".tripTimelineRow()"))
+        // A day, a chosen day, a gap: no ring for a neighbour any more.
+        let marks = Self.squeezed(try Self.body(["struct TripTimelineGutter"], in: Self.timeline))
+        #expect(marks.contains("enumMark{caseday,cut,none}") && marks.contains("typealiasLine=TripTimeline.Stroke"))
+        let gap = Self.squeezed(try Self.body(["struct TripTimelineGapRow", "var body"], in: Self.timeline))
+        #expect(gap.contains("TripTimelineRow(mark:.none,markY:nil,above:line,below:line)"))
     }
 
     /// The identifiers the UI tests use stay (`AlbumistFlowUITests`: split at "5. August", merge

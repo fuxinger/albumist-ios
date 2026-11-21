@@ -11,6 +11,8 @@ import Foundation
 /// - Between two days: the days without photos ("1 Tag ohne Fotos").
 /// - Where the trip can be split: before every day but the first (`TripWorkshop.split`).
 /// - Between this trip and a neighbour: the days without photos a merge would bridge.
+/// - All of it at once (`content(of:…)`), so the sheet makes it off the main thread, not in its
+///   body at every tap (review G6); the line beside the days (`lines(_:at:cut:)`).
 public enum TripTimeline {
     /// One day of the trip as the timeline shows it.
     public struct Day: Hashable, Sendable, Identifiable {
@@ -83,5 +85,81 @@ public enum TripTimeline {
         }
         guard let first, let last else { return nil }
         return DateInterval(start: first, end: last)
+    }
+
+    // MARK: All at once
+
+    /// What the timeline shows of a trip, made in one piece (`content(of:…)`).
+    public struct Content: Hashable, Sendable {
+        /// The trip's days, oldest first (`days(_:facts:ranks:dates:calendar:)`).
+        public var days: [Day]
+        /// Calendar days without photos between the trip before it and its first photo; nil
+        /// without a trip before, or when either has no dated photo.
+        public var quietDaysFromBefore: Int?
+        /// Calendar days without photos between its last photo and the trip after it; nil the same.
+        public var quietDaysToAfter: Int?
+
+        public init(days: [Day] = [], quietDaysFromBefore: Int? = nil, quietDaysToAfter: Int? = nil) {
+            self.days = days
+            self.quietDaysFromBefore = quietDaysFromBefore
+            self.quietDaysToAfter = quietDaysToAfter
+        }
+    }
+
+    /// The timeline of the trip of `photos`, with the trips right `before` and `after` it (their
+    /// photos; nil: none): its days as the split takes them (`TripWorkshop.days`), what each one
+    /// shows, and the days without photos a merge would bridge. One pass over the trip's photos,
+    /// one over each neighbour's.
+    public static func content(of photos: some Collection<AssetID>, before: Set<AssetID>?, after: Set<AssetID>?,
+                               facts: FactsByID, ranks: [AssetID: PreviewRank], dates: [AssetID: Date],
+                               calendar: Calendar) -> Content {
+        let made = days(TripWorkshop.days(of: photos, dates: dates, calendar: calendar), facts: facts, ranks: ranks,
+                        dates: dates, calendar: calendar)
+        let trip = span(of: photos, dates: dates)
+        let earlier = before.flatMap { span(of: $0, dates: dates) }
+        let later = after.flatMap { span(of: $0, dates: dates) }
+        return Content(days: made,
+                       quietDaysFromBefore: trip.flatMap { trip in earlier.map { quietDays(from: $0.end, to: trip.start, calendar: calendar) } },
+                       quietDaysToAfter: trip.flatMap { trip in later.map { quietDays(from: trip.end, to: $0.start, calendar: calendar) } })
+    }
+
+    // MARK: The line
+
+    /// How the line beside the days runs: solid between two days of the trip, dotted over days
+    /// without photos.
+    public enum Stroke: Hashable, Sendable {
+        case solid, dotted
+    }
+
+    /// The line at one day of the timeline (`lines(_:at:cut:)`); nil: none.
+    public struct Lines: Hashable, Sendable {
+        /// From the top of the day's row to its mark.
+        public var above: Stroke?
+        /// From the day's mark to the bottom of its row.
+        public var below: Stroke?
+        /// Through the days without photos right before the day (`Day.quietDaysBefore`).
+        public var gap: Stroke?
+
+        public init(above: Stroke? = nil, below: Stroke? = nil, gap: Stroke? = nil) {
+            self.above = above
+            self.below = below
+            self.gap = gap
+        }
+    }
+
+    /// How the line runs at day `index` of `days` when the second trip of a split begins with day
+    /// `cut` (nil: no split chosen). Solid between two days, dotted over the days without photos
+    /// between them; none above the first day or below the last (the trips before and after it
+    /// are sections of their own). None between the two trips the split makes: not above the
+    /// day it begins with, not below the day before, and not over the days without photos
+    /// between them (review G8: the dotted line ran on into the cut there).
+    public static func lines(_ days: [Day], at index: Int, cut: Int?) -> Lines {
+        guard days.indices.contains(index) else { return Lines() }
+        let quietBefore = days[index].quietDaysBefore > 0
+        let above: Stroke? = index == 0 || cut == index ? nil : (quietBefore ? .dotted : .solid)
+        let below: Stroke? = index == days.count - 1 || cut == index + 1
+            ? nil : (days[index + 1].quietDaysBefore > 0 ? .dotted : .solid)
+        let gap: Stroke? = quietBefore && cut != index ? .dotted : nil
+        return Lines(above: above, below: below, gap: gap)
     }
 }

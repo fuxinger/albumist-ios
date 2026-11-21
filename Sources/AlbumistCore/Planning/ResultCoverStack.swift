@@ -174,12 +174,9 @@ public struct ResultCoverStack: Hashable, Sendable {
         return sources.subtracting(known).union(sources.intersection(personal))
     }
 
-    /// The receipt's name of the album `ref` (`PlanReceipt.Album.id`).
+    /// The receipt's name of the album `ref` (`PlanReceipt.Album.id`, `PlanCovers.key`).
     static func id(of ref: AlbumRef) -> String {
-        switch ref {
-        case .planned(let key): "planned:" + key
-        case .existing(let id): id.rawValue
-        }
+        PlanCovers.key(of: ref)
     }
 
     /// Which albums the stack may show, and their ids: the new ones, else the user's that got

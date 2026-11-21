@@ -8,7 +8,8 @@ import AlbumistTestSupport
 /// Linux. Which photos each cover tries is decided in the core (`PlanCoversTests`); the receipt's
 /// words keep their guard (`ReceiptAlbumRowTests`), its ways back and confirmations theirs
 /// (`DeleteQuestionNoteTests`, `FullAccessForChangesTests`). Here: the covers are worked out off
-/// the main thread and again when the photos' dates or ranks change; each history row and each
+/// the main thread and again when the facts change (the photos' dates and ranks with them, keyed
+/// on the facts' revision); each history row and each
 /// album of the receipt shows its own, larger than the 44 pt pictures of before and laid out as
 /// the tab "Alben" lays out albums; the rows stay what VoiceOver and the UI tests know.
 @Suite("Covers of the history and the receipt in the app (source)")
@@ -17,6 +18,7 @@ struct ChangeCoversSourceTests {
     static let receipt = "App/Albumist/Views/PlanReceiptView.swift"
     static let covers = "App/Albumist/Views/History/ChangeCoverViews.swift"
     static let model = "App/Albumist/Model/AppModel+History.swift"
+    static let review = "App/Albumist/Views/PlanReviewView.swift"
 
     static func code(_ path: String) throws -> String {
         AppSource.code(try AppSource.read(path), keepStrings: true)
@@ -33,16 +35,16 @@ struct ChangeCoversSourceTests {
     // MARK: The history
 
     /// The history works out the cover of each change it lists off the main thread, again when
-    /// the changes or the photos' dates or ranks change (a photo the analysis finds to be a
-    /// sensitive document leaves its cover at once), and hands each row its own; the change cut
-    /// off on its way shows what it sets out to add.
+    /// the changes or the facts change (the photos' dates and ranks are made from them: a photo
+    /// the analysis finds to be a sensitive document leaves its cover at once), and hands each
+    /// row its own; the change cut off on its way shows what it sets out to add.
     @Test func theHistoryWorksOutACoverForEachChange() throws {
         let view = Self.squeezed(try Self.body(["struct HistoryView", "var body"], in: Self.settings))
         #expect(view.contains(".task(id:model.changeCoverInputs(model.history,interrupted:model.interruptedPlan)){letmade=awaitmodel.historyCovers(model.history,interrupted:model.interruptedPlan)guard!Task.isCancelledelse{return}covers=made}"))
         #expect(view.contains("InterruptedHistoryRow(plan:interrupted,cover:covers[interrupted.id])"))
         #expect(view.contains("HistoryRow(plan:plan,cover:covers[plan.id])"))
         let inputs = Self.squeezed(try Self.body(["func changeCoverInputs("], in: Self.model))
-        #expect(inputs.contains("ChangeCoverInputs(plans:plans.map(\\.id)+(interrupted.map{[$0.id]}??[]),dates:creationDates,ranks:previewRanks)"))
+        #expect(inputs.contains("ChangeCoverInputs(plans:plans.map(\\.id)+(interrupted.map{[$0.id]}??[]),facts:factsVersion)"))
         let history = Self.squeezed(try Self.body(["func historyCovers("], in: Self.model))
         // Before the first facts of a launch every photo would count as an ordinary one: no cover
         // until they say which are sensitive documents.
@@ -50,6 +52,17 @@ struct ChangeCoversSourceTests {
         #expect(history.contains("Task.detached(priority:.userInitiated)"))
         #expect(history.contains("covers[plan.id]=PlanCovers.mosaic(of:plan,dates:dates,ranks:ranks)"))
         #expect(history.contains("covers[interrupted.id]=PlanCovers.mosaic(of:interrupted,applied:false,dates:dates,ranks:ranks)"))
+    }
+
+    /// What the covers are keyed on is cheap to keep and compare: the changes and the facts'
+    /// revision (`AppModel.factsVersion`), never the dictionaries of all dates and ranks, which
+    /// SwiftUI would hold on to while the screen is open (a memory warning freed nothing there)
+    /// and compare entry by entry once the model made them anew (review G7).
+    @Test func theCoversAreKeyedOnTheFactsRevisionNotOnTheirDictionaries() throws {
+        let inputs = Self.squeezed(try Self.body(["struct ChangeCoverInputs"], in: Self.model))
+        #expect(inputs == "{varplans:[AlbumistID]varfacts:Int}")
+        let model = Self.squeezed(try Self.code(Self.model))
+        #expect(!model.contains("dates:creationDates,ranks:previewRanks)"), "a task id that holds all dates and ranks")
     }
 
     /// A row of the history: the change's cover beside when and what it did, "Rückgängig gemacht"
@@ -106,8 +119,8 @@ struct ChangeCoversSourceTests {
 
     // MARK: The receipt
 
-    /// The receipt works out the cover of each album off the main thread, again when the photos'
-    /// dates or ranks change, and hands each row its own.
+    /// The receipt works out the cover of each album off the main thread, again when the facts
+    /// change (`ChangeCoverInputs`), and hands each row its own.
     @Test func theReceiptWorksOutACoverForEachAlbum() throws {
         let view = Self.squeezed(try Self.body(["struct PlanReceiptView", "var body"], in: Self.receipt))
         #expect(view.contains(".task(id:model.changeCoverInputs([plan])){letmade=awaitmodel.receiptCovers(for:plan)guard!Task.isCancelledelse{return}covers=made}"))
@@ -137,6 +150,50 @@ struct ChangeCoversSourceTests {
         #expect(!whole.contains("CoverThumbnail(") && !whole.contains("= 44"))
         let size = Self.squeezed(try Self.body(["struct AlbumRowCover", "var body"], in: Self.covers))
         #expect(size.contains("CoverPhoto(ids:ids,aspectRatio:strip?ChangeCoverMetrics.stripAspectRatio:1,cornerRadius:Theme.Radius.tile,hidesPreview:hidesPreview,placeholderSymbol:placeholderSymbol).frame(width:strip?nil:min(side,ChangeCoverMetrics.largestSide))"))
+    }
+
+    // MARK: The preview (DS-15 part 2)
+
+    /// The preview before a run shows each album with the cover its receipt will show: the photos
+    /// the plan sets out to add (`applied: false`), worked out off the main thread, keyed as the
+    /// receipt's covers (`ChangeCoverInputs`: another plan, new facts), none before the first facts
+    /// of a launch; each row finds its own under the receipt's name of the album
+    /// (`PlanCovers.key`), never one made for another plan.
+    @Test func thePreviewWorksOutTheCoverOfEachAlbum() throws {
+        let view = Self.squeezed(try Self.body(["struct PlanReviewView", "var body"], in: Self.review))
+        #expect(view.contains(".task(id:model.changeCoverInputs(plan.map{[$0]}??[])){guardletplanelse{return}letmade=awaitmodel.previewCovers(for:plan)guard!Task.isCancelledelse{return}albumCovers=AlbumCovers(plan:plan.id,covers:made)}"))
+        let content = Self.squeezed(try Self.body(["struct PlanReviewView", "func planContent("], in: Self.review))
+        #expect(content.contains("if!facts.albums.isEmpty{PlanAlbumList(albums:facts.albums,covers:covers(of:plan))}"))
+        let mine = Self.squeezed(try Self.body(["struct PlanReviewView", "func covers(of"], in: Self.review))
+        #expect(mine == "{guardletalbumCovers,albumCovers.plan==plan.idelse{returnnil}returnalbumCovers.covers}")
+        let list = Self.squeezed(try Self.body(["struct PlanAlbumList", "var body"], in: Self.review))
+        #expect(list.contains("PlanAlbumRow(album:album,cover:cover(album))"))
+        let cover = Self.squeezed(try Self.body(["struct PlanAlbumList", "func cover("], in: Self.review))
+        #expect(cover == "{covers.map{$0[PlanCovers.key(of:album.id)]??PlanCovers.Cover(ids:[],hidden:false)}}")
+        let model = Self.squeezed(try Self.body(["func previewCovers("], in: Self.model))
+        #expect(model.hasPrefix("{guard!facts.isEmptyelse{returnnil}"))
+        #expect(model.contains("letdates=creationDates,ranks=previewRanksreturnawaitTask.detached(priority:.userInitiated){PlanCovers.albums(of:plan,applied:false,dates:dates,ranks:ranks)}.value"))
+    }
+
+    /// A row of the preview: the album's cover as the receipt shows it (72 pt beside the words, a
+    /// strip at the accessibility sizes) instead of the 44 pt picture of its first photo; the
+    /// stack's symbol for an album the plan adds no photo to. "Neu" or "Ergänzt" with "N Fotos"
+    /// under the folder, side by side where they fit, as in the receipt. One element for
+    /// VoiceOver with the words of before, in the order of before.
+    @Test func aPreviewRowShowsTheAlbumsCover() throws {
+        let row = Self.squeezed(try Self.body(["private struct PlanAlbumRow", "var body"], in: Self.review))
+        #expect(row.hasPrefix("{AdaptiveStack(spacing:Theme.Spacing.m){coverViewVStack(alignment:.leading,spacing:2){Text(album.title).font(.body.weight(.medium)).compactLineLimit(2)if!album.folderPath.isEmpty{Text(album.folderPath.joined(separator:\"›\")).font(.footnote).foregroundStyle(.noteText).compactLineLimit(2)}ViewThatFits(in:.horizontal){HStack(alignment:.firstTextBaseline,spacing:Theme.Spacing.s){badgecount}VStack(alignment:.leading,spacing:2){badgecount}}}.frame(maxWidth:.infinity,alignment:.leading)}"))
+        #expect(row.hasSuffix(".padding(.vertical,Theme.Spacing.xs).accessibilityElement(children:.combine)}"))
+        let cover = Self.squeezed(try Self.body(["private struct PlanAlbumRow", "private var coverView"], in: Self.review))
+        #expect(cover.contains("ifalbum.addedCount>0{AlbumRowCover(ids:cover?.ids??[],hidesPreview:cover?.hidden??false,placeholderSymbol:cover==nil?nil:\"rectangle.stack\")}else{AlbumRowCover(ids:[],placeholderSymbol:\"rectangle.stack\")}"))
+        // Not the small picture of before.
+        let whole = try Self.body(["private struct PlanAlbumRow"], in: Self.review)
+        #expect(!whole.contains("CoverThumbnail(") && !whole.contains("= 44"))
+        // The words of before.
+        let words = Self.squeezed(whole)
+        #expect(words.contains("Text(\"Neu\").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)"))
+        #expect(words.contains("Text(\"Ergänzt\").font(.caption.weight(.semibold)).foregroundStyle(.noteText)"))
+        #expect(words.contains("Text(\"\\(album.addedCount)\\(album.addedCount.formatted())Fotos\").font(.footnote).foregroundStyle(.noteText).monospacedDigit()"))
     }
 
     /// The names the UI tests use stay (`AlbumistFlowUITests`, `AlbumistLockedUITests`).

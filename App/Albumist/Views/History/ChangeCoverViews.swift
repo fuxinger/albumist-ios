@@ -37,7 +37,8 @@ extension PlanReceipt.Kind {
 /// An album's cover beside its row in the receipt: the photos the change added to it, as the tab
 /// "Alben" shows the album (`PlanCovers.cover`); "Vorschau ausgeblendet" when every one is a
 /// sensitive document; a symbol on the calm ground when there is no photo to try. 72 pt beside
-/// the words, a strip across the row above them at the accessibility text sizes.
+/// the words, a strip across the row above them at the accessibility text sizes. The preview's
+/// album rows (DS-15 part 2) and the merge rows of "Reise anpassen" (review G8) show theirs so.
 struct AlbumRowCover: View {
     var ids: [AssetID]
     var hidesPreview = false

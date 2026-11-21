@@ -56,6 +56,9 @@ struct PlanReviewView: View {
     @State private var facts: PlanReviewFacts?
     /// The plan and album list `facts` were made for.
     @State private var factsMadeFor: FactsKey?
+    /// The covers of the albums the plan lists (design wave 3, DS-15 part 2), as its receipt will
+    /// show them, with the plan they were worked out for.
+    @State private var albumCovers: AlbumCovers?
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     @Environment(\.scenePhase) private var scenePhase
     /// At the accessibility text sizes and in landscape on an iPhone the bar is compact (`compactBar`).
@@ -177,6 +180,16 @@ struct PlanReviewView: View {
             loading = false
         }
         .task(id: factsKey) { await makeFacts() }
+        // The albums' covers (DS-15 part 2), worked out off the main thread from what the plan
+        // sets out to add, again for another plan or when the facts change (the photos' dates and
+        // ranks with them), as the receipt's: a photo the analysis finds to be a sensitive
+        // document leaves its cover at once.
+        .task(id: model.changeCoverInputs(plan.map { [$0] } ?? [])) {
+            guard let plan else { return }
+            let made = await model.previewCovers(for: plan)
+            guard !Task.isCancelled else { return }
+            albumCovers = AlbumCovers(plan: plan.id, covers: made)
+        }
         // Each change (a run that ended, a choice made elsewhere), each change of `freshness`
         // and the end of loading check the plan again.
         .task(id: StaleCheck(changes: changes, freshness: freshness, loading: loading)) { await makePlanIfNeeded() }
@@ -317,6 +330,20 @@ struct PlanReviewView: View {
         factsMadeFor = key
     }
 
+    /// The covers of a plan's albums (`AppModel.previewCovers`), and the plan they were worked
+    /// out for.
+    private struct AlbumCovers {
+        var plan: AlbumistID
+        /// By the receipt's name of the album (`PlanCovers.key`); nil before the first facts.
+        var covers: [String: PlanCovers.Cover]?
+    }
+
+    /// The covers of `plan`'s albums: nil while they are worked out, never another plan's.
+    private func covers(of plan: ChangePlan) -> [String: PlanCovers.Cover]? {
+        guard let albumCovers, albumCovers.plan == plan.id else { return nil }
+        return albumCovers.covers
+    }
+
     // MARK: Plan
 
     /// The plan, from what stops it (if anything) to the way out. The button that runs it is
@@ -349,7 +376,7 @@ struct PlanReviewView: View {
             if summary.deletedContainers > 0 { row("rectangle.stack.badge.minus", "Entfernte Alben", summary.deletedContainers) }
         }
 
-        if !facts.albums.isEmpty { PlanAlbumList(albums: facts.albums) }
+        if !facts.albums.isEmpty { PlanAlbumList(albums: facts.albums, covers: covers(of: plan)) }
 
         // The promises themselves stand in one line above the button (`promise`); what they
         // mean stays here, under the albums: two lines, the rest behind "Mehr erfahren"
@@ -1145,9 +1172,13 @@ struct UnlockCard: View {
 }
 
 /// Every album of the plan with its folder and photo count, so it is clear what
-/// Albumist will make before anything happens (Fuchs, 14.11.).
+/// Albumist will make before anything happens (Fuchs, 14.11.). Each with the cover its receipt
+/// will show (design wave 3, DS-15 part 2).
 struct PlanAlbumList: View {
     let albums: [PlannedAlbumPreview]
+    /// The photos each album's cover tries, by the receipt's name of the album
+    /// (`AppModel.previewCovers`); nil while they are worked out.
+    let covers: [String: PlanCovers.Cover]?
     @State private var showAll = false
     private let collapsedCount = 6
 
@@ -1164,7 +1195,7 @@ struct PlanAlbumList: View {
             .font(.headline)
             .accessibilityAddTraits(.isHeader)
             ForEach(visible) { album in
-                PlanAlbumRow(album: album)
+                PlanAlbumRow(album: album, cover: cover(album))
                 if album.id != visible.last?.id { Divider() }
             }
             if albums.count > collapsedCount {
@@ -1185,43 +1216,69 @@ struct PlanAlbumList: View {
             }
         }
     }
+
+    /// The album's cover (`PlanCovers`, named as the receipt names it): nil while the covers are
+    /// worked out; none to try for an album the plan adds no photo to.
+    private func cover(_ album: PlannedAlbumPreview) -> PlanCovers.Cover? {
+        covers.map { $0[PlanCovers.key(of: album.id)] ?? PlanCovers.Cover(ids: [], hidden: false) }
+    }
 }
 
+/// One album of the preview, as its receipt will show it (design wave 3, DS-15 part 2): its cover
+/// (the photos the plan sets out to add, as the tab "Alben" will show the album, 72 pt instead of
+/// the 44 pt picture of its first photo), its name and folder, and what the plan does ("Neu" or
+/// "Ergänzt" with "N Fotos") under the folder, so the larger cover leaves the name its width on
+/// the smallest iPhone. One element for VoiceOver, the words in the order of before; the cover is
+/// decoration.
 private struct PlanAlbumRow: View {
     let album: PlannedAlbumPreview
-    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 44
+    /// The photos its cover tries (`PlanCovers.albums`, `applied: false`); nil while they are
+    /// worked out.
+    let cover: PlanCovers.Cover?
 
     var body: some View {
         AdaptiveStack(spacing: Theme.Spacing.m) {
-            cover
-                .frame(width: side, height: side)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .accessibilityHidden(true)
+            coverView
             VStack(alignment: .leading, spacing: 2) {
                 Text(album.title).font(.body.weight(.medium)).compactLineLimit(2)
                 if !album.folderPath.isEmpty {
                     Text(album.folderPath.joined(separator: " › "))
                         .font(.footnote).foregroundStyle(.noteText).compactLineLimit(2)
                 }
+                // Side by side where they fit ("Neu" with "16 Fotos"), else one below the other,
+                // as in the receipt.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+                        badge
+                        count
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        badge
+                        count
+                    }
+                }
             }
-            Spacer(minLength: Theme.Spacing.s)
-            VStack(alignment: .trailing, spacing: 2) {
-                badge
-                Text("\(album.addedCount) \(album.addedCount.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.vertical, Theme.Spacing.xs)
         .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
-    private var cover: some View {
-        if album.coverAssetID != nil || album.addedCount > 0 {
-            // No cover although photos are added: every one is a sensitive document, and the
-            // tile says the preview is hidden, as in the lists (`CoverThumbnail`).
-            CoverThumbnail(id: album.coverAssetID, side: side)
+    private var coverView: some View {
+        if album.addedCount > 0 {
+            // The photos the plan adds; "Vorschau ausgeblendet" when every one is a sensitive
+            // document, the symbol once it is clear there is no photo to try (only screenshots).
+            AlbumRowCover(ids: cover?.ids ?? [], hidesPreview: cover?.hidden ?? false,
+                          placeholderSymbol: cover == nil ? nil : "rectangle.stack")
         } else {
-            Theme.accent.opacity(0.15)
+            // No photo added: the album's symbol, as in the receipt.
+            AlbumRowCover(ids: [], placeholderSymbol: "rectangle.stack")
         }
+    }
+
+    private var count: some View {
+        Text("\(album.addedCount) \(album.addedCount.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
     }
 
     @ViewBuilder

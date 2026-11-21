@@ -1375,7 +1375,9 @@ final class AlbumistFlowUITests: XCTestCase {
         }
         let value = (video.value as? String) ?? ""
         print("UI_FACT video cell: label \(video.label), value \(value)")
-        XCTAssertTrue(value.hasPrefix("Video, ") && value.contains("Sekunde"), "VoiceOver does not hear the video's length in its cell: \"\(value)\"")
+        // Its own length, rounded to the second (the clip has 120 frames at 30 a second), as the
+        // thumbnail's value: second review F, F5.
+        XCTAssertTrue(value.hasPrefix("Video, 4 Sekunden"), "VoiceOver does not hear the video's length of 4 seconds in its cell: \"\(value)\"")
         shot("14v-library-video")
         video.tap()
         print("UI_STEP_OK open the video")

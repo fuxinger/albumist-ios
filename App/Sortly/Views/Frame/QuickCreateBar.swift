@@ -69,3 +69,20 @@ extension View {
         }
     }
 }
+
+private struct QuickCreateAtOnceKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Whether "Anlegen" makes the album at once on this stack (decision 7B): only on the tabs,
+    /// which show the banner with "Widerrufen", the purchase sheet and the messages
+    /// (`MainTabs`). Elsewhere, such as in a sheet over the tabs (a photo's "Info"), all of them
+    /// would be hidden under the sheet: there a card opens its suggestion and "Album anlegen" the
+    /// preview, as before 7B. Every `NavigationRoot` sets it for its own stack, so a sheet never
+    /// inherits the yes of the tab under it (review B of design wave 1).
+    var quickCreateAtOnce: Bool {
+        get { self[QuickCreateAtOnceKey.self] }
+        set { self[QuickCreateAtOnceKey.self] = newValue }
+    }
+}

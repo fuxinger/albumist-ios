@@ -188,12 +188,22 @@ struct ProposalListView: View {
         Navigator.push(.proposal(ProposalRef(proposal, zoom: zoom)), on: navigator)
     }
 
+    /// Whether "Anlegen" makes the album at once on this stack: only on a tab's, where its banner
+    /// shows (`NavigationRoot`).
+    @Environment(\.quickCreateAtOnce) private var quickCreateAtOnce
+
     /// The card's one action: "Anlegen" makes the album at once with its banner (decision 7B),
     /// "Ergänzen …" opens the preview (an album of the user's is changed only after a look,
     /// Punkt 5), "Benennen …" and "Ansehen …" open the suggestion.
     private func act(_ action: ProposalCardAction, on proposal: AlbumProposal) {
         switch action {
         case .create:
+            // Where no banner shows (a sheet's own stack), the suggestion opens instead, as for
+            // a card that needs a look; its "Album anlegen" goes through the preview there.
+            guard quickCreateAtOnce else {
+                open(proposal)
+                return
+            }
             made[proposal.id] = proposal
             Task {
                 let outcome = await model.createNow(proposal)
@@ -1163,15 +1173,21 @@ struct ProposalDetailView: View {
         }
     }
 
+    /// Whether "Album anlegen" makes the album at once on this stack: only on a tab's, where its
+    /// banner shows (`NavigationRoot`).
+    @Environment(\.quickCreateAtOnce) private var quickCreateAtOnce
+
     /// "Album anlegen" for a new album: made at once, with the banner to take it back (decision
     /// 7B), through the preview's own plan and run (`AppModel.createNow`). What may not skip the
     /// preview (personal content, whose photos the user may not have seen; a plan with something
     /// to point out, such as an album of the same name in the folder) goes through the preview
-    /// from here. A suggestion that went meanwhile is not made again.
+    /// from here, and so does every suggestion opened where no banner shows (a sheet over the
+    /// tabs, such as a photo's "Info"). A suggestion that went meanwhile is not made again.
     private func create(_ card: ProposalCardText) async {
         guard isCurrent else { return }
         storeTypedName()
-        guard !card.isPersonal, QuickCreate.mayCreateAtOnce(proposal, decision: recommended, hidesPreview: card.hidesPreview) else {
+        guard quickCreateAtOnce, !card.isPersonal,
+              QuickCreate.mayCreateAtOnce(proposal, decision: recommended, hidesPreview: card.hidesPreview) else {
             await applyNow()
             return
         }

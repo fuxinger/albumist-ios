@@ -185,6 +185,10 @@ struct StartSections: View {
         Navigator.push(.proposal(ProposalRef(proposal)), on: navigator)
     }
 
+    /// Whether "Anlegen" makes the album at once on this stack: only on a tab's, where its banner
+    /// shows (`NavigationRoot`).
+    @Environment(\.quickCreateAtOnce) private var quickCreateAtOnce
+
     private func perform(_ action: ProposalCardAction, on proposal: AlbumProposal) {
         switch action {
         case .create:
@@ -194,6 +198,11 @@ struct StartSections: View {
             // (`StartVisit.made`). What cannot be made at once opens its page, the purchase
             // sheet or a message (`createNow`), and the card offers "Anlegen" again.
             guard model.quickCreating == nil, previewing == nil else { return }
+            // Where no banner shows (a sheet's own stack), the suggestion opens instead.
+            guard quickCreateAtOnce else {
+                open(proposal)
+                return
+            }
             visit.create(proposal.id)
             Task {
                 guard await model.createNow(proposal) == .created else { return }

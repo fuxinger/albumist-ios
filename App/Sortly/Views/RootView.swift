@@ -90,23 +90,25 @@ struct MainTabs: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            // Every tab shows the banner after "Anlegen" above the tab bar (decision 7B).
+            // Every tab shows the banner after "Anlegen" above the tab bar (decision 7B), so on
+            // the tabs' stacks "Anlegen" makes the album at once (`quickCreateAtOnce`); a sheet's
+            // own stack over them does not.
             Tab("Vorschläge", systemImage: Self.suggestionsSymbol, value: MainTab.suggestions) {
-                NavigationRoot(suggestionsNavigator) { OverviewView() }
+                NavigationRoot(suggestionsNavigator, quickCreate: true) { OverviewView() }
                     .showsQuickCreateBanner()
             }
             // What is not sorted yet, unsure or ignored (`LibraryView`).
             Tab("Unsortiert", systemImage: "photo.on.rectangle", value: MainTab.unsorted) {
-                NavigationRoot { LibraryView() }
+                NavigationRoot(quickCreate: true) { LibraryView() }
                     .showsQuickCreateBanner()
             }
             // The symbol Photos uses for albums (design review N1).
             Tab("Alben", systemImage: "rectangle.stack", value: MainTab.albums) {
-                NavigationRoot { AlbumsView() }
+                NavigationRoot(quickCreate: true) { AlbumsView() }
                     .showsQuickCreateBanner()
             }
             Tab(value: MainTab.search, role: .search) {
-                NavigationRoot { SearchView() }
+                NavigationRoot(quickCreate: true) { SearchView() }
                     .showsQuickCreateBanner()
             }
         }

@@ -105,3 +105,62 @@ public enum KeptVideoLength {
         }
     }
 }
+
+/// Changes in Photos waiting for one walk over the kept records of videos' lengths (review V11
+/// of design wave 3). An iCloud sync tells many changes in a row; each one walked up to 20,000
+/// records on the main actor and asked Photos about every kept video, and two walks in flight
+/// could end in the wrong order, an older length over a newer one. Now the changes wait in the
+/// order Photos told them, and one walk at a time takes all that waited: from the photo library
+/// watcher's debounced task, or at once when many wait (a long sync restarts the watcher's pause
+/// with each change), so neither the waiting changes nor one walk grow without end. Without a
+/// kept record there is nothing to correct: the changes go unwalked (a record made later is read
+/// from Photos as it is then).
+public struct ChangeBacklog<Change> {
+    /// The most changes that wait for the watcher's pause: with this many the walk starts at once.
+    public let limit: Int
+    private var waiting: [Change] = []
+    /// A walk runs: the changes that come meanwhile wait for the next one.
+    public private(set) var isWalking = false
+    /// The watcher asked for a walk while one ran: the next one follows it at once.
+    private var askedMeanwhile = false
+
+    public init(limit: Int) {
+        self.limit = max(limit, 1)
+    }
+
+    /// How many changes wait.
+    public var count: Int { waiting.count }
+
+    /// A change came, after the ones before it. True when so many wait that the walk should
+    /// start now, not after the watcher's pause.
+    public mutating func arrived(_ change: Change) -> Bool {
+        waiting.append(change)
+        return !isWalking && waiting.count >= limit
+    }
+
+    /// The changes to walk now, in the order they came, all at once: nil while a walk runs (they
+    /// wait for it to end) or when none waits. Without kept records they go unwalked.
+    public mutating func take(recordsKept: Bool) -> [Change]? {
+        guard !isWalking else {
+            askedMeanwhile = true
+            return nil
+        }
+        guard recordsKept, !waiting.isEmpty else {
+            waiting.removeAll()
+            return nil
+        }
+        isWalking = true
+        defer { waiting.removeAll() }
+        return waiting
+    }
+
+    /// The walk ended. True when the next one should start now: changes came meanwhile, and the
+    /// watcher asked for them meanwhile or as many came as the limit.
+    public mutating func walked() -> Bool {
+        isWalking = false
+        defer { askedMeanwhile = false }
+        return !waiting.isEmpty && (askedMeanwhile || waiting.count >= limit)
+    }
+}
+
+extension ChangeBacklog: Sendable where Change: Sendable {}

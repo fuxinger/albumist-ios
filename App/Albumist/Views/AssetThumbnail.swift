@@ -30,6 +30,11 @@ final class ThumbnailCache {
     /// Raised when a change in Photos corrected a length a thumbnail may show: the cells on
     /// screen read theirs again (review V4).
     let lengthRevision = VideoLengthRevision()
+    /// Changes in Photos waiting for one walk over the video records (review V11).
+    private var backlog = ChangeBacklog<ThumbnailRequest.Change>(limit: ThumbnailCache.changeLimit)
+    /// A long iCloud sync restarts the watcher's pause with each change: with this many waiting
+    /// the walk starts at once.
+    private static let changeLimit = 32
 
     static let thumbnailCostLimit = 80 * 1024 * 1024
     static let coverCostLimit = 24 * 1024 * 1024
@@ -178,14 +183,31 @@ final class ThumbnailCache {
         await photoAsset(for: id)
     }
 
+    /// A change in Photos came (`LibraryChangeWatcher`, in the order Photos told them): it waits
+    /// for the watcher's debounced walk, which starts at once when many wait (review V11).
+    func changeArrived(_ change: ThumbnailRequest.Change) {
+        if backlog.arrived(change) { followChanges() }
+    }
+
+    /// The video records follow the changes that waited, all at once, one walk at a time, never
+    /// once per change (review V11): from the watcher's debounced task. Nothing to walk without
+    /// a video record.
+    func followChanges() {
+        guard let waiting = backlog.take(recordsKept: videoLengths.count > 0) else { return }
+        Task {
+            await libraryChanged(waiting)
+            if backlog.walked() { followChanges() }
+        }
+    }
+
     /// Photos changed (review F, F14): the assets kept here are snapshots, so a video trimmed in
-    /// Photos kept its old length on its badge. Each kept video the change touched gets its new
+    /// Photos kept its old length on its badge. Each kept video the changes touched gets its new
     /// asset and length, or loses both when it was deleted; one whose asset is no longer in
     /// memory cannot be checked, and goes with its kept thumbnail so the next look asks Photos
     /// again (`KeptVideoLength`). The rest stays, so the grids keep their badges and the photo
     /// view its waiting thumbnail (emptied, they went on each change). When a length a cell may
     /// show changed, the cells on screen read theirs again (`lengthRevision`, review V4).
-    func libraryChanged(_ change: ThumbnailRequest.Change) async {
+    private func libraryChanged(_ changes: [ThumbnailRequest.Change]) async {
         var kept: [String: ThumbnailRequest.Asset] = [:]
         var readAgain = false
         for key in videoLengths.keys {
@@ -196,7 +218,7 @@ final class ThumbnailCache {
             }
         }
         if !kept.isEmpty {
-            for (key, answer) in await ThumbnailRequest.changed(kept, by: change) {
+            for (key, answer) in await ThumbnailRequest.changed(kept, by: changes) {
                 // Gone meanwhile (a memory warning): nothing to correct.
                 guard let seconds = videoLengths[key] else { continue }
                 if case .changed(let asset) = answer { assets.setObject(asset.value, forKey: key as NSString) }
@@ -444,19 +466,26 @@ enum ThumbnailRequest {
         }
     }
 
-    /// The kept assets `change` touched, by key, and what it did to each (review F, F14), worked
-    /// out on the lookups' queue: a change's details may read the Photos database, which waits
-    /// while Photos writes.
-    nonisolated static func changed(_ kept: [String: Asset], by change: Change) async -> [String: Changed] {
+    /// The kept assets the changes touched, by key, and what they did to each (review F, F14),
+    /// worked out on the lookups' queue: a change's details may read the Photos database, which
+    /// waits while Photos writes. The changes count in the order Photos told them (review V11):
+    /// the last one that touched an asset decides, and a deletion is final.
+    nonisolated static func changed(_ kept: [String: Asset], by changes: [Change]) async -> [String: Changed] {
         await withCheckedContinuation { (continuation: CheckedContinuation<[String: Changed], Never>) in
             lookups.async {
                 var found: [String: Changed] = [:]
                 for (key, asset) in kept {
-                    guard let details = change.value.changeDetails(for: asset.value) else { continue }
-                    if details.objectWasDeleted {
-                        found[key] = .deleted
-                    } else if let after = details.objectAfterChanges {
-                        found[key] = .changed(Asset(after))
+                    var current = asset.value
+                    for change in changes {
+                        guard let details = change.value.changeDetails(for: current) else { continue }
+                        if details.objectWasDeleted {
+                            found[key] = .deleted
+                            break
+                        }
+                        if let after = details.objectAfterChanges {
+                            current = after
+                            found[key] = .changed(Asset(after))
+                        }
                     }
                 }
                 continuation.resume(returning: found)

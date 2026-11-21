@@ -587,22 +587,55 @@ struct VideoViewerSourceTests {
     /// emptied on each change, the grids lost their badges and the photo view its waiting
     /// thumbnail, and Albumist's own albums alone are many changes (they change no photo).
     @Test func aVideosLengthFollowsAChangeInPhotos() throws {
+        // Albumist's own albums change no photo: a change during a plan is not kept for the walk
+        // (when and how often it runs: `changesInPhotosAreWalkedTogetherInTheirOrder`).
         let watcher = try Self.code("App/Albumist/Platform/LibraryChangeWatcher.swift")
-        let changed = try #require(AppSource.body(of: "nonisolated func photoLibraryDidChange(", in: watcher))
-        #expect(Self.inOrder(["let change = ThumbnailRequest.Change(changeInstance)", "Task { @MainActor in", "scheduleCatchUp()",
-                              "if !AppModel.shared.execution.isRunning { await ThumbnailCache.shared.libraryChanged(change) }"],
-                             in: changed), "\(changed)")
+        let changed = try #require(AppSource.body(of: "private func changed(_ change: ThumbnailRequest.Change)", in: watcher))
+        #expect(changed.contains("if !AppModel.shared.execution.isRunning { ThumbnailCache.shared.changeArrived(change) }"), "\(changed)")
         let thumbnails = try Self.code(Self.thumbnailsPath)
-        let refresh = try #require(AppSource.body(of: "func libraryChanged(_ change: ThumbnailRequest.Change) async", in: thumbnails))
+        let refresh = try #require(AppSource.body(of: "private func libraryChanged(_ changes: [ThumbnailRequest.Change]) async", in: thumbnails))
         #expect(Self.inOrder(["for key in videoLengths.keys", "assets.object(forKey: key as NSString)",
-                              "await ThumbnailRequest.changed(kept, by: change)",
+                              "await ThumbnailRequest.changed(kept, by: changes)",
                               "if case .changed(let asset) = answer { assets.setObject(asset.value, forKey: key as NSString) }"],
                              in: refresh), "\(refresh)")
         // Each record as the core's rule says (`aTrimmedVideosCellOnScreenShowsItsNewLength`).
         #expect(!refresh.contains("removeAll"), "the records emptied on every change")
         let details = try #require(AppSource.body(of: "nonisolated static func changed(", in: thumbnails))
-        #expect(Self.inOrder(["lookups.async {", "change.value.changeDetails(for: asset.value)", "objectWasDeleted",
+        #expect(Self.inOrder(["lookups.async {", "change.value.changeDetails(for: current)", "objectWasDeleted",
                               "objectAfterChanges"], in: details), "\(details)")
+    }
+
+    /// The walk over the kept video records for changes in Photos is coalesced (review V11): the
+    /// changes reach the main actor in the order Photos told them (its own serial queue, then the
+    /// main queue, first in first out) and wait (`ChangeBacklog`); the watcher's debounced task
+    /// walks all of them at once, one walk at a time (at once when many wait), never once per
+    /// change, and not at all without a video record. Within a walk the changes count in their
+    /// order: the last one that touched a video decides, and a deletion is final.
+    @Test func changesInPhotosAreWalkedTogetherInTheirOrder() throws {
+        let watcher = try Self.code("App/Albumist/Platform/LibraryChangeWatcher.swift")
+        let told = try #require(AppSource.body(of: "nonisolated func photoLibraryDidChange(", in: watcher))
+        #expect(Self.inOrder(["let change = ThumbnailRequest.Change(changeInstance)", "DispatchQueue.main.async {",
+                              "MainActor.assumeIsolated {", "LibraryChangeWatcher.shared.changed(change)"], in: told), "\(told)")
+        #expect(!told.contains("libraryChanged"), "a walk per change")
+        let changed = try #require(AppSource.body(of: "private func changed(_ change: ThumbnailRequest.Change)", in: watcher))
+        #expect(Self.inOrder(["if !AppModel.shared.execution.isRunning { ThumbnailCache.shared.changeArrived(change) }",
+                              "scheduleCatchUp()"], in: changed), "\(changed)")
+        let debounced = try #require(AppSource.body(of: "private func scheduleCatchUpNow(", in: watcher))
+        #expect(Self.inOrder(["pending = Task {", "try? await Task.sleep(for: .seconds(delay))", "guard !Task.isCancelled else { return }",
+                              "ThumbnailCache.shared.followChanges()", "if model.analysis.isRunning {"], in: debounced), "\(debounced)")
+        let thumbnails = try Self.code(Self.thumbnailsPath)
+        #expect(thumbnails.contains("private var backlog = ChangeBacklog<ThumbnailRequest.Change>(limit: ThumbnailCache.changeLimit)"))
+        let arrived = try #require(AppSource.body(of: "func changeArrived(_ change: ThumbnailRequest.Change)", in: thumbnails))
+        #expect(Self.squeezed(arrived) == "{ifbacklog.arrived(change){followChanges()}}", "\(arrived)")
+        let follow = try #require(AppSource.body(of: "func followChanges()", in: thumbnails))
+        #expect(Self.inOrder(["guard let waiting = backlog.take(recordsKept: videoLengths.count > 0) else { return }", "Task {",
+                              "await libraryChanged(waiting)", "if backlog.walked() { followChanges() }"], in: follow), "\(follow)")
+        let refresh = try #require(AppSource.body(of: "private func libraryChanged(_ changes: [ThumbnailRequest.Change]) async", in: thumbnails))
+        #expect(refresh.contains("await ThumbnailRequest.changed(kept, by: changes)"), "\(refresh)")
+        let details = try #require(AppSource.body(of: "nonisolated static func changed(", in: thumbnails))
+        #expect(Self.inOrder(["lookups.async {", "for (key, asset) in kept {", "var current = asset.value", "for change in changes {",
+                              "change.value.changeDetails(for: current)", "objectWasDeleted", "found[key] = .deleted", "break",
+                              "objectAfterChanges", "current = after", "found[key] = .changed(Asset(after))"], in: details), "\(details)")
     }
 
     /// A trimmed video's cell on screen shows its new length at once, on its badge and to

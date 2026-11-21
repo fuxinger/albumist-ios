@@ -15,14 +15,20 @@ import AlbumistCore
 ///    does not **come back** to it (`returnDuration`: no photo one to five minutes before or after
 ///    it lies within `minimumLegMeters`),
 /// 2. **it lies on a run:** both its legs were flown, it lies on the way between them, it shows no
-///    stay (`FlightTrack.stays`; while both legs take at most `maximumLegDuration`, only one of at
-///    least `stayDuration`), no leg of at most `runEndLongDuration` leads to a photo that stays
-///    (`FlightTrack.staysAt`), and the run does not turn back right before or after it (a leg
-///    faster than ground transport that leaves the way); or
-/// 3. **it is in a burst:** one of `burstPhotos` photos in a row, each at most `burstStepDuration`
-///    and at least `burstStepMeters` after the one before, that move steadily (speeds above
-///    `burstSpeed`, not faster than a plane, within `burstSpeedRatio` of each other) and straight
-///    on (`burstStraightness`); or
+///    stay (`FlightTrack.stays`), no leg of at most `runEndLongDuration` leads to a photo that
+///    stays (`FlightTrack.staysAt`), and the run does not turn back right before or after it (a
+///    leg faster than ground transport that leaves the way); or
+/// 3. **it is in a burst:** `burstPhotos` photos in a row, each at most `burstStepDuration` and at
+///    least `burstStepMeters` after the one before, that move steadily (speeds above `burstSpeed`,
+///    or above `aloftBurstSpeed` from one photo with a stored altitude above `aloftAltitude` to
+///    another, not faster than a plane, within `burstSpeedRatio` of each other) and straight on
+///    (`burstStraightness`), make a burst; bursts sharing a photo are one. It counts when it holds
+///    four such photos in a row (steady and straight over all four), or else when it **heads on**
+///    (`FlightTrack.headsOn`): it has a leg (the leg before its first photo or the leg after its
+///    last), its way from its first photo to its last takes it away from the photo before and
+///    towards the photo after by at least `burstHeading` of that way's length, and it shows no
+///    stay of `stayDuration` (a minute of photos within `minimumLegMeters` of its first photo
+///    before it, or of its last after it); or
 /// 4. **it ends a run:** one of its legs leads to a photo of rules 1 to 3, was flown and takes at
 ///    most `runEndDuration` (or `runEndLongDuration` when faster than `runEndLongSpeed`), the photo
 ///    lies on the way between its legs, the run goes on in a line beyond that photo, and the photo
@@ -33,15 +39,19 @@ import AlbumistCore
 ///   flight with a photo every few hours, or a burst over Siberia five hours after the gate photo.
 ///   A leg faster than `maximumFlightSpeed` is evidence of nothing (two people's photos from Munich
 ///   and Rome in the same minutes, a wrong location). A **stay**: the photos in a row within
-///   `minimumLegMeters` around the photo did not move on along its legs faster than
-///   `maximumGroundSpeed` over their time (nor further than their stated accuracy). In a plane such
-///   a row lasts well under a minute and moves on at the plane's speed, so a stay is ground (or a
-///   location the iPhone failed to update): a layover of three photos over half an hour at Dubai
-///   between Munich and Bangkok stays on the ground, so does a quick series of photos there.
-///   **A single photo shows no stay:** one photo at a layover between two long-haul legs counts
-///   as in flight. That costs no place and no record (both need three photos within 3 km on one
-///   day) and no country unless that country's only photos are such single layover photos; but
-///   its town is missing from the cities when it has no other photo.
+///   `minimumLegMeters` around the photo, lasting at least `shortestStay`, did not move on along
+///   its legs faster than `maximumGroundSpeed` over their time (nor further than their stated
+///   accuracy). In a plane such a row lasts well under a minute and moves on at the plane's speed,
+///   so a stay is ground (or a location the iPhone failed to update): a layover of three photos
+///   over half an hour at Dubai between Munich and Bangkok stays on the ground, and so does a
+///   quick series of photos there, or at Vienna between Berlin and Athens, an hour or two from
+///   either. **A single photo shows no stay,** nor do photos within `shortestStay` (the iPhone
+///   updates the location about once a second, so the fixes of a plane's photos seconds apart may
+///   be up to a second's flight behind them): one photo at a layover between two flown legs counts
+///   as in flight, and so do photos there within five seconds. One such photo costs no place and
+///   no record (both need three photos within 3 km on one day) and no country unless that
+///   country's only photos are such layover photos; but its town is missing from the cities when
+///   it has no other photo. Three within five seconds can cost a place.
 /// - A **short leg to a stay** is no flight leg, for the reason of rule 4 below: a plane needs at
 ///   least a quarter of an hour from standing on the ground to an average above
 ///   `maximumGroundSpeed` (and back). It keeps out a location jumping 3 km to one side and 3 km to
@@ -52,13 +62,22 @@ import AlbumistCore
 /// - **Coming back** keeps out a location landing 1 to 3 km off in any direction every few seconds
 ///   indoors: now and then three of its photos happen to lie in a line at a plane's speed, but
 ///   within minutes the location is back near each of them. A plane is gone.
-/// - Rule 3 finds window photos seconds apart with no photo near enough in time for a leg (a short
-///   flight with one series of photos over the Alps). GPS errors make no such series: a location
-///   jumping away comes back (not straight on), a first coarse fix closing in on the true place
-///   takes ever shorter steps (not steady), a drift indoors is slow. A step shorter than the stated
-///   accuracy of its two fixes is no step. (A location sliding steadily at the speed of a plane
-///   over four photos without a stated accuracy would count.) `burstSpeed` keeps the fastest trains
-///   out with their GPS noise.
+/// - Rule 3 finds window photos seconds apart with no photo near enough in time for a leg: three
+///   photos over France on the way to Lisbon with the gate photo hours before, or a short flight
+///   with one series over the Alps. GPS errors seldom make a series of four: a location jumping
+///   away comes back (not straight on), a first coarse fix closing in on the true place takes ever
+///   shorter steps (not steady), a drift indoors is slow; only a fix sliding along steadily does,
+///   as one catching up after a tunnel. A step shorter than the stated accuracy of its two fixes
+///   is no step. Two steady steps are not enough on their own: a fix closing in can make them,
+///   and so can a location jumping 1 to 3 km three times in a row by chance. So a burst of three
+///   must also head on, as a plane flies on from where the photos before it were taken towards
+///   where the photos after it will be. A GPS error has no heading of its own: between two photos
+///   at home it cannot head away from home and towards it at once, and a minute of photos near it
+///   is a stay. `burstSpeed` keeps the fastest trains out with their GPS noise. Above
+///   `aloftAltitude` nothing on the ground moves at `aloftBurstSpeed` (see there), so with stored
+///   altitudes a burst up there needs only that: three photos in the climb at 3,500 m and
+///   350 km/h make no "Höchstes Foto", while summits up to 5,895 m, cable cars and mountain
+///   railways keep theirs.
 /// - Rule 4 finds the first and last window photo of a flight: their other leg goes to the gate
 ///   photo half an hour before take-off or the arrival photo after landing and is slow. Physical
 ///   reason it never takes a photo outside the plane: such a photo is taken at least five minutes
@@ -71,22 +90,31 @@ import AlbumistCore
 ///   30 km away a minute after a photo makes one, and "on the way" decides nothing when one leg is
 ///   ten times the other (3 km back and 30 km on passes `detourFactor` in any direction).
 ///
-/// Window photos it misses (the altitude, once stored, catches them): a flight with fewer than
-/// three window photos and no burst, unless its legs to the ground are flown (a short hop with two
-/// photos); the first or last window photo more than `runEndDuration` (`runEndLongDuration`)
-/// before or after the next one (a long-haul flight with a photo every few hours, unless its leg
-/// to the airport is flown), or off the way (a turn after take-off); window photos between photos
-/// taken at home by someone else in a shared library (they zig-zag); photos whose location the
-/// iPhone did not update in the plane (they look like a stay); a series of two or three photos
-/// with no flown leg; a series during the climb or descent slower than `burstSpeed`, unless rule 4
-/// takes it; photos of a plane circling back within 3 km in five minutes (a holding pattern).
+/// Window photos it misses (once the analysis stores altitudes, rule 1 catches those taken above
+/// `maximumAltitude`): a flight with fewer than three window photos, unless its legs to the ground
+/// are flown (a short hop with two photos); the first or last window photo more than
+/// `runEndDuration` (`runEndLongDuration`) before or after the next one (a long-haul flight with a
+/// photo every few hours, unless its leg to the airport is flown), or off the way (a turn after
+/// take-off); window photos between photos taken at home by someone else in a shared library (they
+/// zig-zag); photos whose location the iPhone did not update in the plane for `shortestStay` and
+/// more (they look like a stay); a burst of three that does not head on (in a turn, on a route far
+/// off the line between the photos before and after it, or with no photo within
+/// `maximumLongLegDuration` on either side); a series whose steps the age of its fixes makes
+/// uneven (a fix a second old on a step of a second or two); a burst during the climb or descent
+/// slower than `burstSpeed` (with stored altitudes: below `aloftAltitude` or slower than
+/// `aloftBurstSpeed`), unless rule 4 takes it; photos of a plane circling back within 3 km in five
+/// minutes (a holding pattern).
 ///
 /// Ground photos it can take for window photos: three photos within seconds whose location jumps
 /// 3 km and more in a straight line at a plane's speed with no photo near either end and none
-/// coming back; four whose location slides like that (rule 3); one photo at a layover between two
-/// long-haul legs (or a few seconds of photos there whose location jumps on along the route); one
-/// photo half an hour from a place on the line between two others, once (Munich, Florence, Rome);
-/// the odd photo of a location scattered further than 3 km within seconds.
+/// coming back; three whose location slides like that along the way from the photos before them
+/// to those after them, and four that slide like that anywhere (rule 3: a coarse fix closing in,
+/// or a fix catching up after a tunnel on a fast train, stating no accuracy; above
+/// `aloftAltitude`, with stored altitudes, a slide at `aloftBurstSpeed` is enough, as on a
+/// mountain railway); one photo at a layover between two flown legs (or photos there within
+/// `shortestStay`, or a few seconds of photos whose location jumps on along the route); one photo
+/// half an hour from a place on the line between two others, once (Munich, Florence, Rome); the
+/// odd photo of a location scattered further than 3 km within seconds.
 public enum AirborneFilter {
     /// Above this a photo was taken in a plane (concept §5: "Fotos über 6.000 m Höhe"). Places
     /// people photograph on the ground stay below it (Kilimanjaro 5,895 m, the Everest base camp
@@ -106,11 +134,6 @@ public enum AirborneFilter {
     /// hundred metres, which looks like any speed. A neighbour is the nearest photo at least
     /// this far away (a burst of window photos seconds apart reaches past its own burst).
     public static let minimumLegMeters = 3_000.0
-    /// Legs up to this count for any photo that shows no stay of `stayDuration` (rule 2). Longer
-    /// ones count, up to `maximumLongLegDuration`, only for a photo that shows no stay at all: a
-    /// night in a hotel and then a flight looks slow anyway, but a layover between two flights
-    /// looks fast.
-    public static let maximumLegDuration: TimeInterval = 2 * 3_600
     /// The longest leg: the longest non-stop flights take some 19 hours from the gate photo to the
     /// arrival photo. It also bounds the search for a photo's neighbours.
     static let maximumLongLegDuration: TimeInterval = 20 * 3_600
@@ -120,6 +143,12 @@ public enum AirborneFilter {
     /// is on the ground. It also bounds the search for a photo's neighbours to a minute of
     /// photos near it, however many photos a day at one place has.
     static let stayDuration: TimeInterval = 60
+    /// A row of photos shows a stay by how little it moved on only when it lasts at least this
+    /// (`FlightTrack.stays`). The iPhone updates the location about once a second, so the fixes of
+    /// a plane's photos may be up to a second's flight behind them, which takes up to a second off
+    /// a row: at 500 km/h, four seconds of flight cover what 400 km/h covers in five. (Slower in
+    /// the climb, or with older fixes, a plane's row can look like a stay.)
+    static let shortestStay: TimeInterval = 5
     /// The location **comes back** when a photo at least `stayDuration` and at most this long
     /// before or after a photo lies closer than `minimumLegMeters` to it. A plane at
     /// `maximumGroundSpeed` and more is 6.7 km on after a minute; to come back within 3 km (with
@@ -154,9 +183,8 @@ public enum AirborneFilter {
     static let runEndLongDuration: TimeInterval = 15 * 60
     static let runEndLongSpeed = 500.0 / 3.6
 
-    /// Rule 3: a burst has at least this many photos (three steps; two steps in a line at a steady
-    /// speed are too easily a coarse fix closing in) ...
-    static let burstPhotos = 4
+    /// Rule 3: a burst has at least this many photos (two steps) ...
+    static let burstPhotos = 3
     /// ... each at most this long after the one before ...
     static let burstStepDuration: TimeInterval = 60
     /// ... and at least this far from it (a plane covers 220 m and more a second; the jitter of a
@@ -171,6 +199,21 @@ public enum AirborneFilter {
     /// ... along a path at most this many times the way from the first photo to the last (a turn of
     /// up to about 60° between steps).
     static let burstStraightness = 1.15
+    /// A burst without four photos in a row that move steadily and straight on over all four
+    /// (three such steps are evidence enough; two can be a coarse fix closing in) heads on when its
+    /// way takes it away from the photo before it and towards the photo after it by at least this
+    /// share of its length: roughly, it points no more than 60° off the line from the photo before
+    /// it, and off the line to the photo after it. A flight's track keeps far closer to those but
+    /// in turns near the airports; a location jumping around one place points any way.
+    static let burstHeading = 0.5
+    /// From one photo with a stored altitude above this to another, a burst's step needs only to
+    /// be faster than `aloftBurstSpeed`. Up there nothing on the ground comes near it: the fastest
+    /// railway, the Lanzhou–Xinjiang high-speed line over the Qilian mountains (3,600 m), is built
+    /// for 250 km/h, the railways to Lhasa run at 160 km/h and less, cable cars at 45 km/h; an
+    /// airliner climbs or descends through 3,000 m at well over 300 km/h. (A plane taking off from
+    /// an airport that high may pass it on the runway; its photos are harmless.)
+    static let aloftAltitude = 3_000.0
+    static let aloftBurstSpeed = 300.0 / 3.6
 
     /// The photos of `photos` taken in flight.
     /// - Parameters:
@@ -181,8 +224,11 @@ public enum AirborneFilter {
     ///   - altitudes: metres above sea level the iPhone stored, by photo, where known.
     public static func airborne(_ photos: [AssetSnapshot], altitudes: [AssetID: Double] = [:]) -> Set<AssetID> {
         let track = FlightTrack(photos)
-        let high = track.ids.map { id in !altitudes.isEmpty && (altitudes[id].map { $0 > maximumAltitude } ?? false) }
-        let flags = track.inFlight(high: high)
+        let stored: [Double?] = altitudes.isEmpty ? [] : track.ids.map { altitudes[$0] }
+        func above(_ level: Double) -> [Bool] {
+            stored.isEmpty ? [Bool](repeating: false, count: track.ids.count) : stored.map { $0.map { $0 > level } ?? false }
+        }
+        let flags = track.inFlight(high: above(maximumAltitude), aloft: above(aloftAltitude))
         var result = Set<AssetID>()
         for i in track.ids.indices where flags[i] { result.insert(track.ids[i]) }
         return result
@@ -194,7 +240,7 @@ public enum AirborneFilter {
 ///
 /// The work stays about linear in the number of photos, however dense the library. A search for a
 /// photo's neighbour passes only photos closer to it than `minimumLegMeters`, and
-/// - stops after a minute of them for rules 2 and 4: they make a stay (`stayDuration`), so the
+/// - stops after a minute of them for rules 2 to 4: they make a stay (`stayDuration`), so the
 ///   photo is no window photo whatever lies beyond. A day of thousands of photos whose location
 ///   jumps between spots a kilometre or two apart indoors would otherwise read the whole day for
 ///   every photo of it;
@@ -342,8 +388,9 @@ struct FlightTrack: Sendable {
 
     // MARK: Judging
 
-    /// Per photo, whether it was taken in flight: `high` (rule 1, by altitude) or rules 2 to 4.
-    func inFlight(high: [Bool]) -> [Bool] {
+    /// Per photo, whether it was taken in flight: `high` (rule 1, by altitude) or rules 2 to 4;
+    /// `aloft`: whether its stored altitude is above `AirborneFilter.aloftAltitude` (rule 3).
+    func inFlight(high: [Bool], aloft: [Bool]) -> [Bool] {
         // Plain local arrays in the loops: a debug build reads a property far slower.
         let times = self.times, earliest = self.earliest, latest = self.latest, count = times.count
         guard count > 0 else { return [] }
@@ -353,7 +400,18 @@ struct FlightTrack: Sendable {
         for i in 0..<count where earliest[i] < i && latest[i] > i {
             onRun[i] = isOnRun(i, neighbours: &neighbours)
         }
-        let bursts = Bursts(self), member = bursts.member
+        var bursts = Bursts(self, aloft: aloft)
+        var start = 0
+        while start < count {
+            let end = bursts.last[start]
+            guard end >= 0 else {
+                start += 1
+                continue
+            }
+            if !bursts.holdsFour[start] && !headsOn(start, end) { bursts.drop(start, end) }
+            start = end + 1
+        }
+        let member = bursts.member
         var flags = [Bool](repeating: false, count: count)
         for i in 0..<count where high[i] || onRun[i] || member[i] {
             flags[i] = high[i] || onRun[i] || !comesBack(i)
@@ -384,8 +442,7 @@ struct FlightTrack: Sendable {
         guard before >= 0, flown(before, i) else { return false }
         let after = neighbours.runAfter(i, in: self)
         guard after >= 0, flown(i, after), onTheWay(before, i, after) else { return false }
-        let long = times[i] - times[before] > AirborneFilter.maximumLegDuration || times[after] - times[i] > AirborneFilter.maximumLegDuration
-        if stays(i, before: before, after: after, any: long) { return false }
+        if stays(i, before: before, after: after) { return false }
         // A short leg from or to a stay.
         let short = AirborneFilter.runEndLongDuration
         if times[i] - times[before] <= short, staysAt(before, step: -1) { return false }
@@ -417,24 +474,25 @@ struct FlightTrack: Sendable {
             let far = onRun[run] ? (later ? neighbours.runAfter(run, in: self) : neighbours.runBefore(run, in: self))
                 : bursts.member[run] ? (later ? bursts.last[run] : bursts.first[run]) : -1
             if far >= 0, far != run, !(later ? onTheWay(i, run, far) : onTheWay(far, run, i)) { continue }
-            return !stays(i, before: later ? other : run, after: later ? run : other, any: true) && !comesBack(i)
+            return !stays(i, before: later ? other : run, after: later ? run : other) && !comesBack(i)
         }
         return false
     }
 
     /// Whether the photo at `i` shows a stay: the photos in a row around it closer than
     /// `minimumLegMeters` (between its neighbours `before` and `after`, or as far as
-    /// `maximumLongLegDuration` where it has none), when at least two and (unless `any`) lasting at
-    /// least `stayDuration`, did not move on along its legs (away from the photo before, towards the
-    /// photo after; without either, apart) faster than `maximumGroundSpeed` over their time, nor
-    /// further than the stated accuracy of the first and last of them. In a plane such photos lie
-    /// under a minute apart and move on at its speed; on the ground they stay within the 6 km the
-    /// row can span, however long it lasts. A single photo shows nothing.
-    func stays(_ i: Int, before: Int, after: Int, any: Bool) -> Bool {
+    /// `maximumLongLegDuration` where it has none), when they last at least
+    /// `AirborneFilter.shortestStay`, did not move on along its legs (away from the photo before,
+    /// towards the photo after; without either, apart) faster than `maximumGroundSpeed` over their
+    /// time, nor further than the stated accuracy of the first and last of them. In a plane such
+    /// photos lie under a minute apart and move on at its speed; on the ground they stay within the
+    /// 6 km the row can span, however long it lasts. A single photo shows nothing, nor do photos
+    /// within `AirborneFilter.shortestStay`, whose fixes may lag a second's flight behind them.
+    func stays(_ i: Int, before: Int, after: Int) -> Bool {
         let first = before >= 0 ? before + 1 : windowStart[i], last = after >= 0 ? after - 1 : windowEnd[i]
         guard first < last else { return false }
         let span = times[last] - times[first]
-        guard any || span >= AirborneFilter.stayDuration else { return false }
+        guard span >= AirborneFilter.shortestStay else { return false }
         var progress = Double.infinity
         if before >= 0 { progress = min(progress, meters(before, last) - meters(before, first)) }
         if after >= 0 { progress = min(progress, meters(first, after) - meters(last, after)) }
@@ -449,6 +507,23 @@ struct FlightTrack: Sendable {
     /// of photos within 3 km is a stop, not a plane: one at 400 km/h leaves 3 km behind in 27 s.
     func staysAt(_ p: Int, step: Int) -> Bool {
         neighbour(of: p, step: step, limit: step < 0 ? 0 : times.count - 1, staying: true) == Neighbours.staying
+    }
+
+    /// Rule 3: whether the burst from `start` to `end` heads on. Its legs go to the nearest photo
+    /// before its first photo and the nearest after its last that are at least `minimumLegMeters`
+    /// from them and at most `maximumLongLegDuration` apart: it needs one, and its way away from
+    /// the photo before and towards the photo after must each be at least
+    /// `AirborneFilter.burstHeading` of its length. A minute of photos near its first photo before
+    /// it, or near its last after it (`Neighbours.staying`), is a stay, never a plane's.
+    func headsOn(_ start: Int, _ end: Int) -> Bool {
+        let before = neighbour(of: start, step: -1, limit: 0, staying: true)
+        guard before != Neighbours.staying else { return false }
+        let after = neighbour(of: end, step: 1, limit: times.count - 1, staying: true)
+        guard after != Neighbours.staying, before >= 0 || after >= 0 else { return false }
+        let way = AirborneFilter.burstHeading * meters(start, end)
+        if before >= 0 && meters(before, end) - meters(before, start) < way { return false }
+        if after >= 0 && meters(start, after) - meters(end, after) < way { return false }
+        return true
     }
 
     /// Whether the location comes back to the photo at `i` (`AirborneFilter.returnDuration`): a
@@ -602,55 +677,76 @@ struct FlightTrack: Sendable {
     // MARK: Bursts
 
     /// Rule 3: the photos in a burst, and for each the first and last photo of its burst (bursts
-    /// sharing a photo are one), -1 elsewhere.
+    /// sharing a photo are one) and whether its burst holds four photos in a row that move steadily
+    /// and straight on over all four; -1 and false elsewhere.
     struct Bursts {
         var member: [Bool]
         var first: [Int]
         var last: [Int]
+        var holdsFour: [Bool]
 
-        init(_ track: FlightTrack) {
+        /// `aloft`: per photo, whether its stored altitude is above `AirborneFilter.aloftAltitude`.
+        init(_ track: FlightTrack, aloft: [Bool]) {
             let times = track.times, steps = track.steps, accuracies = track.accuracies, count = times.count
             member = [Bool](repeating: false, count: count)
             first = [Int](repeating: -1, count: count)
             last = [Int](repeating: -1, count: count)
-            let size = AirborneFilter.burstPhotos - 1
-            var chain = (start: -1, end: -1)
+            holdsFour = member
+            var chain = (start: -1, end: -1, four: false)
             func close() {
                 guard chain.start >= 0 else { return }
                 for p in chain.start...chain.end {
                     member[p] = true
                     first[p] = chain.start
                     last[p] = chain.end
+                    holdsFour[p] = chain.four
                 }
+            }
+            /// Whether the steps from photo `start` to photo `end` are steady and straight on.
+            func steady(_ start: Int, _ end: Int) -> Bool {
+                var slowest = Double.infinity, fastest = 0.0, path = 0.0
+                for m in (start + 1)...end {
+                    let speed = steps[m] / (times[m] - times[m - 1])
+                    slowest = min(slowest, speed)
+                    fastest = max(fastest, speed)
+                    path += steps[m]
+                }
+                return fastest <= AirborneFilter.burstSpeedRatio * slowest && path <= AirborneFilter.burstStraightness * track.meters(start, end)
             }
             // `streak`: how many steps in a row up to photo `k` fly (seconds apart, long enough, at
             // the speed of a plane).
             var streak = 0
             for k in 1..<max(1, count) {
                 let seconds = times[k] - times[k - 1], meters = steps[k]
+                let speed = aloft[k - 1] && aloft[k] ? AirborneFilter.aloftBurstSpeed : AirborneFilter.burstSpeed
                 let flies = seconds > 0 && seconds <= AirborneFilter.burstStepDuration
                     && meters >= max(AirborneFilter.burstStepMeters, accuracies[k - 1] + accuracies[k])
-                    && meters > AirborneFilter.burstSpeed * seconds && meters <= AirborneFilter.maximumFlightSpeed * seconds
+                    && meters > speed * seconds && meters <= AirborneFilter.maximumFlightSpeed * seconds
                 streak = flies ? streak + 1 : 0
-                guard streak >= size else { continue }
-                let start = k - size
-                var slowest = Double.infinity, fastest = 0.0, path = 0.0
-                for m in (start + 1)...k {
-                    let speed = steps[m] / (times[m] - times[m - 1])
-                    slowest = min(slowest, speed)
-                    fastest = max(fastest, speed)
-                    path += steps[m]
-                }
-                guard fastest <= AirborneFilter.burstSpeedRatio * slowest,
-                      path <= AirborneFilter.burstStraightness * track.meters(start, k) else { continue }
+                guard streak >= AirborneFilter.burstPhotos - 1 else { continue }
+                // The four photos up to `k`, else the three.
+                let four = streak >= 3 && steady(k - 3, k)
+                let start = four ? k - 3 : k - AirborneFilter.burstPhotos + 1
+                guard four || steady(start, k) else { continue }
                 if chain.start >= 0 && start <= chain.end {
                     chain.end = k
+                    chain.four = chain.four || four
                 } else {
                     close()
-                    chain = (start, k)
+                    chain = (start, k, four)
                 }
             }
             close()
+        }
+
+        /// Takes the burst from `start` to `end` out.
+        mutating func drop(_ start: Int, _ end: Int) {
+            for p in start...end {
+                member[p] = false
+                first[p] = -1
+                last[p] = -1
+                holdsFour[p] = false
+            }
         }
     }
 }

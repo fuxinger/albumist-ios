@@ -23,9 +23,9 @@ struct MapLibrary {
     /// Photos taken in flight, as the library was built.
     var windowPhotos: Set<AssetID> = []
     /// The window photos `AirborneFilter` cannot see by design (its doc comment lists them;
-    /// `markUnseen` picks them): both window photos of a flight with only two, a series of three
-    /// photos seconds apart that is a flight's only window photos, and the first or last window
-    /// photo of a flight with one every 2.5 hours, each where its leg to the airport is slow.
+    /// `markUnseen` picks them): both window photos of a flight with only two, and the first or
+    /// last window photo of a flight with one every 2.5 hours, each where its leg to the airport
+    /// is slow.
     var unseenWindowPhotos: Set<AssetID> = []
     /// Photos at airports (gate, layover, arrival) and on the train to the airport: the ground
     /// around flights, which must never count as in flight.
@@ -248,8 +248,9 @@ struct MapLibrary {
         case regular(sleep: Bool)
         /// One every 2.5 hours.
         case sparse
-        /// Only a burst of `photos` photos seconds apart: four or more in the middle of the flight
-        /// (rule 3, or on a long-haul flight rule 2); three on a short flight (unseen by design).
+        /// Only a burst of `photos` photos seconds apart in the middle of the flight: rule 3 finds
+        /// four or more on their own, and three as they head on from the gate photo towards the
+        /// arrival photo (on a long-haul flight rule 2 may find them too).
         case burst(photos: Int)
         /// Only two, about 10 minutes after take-off and before landing (unseen by design).
         case two
@@ -372,10 +373,9 @@ struct MapLibrary {
 
     /// Of one flight's window photos, those `AirborneFilter` cannot see by design (its doc comment
     /// lists them), given the airport photos right before and after them: both photos of a flight
-    /// with two (near the airports, so their legs to the airports are slow); a series of three that
-    /// is a flight's only window photos, when a leg to an airport is slow (with both legs flown,
-    /// rule 2 sees them); the first or last window photo of a flight with one every 2.5 hours, when
-    /// its leg to the airport is slow (too far from the next window photo for rule 4).
+    /// with two (near the airports, so their legs to the airports are slow); the first or last
+    /// window photo of a flight with one every 2.5 hours, when its leg to the airport is slow (too
+    /// far from the next window photo for rule 4).
     mutating func markUnseen(_ flying: [AssetFacts], _ shape: Shape, after ground: AssetFacts, before next: AssetFacts) {
         guard let first = flying.first, let last = flying.last else { return }
         let slowBefore = !Self.flown(ground, first), slowAfter = !Self.flown(last, next)
@@ -383,8 +383,6 @@ struct MapLibrary {
         case .two:
             precondition(slowBefore && slowAfter, "two window photos near the airports")
             unseenWindowPhotos.formUnion(flying.map(\.id))
-        case .burst(let count) where count < AirborneFilter.burstPhotos:
-            if slowBefore || slowAfter { unseenWindowPhotos.formUnion(flying.map(\.id)) }
         case .sparse:
             if slowBefore { unseenWindowPhotos.insert(first.id) }
             if slowAfter { unseenWindowPhotos.insert(last.id) }

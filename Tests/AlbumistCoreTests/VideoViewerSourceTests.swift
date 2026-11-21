@@ -83,14 +83,27 @@ struct VideoViewerSourceTests {
     @Test func aVideoPlaysAsInPhotos() throws {
         let viewer = try Self.code(Self.viewerPath)
         let play = try #require(AppSource.body(of: "private func playVideo(", in: viewer))
-        #expect(play.contains("VideoStart(reduceMotion: reduceMotion, autoplayVideos: UIAccessibility.isVideoAutoplayEnabled)"))
+        #expect(Self.squeezed(play).contains("VideoStart(reduceMotion:reduceMotion,autoplayVideos:UIAccessibility.isVideoAutoplayEnabled,"
+                                             + "lowPowerMode:ProcessInfo.processInfo.isLowPowerModeEnabled)"), "\(play)")
         #expect(play.contains("await video.open(id,"))
         let look = try #require(AppSource.body(of: "private func lookAtCurrent(", in: viewer))
         #expect(Self.inOrder(["await PhotoBasics.of(id)", "await playVideo(id)", "await checkSharing(id)"], in: look))
         #expect(try #require(AppSource.body(of: ".onChange(of: current)", in: viewer)).contains("video.keepOnly(current)"))
         #expect(try #require(AppSource.body(of: "private func closed(", in: viewer)).contains("video.close()"))
-        #expect(viewer.contains(".onChange(of: scenePhase)"))
-        #expect(viewer.contains("video.pause()"), "a video plays on in the background")
+        // It pauses in the background, told by the scene's phase or by the app's notification: a
+        // full-screen cover has not always been told its scene's phase (review F, F18).
+        let pager = Self.squeezed(try #require(AppSource.body(of: "private var pager", in: viewer)))
+        #expect(pager.contains(".onChange(of:scenePhase){_,phaseinifphase==.background{video.pause()}}"),
+                "a video plays on in the background")
+        #expect(pager.contains(".onReceive(NotificationCenter.default.publisher(for:UIApplication.didEnterBackgroundNotification)){_invideo.pause()}"),
+                "a video plays on in the background where the cover misses the scene's phase")
+        // It stops at once when the photo view closes, by the button, the pull or VoiceOver's
+        // escape: its sound does not run on over the grid while the view slides away (review F,
+        // F15; `closed` lets its player go only after that).
+        let closeNow = try #require(AppSource.body(of: "private func closeNow(", in: viewer))
+        #expect(Self.inOrder(["video.pause()", "dismiss()"], in: closeNow), "\(closeNow)")
+        #expect(Self.count(#"(?<![\w.])dismiss\(\)"#, in: viewer) == 1, "a way to close that leaves the video playing")
+        #expect(Self.count(#"(?<!func )closeNow\(\)"#, in: viewer) == 3, "the button, the pull and the escape")
 
         let model = try Self.file("ViewerVideo.swift")
         #expect(model.contains("@MainActor"))
@@ -105,6 +118,13 @@ struct VideoViewerSourceTests {
         #expect(make.contains("actionAtItemEnd = .pause"), "a video that does not loop moves on at its end")
         #expect(make.contains("isMuted = !sound.isOn"))
         #expect(make.contains("addPeriodicTimeObserver("))
+        // As often as the thumb glides, 30 times a second for a short clip (review F, F13).
+        #expect(Self.inOrder(["let interval = CMTime(seconds: VideoPosition.tickInterval(for: length), preferredTimescale: 600)",
+                              "addPeriodicTimeObserver(forInterval: interval,"], in: make), "\(make)")
+        // A looping video lets the iPhone lock after its first play (review F, F8).
+        let tick = try #require(AppSource.body(of: "private func ticked(", in: model))
+        #expect(Self.inOrder(["let keepsOn = start.keepsScreenOn(loopsDone: looper?.loopCount ?? 0)",
+                              "player.value.preventsDisplaySleepDuringVideoPlayback = keepsOn"], in: tick), "\(tick)")
         let leave = try #require(AppSource.body(of: "private func stop(", in: model))
         for step in ["removeTimeObserver(", "pause()", "removeAllItems()", "looper = nil", "player = nil"] {
             #expect(leave.contains(step), "\(step): the player stays alive off screen")
@@ -112,10 +132,15 @@ struct VideoViewerSourceTests {
         #expect(Self.inOrder(["looper?.disableLooping()", "removeAllItems()"], in: leave), "the looper fills the emptied queue again")
         let keep = try #require(AppSource.body(of: "func keepOnly(", in: model))
         #expect(keep.contains("guard id != current else { return }"))
+        // The slider's length is what plays (review F, F7): the item's once the core's rule
+        // prefers it to the asset's, which `open` keeps.
+        #expect(open.contains("assetLength = length"))
+        let ticked = try #require(AppSource.body(of: "private func ticked(", in: model))
+        #expect(ticked.contains("VideoDuration.playing(asset: assetLength, item: item.duration.seconds)"), "\(ticked)")
         // Scrubbing as Apple's QA1820: one exact seek at a time, the last place when it ends.
         #expect(model.contains("ChaseSeek()"))
         #expect(model.contains("toleranceBefore: .zero, toleranceAfter: .zero"))
-        #expect(try #require(AppSource.body(of: "private func seekEnded(", in: model)).contains("seek.finished()"))
+        #expect(try #require(AppSource.body(of: "private func seekEnded(", in: model)).contains("chase.finished()"))
         // Its picture: fitted as the still, under no finger, hidden from VoiceOver (the page says it).
         let surface = try Self.file("VideoSurface.swift")
         #expect(surface.contains("UIViewRepresentable"))
@@ -123,27 +148,125 @@ struct VideoViewerSourceTests {
         #expect(surface.contains("videoGravity = .resizeAspect"))
         #expect(surface.contains("isUserInteractionEnabled = false"))
         #expect(surface.contains("player = nil"), "the layer holds the player after it went")
-        let photo = try #require(AppSource.body(of: "private func photo(_ image: UIImage, in size: CGSize)", in: viewer))
+        let photo = try #require(AppSource.body(of: "private func photo(_ image: UIImage?, in size: CGSize)", in: viewer))
         #expect(Self.squeezed(photo).contains("ifletplayer{VideoSurface(player:player).allowsHitTesting(false).accessibilityHidden(true)"))
-        #expect(Self.inOrder(["Image(uiImage: image)", "VideoSurface(", ".scaleEffect("], in: photo), "the video does not zoom with its still")
+        #expect(Self.inOrder(["still(image)", "VideoSurface(", ".scaleEffect("], in: photo), "the video does not zoom with its still")
+        // A video that plays is its own sharp picture (review F, F6): it shows while its still
+        // comes and when none came sharp (a small poster frame), over the grid's thumbnail from
+        // memory or the black page; the page says "not available" only without a player.
+        let zoomable = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: viewer))
+        let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: zoomable))
+        #expect(Self.inOrder(["if image != nil || player != nil {", "photo(image, in: size)", "} else if unavailable {",
+                              "ContentUnavailableView", "} else {", "waiting(in: size)"], in: shown), "\(shown)")
+        let still = try #require(AppSource.body(of: "private func still(_ image: UIImage?)", in: zoomable))
+        #expect(Self.inOrder(["if let still = image ?? ThumbnailCache.shared.thumbnailInMemory(for: id) {", "Image(uiImage: still)",
+                              ".scaledToFit()", "} else {", "Color.clear"], in: still), "\(still)")
+    }
+
+    /// After the finger lifts from the slider, or a VoiceOver step, the thumb and the play
+    /// symbol hold still until the video is at that place: the ticks of the jump, while the
+    /// player still waits, move neither back and forth (review F, F9).
+    @Test func theSliderSettlesWithoutAFlicker() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let end = try #require(AppSource.body(of: "func endScrub(", in: model))
+        #expect(Self.inOrder(["scrubbing = false", "chase = ChaseSeek()", "settle(at: time, playing: playsAfterScrub)"], in: end), "\(end)")
+        let move = try #require(AppSource.body(of: "func move(by seconds: Double)", in: model))
+        #expect(move.contains("settle(at: time, playing: isPlaying)"), "\(move)")
+        let settle = try #require(AppSource.body(of: "private func settle(", in: model))
+        #expect(Self.inOrder(["settling = true", "seek(to: seconds,"], in: settle))
+        let ended = try #require(AppSource.body(of: "private func seekEnded(", in: model))
+        #expect(Self.inOrder(["settling = false", "play()", "chase.finished()"], in: ended), "\(ended)")
+        let ticked = try #require(AppSource.body(of: "private func ticked(", in: model))
+        #expect(Self.inOrder(["guard !scrubbing, !settling else { return }", "time = ", "isPlaying = "], in: ticked), "\(ticked)")
+        #expect(try #require(AppSource.body(of: "private func stop(", in: model)).contains("settling = false"))
+    }
+
+    /// A seek's end acts only for its own player and the last place asked for, and never against
+    /// a pause: a swipe on right after the finger lifted does not start the next video, a pause
+    /// right after it keeps the video still (review F, F10).
+    @Test func aSeeksEndActsOnlyForItsOwnPlayer() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let seek = try #require(AppSource.body(of: "private func seek(to seconds: Double", in: model))
+        #expect(seek.contains("completionHandler: Self.seekHandler(self, serial: seekSerial, settles: settles)"), "\(seek)")
+        let ended = try #require(AppSource.body(of: "private func seekEnded(", in: model))
+        #expect(Self.inOrder(["guard serial == seekSerial else { return }", "if settles {", "guard !scrubbing else { return }",
+                              "settling = false", "if resumes {", "resumes = false", "play()", "chase.finished()"], in: ended), "\(ended)")
+        for owner in ["private func make(", "private func stop(", "private func settle("] {
+            #expect(try #require(AppSource.body(of: owner, in: model)).contains("seekSerial += 1"), "\(owner)")
+        }
+        #expect(try #require(AppSource.body(of: "private func settle(", in: model)).contains("resumes = playing"))
+        #expect(try #require(AppSource.body(of: "func pause(", in: model)).contains("resumes = false"),
+                "a pause right after the finger lifted is undone")
+    }
+
+    /// A video its player cannot play (a file it cannot decode) says so calmly, as one Photos
+    /// had nothing for, instead of "Anhalten" over its still for good: its player goes, and the
+    /// page is not asked again until the user comes back to it (review F, F11).
+    @Test func aVideoThatCannotPlaySaysSo() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let failed = try #require(AppSource.body(of: "private var failed: Bool", in: model))
+        for part in ["player.value.status == .failed", "player.value.currentItem?.status == .failed", "looper?.status == .failed"] {
+            #expect(failed.contains(part), "\(part) is missing")
+        }
+        let fail = try #require(AppSource.body(of: "private func fail(", in: model))
+        #expect(Self.inOrder(["let failedID = id", "stop()", "id = failedID", "availability = .unavailable"], in: fail), "\(fail)")
+        let ticked = try #require(AppSource.body(of: "private func ticked(", in: model))
+        #expect(Self.inOrder(["guard let player else { return }", "if failed {", "fail()", "return"], in: ticked), "\(ticked)")
+        let play = try #require(AppSource.body(of: "private func play(", in: model))
+        #expect(Self.inOrder(["if failed {", "fail()", "return", "player.value.play()"], in: play), "\(play)")
+        let open = try #require(AppSource.body(of: "func open(", in: model))
+        #expect(open.contains("if self.id == id, player != nil || availability != .unknown { return }"), "asked again on every look")
     }
 
     /// A video starts without sound; "Ton an" gives it sound, which stops the user's music and
-    /// plays with the silent switch on, as in Photos; off, and when the photo view closes, the
-    /// app's sound mixes again and the user's music may go on. The audio server is called off the
-    /// main thread, one change after the other, beside H8's `LiveAudio` and never against it.
+    /// plays with the silent switch on, as in Photos; "Ton aus" lets the app's sound mix again,
+    /// and once the photo view closes, after its player is gone, the user's music is told it may
+    /// go on (never under a running player: that would stop the video, review F, F1). The audio
+    /// server is called off the main thread, one change after the other, beside H8's `LiveAudio`
+    /// and never against it.
     @Test func aVideosSoundIsTheUsersChoice() throws {
         let model = try Self.file("ViewerVideo.swift")
         let toggle = try #require(AppSource.body(of: "func toggleSound(", in: model))
         #expect(Self.inOrder(["sound.toggle()", "isMuted = !sound.isOn", "LiveAudio.videoSound(sound.isOn)"], in: toggle))
         let close = try #require(AppSource.body(of: "func close(", in: model))
-        #expect(Self.inOrder(["stop()", "if sound.isOn", "LiveAudio.videoSound(false)", "sound = VideoSound()"], in: close))
+        #expect(Self.inOrder(["stop()", "if sound.interruptedOthers", "LiveAudio.videoSoundEnded()", "sound = VideoSound()"], in: close),
+                "the music told to go on while the player still runs")
         let audio = try Self.file("LivePhotoPlayer.swift")
         let sound = try #require(AppSource.body(of: "static func videoSound(", in: audio))
         #expect(Self.inOrder(["isReady = false", "Task.detached(", "await previous?.value", "setCategory(.playback",
-                              "setActive(true)", "setCategory(.ambient", "setActive(false, options: .notifyOthersOnDeactivation)",
-                              "await LiveAudio.videoSoundSet("], in: sound), "\(sound)")
+                              "setActive(true)", "setCategory(.ambient", "await LiveAudio.videoSoundSet("], in: sound), "\(sound)")
+        #expect(!sound.contains("setActive(false"), "\"Ton aus\" ends the session under the running player")
+        let ended = try #require(AppSource.body(of: "static func videoSoundEnded(", in: audio))
+        #expect(Self.inOrder(["isReady = false", "Task.detached(", "await previous?.value", "setCategory(.ambient",
+                              "setActive(false, options: .notifyOthersOnDeactivation)", "await LiveAudio.videoSoundSet("], in: ended),
+                "\(ended)")
+        // The session ends there only, and only when the photo view closes.
+        for path in AppSource.swiftFiles(under: "App/Albumist") {
+            let code = try Self.code(path)
+            let ends = Self.count(#"session\.setActive\(false"#, in: code)
+            #expect(ends == (path.hasSuffix("/LivePhotoPlayer.swift") ? 1 : 0), "\(path): \(ends) ends of the session")
+            let told = AppSource.calls(of: "LiveAudio.videoSoundEnded(", in: code).count
+            #expect(told == (path.hasSuffix("/ViewerVideo.swift") ? 1 : 0), "\(path): the music told \(told) times")
+        }
         #expect(Self.squeezed(try #require(AppSource.body(of: "private static func videoSoundSet(", in: audio))).contains("isReady=!on&&done"))
+        // A video plays only in the session meant for it (review F, F2). One that starts by
+        // itself waits for the pending change and starts only once the app's sound mixes with
+        // the user's (or the user turned the sound on), as a Live Photo's short motion waits:
+        // under iOS's default session even a muted start stops the user's music. "Abspielen"
+        // waits for the pending change too, then plays even if it failed: the user asked.
+        let settled = try #require(AppSource.body(of: "static func settled() async", in: audio))
+        #expect(Self.inOrder(["while let pending = soundChange", "await pending.value", "if soundChange == pending { return }"],
+                             in: settled), "\(settled)")
+        let open = try #require(AppSource.body(of: "func open(", in: model))
+        #expect(Self.inOrder(["start.byItself", "Task.sleep(for: .milliseconds(350))", "await LiveAudio.settled()",
+                              "guard !Task.isCancelled, self.id == id, sound.isOn || LiveAudio.isReady else { return }", "play()"],
+                             in: open), "\(open)")
+        let tap = try #require(AppSource.body(of: "func togglePlay(", in: model))
+        #expect(Self.squeezed(tap) == "{ifisPlaying{pause()}else{playAfterSoundChange()}}", "\(tap)")
+        let asked = try #require(AppSource.body(of: "private func playAfterSoundChange(", in: model))
+        #expect(Self.inOrder(["guard let asked = player else { return }", "isPlaying = true", "Task {", "await LiveAudio.settled()",
+                              "guard player == asked, isPlaying else { return }", "play()"], in: asked), "\(asked)")
+        #expect(!asked.contains("isReady"), "\"Abspielen\" does nothing after a change that failed")
         // The photo view's own setting when it opens takes its turn too: "Ton an" right after it
         // is never undone by it.
         let prepare = try #require(AppSource.body(of: "static func prepare(", in: audio))
@@ -162,12 +285,30 @@ struct VideoViewerSourceTests {
         let controls = try Self.file("VideoControls.swift", keepStrings: true)
         for text in ["Text(\"Anhalten\")", "Text(\"Abspielen\")", "Text(\"Ton aus\")", "Text(\"Ton an\")",
                      "Text(\"Wiedergabeposition\")", "\"viewer.video.play\"", "\"viewer.video.sound\"", "\"viewer.video.position\"",
-                     ".labelStyle(.iconOnly)", ".minimumHitTarget()", ".floatingPanel(", ".monospacedDigit()",
+                     ".floatingPanel(", ".monospacedDigit()",
                      "VideoPosition(at:", ".spoken(words)", "VideoPosition.step(for:", ".accessibilityAdjustableAction"] {
             #expect(controls.contains(text), "\(text) is missing")
         }
-        #expect(!controls.contains(".lineLimit(1)"), "a time cut off at a large text size")
+        // The times side by side, as in Photos, and stacked where a large text size leaves no
+        // room for both on a line ("0:12:03" and "−1:02:03" at AX5 are wider than the panel on
+        // a 375-pt iPhone): never cut (review F, F12). One line alone is cut there.
+        let times = try #require(AppSource.body(of: "private var times", in: controls))
+        #expect(Self.inOrder(["ViewThatFits(in: .horizontal) {", "HStack {", "elapsedTime", "Spacer(minLength:", "remainingTime", "}",
+                              "VStack(alignment: .leading", "elapsedTime", "remainingTime"], in: times), "\(times)")
+        #expect(!times.contains(".lineLimit(") && !times.contains(".truncationMode(") && !times.contains(".minimumScaleFactor("),
+                "a time cut or shrunk instead of stacked")
+        #expect(try #require(AppSource.body(of: "private var elapsedTime", in: controls)).contains("Text(verbatim: position.elapsedText)"))
+        #expect(try #require(AppSource.body(of: "private var remainingTime", in: controls)).contains("Text(verbatim: position.remainingText)"))
         #expect(Self.count(#"\.buttonStyle\(\.borderless\)"#, in: controls) == 2)
+        // The 44-pt tap area is the label's own: a frame around a borderless button only adds
+        // empty space, and a near miss moves the slider instead (review F, F3).
+        for button in ["private var playButton", "private var soundButton"] {
+            let label = try #require(AppSource.body(of: [button, "} label:"], in: controls))
+            #expect(Self.inOrder(["Label {", "} icon: {", ".labelStyle(.iconOnly)", ".minimumHitTarget()"], in: label),
+                    "\(button): tappable on its symbol only")
+            let whole = try #require(AppSource.body(of: button, in: controls))
+            #expect(Self.count(#"\.minimumHitTarget\(\)"#, in: whole) == 1, "\(button): a frame around the button")
+        }
         let slider = try #require(AppSource.body(of: "private var slider", in: controls))
         #expect(slider.contains("onEditingChanged:") || slider.contains("{ editing in"))
         #expect(slider.contains("video.beginScrub()") && slider.contains("video.endScrub()"))
@@ -181,7 +322,7 @@ struct VideoViewerSourceTests {
         #expect(panel.contains("!unavailablePictures.contains(current)"), "the note twice when the page says it")
         // VoiceOver's two-finger double tap plays and pauses a video, on its page and on its
         // controls; on a photo it stays the system's, which pauses the user's music.
-        let page = try #require(AppSource.body(of: "private func photo(_ image: UIImage, in size: CGSize)", in: viewer))
+        let page = try #require(AppSource.body(of: "private func photo(_ image: UIImage?, in size: CGSize)", in: viewer))
         #expect(page.contains(".modifier(PlayPauseOnMagicTap(isVideo: isVideo, action: onPlayPause))"))
         let magic = try #require(AppSource.body(of: ["struct PlayPauseOnMagicTap", "func body(content: Content)"], in: viewer))
         #expect(Self.squeezed(magic).contains("ifisVideo{content.accessibilityAction(.magicTap,action)}else{content}"))
@@ -230,12 +371,16 @@ struct VideoViewerSourceTests {
                 && waiting.contains(".offset(x: offset.width, y: offset.height + pull)"), "the preview stands still under a pull")
         #expect(waiting.contains("Text(\"Foto wird geladen\")") && waiting.contains("Text(\"Video wird geladen\")"))
         let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: photo))
-        #expect(Self.inOrder(["if let image {", "} else if unavailable {", "} else {", "waiting(in: size)"], in: shown))
+        #expect(Self.inOrder(["if image != nil || player != nil {", "} else if unavailable {", "} else {", "waiting(in: size)"], in: shown))
         let load = try #require(AppSource.body(of: "private func load(in size: CGSize)", in: photo))
         #expect(Self.inOrder(["await PhotoBasics.of(id)", "ThumbnailCache.shared.largeImage(for: id, pixels: pixels)",
                               "guard !Task.isCancelled", "ViewerPicture.choose(", "case .sharp:", "image = loaded",
                               "onPicture(id, true)", "case .unavailable:", "becameUnavailable()"], in: load), "\(load)")
-        #expect(load.contains("original: basics?.pixels"))
+        // The rule judges what Photos delivered; the page waits by itself until then (review F,
+        // F19: the rule's own "waiting" was never asked for).
+        #expect(Self.squeezed(load).contains("ViewerPicture.choose(delivered:loaded.map(Self.pixelSize(of:)),original:basics?.pixels,screen:screen)"),
+                "\(load)")
+        #expect(!load.contains(".waiting"))
         #expect(try #require(AppSource.body(of: "private func giveUp(", in: photo)).contains("becameUnavailable()"))
         #expect(try #require(AppSource.body(of: "private func becameUnavailable(", in: photo)).contains("onPicture(id, false)"))
         // The photo view leaves out a video's note only under a page that says it is not
@@ -296,6 +441,11 @@ struct VideoViewerSourceTests {
         #expect(shown.contains("let seeded = image != nil && loadedID == id"))
         let slot = try #require(AppSource.body(of: ["struct AssetThumbnail", "private struct Slot"], in: thumbnails))
         #expect(Self.squeezed(slot) == "{varid:AssetIDvarside:CGFloat}")
+        // A request at the new side that brings nothing keeps the photo the cell shows: the
+        // ground would stand where the photo was (review F, note on `show`).
+        let show = try #require(AppSource.body(of: ["struct AssetThumbnail", "private func show("], in: thumbnails))
+        #expect(Self.inOrder(["if loaded == nil, image != nil, loadedID == id { return }", "withAnimation(", "image = loaded"], in: show),
+                "\(show)")
     }
 
     /// A video's thumbnail says how long it is, "0:15" on a small solid light ground in its
@@ -311,6 +461,17 @@ struct VideoViewerSourceTests {
         #expect(lookUp.contains("videoLengths[id] = asset.value.duration"))
         let length = try #require(AppSource.body(of: "func videoLength(for id: AssetID) -> VideoDuration?", in: thumbnails))
         #expect(!length.contains("await") && length.contains("videoLengths[id.rawValue]"))
+        // The records keep what was looked at last: past their limit the older half goes, not
+        // all (review F, F14). Where a record went, the length comes from the asset still in
+        // memory: a thumbnail from the image cache passes no lookup that would write it again.
+        #expect(thumbnails.contains("private var videoLengths = RecentRecords<Double>(limit: ThumbnailCache.recordLimit)"))
+        #expect(thumbnails.contains("private var keptSides = RecentRecords<CGFloat>(limit: ThumbnailCache.recordLimit)"))
+        for owner in ["private func keep(", "private func lookUpWaiting(", "private func lookUpAsset("] {
+            let body = try #require(AppSource.body(of: owner, in: thumbnails))
+            #expect(!body.contains("removeAll()"), "\(owner): the records emptied whole")
+        }
+        #expect(Self.inOrder(["if let seconds = videoLengths[id.rawValue]", "assets.object(forKey: id.rawValue as NSString)",
+                              "asset.mediaType == .video", "VideoDuration(seconds: asset.duration)"], in: length), "\(length)")
         // Gone with the assets on a memory warning.
         let start = try #require(AppSource.body(of: ["final class ThumbnailCache", "init()"], in: thumbnails))
         #expect(start.contains("$0.videoLengths.removeAll()") && start.contains("$0.keptSides.removeAll()"))
@@ -339,6 +500,31 @@ struct VideoViewerSourceTests {
             let body = try #require(AppSource.body(of: [owner, "var body: some View"], in: thumbnails))
             #expect(body.contains(".environment(\\.thumbnailShowsVideoLength, false)"), "\(owner)")
         }
+    }
+
+    /// A video trimmed in Photos: the length on its thumbnail follows (review F, F14 c). The
+    /// assets kept in memory are snapshots; on a change in Photos each kept video the change
+    /// touched gets its new asset and length, or loses both when it was deleted, worked out on
+    /// the lookups' queue (a change's details may read the Photos database). Nothing else goes:
+    /// emptied on each change, the grids lost their badges and the photo view its waiting
+    /// thumbnail, and Albumist's own albums alone are many changes (they change no photo).
+    @Test func aVideosLengthFollowsAChangeInPhotos() throws {
+        let watcher = try Self.code("App/Albumist/Platform/LibraryChangeWatcher.swift")
+        let changed = try #require(AppSource.body(of: "nonisolated func photoLibraryDidChange(", in: watcher))
+        #expect(Self.inOrder(["let change = ThumbnailRequest.Change(changeInstance)", "Task { @MainActor in", "scheduleCatchUp()",
+                              "if !AppModel.shared.execution.isRunning { await ThumbnailCache.shared.libraryChanged(change) }"],
+                             in: changed), "\(changed)")
+        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let refresh = try #require(AppSource.body(of: "func libraryChanged(_ change: ThumbnailRequest.Change) async", in: thumbnails))
+        #expect(Self.inOrder(["for key in videoLengths.keys", "assets.object(forKey: key as NSString)",
+                              "await ThumbnailRequest.changed(kept, by: change)", "case .changed(let asset):",
+                              "assets.setObject(asset.value, forKey: key as NSString)", "videoLengths[key] = asset.value.duration",
+                              "case .deleted:", "assets.removeObject(forKey: key as NSString)", "videoLengths[key] = nil"], in: refresh),
+                "\(refresh)")
+        #expect(!refresh.contains("removeAll"), "the records emptied on every change")
+        let details = try #require(AppSource.body(of: "nonisolated static func changed(", in: thumbnails))
+        #expect(Self.inOrder(["lookups.async {", "change.value.changeDetails(for: asset.value)", "objectWasDeleted",
+                              "objectAfterChanges"], in: details), "\(details)")
     }
 
     // MARK: Search

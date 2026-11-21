@@ -1,15 +1,13 @@
 import Foundation
 
-/// What one page of the photo view shows of its photo or video's still (design wave 3, DS-18:
-/// "ruhige Platzhalter beim Laden statt grauer Flächen und Kreisel"), as in Photos: while the
-/// picture comes, the thumbnail the grid showed, from memory, fitted as the picture will be (the
-/// black page without one), never a spinner; then the picture, when it is sharp at the screen's
-/// size. When no sharp picture comes (only Photos' small preview is on the iPhone, the photo
-/// itself is in iCloud, or Photos has nothing), the calm note says why: no big blurry picture
-/// is left standing (design rule 6).
+/// What one page of the photo view shows of its photo or video's still once Photos answered
+/// (design wave 3, DS-18: "ruhige Platzhalter beim Laden statt grauer Flächen und Kreisel"), as
+/// in Photos: the picture, when it is sharp at the screen's size. When no sharp picture comes
+/// (only Photos' small preview is on the iPhone, the photo itself is in iCloud, or Photos has
+/// nothing), the calm note says why: no big blurry picture is left standing (design rule 6).
+/// Until Photos answers, the page waits by itself with the thumbnail the grid showed, from
+/// memory, fitted as the picture will be (the black page without one), never a spinner.
 public enum ViewerPicture: Equatable, Sendable {
-    /// Still coming: the preview from memory, if there is one.
-    case waiting(preview: Bool)
     /// The picture.
     case sharp
     /// No sharp picture will come: "Dieses Foto ist gerade nicht verfügbar."
@@ -20,14 +18,10 @@ public enum ViewerPicture: Equatable, Sendable {
     public static let sharpShare = 0.7
 
     /// - Parameters:
-    ///   - preview: The grid's thumbnail of the photo is in memory.
     ///   - delivered: The pixels of the picture Photos delivered; nil when none came.
-    ///   - answered: Photos answered (or the wait for it ended); before, the page waits.
     ///   - original: The photo's own pixels, as Photos knows them, if known.
     ///   - screen: The page's area in pixels.
-    public static func choose(preview: Bool, delivered: PixelSize?, answered: Bool, original: PixelSize?,
-                              screen: PixelSize) -> ViewerPicture {
-        guard answered else { return .waiting(preview: preview) }
+    public static func choose(delivered: PixelSize?, original: PixelSize?, screen: PixelSize) -> ViewerPicture {
         guard let delivered, !delivered.isEmpty else { return .unavailable }
         return isSharp(delivered, original: original, on: screen) ? .sharp : .unavailable
     }

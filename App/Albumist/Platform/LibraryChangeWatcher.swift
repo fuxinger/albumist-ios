@@ -27,7 +27,13 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
     }
 
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
-        Task { @MainActor in LibraryChangeWatcher.shared.scheduleCatchUp() }
+        let change = ThumbnailRequest.Change(changeInstance)
+        Task { @MainActor in
+            LibraryChangeWatcher.shared.scheduleCatchUp()
+            // A video trimmed in Photos: the length on its thumbnail follows (review F, F14).
+            // Albumist's own albums change no photo.
+            if !AppModel.shared.execution.isRunning { await ThumbnailCache.shared.libraryChanged(change) }
+        }
     }
 
     /// Also called when a run ends that saw changes arrive meanwhile.

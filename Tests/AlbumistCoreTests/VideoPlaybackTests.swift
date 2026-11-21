@@ -44,6 +44,25 @@ struct VideoPlaybackTests {
         #expect(VideoDuration.oneSecond.text == "0:01")
     }
 
+    /// The slider and the times follow what plays (review F, F7): a slow-motion video plays as a
+    /// composition longer than the asset says, an edit may trim it. Once the playing item knows
+    /// its length and it differs from the asset's by more than a second, that length; else the
+    /// asset's, so the times do not jump by a rounding.
+    @Test func theLengthIsWhatPlays() throws {
+        let asset = try #require(VideoDuration(seconds: 10))
+        #expect(VideoDuration.playing(asset: asset, item: 40.2)?.seconds == 40, "slow motion")
+        #expect(VideoDuration.playing(asset: asset, item: 6)?.seconds == 6, "trimmed")
+        for close in [10.4, 9.2, 11, 9] {
+            #expect(VideoDuration.playing(asset: asset, item: close) == asset, "\(close) s")
+        }
+        for unknown in [Double.nan, .infinity, 0, -1] {
+            #expect(VideoDuration.playing(asset: asset, item: unknown) == asset, "\(unknown)")
+        }
+        // Photos said nothing of its length: the item's, once it knows it.
+        #expect(VideoDuration.playing(asset: nil, item: 12.6)?.seconds == 13)
+        #expect(VideoDuration.playing(asset: nil, item: .nan) == nil)
+    }
+
     /// The figures read the same in German and English; what VoiceOver says does not.
     @Test func theFiguresAreTheSameInBothLanguages() {
         let length = VideoDuration(seconds: 3723)
@@ -127,27 +146,60 @@ struct VideoPlaybackTests {
         #expect(VideoPosition.step(for: try #require(VideoDuration(seconds: 3600))) == 10)
     }
 
+    /// The slider's thumb glides: the photo view reads where a playing video is about every
+    /// 300th of its length, 30 times a second for a short clip, and at least twice a second for
+    /// a long one, so the times change on the second (review F, F13: a three-second clip jumped
+    /// twelve times). Before its length is known, as for a short clip.
+    @Test func theThumbGlides() throws {
+        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 3))) == 1.0 / 30)
+        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 10))) == 1.0 / 30)
+        #expect(abs(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 30))) - 0.1) < 1e-9)
+        #expect(abs(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 90))) - 0.3) < 1e-9)
+        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 150))) == 0.5)
+        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 3600))) == 0.5)
+        #expect(VideoPosition.tickInterval(for: nil) == 1.0 / 30)
+    }
+
     // MARK: Starting by itself
 
     /// As in Photos a video plays when it comes into view and starts over at its end, but only
     /// where motion is welcome: not with Reduce Motion, not with "Auto-Play Video Previews" off.
     /// There it waits for "Abspielen" and stops at its end.
     @Test func aVideoStartsByItselfOnlyWhereMotionIsWelcome() {
-        let welcome = VideoStart(reduceMotion: false, autoplayVideos: true)
+        let welcome = VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: false)
         #expect(welcome.byItself)
         #expect(welcome.loops)
-        for (reduceMotion, autoplay) in [(true, true), (false, false), (true, false)] {
-            let calm = VideoStart(reduceMotion: reduceMotion, autoplayVideos: autoplay)
-            #expect(!calm.byItself, "Reduce Motion \(reduceMotion), autoplay \(autoplay)")
-            #expect(!calm.loops, "Reduce Motion \(reduceMotion), autoplay \(autoplay)")
+        for lowPowerMode in [false, true] {
+            for (reduceMotion, autoplay) in [(true, true), (false, false), (true, false)] {
+                let calm = VideoStart(reduceMotion: reduceMotion, autoplayVideos: autoplay, lowPowerMode: lowPowerMode)
+                #expect(!calm.byItself, "Reduce Motion \(reduceMotion), autoplay \(autoplay), Low Power Mode \(lowPowerMode)")
+                #expect(!calm.loops, "Reduce Motion \(reduceMotion), autoplay \(autoplay), Low Power Mode \(lowPowerMode)")
+            }
         }
     }
 
-    /// Low Power Mode keeps a Live Photo's short motion still (it is decoration), not a video the
-    /// user opened to watch.
-    @Test func lowPowerModeDoesNotHoldAVideoBack() {
+    /// Low Power Mode keeps a Live Photo's short motion still (it is decoration). A video the
+    /// user opened to watch still starts by itself, but plays once and stops at its end instead
+    /// of looping for good (review F, F8).
+    @Test func inLowPowerModeAVideoPlaysOnce() {
         #expect(!LiveMotion.playsHint(reduceMotion: false, lowPowerMode: true, autoplayVideos: true))
-        #expect(VideoStart(reduceMotion: false, autoplayVideos: true).byItself)
+        let saving = VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: true)
+        #expect(saving.byItself)
+        #expect(!saving.loops)
+    }
+
+    /// A video keeps the screen on while it plays, as any video the user watches; one that loops
+    /// lets the iPhone lock after its first play, as it may loop on while nobody watches (review
+    /// F, F8: before, an open video kept the iPhone awake for good).
+    @Test func aLoopingVideoLetsTheIPhoneLockAfterItsFirstPlay() {
+        let looping = VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: false)
+        #expect(looping.keepsScreenOn(loopsDone: 0))
+        #expect(!looping.keepsScreenOn(loopsDone: 1))
+        #expect(!looping.keepsScreenOn(loopsDone: 40))
+        for once in [VideoStart(reduceMotion: true, autoplayVideos: true, lowPowerMode: false),
+                     VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: true)] {
+            #expect(once.keepsScreenOn(loopsDone: 0), "\(once)")
+        }
     }
 
     // MARK: Sound
@@ -167,6 +219,21 @@ struct VideoPlaybackTests {
         #expect(!sound.isOn)
         #expect(sound.session == .mixesWithOthers)
         #expect(!VideoSound().isOn)
+    }
+
+    /// Once "Ton an" stopped the user's music, the music is told it may go on when the photo view
+    /// closes, after the video's player is gone; "Ton aus" alone does not tell it (told under a
+    /// running player, the end of the app's audio session would stop the video too, review F,
+    /// F1). Music the photo view never stopped is told nothing.
+    @Test func theUsersMusicIsToldToGoOnWhenThePhotoViewCloses() {
+        var sound = VideoSound()
+        #expect(!sound.interruptedOthers)
+        sound.toggle()
+        #expect(sound.interruptedOthers)
+        sound.toggle()
+        #expect(!sound.isOn)
+        #expect(sound.interruptedOthers, "\"Ton aus\": the music is still to be told")
+        #expect(!VideoSound().interruptedOthers)
     }
 
     // MARK: Only what is on the iPhone

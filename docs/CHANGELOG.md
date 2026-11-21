@@ -2,6 +2,14 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. Videos nach der Zweitprüfung (Design-Welle 3, Review F, noch in keinem Build): „Ton aus“ hält ein Video
+  nicht mehr an; die Musik darf beim Schließen der Foto-Ansicht weiterlaufen. Ein Video startet von selbst erst, wenn
+  der App-Ton mit der Musik mischt, und hält sie so nie an. Die Knöpfe unter dem Video lassen sich auf 44 pt treffen,
+  ein Video zeigt sich auch ohne scharfes Standbild, und ein Video, das sich nicht abspielen lässt, sagt es ruhig.
+  Zeitlupen-Videos lassen sich bis zum Ende spulen, der Regler gleitet bei kurzen Clips und flackert nach dem
+  Loslassen nicht mehr. Im Stromsparmodus spielt ein Video einmal; in Schleife darf das iPhone nach dem ersten
+  Durchlauf sperren. Bei großer Schrift stehen die Zeiten untereinander statt abgeschnitten. Schließen hält ein Video
+  sofort an. Die Dauer auf Miniaturen bleibt beim schnellen Scrollen erhalten und folgt einem in Fotos gekürzten Video.
 - 21.11. „Unsortiert“ nach Tagen wie in Fotos (Design-Welle 3, DS-21 und DS-06b, noch in keinem Build): in allen
   drei Filtern je Tag eine Überschrift mit der Zahl der Fotos, der neueste Tag oben, Fotos ohne Datum zuletzt; jedes
   Foto an dem Tag, den seine Foto-Ansicht nennt. „Unsortiert“ und die Fotos eines Vorschlags teilen sich ein Raster:

@@ -91,7 +91,7 @@ struct PhotoViewer: View {
         NavigationRoot { pager }
             // Dark inside the viewer only; the sheets below keep the app's own appearance.
             .environment(\.colorScheme, .dark)
-            .accessibilityAction(.escape) { dismiss() }
+            .accessibilityAction(.escape) { closeNow() }
             .sheet(item: $info) { facts in details(facts) }
             .sheet(isPresented: addingBinding) { addSheet }
             // Said here, over the photo: the app's own alert cannot show over this full-screen
@@ -111,6 +111,13 @@ struct PhotoViewer: View {
     private func opened() {
         PhotoShare.removeLeftovers()
         LiveAudio.prepare()
+    }
+
+    /// The photo view closes by the button, a pull or VoiceOver's escape: a video stops at once,
+    /// so its sound does not run on over the grid while the view slides away (review F, F15).
+    private func closeNow() {
+        video.pause()
+        dismiss()
     }
 
     /// The video stops, and the app's sound mixes with the user's again (DS-16).
@@ -137,8 +144,10 @@ struct PhotoViewer: View {
             .animation(.easeInOut(duration: 0.2), value: video.availability)
             .onChange(of: assistive, initial: true) { _, running in chrome.assistiveTechnology(running: running) }
             .task(id: current) { await lookAtCurrent() }
-            // A video pauses when the app goes to the background, as in Photos.
+            // A video pauses when the app goes to the background, as in Photos; told by the
+            // app too, as a full-screen cover has not always been told its scene's phase.
             .onChange(of: scenePhase) { _, phase in if phase == .background { video.pause() } }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in video.pause() }
     }
 
     private var pages: some View {
@@ -183,7 +192,7 @@ struct PhotoViewer: View {
         let id = ids[index]
         let photo = ZoomablePhoto(id: id, label: label(of: id), position: position(of: index), isCurrent: id == current,
                                   isVideo: isVideo(id), player: video.surface(for: id),
-                                  top: top, pull: $pull, onTap: { toggleChrome() }, onClose: { dismiss() },
+                                  top: top, pull: $pull, onTap: { toggleChrome() }, onClose: { closeNow() },
                                   onLive: { _ = livePhotos.insert($0) }, onZoom: { zoomChrome() },
                                   onPressing: { livePress(id, $0) }, onPicture: { pictureCame($0, sharp: $1) },
                                   onPlayPause: { if video.id == id { video.togglePlay() } })
@@ -243,7 +252,7 @@ struct PhotoViewer: View {
     }
 
     private var closeButton: some View {
-        Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
+        Button { closeNow() } label: { Label("Schließen", systemImage: "xmark") }
             .accessibilityIdentifier("viewer.close")
     }
 
@@ -406,9 +415,11 @@ struct PhotoViewer: View {
     }
 
     /// The video on screen (DS-16): asked for from the iPhone only, played by itself where
-    /// motion is welcome (`VideoStart`); it stops when the user swipes on (`keepOnly`).
+    /// motion is welcome (`VideoStart`), once in Low Power Mode; it stops when the user swipes on
+    /// (`keepOnly`).
     private func playVideo(_ id: AssetID) async {
-        let start = VideoStart(reduceMotion: reduceMotion, autoplayVideos: UIAccessibility.isVideoAutoplayEnabled)
+        let start = VideoStart(reduceMotion: reduceMotion, autoplayVideos: UIAccessibility.isVideoAutoplayEnabled,
+                               lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled)
         await video.open(id, length: videoLength(of: id), start: start)
     }
 
@@ -458,7 +469,8 @@ struct PhotoViewer: View {
 
 /// One photo that fits the screen; pinch or double-tap to zoom, drag to look around, pull
 /// down to close, tap to hide or show the bars, press and hold to play a Live Photo
-/// (`LivePress`). A video plays over its still (`VideoSurface`), zoomed and pulled with it.
+/// (`LivePress`). A video plays over its still (`VideoSurface`), zoomed and pulled with it, also
+/// before the still came and when none came sharp: the video is its own sharp picture.
 ///
 /// While the photo comes, the thumbnail the grid showed stands in for it, from memory, as in
 /// Photos; without one the page is black. No spinner (DS-18). The large picture shows only when
@@ -558,9 +570,11 @@ private struct ZoomablePhoto: View {
             .simultaneousGesture(pullDown, including: scale > 1 ? .subviews : .all)
     }
 
+    /// A video that plays is its own sharp picture: it shows while its still comes and when none
+    /// came sharp (a small poster frame), never under the note (review F, F6).
     @ViewBuilder
     private func shown(in size: CGSize) -> some View {
-        if let image {
+        if image != nil || player != nil {
             photo(image, in: size)
         } else if unavailable {
             ContentUnavailableView {
@@ -599,13 +613,12 @@ private struct ZoomablePhoto: View {
             .accessibilityLabel(isVideo ? Text("Video wird geladen") : Text("Foto wird geladen"))
     }
 
-    /// The still, and over it the Live Photo's motion while it plays; zoomed and moved together.
-    /// One element for VoiceOver, with the title's words, the position and the zoom.
-    private func photo(_ image: UIImage, in size: CGSize) -> some View {
+    /// The still, and over it the Live Photo's motion while it plays or the video's picture;
+    /// zoomed and moved together. One element for VoiceOver, with the title's words, the position
+    /// and the zoom.
+    private func photo(_ image: UIImage?, in size: CGSize) -> some View {
         ZStack {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
+            still(image)
             if let live {
                 LivePhotoPlayer(livePhoto: live.value, command: command)
                     .allowsHitTesting(false)
@@ -629,6 +642,19 @@ private struct ZoomablePhoto: View {
         .accessibilityZoomAction { action in zoom(action) }
         .accessibilityActions { liveActions }
         .modifier(PlayPauseOnMagicTap(isVideo: isVideo, action: onPlayPause))
+    }
+
+    /// The sharp still; under a video that plays without one, the grid's thumbnail from memory
+    /// as while it waits, else the black page. The video's first frame covers it.
+    @ViewBuilder
+    private func still(_ image: UIImage?) -> some View {
+        if let still = image ?? ThumbnailCache.shared.thumbnailInMemory(for: id) {
+            Image(uiImage: still)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Color.clear
+        }
     }
 
     /// A Live Photo plays from VoiceOver's actions too (swipe up or down), as the long press.
@@ -761,13 +787,11 @@ private struct ZoomablePhoto: View {
         // not replace the new photo's.
         guard !Task.isCancelled else { return }
         let screen = PixelSize(width: Double(size.width * displayScale), height: Double(size.height * displayScale))
-        switch ViewerPicture.choose(preview: false, delivered: loaded.map(Self.pixelSize(of:)), answered: true,
-                                    original: basics?.pixels, screen: screen) {
+        switch ViewerPicture.choose(delivered: loaded.map(Self.pixelSize(of:)), original: basics?.pixels, screen: screen) {
         case .sharp:
             image = loaded
             onPicture(id, true)
         case .unavailable: becameUnavailable()
-        case .waiting: break
         }
     }
 

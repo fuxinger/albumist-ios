@@ -20,12 +20,12 @@ final class ThumbnailCache {
     /// asset the lookup fetches anyway: a video's thumbnail says how long it is without a fetch
     /// of its own (100,000 photos in a grid). Only videos; goes on a memory warning and is read
     /// again with the next lookup.
-    private var videoLengths: [String: Double] = [:]
+    private var videoLengths = RecentRecords<Double>(limit: ThumbnailCache.recordLimit)
     /// The side each photo's thumbnail was last kept at (DS-18): the photo view shows that
     /// thumbnail from memory while its large picture comes (`thumbnailInMemory`).
-    private var keptSides: [String: CGFloat] = [:]
-    /// More entries than any grid shows between two memory warnings: past it the records start
-    /// again (they are only a shortcut to what is in memory).
+    private var keptSides = RecentRecords<CGFloat>(limit: ThumbnailCache.recordLimit)
+    /// More entries than any grid shows between two memory warnings: past it the older half of
+    /// the records goes (they are only a shortcut to what is in memory, review F, F14).
     private static let recordLimit = 20_000
 
     static let thumbnailCostLimit = 80 * 1024 * 1024
@@ -121,9 +121,13 @@ final class ThumbnailCache {
     }
 
     /// How long the video `id` is, as the lookup found it, from memory only (DS-16); nil for a
-    /// photo or while it was not looked up.
+    /// photo or while it was not looked up. Where its record went (`recordLimit`), from its asset
+    /// while that is in memory: a thumbnail from the image cache passes no lookup that would
+    /// write the record again (review F, F14).
     func videoLength(for id: AssetID) -> VideoDuration? {
-        videoLengths[id.rawValue].flatMap { VideoDuration(seconds: $0) }
+        if let seconds = videoLengths[id.rawValue] { return VideoDuration(seconds: seconds) }
+        guard let asset = assets.object(forKey: id.rawValue as NSString), asset.mediaType == .video else { return nil }
+        return VideoDuration(seconds: asset.duration)
     }
 
     private static func thumbnailKey(_ id: AssetID, _ side: CGFloat) -> NSString {
@@ -154,7 +158,6 @@ final class ThumbnailCache {
     private func keep(_ image: UIImage, id: AssetID, side: CGFloat) {
         let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
         cache.setObject(image, forKey: Self.thumbnailKey(id, side), cost: cost)
-        if keptSides.count >= Self.recordLimit { keptSides.removeAll() }
         keptSides[id.rawValue] = side
     }
 
@@ -170,6 +173,28 @@ final class ThumbnailCache {
     /// of the Photos database. Nil when Photos does not know the photo or did not answer in time.
     func asset(for id: AssetID) async -> ThumbnailRequest.Asset? {
         await photoAsset(for: id)
+    }
+
+    /// Photos changed (review F, F14): the assets kept here are snapshots, so a video trimmed in
+    /// Photos kept its old length on its badge. Each kept video the change touched gets its new
+    /// asset and length, or loses both when it was deleted; the rest stays, so the grids keep
+    /// their badges and the photo view its waiting thumbnail (emptied, they went on each change).
+    func libraryChanged(_ change: ThumbnailRequest.Change) async {
+        var kept: [String: ThumbnailRequest.Asset] = [:]
+        for key in videoLengths.keys {
+            if let asset = assets.object(forKey: key as NSString) { kept[key] = ThumbnailRequest.Asset(asset) }
+        }
+        guard !kept.isEmpty else { return }
+        for (key, found) in await ThumbnailRequest.changed(kept, by: change) {
+            switch found {
+            case .changed(let asset):
+                assets.setObject(asset.value, forKey: key as NSString)
+                videoLengths[key] = asset.value.duration
+            case .deleted:
+                assets.removeObject(forKey: key as NSString)
+                videoLengths[key] = nil
+            }
+        }
     }
 
     /// `asset(for:)`, telling "Photos does not know the photo" from "Photos did not answer in
@@ -285,7 +310,6 @@ final class ThumbnailCache {
                     missing[id] = nil
                     // A video's length comes with its asset (DS-16): no fetch of its own.
                     if asset.value.mediaType == .video {
-                        if videoLengths.count >= Self.recordLimit { videoLengths.removeAll() }
                         videoLengths[id] = asset.value.duration
                     }
                 } else {
@@ -333,6 +357,17 @@ enum ThumbnailRequest {
         let value: PHAsset
         init(_ value: PHAsset) { self.value = value }
     }
+    /// What changed in Photos; read on any thread, but not marked Sendable either.
+    struct Change: @unchecked Sendable {
+        let value: PHChange
+        init(_ value: PHChange) { self.value = value }
+    }
+
+    /// What a change in Photos did to a kept asset it touched.
+    enum Changed: Sendable {
+        case changed(Asset)
+        case deleted
+    }
 
     /// Asset lookups wait while Photos writes its database, so they run on their own serial
     /// queue: neither the main thread nor the few threads of Swift's shared pool (the analysis
@@ -355,6 +390,26 @@ enum ThumbnailRequest {
                     }
                     continuation.resume(returning: found)
                 }
+            }
+        }
+    }
+
+    /// The kept assets `change` touched, by key, and what it did to each (review F, F14), worked
+    /// out on the lookups' queue: a change's details may read the Photos database, which waits
+    /// while Photos writes.
+    nonisolated static func changed(_ kept: [String: Asset], by change: Change) async -> [String: Changed] {
+        await withCheckedContinuation { (continuation: CheckedContinuation<[String: Changed], Never>) in
+            lookups.async {
+                var found: [String: Changed] = [:]
+                for (key, asset) in kept {
+                    guard let details = change.value.changeDetails(for: asset.value) else { continue }
+                    if details.objectWasDeleted {
+                        found[key] = .deleted
+                    } else if let after = details.objectAfterChanges {
+                        found[key] = .changed(Asset(after))
+                    }
+                }
+                continuation.resume(returning: found)
             }
         }
     }
@@ -567,8 +622,10 @@ struct AssetThumbnail: View {
             .accessibilityHidden(spokenLength == nil)
     }
 
-    /// The photo, and how long it is when it is a video; it fades in when it took a moment.
+    /// The photo, and how long it is when it is a video; it fades in when it took a moment. A
+    /// request at another side (a grid zoomed) that brought nothing keeps the photo shown.
     private func show(_ loaded: UIImage?, seeded: Bool, since asked: ContinuousClock.Instant) {
+        if loaded == nil, image != nil, loadedID == id { return }
         let fade = ThumbnailAppearance.fade(seeded: seeded, waited: (ContinuousClock.now - asked) / .seconds(1))
         withAnimation(fade.map { Animation.easeOut(duration: $0) }) {
             image = loaded

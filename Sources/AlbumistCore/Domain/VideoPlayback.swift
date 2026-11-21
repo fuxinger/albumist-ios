@@ -33,6 +33,17 @@ public struct VideoDuration: Equatable, Sendable {
     public func spoken(_ words: ProposalWords) -> String {
         "Video, " + VideoClock.spoken(seconds, words)
     }
+
+    /// The length the slider and the times use while a video plays (review F, F7). Photos' asset
+    /// says how long the video is, but what plays may differ: a slow-motion video plays as a
+    /// longer composition, an edit may trim it. Once the playing item knows its own length
+    /// (`item`, in seconds) and it differs from the asset's by more than a second, that one; else
+    /// the asset's, so the times do not jump by a rounding. Without the asset's, the item's.
+    public static func playing(asset: VideoDuration?, item seconds: Double) -> VideoDuration? {
+        guard let item = VideoDuration(seconds: seconds) else { return asset }
+        guard let asset else { return item }
+        return abs(seconds - Double(asset.seconds)) > 1 ? item : asset
+    }
 }
 
 /// Where a playing video is (DS-16): the time passed and the time left, in whole seconds that
@@ -70,6 +81,15 @@ public struct VideoPosition: Equatable, Sendable {
     public static func step(for duration: VideoDuration) -> Double {
         min(10, max(1, Double(duration.seconds) / 10))
     }
+
+    /// How often the photo view reads where a playing video is, in seconds (review F, F13): so
+    /// often that the slider's thumb moves by about a 300th of its track at a time and glides,
+    /// at most 30 times a second (a short clip), at least twice a second (the times show whole
+    /// seconds). Before its length is known, as for a short clip.
+    public static func tickInterval(for duration: VideoDuration?) -> Double {
+        guard let duration else { return 1.0 / 30 }
+        return min(0.5, max(1.0 / 30, Double(duration.seconds) / 300))
+    }
 }
 
 /// Seconds as a clock reads them, and in words.
@@ -104,17 +124,25 @@ enum VideoClock {
 /// into view and starts over at its end until it is paused (Photos' "Loop Videos", on since iOS
 /// 18.2), but only where motion is welcome: not with Reduce Motion, not with Settings ›
 /// Accessibility › Motion › "Auto-Play Video Previews" off. There it shows its still with
-/// "Abspielen" and stops at its end. Low Power Mode does not hold it back: it keeps a Live
-/// Photo's short motion still (`LiveMotion`, decoration), not the video the user opened to watch.
+/// "Abspielen" and stops at its end. Low Power Mode keeps a Live Photo's short motion still
+/// (`LiveMotion`, decoration), but not the video the user opened to watch: it starts, plays
+/// once and stops at its end (review F, F8).
 public struct VideoStart: Equatable, Sendable {
     /// It plays once it is on screen.
     public let byItself: Bool
     /// It starts over at its end.
     public let loops: Bool
 
-    public init(reduceMotion: Bool, autoplayVideos: Bool) {
+    public init(reduceMotion: Bool, autoplayVideos: Bool, lowPowerMode: Bool) {
         byItself = !reduceMotion && autoplayVideos
-        loops = byItself
+        loops = byItself && !lowPowerMode
+    }
+
+    /// Whether the playing video keeps the screen on (review F, F8): while it plays, as any video
+    /// the user watches; one that loops only through its first play (`loopsDone` 0), then the
+    /// iPhone may lock as usual, since it loops on while nobody watches.
+    public func keepsScreenOn(loopsDone: Int) -> Bool {
+        !loops || loopsDone == 0
     }
 }
 
@@ -133,11 +161,16 @@ public struct VideoSound: Equatable, Sendable {
     }
 
     public private(set) var isOn = false
+    /// The sound was on in this photo view, so the user's music was stopped: it is told it may go
+    /// on when the photo view closes, after the video's player is gone. "Ton aus" alone does not
+    /// tell it: the end of the app's audio session under a running player stops the video too.
+    public private(set) var interruptedOthers = false
 
     public init() {}
 
     public mutating func toggle() {
         isOn.toggle()
+        if isOn { interruptedOthers = true }
     }
 
     public var session: Session { isOn ? .interruptsOthers : .mixesWithOthers }

@@ -225,6 +225,30 @@ struct PhotoTintSourceTests {
         #expect(!settings[icon.upperBound..<about.lowerBound].contains("Section {"), "the icon is not in the section „Über“")
     }
 
+    /// The app's row in Settings › Über is one element for VoiceOver with the app's name (the icon
+    /// is decorative), found by its identifier `settings.about.app` (verification review V10).
+    /// UI test 4 finds it by that, whatever type XCTest gives the combined element, and asserts
+    /// its name and that it is at least 48 pt high, the icon's side: a row without the icon is a
+    /// line of text, lower than that.
+    @Test func theAppsRowIsOneElementTheUITestFinds() throws {
+        let settings = try Self.code("App/Albumist/Views/SettingsView.swift")
+        let icon = try #require(settings.range(of: "AppIconImage(side: typeSize.isAccessibilitySize ? 64 : 48)"))
+        let next = try #require(settings[icon.upperBound...].range(of: "NavigationLink(\"Datenschutz\")"), "\(settings)")
+        let row = settings[icon.upperBound..<next.lowerBound]
+        #expect(row.contains("Text(verbatim: AppInfo.name)"), "\(row)")
+        let combined = try #require(row.range(of: ".accessibilityElement(children: .combine)"), "the row is not one element: \(row)")
+        let identified = try #require(row.range(of: ".accessibilityIdentifier(\"settings.about.app\")"), "the app's row has no identifier: \(row)")
+        #expect(combined.upperBound <= identified.lowerBound, "the identifier is not on the combined element: \(row)")
+        let image = try Self.code("App/Albumist/DesignSystem/AppIconImage.swift")
+        #expect(image.contains(".accessibilityHidden(true)"), "the icon speaks for itself")
+        let test = AppSource.code(try AppSource.read("App/AlbumistUITests/ShowAndHandwritingUITests.swift"), keepStrings: true)
+        let body = try Self.body(["final class ShowAndHandwritingUITests", "func test4_SettingsAboutShowsTheAppsIconAndName()"], in: test)
+        #expect(body.contains("node.identifier == \"settings.about.app\""), "UI test 4 does not find the row by its identifier: \(body)")
+        #expect(body.contains("XCTAssertEqual(row.label, \"Albumist\""), "\(body)")
+        #expect(body.contains("XCTAssertGreaterThanOrEqual(row.frame.height, 48"), "UI test 4 does not look at the icon: \(body)")
+        #expect(!body.contains(".staticText"), "UI test 4 still needs a static text: \(body)")
+    }
+
     /// UI test 3 knows the page's colour from any other ground (verification review V9): besides
     /// "not the grouped background" it asserts pale in light mode (each channel at least 215)
     /// and deep in dark mode (each at most 80), bounds every tint keeps

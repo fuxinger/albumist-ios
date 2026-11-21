@@ -440,8 +440,11 @@ final class ShowAndHandwritingUITests: XCTestCase {
     // MARK: Settings › Über
 
     /// Settings › "Über" starts with the app's icon (the Glass Stack, DS-11: where the app
-    /// speaks of itself) and its name, one element for VoiceOver: "Albumist" between the
-    /// section's title and "Version".
+    /// speaks of itself) and its name, one element for VoiceOver ("Albumist"; the icon is
+    /// decorative): the row `settings.about.app`, between the section's title and "Version",
+    /// found by its identifier whatever type XCTest gives the combined element, and at least
+    /// 48 pt high, the icon's side (verification review V10): without the icon it is a line of
+    /// text, lower than that. Only the combined row can carry both the name and the icon's height.
     func test4_SettingsAboutShowsTheAppsIconAndName() {
         continueAfterFailure = true
         prepare("about")
@@ -454,26 +457,32 @@ final class ShowAndHandwritingUITests: XCTestCase {
             swipes += 1
         }
         UITestWait.screenAtRest(app, "about: settings at rest at \"Über\"")
-        // One snapshot: the section's title, the name and "Version", top to bottom.
+        // One snapshot: the section's title, the app's row and "Version", top to bottom.
         var title: CGRect?, versionRow: CGRect?
-        var names: [(type: XCUIElement.ElementType, frame: CGRect)] = []
+        var found: (label: String, frame: CGRect)?
         if let root = try? app.snapshot() {
             var stack: [any XCUIElementSnapshot] = [root]
             while let node = stack.popLast() {
                 if node.label.caseInsensitiveCompare("Über") == .orderedSame, title == nil { title = node.frame }
                 if node.label == "Version", versionRow == nil { versionRow = node.frame }
-                if node.label == "Albumist", node.elementType != .button { names.append((node.elementType, node.frame)) }
+                if node.identifier == "settings.about.app", found == nil { found = (node.label, node.frame) }
                 stack.append(contentsOf: node.children)
             }
         }
-        let inAbout = names.filter { name in
-            (title.map { name.frame.minY >= $0.maxY - 1 } ?? false) && (versionRow.map { name.frame.maxY <= $0.minY + 1 } ?? false)
-        }
-        print("UI_FACT about: title \(title.map { "\($0)" } ?? "missing"), Version \(versionRow.map { "\($0)" } ?? "missing"), \"Albumist\" \(names.map { "\($0.type.rawValue) \($0.frame)" })")
+        print("UI_FACT about: title \(title.map { "\($0)" } ?? "missing"), Version \(versionRow.map { "\($0)" } ?? "missing"), the app's row \(found.map { "'\($0.label)' \($0.frame)" } ?? "missing")")
         shot("80x-settings-about")
-        let text = inAbout.contains { $0.type == .staticText }
-        print(text ? "UI_STEP_OK about: \"Albumist\" in \"Über\"" : "UI_STEP_MISSING about: \"Albumist\" in \"Über\"")
-        XCTAssertTrue(text, "Settings › Über has no text \"Albumist\" between its title and \"Version\"")
+        if let row = found {
+            let placed = (title.map { row.frame.minY >= $0.maxY - 1 } ?? false) && (versionRow.map { row.frame.maxY <= $0.minY + 1 } ?? false)
+            let icon = row.frame.height >= 48
+            print(placed && icon && row.label == "Albumist" ? "UI_STEP_OK about: the app's icon and name in \"Über\""
+                                                           : "UI_STEP_MISSING about: the app's icon and name in \"Über\"")
+            XCTAssertTrue(placed, "The app's row \(row.frame) is not between the title \"Über\" and \"Version\"")
+            XCTAssertEqual(row.label, "Albumist", "The app's row says '\(row.label)', not the app's name alone")
+            XCTAssertGreaterThanOrEqual(row.frame.height, 48, "The app's row is \(row.frame.height) pt high: no icon of 48 pt beside the name")
+        } else {
+            print("UI_STEP_MISSING about: the app's row (settings.about.app)")
+            XCTFail("Settings › Über has no row settings.about.app")
+        }
         tap(app.buttons["Fertig"], "about: close settings", timeout: 5)
     }
 }

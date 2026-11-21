@@ -199,6 +199,7 @@ struct SettingsView: View {
                 }
                 .padding(.vertical, Theme.Spacing.xs)
                 .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("settings.about.app") // Design W3 H13: UI test 4 finds the row by it
                 NavigationLink("Datenschutz") { PrivacyView() }
                 LabeledContent("Version", value: AppInfo.version)
                 DiagnosticShareRow()

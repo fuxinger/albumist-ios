@@ -92,14 +92,34 @@ struct PhotoGridSourceTests {
     /// the photos as buttons with a year in their names), opens or ticks as before, says when it
     /// is ticked, zooms into the photo view out of its tile, and does nothing while the page waits.
     /// The lift that ends a drag or a pinch (UIKit may hand it to the photo's button too) is no
-    /// tap: the drag ticked its first photo already, and a pinch opens nothing.
+    /// tap: the drag ticked its first photo already, and a pinch opens nothing. Only that lift
+    /// (`PhotoGridLift`, review L8): both gestures tell of each finger that touches the grid, and
+    /// a tap after it is one of its own, however soon after a drag or a pinch.
     @Test func aPhotoOpensAndTicksAsBefore() throws {
         let cell = try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.grid)
         let tap = Self.squeezed(cell)
-        #expect(tap.contains("returnButton{guard!gestures.endsGestureelse{return}guardselectingelse{open(id)return}"
+        #expect(tap.contains("returnButton{guard!gestures.swallowsTapelse{return}guardselectingelse{open(id)return}"
                              + "ifisSelected{selection.remove(id)}else{selection.insert(id)}}"), "\(tap)")
-        let lift = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "var endsGesture: Bool"], in: Self.state))
-        #expect(lift == "{drag!=nil||zooming!=nil||gestureEnded.map{Date().timeIntervalSince($0)<0.4}??false}", "\(lift)")
+        let lift = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "var swallowsTap: Bool"], in: Self.state))
+        #expect(lift == "{lift.swallowsTap}", "\(lift)")
+        let state = try Self.code(Self.state)
+        #expect(!state.contains("Date()"), "a time window swallows the taps after the lift too")
+        let end = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func endDrag("], in: Self.state))
+        #expect(end.contains("ifdrag!=nil||waiting!=nil{lift.gestureEnded()}"), "\(end)")
+        let endPinch = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func endPinch("], in: Self.state))
+        #expect(endPinch.contains("ifzooming!=nil{lift.gestureEnded()}"), "\(endPinch)")
+        let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
+        #expect(view.components(separatedBy: "touchedDown:{gestures.touchedDown()}").count - 1 == 2, "\(view)")
+        for recognizer in ["final class PhotoGridSelectRecognizer", "final class PhotoGridPinchRecognizer"] {
+            let touched = Self.squeezed(try Self.body([recognizer, "shouldReceive touch: UITouch"], in: Self.recognizers))
+            #expect(touched == "{touchedDown?()returntrue}", "\(recognizer): \(touched)")
+        }
+        for representable in ["struct PhotoGridSelectDrag", "struct PhotoGridPinch"] {
+            let made = try Self.body([representable, "func makeUIGestureRecognizer("], in: Self.recognizers)
+            let updated = try Self.body([representable, "func updateUIGestureRecognizer("], in: Self.recognizers)
+            #expect(made.contains("recognizer.touchedDown = touchedDown") && updated.contains("recognizer.touchedDown = touchedDown"),
+                    "\(representable)")
+        }
         for modifier in [".matchedTransitionSource(id: id, in: zoom)", ".buttonStyle(.plain)", ".disabled(disabled)",
                          ".accessibilityLabel(Text(Self.spokenDate(entry)))",
                          ".accessibilityAddTraits(selecting && isSelected ? .isSelected : [])",
@@ -193,7 +213,8 @@ struct PhotoGridSourceTests {
     /// swipe scrolls as before; a tap never begins it, so a tap still ticks one photo.
     @Test func dragToSelectIsUIKitsPanBesideTheScrollView() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
-        #expect(view.contains(".gesture(PhotoGridSelectDrag(isEnabled:selecting&&!disabled,space:PhotoGridPlace.space){touchindragged(touch)})"),
+        #expect(view.contains(".gesture(PhotoGridSelectDrag(isEnabled:selecting&&!disabled,space:PhotoGridPlace.space,"
+                              + "touchedDown:{gestures.touchedDown()}){touchindragged(touch)})"),
                 "\(view)")
         let recognizers = try Self.code(Self.recognizers)
         #expect(recognizers.contains("final class PhotoGridSelectRecognizer: UIPanGestureRecognizer, UIGestureRecognizerDelegate {"))
@@ -247,7 +268,8 @@ struct PhotoGridSourceTests {
     /// Reduce Motion; the size is remembered, but not from one UI test to the next.
     @Test func pinchToZoomKeepsThePlace() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
-        #expect(view.contains(".gesture(PhotoGridPinch(isEnabled:!disabled,space:PhotoGridPlace.space){touchinpinched(touch)})"), "\(view)")
+        #expect(view.contains(".gesture(PhotoGridPinch(isEnabled:!disabled,space:PhotoGridPlace.space,touchedDown:{gestures.touchedDown()})"
+                              + "{touchinpinched(touch)})"), "\(view)")
         let recognizers = try Self.code(Self.recognizers)
         #expect(recognizers.contains("final class PhotoGridPinchRecognizer: UIPinchGestureRecognizer, UIGestureRecognizerDelegate {"))
         let stop = Self.squeezed(try Self.body(["final class PhotoGridPinchRecognizer", "func stopScrolling("], in: Self.recognizers))

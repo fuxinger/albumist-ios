@@ -136,6 +136,40 @@ public struct PhotoGridDrag: Equatable, Sendable {
     }
 }
 
+/// The lift that ends a drag or a pinch, which UIKit may hand a photo's button too as a tap,
+/// before or right after the gesture's end (review L8 of design wave 3): it neither ticks nor
+/// opens a photo, as the drag ticked its first photo already and a pinch opens nothing. Only
+/// that lift: once no gesture runs, the next finger that touches the grid begins a tap of its
+/// own, however soon (a tap right after a drag ticks or unticks, one right after a pinch opens).
+public struct PhotoGridLift: Equatable, Sendable {
+    /// The gestures running (a drag and a pinch may run at once).
+    private var running = 0
+    /// A gesture ended and no finger touched since: a tap now is its lift.
+    private var lifting = false
+
+    public init() {}
+
+    public mutating func gestureBegan() {
+        running += 1
+    }
+
+    public mutating func gestureEnded() {
+        running = max(0, running - 1)
+        lifting = true
+    }
+
+    /// A finger touched the grid: once no gesture runs, what follows is no gesture's lift. A
+    /// finger that touches while one runs (a pinch's second finger) is part of it.
+    public mutating func touchedDown() {
+        if running == 0 { lifting = false }
+    }
+
+    /// Whether a tap on a photo now is a gesture's, not one of its own.
+    public var swallowsTap: Bool {
+        running > 0 || lifting
+    }
+}
+
 /// Which photo of a grid is under a finger, from the frames of the photos on screen.
 public enum PhotoGridHitTest {
     /// The position of the photo at (`x`, `y`) among `cells` (position and frame, in one space):

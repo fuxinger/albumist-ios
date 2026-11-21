@@ -113,6 +113,51 @@ struct PhotoGridGestureTests {
         #expect(selection == ["a", "b", "c"])
     }
 
+    // MARK: A gesture's lift (review L8)
+
+    /// The lift that ends a drag or a pinch is no tap (UIKit may hand it to the photo's button
+    /// too, before or right after the gesture's end); a tap after the next finger touched down is
+    /// one of its own, however soon: a tap right after a drag ticks, one right after a pinch opens.
+    @Test func onlyTheLiftOfTheGestureThatEndedIsNoTap() {
+        var lift = PhotoGridLift()
+        #expect(!lift.swallowsTap, "a plain tap")
+        // A drag: its finger touches down, then it begins.
+        lift.touchedDown()
+        lift.gestureBegan()
+        #expect(lift.swallowsTap, "a tap while it runs")
+        lift.gestureEnded()
+        #expect(lift.swallowsTap, "its own lift")
+        #expect(lift.swallowsTap, "its lift, however late, until a finger touches again")
+        lift.touchedDown()
+        #expect(!lift.swallowsTap, "a tap right after the drag ticks or unticks")
+        // A pinch: its second finger touches down while it runs, which is no tap of its own.
+        lift.gestureBegan()
+        lift.touchedDown()
+        #expect(lift.swallowsTap)
+        lift.gestureEnded()
+        #expect(lift.swallowsTap, "the lift of its fingers")
+        lift.touchedDown()
+        #expect(!lift.swallowsTap, "a tap right after the pinch opens")
+    }
+
+    /// A drag and a pinch at once: a tap is their lift until both ended and a finger touched again.
+    @Test func twoGesturesAtOnceLiftTogether() {
+        var lift = PhotoGridLift()
+        lift.gestureBegan()
+        lift.gestureBegan()
+        lift.gestureEnded()
+        lift.touchedDown()
+        #expect(lift.swallowsTap, "the other one still runs")
+        lift.gestureEnded()
+        #expect(lift.swallowsTap)
+        lift.touchedDown()
+        #expect(!lift.swallowsTap)
+        // An end without a beginning leaves nothing running.
+        lift.gestureEnded()
+        lift.touchedDown()
+        #expect(!lift.swallowsTap)
+    }
+
     // MARK: The photo under the finger
 
     /// Two rows of three 100-pt photos with 2 pt between them; the second row is short.

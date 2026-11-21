@@ -26,9 +26,9 @@ final class PhotoGridGestureState {
     /// finger reaches.
     private var waiting: Waiting?
     private var zooming: Zooming?
-    /// When the last drag or pinch ended: the lift that ends one is no tap of its own
-    /// (`endsGesture`).
-    private var gestureEnded: Date?
+    /// The lift that ends a drag or a pinch is no tap of its own, only that lift
+    /// (`swallowsTap`, review L8).
+    private var lift = PhotoGridLift()
     let ticker = PhotoGridTicker()
 
     /// One drag to select.
@@ -149,6 +149,7 @@ final class PhotoGridGestureState {
     /// A finger began to draw sideways across the grid.
     func beginDrag(_ touch: PhotoGridTouch, selection: Binding<Set<AssetID>>, scroller: PhotoGridScroller?) {
         endDrag()
+        lift.gestureBegan()
         // Where the finger touched: the pan begins only once it moved a little.
         let touched = CGPoint(x: touch.inGrid.x - touch.moved.x, y: touch.inGrid.y - touch.moved.y)
         waiting = Waiting(selection: selection, scroller: scroller)
@@ -171,16 +172,22 @@ final class PhotoGridGestureState {
     func endDrag() {
         ticker.stop()
         drag?.scroller?.endAutoScroll()
-        if drag != nil { gestureEnded = Date() }
+        if drag != nil || waiting != nil { lift.gestureEnded() }
         drag = nil
         waiting = nil
     }
 
     /// Whether a tap on a photo now is the lift that ends a drag or a pinch (UIKit may hand it to
     /// the photo's button too, before or right after the gesture's end): it neither ticks nor
-    /// opens a photo of its own.
-    var endsGesture: Bool {
-        drag != nil || zooming != nil || gestureEnded.map { Date().timeIntervalSince($0) < 0.4 } ?? false
+    /// opens a photo of its own. A tap after the next finger touched is a tap again
+    /// (`PhotoGridLift`).
+    var swallowsTap: Bool {
+        lift.swallowsTap
+    }
+
+    /// A finger touched the grid (either gesture's recognizer tells).
+    func touchedDown() {
+        lift.touchedDown()
     }
 
     /// The range begins at the first of `points` with a photo under it; with none the drag
@@ -277,6 +284,8 @@ final class PhotoGridGestureState {
     /// Two fingers touched the grid, which shows `columns` photos in a row: the photo they hold
     /// (`PhotoGridHitTest.nearest`) and the point of it under them.
     func beginPinch(_ touch: PhotoGridTouch, columns: Int, scroller: PhotoGridScroller?) {
+        endPinch()
+        lift.gestureBegan()
         let all = photos.shown.map { (position: $0.value.position, frame: GridRect($0.value.frame)) }
         var photo: AssetID?
         var pointInPhoto = 0.5
@@ -307,7 +316,7 @@ final class PhotoGridGestureState {
     }
 
     func endPinch() {
-        if zooming != nil { gestureEnded = Date() }
+        if zooming != nil { lift.gestureEnded() }
         zooming = nil
     }
 }

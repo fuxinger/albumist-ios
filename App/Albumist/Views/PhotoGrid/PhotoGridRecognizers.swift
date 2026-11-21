@@ -33,6 +33,8 @@ struct PhotoGridSelectDrag: UIGestureRecognizerRepresentable {
     var isEnabled: Bool
     /// The grid's coordinate space (`PhotoGridPlace.space`).
     var space: String
+    /// A finger touched the grid: a tap after a gesture is one of its own (`PhotoGridLift`).
+    var touchedDown: () -> Void
     var onTouch: (PhotoGridTouch) -> Void
 
     func makeUIGestureRecognizer(context: Context) -> PhotoGridSelectRecognizer {
@@ -40,11 +42,13 @@ struct PhotoGridSelectDrag: UIGestureRecognizerRepresentable {
         recognizer.maximumNumberOfTouches = 1
         recognizer.delegate = recognizer
         recognizer.isEnabled = isEnabled
+        recognizer.touchedDown = touchedDown
         return recognizer
     }
 
     func updateUIGestureRecognizer(_ recognizer: PhotoGridSelectRecognizer, context: Context) {
         recognizer.isEnabled = isEnabled
+        recognizer.touchedDown = touchedDown
     }
 
     func handleUIGestureRecognizerAction(_ recognizer: PhotoGridSelectRecognizer, context: Context) {
@@ -63,6 +67,14 @@ struct PhotoGridSelectDrag: UIGestureRecognizerRepresentable {
 
 /// The pan of drag to select, its own delegate (as `LivePressRecognizer`).
 final class PhotoGridSelectRecognizer: UIPanGestureRecognizer, UIGestureRecognizerDelegate {
+    /// Told of each finger that touches the grid (`PhotoGridLift`).
+    var touchedDown: (() -> Void)?
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        touchedDown?()
+        return true
+    }
+
     /// Only a sideways start selects: a vertical or diagonal one is the scroll view's.
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         let moved = translation(in: view)
@@ -83,17 +95,22 @@ struct PhotoGridPinch: UIGestureRecognizerRepresentable {
     var isEnabled: Bool
     /// The grid's coordinate space (`PhotoGridPlace.space`).
     var space: String
+    /// A finger touched the grid: a tap after a gesture is one of its own (`PhotoGridLift`). The
+    /// pinch is on whenever the grid's photos can be tapped, so it sees every finger.
+    var touchedDown: () -> Void
     var onTouch: (PhotoGridTouch) -> Void
 
     func makeUIGestureRecognizer(context: Context) -> PhotoGridPinchRecognizer {
         let recognizer = PhotoGridPinchRecognizer()
         recognizer.delegate = recognizer
         recognizer.isEnabled = isEnabled
+        recognizer.touchedDown = touchedDown
         return recognizer
     }
 
     func updateUIGestureRecognizer(_ recognizer: PhotoGridPinchRecognizer, context: Context) {
         recognizer.isEnabled = isEnabled
+        recognizer.touchedDown = touchedDown
     }
 
     func handleUIGestureRecognizerAction(_ recognizer: PhotoGridPinchRecognizer, context: Context) {
@@ -117,6 +134,13 @@ struct PhotoGridPinch: UIGestureRecognizerRepresentable {
 final class PhotoGridPinchRecognizer: UIPinchGestureRecognizer, UIGestureRecognizerDelegate {
     /// The pan of the scroll view the grid is in, met while the pinch had not begun.
     private weak var scrollPan: UIGestureRecognizer?
+    /// Told of each finger that touches the grid (`PhotoGridLift`).
+    var touchedDown: (() -> Void)?
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        touchedDown?()
+        return true
+    }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {

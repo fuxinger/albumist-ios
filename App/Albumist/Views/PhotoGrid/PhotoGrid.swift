@@ -88,8 +88,10 @@ struct PhotoGrid: View {
         }
         // Fingers between two photos are on the grid too.
         .contentShape(Rectangle())
-        .gesture(PhotoGridSelectDrag(isEnabled: selecting && !disabled, space: PhotoGridPlace.space) { touch in dragged(touch) })
-        .gesture(PhotoGridPinch(isEnabled: !disabled, space: PhotoGridPlace.space) { touch in pinched(touch) })
+        .gesture(PhotoGridSelectDrag(isEnabled: selecting && !disabled, space: PhotoGridPlace.space,
+                                     touchedDown: { gestures.touchedDown() }) { touch in dragged(touch) })
+        .gesture(PhotoGridPinch(isEnabled: !disabled, space: PhotoGridPlace.space,
+                                touchedDown: { gestures.touchedDown() }) { touch in pinched(touch) })
         .coordinateSpace(.named(PhotoGridPlace.space))
         // After a pinch's step the grid settles from the old size around the fingers, so the
         // step looks like a zoom; not under Reduce Motion (`step(to:)`).
@@ -127,8 +129,9 @@ struct PhotoGrid: View {
         // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
         return Button {
             // The lift that ends a drag or a pinch is no tap: the drag ticked its first photo
-            // already, and a pinch opens nothing.
-            guard !gestures.endsGesture else { return }
+            // already, and a pinch opens nothing. Only that lift: a tap right after either one
+            // ticks or opens (review L8).
+            guard !gestures.swallowsTap else { return }
             guard selecting else {
                 open(id)
                 return

@@ -161,7 +161,7 @@ struct ChangeCoversSourceTests {
     /// (`PlanCovers.key`), never one made for another plan.
     @Test func thePreviewWorksOutTheCoverOfEachAlbum() throws {
         let view = Self.squeezed(try Self.body(["struct PlanReviewView", "var body"], in: Self.review))
-        #expect(view.contains(".task(id:model.changeCoverInputs(plan.map{[$0]}??[])){guardletplanelse{return}letmade=awaitmodel.previewCovers(for:plan)guard!Task.isCancelledelse{return}albumCovers=AlbumCovers(plan:plan.id,covers:made)}"))
+        #expect(view.contains(".task(id:albumCoverInputs){guardalbumCoverInputs!=nil,letplanelse{return}letmade=awaitmodel.previewCovers(for:plan)guard!Task.isCancelledelse{return}albumCovers=AlbumCovers(plan:plan.id,covers:made)}"))
         let content = Self.squeezed(try Self.body(["struct PlanReviewView", "func planContent("], in: Self.review))
         #expect(content.contains("if!facts.albums.isEmpty{PlanAlbumList(albums:facts.albums,covers:covers(of:plan))}"))
         let mine = Self.squeezed(try Self.body(["struct PlanReviewView", "func covers(of"], in: Self.review))
@@ -173,6 +173,18 @@ struct ChangeCoversSourceTests {
         let model = Self.squeezed(try Self.body(["func previewCovers("], in: Self.model))
         #expect(model.hasPrefix("{guard!facts.isEmptyelse{returnnil}"))
         #expect(model.contains("letdates=creationDates,ranks=previewRanksreturnawaitTask.detached(priority:.userInitiated){PlanCovers.albums(of:plan,applied:false,dates:dates,ranks:ranks)}.value"))
+    }
+
+    /// While the plan runs, its sorting show included, the preview works out no covers (review
+    /// M4): the task's id is nil then, so the facts a run brings neither draw the screen again for
+    /// the covers nor work them out for a list that is not on screen. The body reads the facts'
+    /// revision only while the plan is on screen.
+    @Test func thePreviewWorksOutNoCoversWhileItsPlanRuns() throws {
+        let view = Self.squeezed(try Self.body(["struct PlanReviewView", "var body"], in: Self.review))
+        #expect(view.contains(".task(id:albumCoverInputs){guardalbumCoverInputs!=nil,letplanelse{return}"))
+        #expect(!view.contains("changeCoverInputs("), "the body reads the facts' revision during the run")
+        let inputs = Self.squeezed(try Self.body(["struct PlanReviewView", "private var albumCoverInputs"], in: Self.review))
+        #expect(inputs == "{guardshow==nil,!model.execution.isRunning,letplanelse{returnnil}returnmodel.changeCoverInputs([plan])}")
     }
 
     /// A row of the preview: the album's cover as the receipt shows it (72 pt beside the words, a

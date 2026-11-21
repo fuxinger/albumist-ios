@@ -1,0 +1,221 @@
+import Foundation
+import Testing
+@testable import AlbumistCore
+
+/// Videos in the photo view and on the thumbnails (design wave 3, DS-16): how long a video is,
+/// in figures and for VoiceOver in German and English, where it is while it plays, when it
+/// starts and loops by itself, its sound, what Photos' answer says of where it is (Albumist
+/// never loads from iCloud), and seeking while the finger moves on the slider.
+@Suite("Videos: length, start, sound and iCloud (DS-16)")
+struct VideoPlaybackTests {
+    // MARK: How long
+
+    /// Minutes and seconds as Photos shows them on a video's thumbnail; hours only from an hour on.
+    @Test func theLengthReadsAsInPhotos() {
+        let cases: [(Double, String)] = [
+            (5, "0:05"), (15, "0:15"), (59, "0:59"), (60, "1:00"), (125, "2:05"), (600, "10:00"),
+            (3599, "59:59"), (3600, "1:00:00"), (3723, "1:02:03"), (36_061, "10:01:01"),
+        ]
+        for (seconds, text) in cases {
+            #expect(VideoDuration(seconds: seconds)?.text == text, "\(seconds) s")
+        }
+    }
+
+    /// To the nearest second, halves up; a clip shorter than half a second is never "0:00".
+    @Test func theLengthIsRoundedToTheNearestSecond() {
+        #expect(VideoDuration(seconds: 14.4)?.seconds == 14)
+        #expect(VideoDuration(seconds: 14.5)?.seconds == 15)
+        #expect(VideoDuration(seconds: 14.6)?.text == "0:15")
+        #expect(VideoDuration(seconds: 59.5)?.text == "1:00")
+        #expect(VideoDuration(seconds: 3599.5)?.text == "1:00:00")
+        #expect(VideoDuration(seconds: 0.2)?.text == "0:01")
+        #expect(VideoDuration(seconds: 0.001)?.seconds == 1)
+    }
+
+    /// No length, no badge: a photo has none, and a broken file's never crashes the grid.
+    @Test func withoutALengthThereIsNone() {
+        for seconds in [0, -3, Double.nan, -Double.infinity, Double.infinity] {
+            #expect(VideoDuration(seconds: seconds) == nil, "\(seconds)")
+        }
+        #expect(VideoDuration(seconds: 1e300) != nil)
+        #expect(VideoDuration(seconds: 1e300)?.text.isEmpty == false)
+    }
+
+    /// The figures read the same in German and English; what VoiceOver says does not.
+    @Test func theFiguresAreTheSameInBothLanguages() {
+        let length = VideoDuration(seconds: 3723)
+        #expect(length?.text == "1:02:03")
+        #expect(length?.spoken(.german) != length?.spoken(.english))
+    }
+
+    /// VoiceOver says what it is and how long, in words, one and more, without the parts that are
+    /// zero (Photos' badge says nothing to VoiceOver; Albumist's grid cells do).
+    @Test func voiceOverSaysVideoAndHowLongInGerman() {
+        let cases: [(Double, String)] = [
+            (15, "Video, 15 Sekunden"), (1, "Video, 1 Sekunde"), (60, "Video, 1 Minute"),
+            (62, "Video, 1 Minute, 2 Sekunden"), (125, "Video, 2 Minuten, 5 Sekunden"), (3600, "Video, 1 Stunde"),
+            (3723, "Video, 1 Stunde, 2 Minuten, 3 Sekunden"), (7201, "Video, 2 Stunden, 1 Sekunde"),
+            (14.6, "Video, 15 Sekunden"), (0.2, "Video, 1 Sekunde"),
+        ]
+        for (seconds, spoken) in cases {
+            #expect(VideoDuration(seconds: seconds)?.spoken(.german) == spoken, "\(seconds) s")
+        }
+    }
+
+    @Test func voiceOverSaysVideoAndHowLongInEnglish() {
+        let cases: [(Double, String)] = [
+            (15, "Video, 15 seconds"), (1, "Video, 1 second"), (60, "Video, 1 minute"),
+            (62, "Video, 1 minute, 2 seconds"), (125, "Video, 2 minutes, 5 seconds"), (3600, "Video, 1 hour"),
+            (3723, "Video, 1 hour, 2 minutes, 3 seconds"), (7201, "Video, 2 hours, 1 second"),
+        ]
+        for (seconds, spoken) in cases {
+            #expect(VideoDuration(seconds: seconds)?.spoken(.english) == spoken, "\(seconds) s")
+        }
+    }
+
+    // MARK: Where it is while it plays
+
+    /// The time passed and the time left, in whole seconds that always add up to the length, so
+    /// the end reads "0:15" and "−0:00", never one second short.
+    @Test func timePassedAndLeftAddUpToTheLength() throws {
+        let length = try #require(VideoDuration(seconds: 15))
+        let start = VideoPosition(at: 0, of: length)
+        #expect(start.elapsedText == "0:00")
+        #expect(start.remainingText == "\u{2212}0:15")
+        let three = VideoPosition(at: 3.2, of: length)
+        #expect(three.elapsedText == "0:03")
+        #expect(three.remainingText == "\u{2212}0:12")
+        let end = VideoPosition(at: 14.9, of: length)
+        #expect(end.elapsedText == "0:15")
+        #expect(end.remainingText == "\u{2212}0:00")
+        let rounded = try #require(VideoDuration(seconds: 14.6))
+        #expect(VideoPosition(at: 14.6, of: rounded).remaining == 0)
+        for time in [-2, 99, Double.nan, Double.infinity] {
+            let position = VideoPosition(at: time, of: length)
+            #expect((0...15).contains(position.elapsed), "\(time)")
+            #expect(position.elapsed + position.remaining == 15, "\(time)")
+        }
+    }
+
+    /// A video of an hour or more shows hours on both sides, so the times do not change width
+    /// while it plays.
+    @Test func aLongVideoShowsHoursOnBothSides() throws {
+        let position = VideoPosition(at: 3, of: try #require(VideoDuration(seconds: 3723)))
+        #expect(position.elapsedText == "0:00:03")
+        #expect(position.remainingText == "\u{2212}1:02:00")
+    }
+
+    /// VoiceOver says the place on the slider in words.
+    @Test func voiceOverSaysWhereTheVideoIs() throws {
+        let length = try #require(VideoDuration(seconds: 15))
+        #expect(VideoPosition(at: 3, of: length).spoken(.german) == "3 Sekunden von 15 Sekunden")
+        #expect(VideoPosition(at: 3, of: length).spoken(.english) == "3 seconds of 15 seconds")
+        #expect(VideoPosition(at: 0, of: length).spoken(.german) == "0 Sekunden von 15 Sekunden")
+        let long = try #require(VideoDuration(seconds: 125))
+        #expect(VideoPosition(at: 61, of: long).spoken(.english) == "1 minute, 1 second of 2 minutes, 5 seconds")
+    }
+
+    /// VoiceOver's swipe up or down on the slider moves a tenth of the video, at least a second
+    /// and at most ten.
+    @Test func voiceOverMovesByAStepThatFitsTheLength() throws {
+        #expect(VideoPosition.step(for: try #require(VideoDuration(seconds: 5))) == 1)
+        #expect(VideoPosition.step(for: try #require(VideoDuration(seconds: 15))) == 1.5)
+        #expect(VideoPosition.step(for: try #require(VideoDuration(seconds: 60))) == 6)
+        #expect(VideoPosition.step(for: try #require(VideoDuration(seconds: 3600))) == 10)
+    }
+
+    // MARK: Starting by itself
+
+    /// As in Photos a video plays when it comes into view and starts over at its end, but only
+    /// where motion is welcome: not with Reduce Motion, not with "Auto-Play Video Previews" off.
+    /// There it waits for "Abspielen" and stops at its end.
+    @Test func aVideoStartsByItselfOnlyWhereMotionIsWelcome() {
+        let welcome = VideoStart(reduceMotion: false, autoplayVideos: true)
+        #expect(welcome.byItself)
+        #expect(welcome.loops)
+        for (reduceMotion, autoplay) in [(true, true), (false, false), (true, false)] {
+            let calm = VideoStart(reduceMotion: reduceMotion, autoplayVideos: autoplay)
+            #expect(!calm.byItself, "Reduce Motion \(reduceMotion), autoplay \(autoplay)")
+            #expect(!calm.loops, "Reduce Motion \(reduceMotion), autoplay \(autoplay)")
+        }
+    }
+
+    /// Low Power Mode keeps a Live Photo's short motion still (it is decoration), not a video the
+    /// user opened to watch.
+    @Test func lowPowerModeDoesNotHoldAVideoBack() {
+        #expect(!LiveMotion.playsHint(reduceMotion: false, lowPowerMode: true, autoplayVideos: true))
+        #expect(VideoStart(reduceMotion: false, autoplayVideos: true).byItself)
+    }
+
+    // MARK: Sound
+
+    /// A video starts without sound, so nothing makes a sound the user did not ask for and the
+    /// user's music plays on. "Ton an" gives it sound, which stops the user's music and plays with
+    /// the silent switch on, as in Photos; the choice holds for the next videos of the same photo
+    /// view, a new photo view starts without sound again.
+    @Test func aVideoStartsWithoutSoundUntilTheUserTurnsItOn() {
+        var sound = VideoSound()
+        #expect(!sound.isOn)
+        #expect(sound.session == .mixesWithOthers)
+        sound.toggle()
+        #expect(sound.isOn)
+        #expect(sound.session == .interruptsOthers)
+        sound.toggle()
+        #expect(!sound.isOn)
+        #expect(sound.session == .mixesWithOthers)
+        #expect(!VideoSound().isOn)
+    }
+
+    // MARK: Only what is on the iPhone
+
+    /// Photos' answer to the request for a video with the network off says where it is: a player
+    /// item, it is on the iPhone; "in the cloud" or Photos' "network access required", also under
+    /// another error, it is only in iCloud; anything else, not available now (never "only in
+    /// iCloud" by guess).
+    @Test func photosAnswerSaysWhereTheVideoIs() {
+        let network = (domain: ShareAvailability.photosErrorDomain, code: ShareAvailability.networkAccessRequired)
+        let other = (domain: "NSCocoaErrorDomain", code: 4)
+        #expect(VideoAvailability.afterRequest(gotItem: true, inCloud: false, errors: []) == .onDevice)
+        #expect(VideoAvailability.afterRequest(gotItem: true, inCloud: true, errors: []) == .onDevice)
+        #expect(VideoAvailability.afterRequest(gotItem: false, inCloud: true, errors: []) == .onlyInICloud)
+        #expect(VideoAvailability.afterRequest(gotItem: false, inCloud: false, errors: [network]) == .onlyInICloud)
+        #expect(VideoAvailability.afterRequest(gotItem: false, inCloud: false, errors: [other, network]) == .onlyInICloud)
+        #expect(VideoAvailability.afterRequest(gotItem: false, inCloud: false, errors: [other]) == .unavailable)
+        #expect(VideoAvailability.afterRequest(gotItem: false, inCloud: false, errors: []) == .unavailable)
+    }
+
+    /// Only a video on the iPhone plays; a video only in iCloud says so and where it plays; one
+    /// Photos did not answer for is not available now, and nothing is said while it is asked.
+    @Test func onlyAVideoOnTheIPhonePlays() {
+        #expect(VideoAvailability.onDevice.plays)
+        for other in [VideoAvailability.unknown, .onlyInICloud, .unavailable] {
+            #expect(!other.plays, "\(other)")
+        }
+        #expect(VideoAvailability.unknown.note == nil)
+        #expect(VideoAvailability.onDevice.note == nil)
+        #expect(VideoAvailability.onlyInICloud.note == .onlyInICloud)
+        #expect(VideoAvailability.unavailable.note == .unavailable)
+    }
+
+    // MARK: Seeking with the finger
+
+    /// While the finger moves on the slider, one seek runs at a time, to the exact frame; the
+    /// places the finger passes meanwhile are not all asked for, only the last one, when the
+    /// running seek ends (Apple's technical Q&A QA1820), so the picture follows the finger
+    /// without a queue of seeks behind it.
+    @Test func seekingFollowsTheFingerOneSeekAtATime() {
+        var seek = ChaseSeek()
+        #expect(seek.want(2) == 2)
+        #expect(seek.want(3) == nil)
+        #expect(seek.want(4) == nil)
+        #expect(seek.finished() == 4)
+        #expect(seek.finished() == nil)
+        #expect(seek.want(5) == 5)
+        #expect(seek.finished() == nil)
+        // The place that is running already is not asked for again.
+        #expect(seek.want(6) == 6)
+        #expect(seek.want(6) == nil)
+        #expect(seek.finished() == nil)
+        #expect(!seek.isRunning)
+    }
+}

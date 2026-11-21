@@ -125,7 +125,7 @@ struct VideoViewerSourceTests {
         // Scrubbing as Apple's QA1820: one exact seek at a time, the last place when it ends.
         #expect(model.contains("ChaseSeek()"))
         #expect(model.contains("toleranceBefore: .zero, toleranceAfter: .zero"))
-        #expect(try #require(AppSource.body(of: "private func seekEnded(", in: model)).contains("seek.finished()"))
+        #expect(try #require(AppSource.body(of: "private func seekEnded(", in: model)).contains("chase.finished()"))
         // Its picture: fitted as the still, under no finger, hidden from VoiceOver (the page says it).
         let surface = try Self.file("VideoSurface.swift")
         #expect(surface.contains("UIViewRepresentable"))
@@ -146,6 +146,24 @@ struct VideoViewerSourceTests {
         let still = try #require(AppSource.body(of: "private func still(_ image: UIImage?)", in: zoomable))
         #expect(Self.inOrder(["if let still = image ?? ThumbnailCache.shared.thumbnailInMemory(for: id) {", "Image(uiImage: still)",
                               ".scaledToFit()", "} else {", "Color.clear"], in: still), "\(still)")
+    }
+
+    /// After the finger lifts from the slider, or a VoiceOver step, the thumb and the play
+    /// symbol hold still until the video is at that place: the ticks of the jump, while the
+    /// player still waits, move neither back and forth (review F, F9).
+    @Test func theSliderSettlesWithoutAFlicker() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let end = try #require(AppSource.body(of: "func endScrub(", in: model))
+        #expect(Self.inOrder(["scrubbing = false", "chase = ChaseSeek()", "settle(at: time, playing: playsAfterScrub)"], in: end), "\(end)")
+        let move = try #require(AppSource.body(of: "func move(by seconds: Double)", in: model))
+        #expect(move.contains("settle(at: time, playing: isPlaying)"), "\(move)")
+        let settle = try #require(AppSource.body(of: "private func settle(", in: model))
+        #expect(Self.inOrder(["settling = true", "seek(to: seconds,"], in: settle))
+        let ended = try #require(AppSource.body(of: "private func seekEnded(", in: model))
+        #expect(Self.inOrder(["settling = false", "play()", "chase.finished()"], in: ended), "\(ended)")
+        let ticked = try #require(AppSource.body(of: "private func ticked(", in: model))
+        #expect(Self.inOrder(["guard !scrubbing, !settling else { return }", "time = ", "isPlaying = "], in: ticked), "\(ticked)")
+        #expect(try #require(AppSource.body(of: "private func stop(", in: model)).contains("settling = false"))
     }
 
     /// A video starts without sound; "Ton an" gives it sound, which stops the user's music and

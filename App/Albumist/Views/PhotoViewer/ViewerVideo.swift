@@ -45,8 +45,11 @@ final class ViewerVideo {
     @ObservationIgnored private var looper: AVPlayerLooper?
     @ObservationIgnored private var observer: Any?
     @ObservationIgnored private var start = VideoStart(reduceMotion: true, autoplayVideos: false, lowPowerMode: false)
-    @ObservationIgnored private var seek = ChaseSeek()
+    @ObservationIgnored private var chase = ChaseSeek()
     @ObservationIgnored private var scrubbing = false
+    /// From the finger's lift (or a VoiceOver step) until the video is at that place: the ticks
+    /// of the jump, while the player still waits, move neither the thumb nor the play symbol.
+    @ObservationIgnored private var settling = false
     @ObservationIgnored private var playsAfterScrub = false
     /// Videos Photos said are only in iCloud: not asked again while the photo view is open.
     @ObservationIgnored private var onlyInICloud: Set<AssetID> = []
@@ -162,22 +165,29 @@ final class ViewerVideo {
     func scrub(to seconds: Double) {
         time = seconds
         if !scrubbing { beginScrub() }
-        if let next = seek.want(seconds) { seek(to: next) }
+        if let next = chase.want(seconds) { seek(to: next) }
     }
 
     /// The finger left the slider: the video is where it is, and plays on if it played before.
     func endScrub() {
         guard scrubbing else { return }
         scrubbing = false
-        seek = ChaseSeek()
-        seek(to: time, then: playsAfterScrub)
+        chase = ChaseSeek()
+        settle(at: time, playing: playsAfterScrub)
     }
 
     /// VoiceOver's swipe up or down on the slider: a step on or back (`VideoPosition.step`).
     func move(by seconds: Double) {
         guard let length else { return }
         time = min(max(time + seconds, 0), Double(length.seconds))
-        seek(to: time, then: isPlaying)
+        settle(at: time, playing: isPlaying)
+    }
+
+    /// The video goes to `seconds` and stays there, or plays on from there if `playing`; the
+    /// thumb and the play symbol hold still until it is there (`settling`, review F, F9).
+    private func settle(at seconds: Double, playing: Bool) {
+        settling = true
+        seek(to: seconds, then: playing)
     }
 
     // MARK: Player
@@ -204,17 +214,19 @@ final class ViewerVideo {
         // What plays may be longer than the asset says (slow motion) or shorter (trimmed): the
         // item's length, once it knows it and the core prefers it (review F, F7).
         if let item = player.value.currentItem {
-            let playing = VideoDuration.playing(asset: assetLength, item: item.duration.seconds)
-            if playing != length { length = playing }
+            let itemLength = VideoDuration.playing(asset: assetLength, item: item.duration.seconds)
+            if itemLength != length { length = itemLength }
         }
         // A looping video lets the iPhone lock after its first play (review F, F8).
         let keepsOn = start.keepsScreenOn(loopsDone: looper?.loopCount ?? 0)
         if player.value.preventsDisplaySleepDuringVideoPlayback != keepsOn {
             player.value.preventsDisplaySleepDuringVideoPlayback = keepsOn
         }
-        if !scrubbing { time = seconds.isFinite ? max(seconds, 0) : 0 }
+        // The finger moves the thumb, or the video is on its way to where it lifted.
+        guard !scrubbing, !settling else { return }
+        time = seconds.isFinite ? max(seconds, 0) : 0
         let playing = player.value.timeControlStatus != .paused
-        if !scrubbing, playing != isPlaying { isPlaying = playing }
+        if playing != isPlaying { isPlaying = playing }
     }
 
     private func seek(to seconds: Double, then plays: Bool? = nil) {
@@ -225,10 +237,11 @@ final class ViewerVideo {
 
     private func seekEnded(then plays: Bool?) {
         if let plays {
+            settling = false
             if plays { play() }
             return
         }
-        if let next = seek.finished() { seek(to: next) }
+        if let next = chase.finished() { seek(to: next) }
     }
 
     /// What AVFoundation calls with the time, on the main queue (`queue: .main`): handed to the
@@ -266,8 +279,9 @@ final class ViewerVideo {
         time = 0
         length = nil
         assetLength = nil
-        seek = ChaseSeek()
+        chase = ChaseSeek()
         scrubbing = false
+        settling = false
         playsAfterScrub = false
     }
 }

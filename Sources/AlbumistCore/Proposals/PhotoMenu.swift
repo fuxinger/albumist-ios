@@ -113,18 +113,40 @@ public struct PhotoMenu: Equatable, Sendable {
     /// proportions, as large as it is sharp (`sharpShare`), at most `previewBounds` (review C of
     /// design wave 2, M2: lifted at once from what the cell shows, never a placeholder or a
     /// blurry enlargement). Never smaller than its cell (`cellSide` points on its short side),
-    /// which shows the image that large already; a square of the cell when the image is not
-    /// known.
-    public static func liftSize(imageWidth: Double, imageHeight: Double, scale: Double, cellSide: Double) -> PreviewSize {
-        guard imageWidth > 0, imageHeight > 0, scale > 0 else { return PreviewSize(width: cellSide, height: cellSide) }
+    /// which shows the image that large already, nor than `minimumSide` (a grid's small cells,
+    /// `liftMinimum`); a square of that size when the image is not known.
+    public static func liftSize(imageWidth: Double, imageHeight: Double, scale: Double, cellSide: Double,
+                                minimumSide: Double = 0) -> PreviewSize {
+        let smallest = max(cellSide, minimumSide)
+        guard imageWidth > 0, imageHeight > 0, scale > 0 else { return PreviewSize(width: smallest, height: smallest) }
         let ratio = min(max(imageWidth / imageHeight, previewAspectRange.lowerBound), previewAspectRange.upperBound)
         let pixelsPerPoint = scale * sharpShare
         // As high as the image is sharp, on the side that decides in these proportions.
         var height = min(imageHeight / pixelsPerPoint, imageWidth / pixelsPerPoint / ratio)
         // At least as large as its cell shows it (filled: its short side is the cell's side).
         let shortSide = min(height * ratio, height)
-        if shortSide < cellSide { height *= cellSide / shortSide }
+        if shortSide < smallest { height *= smallest / shortSide }
         height = min(height, previewBounds.height, previewBounds.width / ratio)
         return PreviewSize(width: height * ratio, height: height)
+    }
+
+    /// The smallest a grid's photo is lifted on its short side (review L9 of design wave 3): as
+    /// large as at three in a row, the grids' size before they zoomed and the menu's lift then,
+    /// never under 110 pt (the grids' photos before), also at five and seven in a row, where the
+    /// cell is much smaller.
+    public static func liftMinimum(gridWidth: Double) -> Double {
+        max(110, PhotoGridZoom.side(width: gridWidth, columns: PhotoGridZoom.standard))
+    }
+
+    /// Of the images kept in memory of a photo (`width` × `height` pixels each), the one to lift:
+    /// the one with the most pixels, the sharpest at any size; on a tie the first. Nil when none
+    /// is kept: the lift asks Photos for nothing of its own.
+    public static func sharpest(_ images: [(width: Double, height: Double)]) -> Int? {
+        var best: (index: Int, pixels: Double)?
+        for (index, image) in images.enumerated() {
+            let pixels = image.width * image.height
+            if best == nil || pixels > best!.pixels { best = (index, pixels) }
+        }
+        return best?.index
     }
 }

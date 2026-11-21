@@ -395,7 +395,8 @@ struct LongPressSourceTests {
         // lifts the image the photo asked for, at the side it is shown at (three, five or seven
         // in a row), never at a second side.
         let shared = try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.photoGrid)
-        #expect(shared.contains(".photoMenu(id, place: place, side: side, selecting: selecting, available: available)"), "\(shared)")
+        #expect(shared.contains(".photoMenu(id, place: place, side: side, gridWidth: width, selecting: selecting, available: available)"),
+                "\(shared)")
         #expect(shared.contains("AssetThumbnail(id: id, side: side)"), "\(shared)")
         let gridCode = try Self.code(Self.photoGrid)
         #expect(gridCode.components(separatedBy: "AssetThumbnail(").count - 1 == 1, "a second thumbnail in the grid")
@@ -440,7 +441,8 @@ struct LongPressSourceTests {
         // Without one (the grid selects, the photo cannot open), none of them at all:
         // `aPhotoWithoutAMenuHasNoContextMenuAtAll` (review C2 of design wave 2, N1).
         let squeezedPress = Self.squeezed(press)
-        #expect(squeezedPress.contains("ifoffered{content.contextMenu{items(forVoiceOver:false)}preview:{PhotoPreview(id:id,side:side)}"
+        #expect(squeezedPress.contains("ifoffered{content.contextMenu{items(forVoiceOver:false)}"
+                                       + "preview:{PhotoPreview(id:id,side:side,gridWidth:gridWidth)}"
                                        + ".accessibilityActions{items(forVoiceOver:true)}}"), "\(squeezedPress)")
         let offered = Self.squeezed(try Self.body(["private struct PhotoLongPress", "private var offered: Bool"], in: Self.photoMenu))
         #expect(offered == "{PhotoMenu.isOffered(selecting:selecting,available:available)}", "\(offered)")
@@ -454,7 +456,21 @@ struct LongPressSourceTests {
         #expect(!(try Self.body(["private struct PhotoLongPress"], in: Self.photoMenu)).contains("factsByID"),
                 "every cell tied to the facts")
         let lifted = try Self.body(["struct PhotoPreview"], in: Self.photoMenu)
-        #expect(lifted.contains("ThumbnailCache.shared.cachedThumbnail(for: id, side: side)"), "the image the cell shows")
+        // The sharpest image kept in memory: the cell's, one of a zooming grid's other sizes, or
+        // the one a grid showed last; at least as large as at three in a row (review L9).
+        let sharpest = Self.squeezed(try Self.body(["struct PhotoPreview", "private var sharpestInMemory"], in: Self.photoMenu))
+        #expect(sharpest.contains("varsides=[side]ifletgridWidth{sides+=PhotoGridZoom.sides(width:Double(gridWidth)).map{CGFloat($0)}}"),
+                "\(sharpest)")
+        #expect(sharpest.contains("varimages=sides.compactMap{cache.cachedThumbnail(for:id,side:$0)}"
+                                  + "ifletlast=cache.thumbnailInMemory(for:id){images.append(last)}"), "\(sharpest)")
+        #expect(sharpest.contains("returnPhotoMenu.sharpest(pixels).map{images[$0]}"), "\(sharpest)")
+        #expect(Self.squeezed(lifted).contains("letminimum=gridWidth.map{CGFloat(PhotoMenu.liftMinimum(gridWidth:Double($0)))}??0"),
+                "the minimum of a zooming grid: \(lifted)")
+        #expect(Self.squeezed(lifted).contains("cellSide:Double(side),minimumSide:Double(minimum))"), "\(lifted)")
+        #expect(Self.squeezed(lifted).contains(".frame(width:max(side,minimum),height:max(side,minimum))"), "\(lifted)")
+        for request in ["image(for:", "requestImage(", "PHImageManager", "largeImage("] {
+            #expect(!lifted.contains(request), "the lift asks Photos itself: \(request)")
+        }
         #expect(lifted.contains("PhotoMenu.liftSize(imageWidth:"))
         #expect(lifted.contains("@Environment(\\.displayScale)"))
         #expect(lifted.contains("AssetThumbnail(id: id, side: side)"), "gone from memory: as large as its cell, asked for again")

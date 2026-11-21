@@ -186,8 +186,9 @@ struct PhotoGrid: View {
                 Button("Verkleinern") { step(zoomingIn: false, on: id, columns: columns) }
             }
         }
-        // The long press (DS-06a): the photo larger, and what the page offers for it.
-        .photoMenu(id, place: place, side: side, selecting: selecting, available: available) { item in
+        // The long press (DS-06a): the photo larger (at least as at three in a row, review L9),
+        // and what the page offers for it.
+        .photoMenu(id, place: place, side: side, gridWidth: width, selecting: selecting, available: available) { item in
             perform(item, id)
         }
         // Where it is, for the fingers of the gestures. Away (scrolled off, or the page left for

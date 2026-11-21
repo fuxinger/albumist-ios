@@ -470,4 +470,40 @@ struct PhotoMenuTests {
         #expect(Self.close(tower.aspectRatio, 0.25))
         #expect(Self.close(tower.height, 426.67))
     }
+
+    /// At five and seven in a row a grid's cell is small (52 pt on a 375-pt iPhone): its photo is
+    /// still lifted at least as large as at three in a row, the grids' size before they zoomed and
+    /// the menu's lift then, never under 110 pt (review L9 of design wave 3); as large as it is
+    /// sharp from a larger image kept of it, as at three in a row.
+    @Test func aSmallCellsPhotoIsLiftedAsLargeAsAtThreeInARow() {
+        let width = 375.0
+        let three = PhotoGridZoom.side(width: width, columns: 3)
+        let seven = PhotoGridZoom.side(width: width, columns: 7)
+        #expect(PhotoMenu.liftMinimum(gridWidth: width) == three)
+        #expect(PhotoMenu.liftMinimum(gridWidth: 300) == 110, "never under 110 pt")
+        #expect(PhotoGridZoom.sides(width: width) == [3, 5, 7].map { PhotoGridZoom.side(width: width, columns: $0) })
+        // Only the cell's own thumbnail at seven in a row (156 px on a 3x screen): as large as at three.
+        let small = PhotoMenu.liftSize(imageWidth: 156, imageHeight: 156, scale: 3, cellSide: seven, minimumSide: three)
+        #expect(Self.close(small.width, three) && Self.close(small.height, three))
+        let across = PhotoMenu.liftSize(imageWidth: 208, imageHeight: 156, scale: 3, cellSide: seven, minimumSide: three)
+        #expect(Self.close(across.height, three) && Self.close(across.aspectRatio, 4.0 / 3.0))
+        // The three-in-a-row thumbnail kept: lifted as at three in a row.
+        let kept = PhotoMenu.liftSize(imageWidth: 440, imageHeight: 330, scale: 3, cellSide: seven, minimumSide: three)
+        #expect(kept == PhotoMenu.liftSize(imageWidth: 440, imageHeight: 330, scale: 3, cellSide: three))
+        // No image in memory: a square as large as at three in a row.
+        let none = PhotoMenu.liftSize(imageWidth: 0, imageHeight: 0, scale: 3, cellSide: seven, minimumSide: three)
+        #expect(Self.close(none.width, three) && Self.close(none.height, three))
+        // A minimum below the cell changes nothing.
+        #expect(PhotoMenu.liftSize(imageWidth: 120, imageHeight: 90, scale: 3, cellSide: 110, minimumSide: 50)
+                == PhotoMenu.liftSize(imageWidth: 120, imageHeight: 90, scale: 3, cellSide: 110))
+    }
+
+    /// Of the images kept in memory of a photo (at the grid's sizes, and the one a grid showed
+    /// last) the one with the most pixels is lifted, the sharpest at any size; on a tie the first
+    /// (the cell's own). Nothing kept: none, and nothing is asked of Photos for the lift.
+    @Test func theSharpestImageKeptIsLifted() {
+        #expect(PhotoMenu.sharpest([(width: 156, height: 156), (width: 440, height: 330), (width: 260, height: 260)]) == 1)
+        #expect(PhotoMenu.sharpest([(width: 156, height: 156), (width: 156, height: 156)]) == 0)
+        #expect(PhotoMenu.sharpest([]) == nil)
+    }
 }

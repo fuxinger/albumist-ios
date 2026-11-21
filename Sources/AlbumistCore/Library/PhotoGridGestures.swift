@@ -442,6 +442,12 @@ public enum PhotoGridZoom {
         return max(0, (width - spacing * Double(columns - 1)) / Double(columns))
     }
 
+    /// The sides of a grid `width` points wide at each of its sizes (three, five and seven in a
+    /// row): the sides its thumbnails are asked for, where a photo's images may be kept.
+    public static func sides(width: Double) -> [Double] {
+        columns.map { side(width: width, columns: $0) }
+    }
+
     /// One pinch: a step each time the fingers spread (fewer photos) or pinch (more) by
     /// `stepScale` since the last step. Past the last step the furthest scale counts, so turning
     /// back needs a full step again and the grid never flickers between two steps.

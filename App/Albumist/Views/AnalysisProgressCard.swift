@@ -51,8 +51,9 @@ struct AnalysisProgressCard: View {
                     .padding(.vertical, Theme.Spacing.m)
             }
         }
-        // B2: said when the step changes, on Pause, waiting and the end; quietly (low priority,
-        // so it does not cut into what VoiceOver is reading), and only while on screen.
+        // B2: said when the step changes, on Pause and waiting; quietly (low priority, so it
+        // does not cut into what VoiceOver is reading), and only while on screen. The end is
+        // said by the finished card, once per run (`FinishAnnouncementStore`).
         .onChange(of: announcement) { _, text in
             guard let text, scenePhase == .active else { return }
             var spoken = AttributedString(text)
@@ -90,12 +91,15 @@ struct AnalysisProgressCard: View {
         }
     }
 
-    /// What VoiceOver announces when it changes (nil: nothing to say).
+    /// What VoiceOver announces when it changes (nil: nothing to say). Not "Analyse fertig": this
+    /// card is made anew between the end of a run and "fertig", so the change was rarely heard;
+    /// the finished card says it once per run (`FinishAnnouncementStore`).
     private var announcement: String? {
         switch state {
         case .running(let p, _, _, let catchingUp) where catchingUp == nil: p.map { $0.step.labelText }
         case .running: nil
         case .quickCheck: nil
+        case .finished: nil
         default: title
         }
     }
@@ -615,8 +619,39 @@ struct AnalysisFinishedView: View {
     }
 
     private func play() {
-        guard model.claimFinishMoment(), !reduceMotion else { return }
+        guard model.claimFinishMoment() else { return }
+        // Heard once per finished run, also with Reduce Motion (design wave 3, H14).
+        FinishAnnouncementStore.shared.cardSeen(active: model.isOnScreen)
+        guard !reduceMotion else { return }
         bounce += 1
+    }
+}
+
+/// "Analyse fertig" for VoiceOver, once per finished run (design wave 3, H14; the rule is
+/// `FinishAnnouncement`). One per app, outside the card, which is made anew between the end of a
+/// run and "Analyse fertig": the model tells it how each run ended (`AppModel`, with
+/// `FinishMoment`), the finished card when it is first seen (`AnalysisFinishedView.play`).
+@MainActor
+final class FinishAnnouncementStore {
+    static let shared = FinishAnnouncementStore()
+    private var rule = FinishAnnouncement()
+
+    private init() {}
+
+    /// The end of a run in the app, decided before it waits for the overview.
+    func runEnded(finished: Bool, celebrates: Bool, inBackground: Bool) {
+        rule.runEnded(finished: finished, celebrates: celebrates, inBackground: inBackground)
+    }
+
+    /// The finished card is seen for the first time for its run (its check mark is claimed):
+    /// "Analyse fertig", quietly (low priority, as the card's other announcements), unless the
+    /// first 100 % on the card says it itself ("Analyse fertig: 100 %", DS-08).
+    func cardSeen(active: Bool) {
+        guard rule.cardSeen(voiceOver: UIAccessibility.isVoiceOverRunning, active: active,
+                            saidByFirstMoment: FirstAnalysisMomentStore.shared.moment.shows(at: Date())) else { return }
+        var spoken = AttributedString(String(localized: "Analyse fertig"))
+        spoken.accessibilitySpeechAnnouncementPriority = .low
+        AccessibilityNotification.Announcement(spoken).post()
     }
 }
 

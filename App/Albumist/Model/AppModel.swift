@@ -1299,6 +1299,7 @@ final class AppModel {
             // "Neu prüfen") no longer drops "Analyse fertig" (`FinishMoment`).
             finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)
             firstAnalysisRunEnded(finished: end.isFinished, celebrates: celebrate) // Design W3 H13: the first 100 % (DS-08), decided before the wait below
+            FinishAnnouncementStore.shared.runEnded(finished: end.isFinished, celebrates: celebrate, inBackground: UIApplication.shared.applicationState == .background) // Design W3 H14: "Analyse fertig" for VoiceOver, once per run
             // The trips it made are on screen only once its end has refreshed the overview.
             tripChangeLedger.runEnded(generation, madeSuggestions: finished.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true)
             analysis.stoppedAt = analysis.position

@@ -298,3 +298,52 @@ class MacSideTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PerfReportTests(unittest.TestCase):
+    """XCTMetric values of PerformanceUITests in the job summary (report only)."""
+    LOG = "\n".join([
+        "Test Case '-[AlbumistUITests.PerformanceUITests test1_LaunchTime]' measured [Duration (AppLaunch), s] "
+        "average: 1.842, relative standard deviation: 6.120%, values: [1.9, 1.8], performanceMetricID:x",
+        "Test case 'PerformanceUITests.test2_LibraryScroll()' measured [Duration (ScrollDeceleration), s] average: 0.610",
+        "Test Case '-[AlbumistUITests.PerformanceUITests test1_LaunchTime]' measured [Duration (AppLaunch), s] "
+        "average: 1.500, relative standard deviation: 2.000%, values: [1.5]",
+        "UI_PERF analysis 287.4 s",
+        "UI_PERFORMANCE something else",
+    ])
+
+    def test_values_from_xctest_and_own_lines_the_last_pass_wins(self):
+        values = {(v["test"], v["metric"]): v for v in ui_tests.perf_values(self.LOG)}
+        self.assertEqual(set(values), {("test1_LaunchTime", "Duration (AppLaunch), s"),
+                                       ("test2_LibraryScroll", "Duration (ScrollDeceleration), s"),
+                                       ("own", "analysis (s)")})
+        self.assertEqual(values[("test1_LaunchTime", "Duration (AppLaunch), s")]["value"], 1.5)
+        self.assertIsNone(values[("test2_LibraryScroll", "Duration (ScrollDeceleration), s")]["rsd"])
+        self.assertEqual(values[("own", "analysis (s)")]["value"], 287.4)
+
+    def test_summary_table_and_never_red(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "summary.md")
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                ui_tests.perf_report("flow-full", self.LOG, summary=path)
+            table = open(path, encoding="utf-8").read()
+        self.assertIn("| test1_LaunchTime | Duration (AppLaunch), s | 1.5 | 2.0 % |", table)
+        self.assertIn("| own | analysis (s) | 287.4 | one run |", table)
+        self.assertIn("UI_PERF_VALUE flow-full own analysis (s): 287.4", out.getvalue())
+        self.assertNotIn("::error", out.getvalue())
+
+    def test_no_values_no_table(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "summary.md")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(ui_tests.perf_report("contrast", "Test Case 'x' passed", summary=path), [])
+            self.assertFalse(os.path.exists(path))
+
+    def test_the_performance_tests_never_set_a_baseline_and_launch_through_the_helper(self):
+        swift = open(os.path.join(ROOT, "App", "AlbumistUITests", "PerformanceUITests.swift"), encoding="utf-8").read()
+        self.assertNotIn("baseline", swift.split("final class", 1)[1].lower())
+        self.assertIn("UITestAppEnd.launch(app)", swift)
+        self.assertIn("ALBUMIST_UI_QUICK", swift)
+        groups = json.load(open(os.path.join(ROOT, ".github", "ui-groups.json"), encoding="utf-8"))
+        full = next(g for g in groups["groups"] if g["group"] == "flow-full")
+        self.assertIn("PerformanceUITests", full["only"].split())

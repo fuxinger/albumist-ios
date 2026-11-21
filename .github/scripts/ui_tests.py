@@ -119,7 +119,7 @@ BUNDLE_ID = "app.albumist.ios"
 
 # Lines of the xcodebuild log that go into the job log. PREVIEW_JPEG lines carry the
 # screenshots (the gallery is built from them), A11Y_ lines the accessibility findings.
-REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|UI_HOST|UI_STRESS|UI_FLAKY|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |"
+REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_PERF|UI_FACT|UI_HOST|UI_STRESS|UI_FLAKY|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |"
                     r"Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error")
 REPORT_LIMIT = 15000
 
@@ -1435,6 +1435,10 @@ def run_group(args) -> int:
         failed, infra_only = True, False
     if quality_gates(args.name, system_log_path, "\n".join(CONSOLES), gate) and not infra_only:
         failed = True
+    try:
+        perf_report(args.name, "\n".join(p[4] for p in passes))
+    except Exception as error:  # noqa: BLE001 - a report must not hide the test result
+        print(f"::warning title=UI {args.name}::speed report failed: {error!r}", flush=True)
     if args.video:
         video_to_log(args.video)
     if args.a11y_summary:
@@ -1738,6 +1742,48 @@ def swiftui_warnings(path: str) -> int:
         print("::error::SwiftUI navigation warning in the UI run (a link leads nowhere)")
         return 1
     return 0
+
+
+# "Test Case '-[AlbumistUITests.PerformanceUITests test1_LaunchTime]' measured [Duration (AppLaunch), s]
+# average: 1.234, relative standard deviation: 3.210%, values: [...]" (newer xcodebuild: "Test case
+# 'PerformanceUITests.test1_LaunchTime()' measured ...").
+PERF_MEASURED = re.compile(r"Test [Cc]ase '([^']+)' measured \[([^\]]+)\] average: ([\d.]+)"
+                           r"(?:, relative standard deviation: ([\d.]+)%)?")
+PERF_OWN = re.compile(r"UI_PERF (\w+) ([\d.]+) (\w+)")
+
+
+def perf_values(text: str) -> list[dict]:
+    """The speed measurements of a group's log (PerformanceUITests): XCTest's "measured [...]
+    average" lines and the tests' own UI_PERF lines. A value measured in two passes counts
+    from the last one."""
+    found: dict[tuple[str, str], dict] = {}
+    for m in PERF_MEASURED.finditer(text):
+        test = re.findall(r"test\w+", m.group(1))
+        test = test[-1] if test else m.group(1)
+        found[(test, m.group(2))] = {"test": test, "metric": m.group(2), "value": float(m.group(3)),
+                                     "rsd": float(m.group(4)) if m.group(4) else None}
+    for m in PERF_OWN.finditer(text):
+        key = ("own", m.group(1))
+        found[key] = {"test": "own", "metric": f"{m.group(1)} ({m.group(3)})", "value": float(m.group(2)), "rsd": None}
+    return list(found.values())
+
+
+def perf_report(name: str, text: str, summary: str | None = None) -> list[dict]:
+    """UI_PERF_VALUE lines and a table in the job summary. Report only (owner 16.11.: generous
+    limits or none): nothing here makes the run red."""
+    values = perf_values(text)
+    for v in values:
+        rsd = f", spread {v['rsd']:.1f} %" if v["rsd"] is not None else ""
+        print(f"UI_PERF_VALUE {name} {v['test']} {v['metric']}: {v['value']:g}{rsd}", flush=True)
+    path = summary if summary is not None else os.environ.get("GITHUB_STEP_SUMMARY")
+    if path and values:
+        with open(path, "a", encoding="utf-8") as out:
+            out.write(f"\n**Speed ({name}, report only; CI simulator, for trends between runs):**\n\n"
+                      "| Test | Metric | Average | Spread |\n|---|---|---|---|\n")
+            for v in values:
+                spread = f"{v['rsd']:.1f} %" if v["rsd"] is not None else "one run"
+                out.write(f"| {v['test']} | {v['metric'].replace('|', '¦')} | {v['value']:g} | {spread} |\n")
+    return values
 
 
 def quality_gates(name: str, system_log_path: str, console: str, gate: dict) -> bool:

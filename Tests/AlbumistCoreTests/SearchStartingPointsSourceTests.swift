@@ -59,6 +59,20 @@ struct SearchStartingPointsSourceTests {
         #expect(!model.contains("@ObservationIgnoredprivatevarfactsVersion"))
     }
 
+    /// The revision counts every new value of the facts (review M6): the tiles, the covers of the
+    /// history, the receipt and the preview, and the trip's timeline are made again only when it
+    /// moves, so without the count in the facts' `didSet` none of them would be made again. It
+    /// only grows: set back, it could come to a value a screen keyed on it had already seen.
+    @Test func theFactsRevisionCountsEveryNewValueOfTheFacts() throws {
+        let model = AppSource.code(try AppSource.read("App/Albumist/Model/AppModel.swift"))
+        let facts = try #require(AppSource.body(of: "var facts: [AssetFacts] = []", in: model))
+        let didSet = try #require(AppSource.body(of: "didSet", in: facts))
+        #expect(Self.squeezed(didSet).contains("factsVersion&+=1"), "a new value of the facts leaves the revision as it was")
+        // Assignments, not comparisons: only its start value.
+        let sets = Self.squeezed(model).components(separatedBy: "factsVersion=").dropFirst().filter { !$0.hasPrefix("=") }
+        #expect(sets.count == 1 && sets.first?.hasPrefix("0") == true, "the revision is set elsewhere than at its start")
+    }
+
     /// The work is one search per starting point on the search's own index, off the main thread.
     @Test func theModelMakesThemOffTheMainThreadFromTheSearchIndex() throws {
         let model = Self.squeezed(try Self.body(["func searchStartingPoints()"], in: Self.model))

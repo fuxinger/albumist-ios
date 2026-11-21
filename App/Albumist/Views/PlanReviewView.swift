@@ -37,8 +37,12 @@ struct PlanReviewView: View {
     /// Albums of the plan that is running, for the "photos fly into albums" show.
     @State private var show: [SortingShow.Album]?
     /// The result's moment is still to come (`ResultCard.onMoment`): the success tap waits for
-    /// the main cover to lie down on the stack (draft E3), as it waits for the show's end.
+    /// the main cover to lie down on the stack (draft E3), as it waits for the show's end, but
+    /// never longer than `ResultCoverFan.successDeadline` once the result shows (`momentDue`).
     @State private var momentPending = false
+    /// The covers of the result's stack loading while the plan runs (`beginMoment`); cancelled as
+    /// the result shows, which takes only what is kept by then, or when the run has no result.
+    @State private var prefetch: Task<Void, Never>?
     /// What the result's stack of covers knows of the suggestions the plan came from, taken as
     /// it starts (`AppModel.resultCoverSources`).
     @State private var coverSources: ResultCoverSources?
@@ -143,6 +147,7 @@ struct PlanReviewView: View {
         .navigationBarBackButtonHidden(model.execution.isRunning)
         .navigationBarTitleDisplayMode(.inline)
         .modifier(ExecutionHaptics(execution: model.execution, holdSuccess: show != nil || momentPending))
+        .task(id: momentDue) { await holdMomentAtMost() }
         .task {
             await model.refreshAccess()
             guard !didLoad else { return }
@@ -443,10 +448,12 @@ struct PlanReviewView: View {
             Task {
                 // Once it ran, the preview never offers it again (the result shows, and a result
                 // cleared later leaves "Nichts zu tun"), whatever runs on other tabs meanwhile.
+                // A plan that did not start, or stopped with an error, has no result: the moment
+                // ends, and with it the waiting success tap and the loading of covers.
                 if await model.execute(plan) { self.plan = nil } else {
                     freshness.notTaken()
-                    momentPending = false
                 }
+                if model.execution.finished?.id != plan.id { endMoment() }
             }
         } label: {
             applyTitle(plan, facts.summary)
@@ -468,14 +475,40 @@ struct PlanReviewView: View {
         momentPending = true
         let stack = model.resultCoverStack(for: plan, taken: sources, expected: true)
         let scale = displayScale
-        Task { await ResultMomentLoader.prefetch(stack, scale: scale) }
+        prefetch?.cancel()
+        prefetch = Task { await ResultMomentLoader.prefetch(stack, scale: scale) }
+    }
+
+    /// The moment is over, or there is none: the success tap may come, and no cover loads any more.
+    private func endMoment() {
+        momentPending = false
+        prefetch?.cancel()
+        prefetch = nil
+    }
+
+    /// The result whose moment is still to come is on screen (after the show, once the run ended).
+    private var momentDue: AlbumistID? {
+        guard momentPending, show == nil, !model.execution.isRunning else { return nil }
+        return model.execution.finished?.id
+    }
+
+    /// The result shows: the covers stop loading (its stack takes what is kept by now, it never
+    /// waits for Photos), and the success tap comes after `ResultCoverFan.successDeadline` at the
+    /// latest, whether or not the main cover lay down (review E of design wave 2, finding 1).
+    private func holdMomentAtMost() async {
+        guard momentDue != nil else { return }
+        prefetch?.cancel()
+        prefetch = nil
+        try? await Task.sleep(for: .seconds(ResultCoverFan.successDeadline))
+        guard !Task.isCancelled else { return }
+        endMoment()
     }
 
     /// The result of the plan that ran, with its moment (draft E3): the success tap comes as
     /// the main cover lies down, or as the symbol shows.
     private func resultCard(_ result: ChangePlan) -> some View {
         ResultCard(plan: result, sources: coverSources, screenPadding: Self.contentPadding) {
-            momentPending = false
+            endMoment()
         }
     }
 
@@ -620,7 +653,8 @@ struct ExecutionProgressBar: View {
 private struct ExecutionHaptics: ViewModifier {
     var execution: AppModel.ExecutionState
     /// While the sorting show plays, the success tap waits for its end; then for the result's
-    /// moment (the main cover lies down on the stack, draft E3).
+    /// moment (the main cover lies down on the stack, draft E3), at most
+    /// `ResultCoverFan.successDeadline` (`PlanReviewView.holdMomentAtMost`).
     var holdSuccess: Bool
 
     func body(content: Content) -> some View {
@@ -641,9 +675,10 @@ private struct ExecutionHaptics: ViewModifier {
 /// where the new albums are, a way to Photos, and "Rückgängig machen" with what it does. A
 /// removal says "1 Album entfernt", never "0 Fotos einsortiert" or where new albums are.
 ///
-/// On the screen's ground, as in the draft (no card around it). The stack gives way to the
-/// count and "Fotos-App öffnen", which stay on screen: it takes only the height they leave
-/// (`stackRoom`), down to its smallest size.
+/// On the screen's ground, as in the draft (no card around it). The stack gives way to everything
+/// below it (the count, "Fotos-App öffnen", "Alle Änderungen ansehen", "Rückgängig machen"),
+/// which stays on screen: it takes only the height they leave (`stackRoom`), down to its smallest
+/// size; below that the screen scrolls.
 struct ResultCard: View {
     @Environment(AppModel.self) private var model
     @Environment(Navigator.self) private var navigator: Navigator?
@@ -667,18 +702,19 @@ struct ResultCard: View {
     /// The height the screen shows of the scroll view the result stands in: between the
     /// navigation bar and the tab bar (`containerRelativeFrame`). Nil until measured.
     @State private var room: CGFloat?
-    /// The height of what stays in view below the stack: the count, the way to the new albums
-    /// and "Fotos-App öffnen".
-    @State private var essentialsHeight: CGFloat = 0
+    /// The height of everything below the stack: the count, the way to the new albums,
+    /// "Fotos-App öffnen", "Alle Änderungen ansehen" and "Rückgängig machen" with its note
+    /// (review E of design wave 2, finding 8).
+    @State private var belowHeight: CGFloat = 0
     @Environment(\.openURL) private var openURL
 
     private static let spacing = Theme.Spacing.l
 
-    /// The height the stack may take: what the screen shows, less its padding above and below,
-    /// the count and "Fotos-App öffnen". Nil until measured.
+    /// The height the stack may take: what the screen shows, less its padding above and below
+    /// and everything below the stack. Nil until measured.
     private var stackRoom: CGFloat? {
         guard let room else { return nil }
-        return room - 2 * screenPadding - essentialsHeight - Self.spacing
+        return room - 2 * screenPadding - belowHeight - Self.spacing
     }
 
     var body: some View {
@@ -696,9 +732,9 @@ struct ResultCard: View {
             // The buttons close together below the way to Photos, as in the draft.
             VStack(spacing: Theme.Spacing.s) {
                 essentials(receipt, headline, way: way)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { essentialsHeight = $0 }
                 more(undoNote: undoNote)
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { belowHeight = $0 }
         }
         .frame(maxWidth: .infinity)
         // How high the screen is: the scroll view's visible height, without its bars.
@@ -724,13 +760,13 @@ struct ResultCard: View {
     // MARK: Parts
 
     /// The covers of the new albums lying down on their stack (draft E3), or the symbol as
-    /// before: a check, the arrow of an undo, or the mark of steps that did not happen.
+    /// before: a check, the arrow of an undo, or the mark of steps that did not happen. The
+    /// stack is worked out once per plan by the moment itself, never in this body.
     private func moment(_ headline: ResultHeadline, failed: Int) -> some View {
         let symbol = failed > 0 ? "exclamationmark.circle.fill"
             : headline.kind == .undone ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill"
         let tint = failed == 0 ? Theme.accent : Theme.tint(for: .documents)
-        let stack = model.resultCoverStack(for: plan, taken: sources)
-        return ResultCoverMoment(plan: plan, stack: stack, symbol: symbol, tint: tint, room: stackRoom, onSettled: onMoment)
+        return ResultCoverMoment(plan: plan, sources: sources, symbol: symbol, tint: tint, room: stackRoom, onSettled: onMoment)
     }
 
     /// What stays in view below the stack: the count with its line, what did not happen, where

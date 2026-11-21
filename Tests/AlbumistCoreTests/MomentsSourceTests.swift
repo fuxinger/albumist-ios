@@ -40,7 +40,9 @@ struct MomentsSourceTests {
     // MARK: The big moment (draft E3)
 
     /// The covers lie above the count on the screen's ground (no card around the result), the
-    /// count and "Fotos-App öffnen" below them; the stack takes only the height they leave.
+    /// count, "Fotos-App öffnen", "Alle Änderungen" and "Rückgängig machen" below them; the stack
+    /// takes only the height they leave (review E of design wave 2, finding 8). It is worked out
+    /// once per plan as the result shows and kept, never in the card's body (finding 7).
     @Test func theStackLiesAboveTheCount() throws {
         let file = try Self.code(Self.review)
         let card = try Self.body(["struct ResultCard"], in: file)
@@ -51,18 +53,29 @@ struct MomentsSourceTests {
         #expect(moment.lowerBound < essentials.lowerBound && essentials.lowerBound < more.lowerBound)
         #expect(!card.contains("Card {"), "the result still stands in a card")
         let stack = try Self.body(["struct ResultCard", "func moment("], in: file)
-        #expect(stack.contains("ResultCoverMoment(plan: plan, stack: stack"), "\(stack)")
-        #expect(stack.contains("model.resultCoverStack(for: plan, taken: sources)"), "\(stack)")
+        #expect(stack.contains("ResultCoverMoment(plan: plan, sources: sources"), "\(stack)")
         #expect(stack.contains("room: stackRoom") && stack.contains("onSettled: onMoment"), "\(stack)")
+        #expect(!card.contains("resultCoverStack("), "the card works the stack out in its body")
+        let covers = try Self.code(Self.stack)
+        let view = try Self.body(["struct ResultCoverMoment", "var body: some View"], in: covers)
+        #expect(view.contains(".onChange(of: plan.id, initial: true) { make() }"), "\(view)")
+        let make = try Self.body(["struct ResultCoverMoment", "func make()"], in: covers)
+        for part in ["guard madeFor != plan.id else { return }", "model.resultCoverStack(for: plan, taken: sources)",
+                     "ResultMomentLoader.kept(stack, scale: displayScale)", "madeFor = plan.id"] {
+            #expect(make.contains(part), "\(part): \(make)")
+        }
         let kept = try Self.body(["struct ResultCard", "func essentials("], in: file)
         #expect(kept.contains("ResultLead(headline: headline"), "\(kept)")
         #expect(kept.contains("photosButton"), "\(kept)")
         let photos = try Self.body(["struct ResultCard", "var photosButton: some View"], in: file)
         #expect(photos.contains("Button(\"Fotos-App öffnen\")") && photos.contains(".buttonStyle(PrimaryButtonStyle())"), "\(photos)")
-        // What stays in view is measured; the screen's height is the scroll view's.
-        #expect(body.contains(/essentialsHeight\s*=\s*\$0/), "\(body)")
+        // Everything below the stack is measured and stays in view; the screen's height is the
+        // scroll view's.
+        #expect(body.contains(/belowHeight\s*=\s*\$0/), "\(body)")
+        let below = try #require(body.range(of: "belowHeight"))
+        #expect(body[..<below.lowerBound].contains("more(undoNote"), "\"Alle Änderungen\" and \"Rückgängig machen\" are not measured")
         let room = try Self.body(["struct ResultCard", "var stackRoom: CGFloat?"], in: file)
-        #expect(room.contains("2 * screenPadding") && room.contains("essentialsHeight"), "\(room)")
+        #expect(room.contains("2 * screenPadding") && room.contains("belowHeight"), "\(room)")
         let screen = try Self.body(["struct ResultCard", "var screenHeight: some View"], in: file)
         #expect(screen.contains(/\.containerRelativeFrame\(\s*\.vertical\s*\)/), "\(screen)")
         // The screen hands the result the padding it puts around it, as it does to the show.
@@ -87,19 +100,24 @@ struct MomentsSourceTests {
         #expect(calm.contains("reduceMotion || UITestSupport.isRunning"), "\(calm)")
         let play = try Self.body(["struct ResultCoverMoment", "func play()"], in: file)
         let fades = try #require(AppSource.body(of: "if calm", in: play), "\(play)")
-        #expect(fades.contains("withAnimation(.easeOut") && !fades.contains("spring"), "\(fades)")
+        #expect(fades.contains("withAnimation(.easeOut(duration: ResultCoverFan.fadeIn))") && !fades.contains("spring"), "\(fades)")
+        // The core's times: the main cover lies within `ResultCoverFan.settleTime`.
+        #expect(play.contains("ResultCoverFan.layingStep") && play.contains("ResultCoverFan.lastFall"), "\(play)")
         #expect(file.contains("down: position < laid, calm: calm)"))
         let limit = try Self.body(["struct ResultCoverMoment", "var limit: Int"], in: file)
         #expect(limit.contains("typeSize.isAccessibilitySize ? ResultCoverStack.limitAtLargestText : ResultCoverStack.limit"))
-        let scale = try Self.body(["struct ResultCoverMoment", "var fanScale: CGFloat"], in: file)
+        let scale = try Self.body(["struct ResultCoverMoment", "func fanScale("], in: file)
         #expect(scale.contains("ResultCoverFan.scale(count:") && scale.contains("room"), "\(scale)")
+        // No room held for covers that may come: the fan is as high as what it shows (finding 9).
+        #expect(!file.contains("heldHeight") && !file.contains("expected"), "the stack still holds room while it loads")
         // No glow, no confetti: a white edge and a soft shadow.
         #expect(!file.contains("blur(") && !file.contains("confetti") && !file.contains(".glow"))
     }
 
     /// The covers come only from the device, through the cards' own loader (`CoverLoader`, which
     /// keeps only sharp ones), never from iCloud; the flying cover is the very image its card
-    /// keeps. No second image loader.
+    /// keeps. No second image loader. They load while the plan runs; the result takes them from
+    /// the covers' store and never waits for Photos (review E of design wave 2, finding 1).
     @Test func theCoversComeOnlyFromTheDevice() throws {
         for path in [Self.stack, Self.layer] {
             let file = try Self.code(path)
@@ -108,10 +126,22 @@ struct MomentsSourceTests {
             }
         }
         let stack = try Self.code(Self.stack)
-        let load = try Self.body(["enum ResultMomentLoader", "static func load("], in: stack)
+        let load = try Self.body(["enum ResultMomentLoader", "static func prefetch("], in: stack)
         #expect(load.contains("CoverLoader.Request(ids: card.candidates, pixels: pixels)"), "\(load)")
         #expect(load.contains("await CoverLoader.load(request)"), "\(load)")
-        #expect(load.contains("guard case .photo(let image, let focus) = loaded.shown else { continue }"), "\(load)")
+        #expect(load.contains("!Task.isCancelled"), "\(load)")
+        #expect(stack.contains("static func kept(_ stack: ResultCoverStack, scale: CGFloat) -> [ResultMomentCover] {"),
+                "the result's covers are not taken from the store at once")
+        let fromStore = try Self.body(["enum ResultMomentLoader", "static func kept("], in: stack)
+        #expect(fromStore.contains("ThumbnailCache.shared.cachedCover(for: photo, pixels: pixels)"), "\(fromStore)")
+        #expect(!fromStore.contains("await"), "\(fromStore)")
+        // The view itself never asks Photos: its only waits are the covers lying down.
+        let view = try Self.body(["struct ResultCoverMoment"], in: stack)
+        for asks in ["CoverLoader.load", "ResultMomentLoader.prefetch", "ResultMomentLoader.load"] {
+            #expect(!view.contains(asks), "the result waits for Photos: \(asks)")
+        }
+        let waits = view.components(separatedBy: "await ").dropFirst().map { String($0.prefix(10)) }
+        #expect(waits.allSatisfy { $0.hasPrefix("Task.sleep") || $0.hasPrefix("play()") }, "\(waits)")
         let layer = try Self.code(Self.layer)
         let kept = try Self.body(["final class QuickCreateMomentSources", "func keptCover("], in: layer)
         #expect(kept.contains("QuickCreateMoment.coverPixels(") && kept.contains("ThumbnailCache.shared.cachedCover("), "\(kept)")
@@ -148,23 +178,44 @@ struct MomentsSourceTests {
     }
 
     /// One success tap per run, as before: it waits for the show's end and then for the main
-    /// cover to lie down (or the symbol to show). The stack makes no haptic of its own.
+    /// cover to lie down (or the symbol to show), but never longer than
+    /// `ResultCoverFan.successDeadline` once the result shows; a run without a result lets it go
+    /// at once, and the covers loaded ahead stop loading then (review E of design wave 2,
+    /// findings 1, 11 and 15). The stack makes no haptic of its own.
     @Test func theSuccessTapWaitsForTheMoment() throws {
         let file = try Self.code(Self.review)
         #expect(Self.count(".sensoryFeedback(", in: file) == 2, "the result screen has haptics of its own")
         #expect(file.contains("ExecutionHaptics(execution: model.execution, holdSuccess: show != nil || momentPending)"))
         let begin = try Self.body(["struct PlanReviewView", "func beginMoment("], in: file)
         for part in ["momentPending = true", "model.resultCoverSources(for: plan)",
-                     "model.resultCoverStack(for: plan, taken: sources, expected: true)", "ResultMomentLoader.prefetch(stack"] {
+                     "model.resultCoverStack(for: plan, taken: sources, expected: true)", "prefetch?.cancel()",
+                     "prefetch = Task { await ResultMomentLoader.prefetch(stack, scale: scale) }"] {
             #expect(begin.contains(part), "\(part): \(begin)")
+        }
+        let end = try Self.body(["struct PlanReviewView", "func endMoment()"], in: file)
+        for part in ["momentPending = false", "prefetch?.cancel()", "prefetch = nil"] {
+            #expect(end.contains(part), "\(part): \(end)")
         }
         let button = try Self.body(["struct PlanReviewView", "func applyButton("], in: file)
         #expect(button.contains("beginMoment(plan)"), "\(button)")
-        // A plan that did not start lets the tap go.
+        // A plan that did not start, or stopped with an error, has no result: the tap goes.
         let notTaken = try #require(button.range(of: "freshness.notTaken()"))
-        #expect(button[notTaken.upperBound...].prefix(80).contains("momentPending = false"), "\(button)")
+        #expect(button[notTaken.upperBound...].prefix(120).contains("if model.execution.finished?.id != plan.id { endMoment() }"),
+                "\(button)")
         let result = try Self.body(["struct PlanReviewView", "func resultCard("], in: file)
-        #expect(result.contains("momentPending = false"), "\(result)")
+        #expect(result.contains("endMoment()"), "\(result)")
+        // A real deadline once the result shows, which also ends the loading ahead.
+        let body = try Self.body(["struct PlanReviewView", "var body: some View"], in: file)
+        #expect(body.contains(".task(id: momentDue) { await holdMomentAtMost() }"), "\(body)")
+        let due = try Self.body(["struct PlanReviewView", "var momentDue: AlbumistID?"], in: file)
+        for part in ["momentPending", "show == nil", "!model.execution.isRunning", "model.execution.finished?.id"] {
+            #expect(due.contains(part), "\(part): \(due)")
+        }
+        let hold = try Self.body(["struct PlanReviewView", "func holdMomentAtMost()"], in: file)
+        let cancel = try #require(hold.range(of: "prefetch?.cancel()"), "\(hold)")
+        let sleep = try #require(hold.range(of: "try? await Task.sleep(for: .seconds(ResultCoverFan.successDeadline))"), "\(hold)")
+        let ends = try #require(hold.range(of: "endMoment()", options: .backwards), "\(hold)")
+        #expect(cancel.lowerBound < sleep.lowerBound && sleep.upperBound <= ends.lowerBound, "\(hold)")
         let stack = try Self.code(Self.stack)
         #expect(!stack.contains("sensoryFeedback"), "the stack has a haptic of its own")
         let settle = try Self.body(["struct ResultCoverMoment", "func settle("], in: stack)

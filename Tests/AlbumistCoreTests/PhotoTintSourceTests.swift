@@ -100,8 +100,51 @@ struct PhotoTintSourceTests {
         #expect(request.contains("height: points.height * displayScale"), "\(request)")
         #expect(cover.contains("self.aspectRatio = max(aspectRatio, 0.1)"))
         let reader = try Self.body(["struct CoverTintReader", "func body(content: Content)"], in: file)
-        #expect(reader.contains("guard sharp, width >= 1 else { return }"), "\(reader)")
-        #expect(reader.contains("withAnimation(PhotoTintGround.arrival) { tint = found }"), "\(reader)")
+        #expect(reader.contains("Key(ids: CoverPhoto.candidates(ids), pixels: pixels, sharp: sharp)"), "\(reader)")
+        #expect(reader.contains("guard width >= 1 else { return }"), "\(reader)")
+        let follow = try Self.body(["struct CoverTintReader", "private func follow("], in: file)
+        #expect(follow.contains("PhotoTints.shared.known(for: key.ids, pixels: key.pixels)"), "\(follow)")
+    }
+
+    /// The page's colour follows the cover on screen (second review, K5): it goes when the cover
+    /// stops being a sharp photo or its preview becomes hidden (photos taken out with
+    /// "Auswählen", "Vorschau ausgeblendet"), and a colour worked out before is used only for the
+    /// cover kept at this size, the first of the candidates kept there, as `CoverPhoto` shows the
+    /// first sharp one, from the same candidates.
+    @Test func theColourFollowsTheCoverOnScreen() throws {
+        let file = try Self.code(Self.ground)
+        let reader = try Self.body(["struct CoverTintReader", "func body(content: Content)"], in: file)
+        #expect(reader.contains("guard key.sharp else {"), "\(reader)")
+        #expect(reader.contains("withAnimation(PhotoTintGround.arrival) { tint = nil }"), "\(reader)")
+        #expect(reader.contains("CoverPhoto.candidates(ids)"), "\(reader)")
+        #expect(!file.contains("ids.prefix(CoverLoader.attempts)"), "the reader tries other candidates than the cover")
+        let cover = try Self.code(Self.cover)
+        let candidates = try Self.body(["struct CoverPhoto", "private var candidates: [AssetID]"], in: cover)
+        #expect(candidates.contains("Self.candidates(ids)"), "\(candidates)")
+        let shared = try Self.body(["struct CoverPhoto", "static func candidates(_ ids: [AssetID])"], in: cover)
+        #expect(shared.contains("ids.lazy.filter { !$0.rawValue.isEmpty }.prefix(CoverLoader.attempts)"), "\(shared)")
+        // A remembered colour only for the cover kept at this size.
+        for name in ["func known(for ids: [AssetID], pixels: CGSize)", "func tint(for ids: [AssetID], pixels: CGSize)"] {
+            let lookUp = try Self.body(["final class PhotoTints", name], in: file)
+            let kept = try #require(lookUp.range(of: "ThumbnailCache.shared.cachedCover(for: id, pixels: pixels)"), "\(lookUp)")
+            let remembered = try #require(lookUp.range(of: "tints[id]"), "\(lookUp)")
+            #expect(kept.upperBound < remembered.lowerBound, "a remembered colour before the cover kept at this size: \(lookUp)")
+        }
+    }
+
+    /// A colour worked out before shows with its cover, without the slow fade: a page opened
+    /// again starts in its colour, not on grey that turns into it. Only a colour worked out now
+    /// fades in (second review, K8).
+    @Test func aKnownColourShowsAtOnce() throws {
+        let file = try Self.code(Self.ground)
+        let follow = try Self.body(["struct CoverTintReader", "private func follow("], in: file)
+        let known = try #require(follow.range(of: "case .tint(let known):"), "\(follow)")
+        let notYet = try #require(follow.range(of: "case .notYet:"), "\(follow)")
+        #expect(follow[known.upperBound..<notYet.lowerBound].contains("if tint == nil { tint = known }"), "\(follow)")
+        let worked = follow[notYet.upperBound...]
+        let asked = try #require(worked.range(of: "await PhotoTints.shared.tint(for: key.ids, pixels: key.pixels)"), "\(follow)")
+        let faded = try #require(worked.range(of: "withAnimation(PhotoTintGround.arrival) { tint = found }"), "\(follow)")
+        #expect(asked.upperBound < faded.lowerBound, "\(follow)")
     }
 
     /// The one new place (DS-11): the ground of a suggestion's page, under its cover, header,

@@ -324,8 +324,9 @@ struct HistoryView: View {
         }
         .navigationTitle("Verlauf und Rückgängig")
         .navigationBarTitleDisplayMode(.inline)
-        // The covers of the changes listed, again when the photos' dates or ranks change: a photo
-        // the analysis finds to be a sensitive document leaves its cover at once.
+        // The covers of the changes listed, again when the facts change (the photos' dates and
+        // ranks with them): a photo the analysis finds to be a sensitive document leaves its
+        // cover at once.
         .task(id: model.changeCoverInputs(model.history, interrupted: model.interruptedPlan)) {
             let made = await model.historyCovers(model.history, interrupted: model.interruptedPlan)
             guard !Task.isCancelled else { return }
@@ -349,7 +350,7 @@ struct HistoryRow: View {
                 ChangeCover(mosaic: cover, symbol: PlanReceipt.Kind(plan).coverSymbol)
                 VStack(alignment: .leading, spacing: 2) {
                     Text((plan.confirmedAt ?? plan.createdAt).formatted(date: .abbreviated, time: .shortened))
-                    Text(Counted.historyLine(plan.appliedSummary))
+                    Text(Counted.historyLine(plan))
                         .font(.footnote).foregroundStyle(.noteText)
                     // Below the words, no longer beside them: the cover takes that room.
                     if model.undonePlans.contains(plan.id) {

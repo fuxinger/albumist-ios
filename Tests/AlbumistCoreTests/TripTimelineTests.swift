@@ -182,4 +182,66 @@ struct TripTimelineTests {
         #expect(span.end == Fixture.date("2023-08-07 08:00"))
         #expect(TripTimeline.span(of: [AssetID("none")], dates: trip.dates) == nil)
     }
+
+    // MARK: Made at once, off the sheet's body (review G6)
+
+    /// Everything the timeline shows of a trip comes in one piece, so the sheet makes it once off
+    /// the main thread instead of in its body at every tap: the days as `days(…)` makes them from
+    /// the days the split takes, and the days without photos to the trips before and after it.
+    @Test func theTimelineComesInOnePieceWithTheDaysToItsNeighbours() {
+        var trip = Self.iceland.trip
+        let before = [trip.add("2023-07-25 10:00", "Akureyri"), trip.add("2023-07-28 18:00", "Akureyri")]
+        let after = [trip.add("2023-08-12 09:00", "Höfn")]
+        let iceland = Set(Self.iceland.trip.ids)
+        let content = TripTimeline.content(of: iceland, before: Set(before), after: Set(after), facts: FactsByID(trip.facts),
+                                           ranks: trip.ranks, dates: trip.dates, calendar: Self.calendar)
+        #expect(content.days == Self.iceland.trip.timeline())
+        // From the 28th of July to the 1st of August: the 29th, 30th and 31st.
+        #expect(content.quietDaysFromBefore == 3)
+        // From the 7th to the 12th of August: four days between.
+        #expect(content.quietDaysToAfter == 4)
+        let alone = TripTimeline.content(of: iceland, before: nil, after: nil, facts: FactsByID(trip.facts),
+                                         ranks: trip.ranks, dates: trip.dates, calendar: Self.calendar)
+        #expect(alone.days == content.days)
+        #expect(alone.quietDaysFromBefore == nil && alone.quietDaysToAfter == nil)
+        // A neighbour without a dated photo has no days between.
+        let undated = TripTimeline.content(of: iceland, before: [AssetID("none")], after: [], facts: FactsByID(trip.facts),
+                                           ranks: trip.ranks, dates: trip.dates, calendar: Self.calendar)
+        #expect(undated.quietDaysFromBefore == nil && undated.quietDaysToAfter == nil)
+    }
+
+    // MARK: The line (review G8)
+
+    /// Solid between two days, dotted over the days without photos (nothing on the 2nd), none
+    /// above the first day or below the last: the trips before and after it are sections of
+    /// their own.
+    @Test func theLineIsSolidBetweenDaysAndDottedOverDaysWithoutPhotos() {
+        let days = Self.iceland.trip.timeline()
+        let lines = days.indices.map { TripTimeline.lines(days, at: $0, cut: nil) }
+        #expect(lines.map(\.above) == [nil, .dotted, .solid, .solid, .solid, .solid])
+        #expect(lines.map(\.below) == [.dotted, .solid, .solid, .solid, .solid, nil])
+        #expect(lines.map(\.gap) == [nil, .dotted, nil, nil, nil, nil])
+        #expect(TripTimeline.lines(days, at: days.count, cut: nil) == TripTimeline.Lines())
+    }
+
+    /// Where the second trip begins the line breaks: nothing above the chosen day, nothing below
+    /// the day before it, and nothing over the days without photos between them (the dotted line
+    /// ran on into the cut there, review G8).
+    @Test func theLineBreaksWhereTheSecondTripBegins() {
+        let days = Self.iceland.trip.timeline()
+        // A new trip from the 3rd, after the day without photos.
+        let afterAGap = days.indices.map { TripTimeline.lines(days, at: $0, cut: 1) }
+        #expect(afterAGap[0].below == nil)
+        #expect(afterAGap[1].above == nil && afterAGap[1].gap == nil)
+        #expect(afterAGap[1].below == .solid)
+        // A new trip from the 4th: the line before the gap stays.
+        let inTheMiddle = days.indices.map { TripTimeline.lines(days, at: $0, cut: 2) }
+        #expect(inTheMiddle[0].below == .dotted)
+        #expect(inTheMiddle[1].above == .dotted && inTheMiddle[1].gap == .dotted && inTheMiddle[1].below == nil)
+        #expect(inTheMiddle[2].above == nil && inTheMiddle[2].below == .solid)
+        // Every other day as without a cut.
+        for index in days.indices where ![1, 2].contains(index) {
+            #expect(inTheMiddle[index] == TripTimeline.lines(days, at: index, cut: nil))
+        }
+    }
 }

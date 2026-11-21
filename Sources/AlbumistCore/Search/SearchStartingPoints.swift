@@ -7,8 +7,10 @@ public struct SearchStartingPoint: Hashable, Sendable, Identifiable {
     /// `count` is what that search finds.
     public var suggestion: SearchSuggestion
     /// The photos its picture tries, best first (`CoverPhoto` shows the first one that is sharp
-    /// on the device): never a sensitive one, and a screenshot or paper only for a kind of
-    /// nothing else ("Screenshots"). Never empty.
+    /// on the device): ordinary photos only, never a sensitive one, a screenshot or a paper, and
+    /// none another starting point tries. Empty only for a kind of nothing but screenshots and
+    /// papers ("Screenshots"): its tile shows the calm placeholder with its symbol, as an album
+    /// of them shows in the tab "Alben".
     public var coverIDs: [AssetID]
 
     public var id: String { suggestion.id }
@@ -29,11 +31,14 @@ public struct SearchStartingPoint: Hashable, Sendable, Identifiable {
 ///   picture: their pictures are personal papers (the page keeps them as a word).
 /// - The picture, as a big cover takes it (`PreviewPicker.coverCandidates`): ordinary photos,
 ///   the user's favourites first, then the newest, the one the analysis is surest about before
-///   them (a topic); photos not analysed yet after the analysed ones. A screenshot or a harmless
-///   paper only where no photo of the kind exists, sensitive ones never. Each starting point
-///   shows a photo of its own: one whose photos are all shown by those before it, or whose
-///   pictures may not be shown at all, is left out, so a small library offers fewer, never an
-///   empty box.
+///   them (a topic); photos not analysed yet after the analysed ones. Never a sensitive one, a
+///   screenshot or a paper (a chat or an order is as personal at tile size as the papers the
+///   page keeps as words, review G5): a kind of nothing else ("Screenshots") keeps its tile on
+///   the calm placeholder with its symbol, as an album of them shows in the tab "Alben".
+/// - Each starting point shows a photo of its own: no tile tries a photo another one tries
+///   (`CoverPhoto` falls back to a later candidate when the first is not sharp on the device,
+///   review G1). One without a photo of its own is left out, so a small library offers fewer,
+///   never an empty box or a photo twice.
 public enum SearchStartingPoints {
     /// Starting points the page offers at most: one of each kind it takes first (two places, a
     /// trip, the newest year, a topic, a kind), three rows of two tiles on an iPhone.
@@ -65,8 +70,13 @@ public enum SearchStartingPoints {
             let found = index.search(words, now: now)
             guard !found.ids.isEmpty, !found.isRelaxed, !found.tokens.contains(where: { $0.kind == .ignored }) else { continue }
             let pictures = pictures(of: found, besides: shown, ranks: ranks, dates: dates, favorites: favorites)
-            guard let first = pictures.first else { continue }
-            shown.insert(first)
+            if pictures.isEmpty {
+                // No photo of its own: left out, unless it is a kind of nothing but screenshots
+                // and papers, which shows its symbol (see above).
+                guard candidate.kind == .mediaType, !found.ids.contains(where: { Self.isPhoto($0, ranks: ranks) }) else { continue }
+            }
+            // Every photo it tries is its own (review G1): `CoverPhoto` may show any of them.
+            shown.formUnion(pictures)
             chosen.append(SearchStartingPoint(
                 suggestion: SearchSuggestion(completion: words, label: words, kind: candidate.kind, count: found.ids.count),
                 coverIDs: pictures))
@@ -100,20 +110,20 @@ public enum SearchStartingPoints {
         return first.compactMap { $0 } + then.compactMap { $0 } + places.dropFirst(2) + topics.dropFirst(2) + kinds.dropFirst(2)
     }
 
-    /// The photos a starting point's picture tries, best first, none that one before it shows
-    /// (`shown`). Its ordinary photos when it has any (also when those before it show them all:
-    /// then nothing), else its screenshots and harmless papers, newest first.
+    /// The photos a starting point's picture tries, best first, none that one before it tries
+    /// (`shown`): its ordinary photos (`PreviewPicker.coverCandidates`), nothing when it has
+    /// none or those before it try them all.
     static func pictures(of found: SearchResult, besides shown: Set<AssetID>, ranks: [AssetID: PreviewRank],
                          dates: [AssetID: Date], favorites: Set<AssetID>) -> [AssetID] {
         let free = shown.isEmpty ? found.ids : found.ids.filter { !shown.contains($0) }
-        let hasPhotos = found.ids.contains { (ranks[$0] ?? .photo) <= .unknown }
-        guard hasPhotos else {
-            // Found newest first, as the grid shows them.
-            return Array(free.lazy.filter { ranks[$0] == .document }.prefix(4))
-        }
         // The best hit the analysis is surest about (a topic, `SearchResult.top`), when it is an
         // analysed ordinary photo.
         let surest = found.top.first { ranks[$0] == nil && !shown.contains($0) }
         return PreviewPicker.coverCandidates(free, cover: surest, dates: dates, ranks: ranks, favorites: favorites, count: 4)
+    }
+
+    /// An ordinary photo, or one not analysed yet: what a picture may be (`PreviewRank`).
+    static func isPhoto(_ id: AssetID, ranks: [AssetID: PreviewRank]) -> Bool {
+        (ranks[id] ?? .photo) <= .unknown
     }
 }

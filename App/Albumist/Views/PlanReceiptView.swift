@@ -93,9 +93,9 @@ struct PlanReceiptView: View {
             guard !Task.isCancelled else { return }
             shareText = text
         }
-        // The albums' covers, worked out off the main thread, again when the photos' dates or
-        // ranks change: a photo the analysis finds to be a sensitive document leaves its cover at
-        // once.
+        // The albums' covers, worked out off the main thread, again when the facts change (the
+        // photos' dates and ranks with them): a photo the analysis finds to be a sensitive
+        // document leaves its cover at once.
         .task(id: model.changeCoverInputs([plan])) {
             let made = await model.receiptCovers(for: plan)
             guard !Task.isCancelled else { return }

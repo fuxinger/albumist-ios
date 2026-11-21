@@ -2,6 +2,27 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. Vorschau mit Titelbildern und ein klarer Verlauf (Design-Welle 3, DS-15 Teil 2 und Zweitprüfung G, noch
+  in keinem Build): In der Vorschau vor dem Umsetzen hat jedes Album schon das Titelbild, das später sein Beleg und
+  der Tab „Alben“ zeigen (72 statt 44 Punkte, aus den Fotos, die der Plan hinzufügen will; heikle Fotos,
+  Screenshots und Papiere nie); „Neu“ oder „Ergänzt“ und die Zahl der Fotos stehen unter dem Ordner, ein Album ohne
+  neue Fotos zeigt das Stapel-Symbol; während der Plan läuft, rechnet die Vorschau nichts neu. Der Verlauf sagt jede
+  Änderung in Worten, nie „0 Fotos“: „1 entfernt“, „12 Fotos herausgenommen“ (auch wenn Albumist ein Album behält,
+  weil gerade ein Foto hineinkam), „1 umbenannt“, „1 verschoben“, „Nichts entfernt“ für eine abgelehnte oder
+  gescheiterte Entfernung, „Nichts geändert“, wenn nichts ankam, und ein neues Album ohne Fotos als „1 neu“. Jede
+  Such-Kachel zeigt ein eigenes Foto, „Screenshots“ ihr Symbol, und die Kacheln folgen jeder neuen Analyse. Die
+  Reise-Werkstatt liest sich in der Zeit: „Reise davor“, die Tage, „Reise danach“; der Hinweis zum Warten steht
+  einmal und gleich beim Öffnen, die Tage zu einer Nachbarreise erst, wenn sie zu genau dieser gehören.
+- 21.11. Sortier-Show, ruhige Farben und die ersten 100 % (Design-Welle 3, DS-17, DS-11 und DS-08, mit der
+  Zweitprüfung K, noch in keinem Build): In der Sortier-Show fliegen größere Fotos vom Stapel in ihr Album, das als
+  sein echtes Titelbild wartet (grau, bis es gefüllt ist, dann farbig, der Haken auf einem Ring); der Stapel zeigt
+  seine Fotos auch mit „Bewegung reduzieren“, VoiceOver und im Stromsparmodus, auf niedrigen iPhones rückt zuerst
+  der Stapel zusammen, die Show hält nur die Fotos, die sie zeigt, und ein zweiter Tipp auf „Anlegen“ startet
+  nichts. Die Seite eines Vorschlags nimmt die ruhige Farbe ihres Titelbilds als Grund (hell blass, dunkel tief,
+  wie Musik mit dem Albumcover, Texte gut lesbar); eine bekannte Farbe steht sofort da, und sie geht mit dem
+  Titelbild. Wird die erste ganze Analyse fertig, während Albumist offen ist, zeigt der Ring einmal „100 %“; war
+  die erste Analyse zu schnell dafür, kommt der Moment beim nächsten gefeierten Ende. In Einstellungen › Über
+  steht das Glass-Stack-Symbol mit dem Namen der App. Neue Mac-Tests für alle vier.
 - 21.11. Videos nach der Zweitprüfung (Design-Welle 3, Review F, noch in keinem Build): „Ton aus“ hält ein Video
   nicht mehr an; die Musik darf beim Schließen der Foto-Ansicht weiterlaufen. Ein Video startet von selbst erst, wenn
   der App-Ton mit der Musik mischt, und hält sie so nie an. Die Knöpfe unter dem Video lassen sich auf 44 pt treffen,

@@ -43,13 +43,34 @@ struct SearchStartingPointsSourceTests {
         #expect(page.components(separatedBy: ".accessibilityIdentifier(\"search.example\")").count - 1 == 2)
     }
 
-    /// The tiles follow the library: its facts and what the analysis has looked at since.
-    @Test func theStartingPointsFollowTheFactsAndTheAnalysis() throws {
+    /// The tiles follow every change of the facts (`AppModel.factsVersion`), also one of a
+    /// photo's rank or date alone: the text step makes a photo a sensitive document without
+    /// changing any count, and its tile must not keep showing it (review G2). A task cancelled
+    /// meanwhile starts no more work and keeps nothing; both lists are shown together.
+    @Test func theStartingPointsFollowEveryChangeOfTheFacts() throws {
         let view = Self.squeezed(try Self.code(Self.search))
-        #expect(view.contains(".task(id:StartingPointsInputs(facts:model.facts.count,analysis:model.analysisCounts)){featured=awaitmodel.featuredSearches()starts=awaitmodel.searchStartingPoints()}"))
-        #expect(!view.contains(".task(id:model.facts.count)"))
-        let inputs = Self.squeezed(try Self.body(["struct SearchView", "private struct StartingPointsInputs"], in: Self.search))
-        #expect(inputs == "{varfacts:Intvaranalysis:AppModel.AnalysisCounts}")
+        #expect(view.contains(".task(id:model.factsVersion){letwords=awaitmodel.featuredSearches()guard!Task.isCancelledelse{return}letmade=awaitmodel.searchStartingPoints()guard!Task.isCancelledelse{return}featured=wordsstarts=made}"))
+        #expect(!view.contains("StartingPointsInputs"), "keyed on counts, which a change of rank leaves as they are")
+        #expect(!view.contains("model.facts.count"))
+        // The revision is observed, so a screen keyed on it works its part out again; only the
+        // model counts it.
+        let model = Self.squeezed(AppSource.code(try AppSource.read("App/Albumist/Model/AppModel.swift")))
+        #expect(model.contains("private(set)varfactsVersion=0"))
+        #expect(!model.contains("@ObservationIgnoredprivatevarfactsVersion"))
+    }
+
+    /// The revision counts every new value of the facts (review M6): the tiles, the covers of the
+    /// history, the receipt and the preview, and the trip's timeline are made again only when it
+    /// moves, so without the count in the facts' `didSet` none of them would be made again. It
+    /// only grows: set back, it could come to a value a screen keyed on it had already seen.
+    @Test func theFactsRevisionCountsEveryNewValueOfTheFacts() throws {
+        let model = AppSource.code(try AppSource.read("App/Albumist/Model/AppModel.swift"))
+        let facts = try #require(AppSource.body(of: "var facts: [AssetFacts] = []", in: model))
+        let didSet = try #require(AppSource.body(of: "didSet", in: facts))
+        #expect(Self.squeezed(didSet).contains("factsVersion&+=1"), "a new value of the facts leaves the revision as it was")
+        // Assignments, not comparisons: only its start value.
+        let sets = Self.squeezed(model).components(separatedBy: "factsVersion=").dropFirst().filter { !$0.hasPrefix("=") }
+        #expect(sets.count == 1 && sets.first?.hasPrefix("0") == true, "the revision is set elsewhere than at its start")
     }
 
     /// The work is one search per starting point on the search's own index, off the main thread.

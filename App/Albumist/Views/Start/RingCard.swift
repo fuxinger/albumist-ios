@@ -251,7 +251,7 @@ struct FirstAnalysisMomentHeader: View {
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: T.join)) { joined = true }
         }
-        let hold = FirstAnalysisMomentStore.askedByUITest ? T.heldForUITest : T.hold
+        let hold = UITestSupport.showsFirstFinishMoment ? T.heldForUITest : T.hold
         try? await Task.sleep(for: .seconds(calm ? hold : hold - T.joinDelay))
         guard !Task.isCancelled else { return }
         withAnimation(calm ? .easeInOut(duration: T.fade) : .smooth(duration: T.fold)) { store.ended() }

@@ -120,10 +120,16 @@ struct LargestTextFitTests {
         return try #require(chain(from: /Button\("Animation überspringen"/, in: body))
     }
 
-    /// The show's own scale for its decorative scene.
+    /// The show's own scale for its decorative scene, with what the screen leaves for the scene
+    /// (`sceneRoom`, which the pile gives way to first since the second review of H13, K6).
     static func sceneScale() throws -> String {
-        try #require(AppSource.body(of: ["struct SortingShow", "var sceneScale: CGFloat"], in: try code(show)),
-                     "the scene has no scale: it is 360 pt high at every size")
+        let code = try code(show)
+        let scale = try #require(AppSource.body(of: ["struct SortingShow", "var sceneScale: CGFloat"], in: code),
+                                 "the scene has no scale: it is 360 pt high at every size")
+        let room = try #require(AppSource.body(of: ["struct SortingShow", "var sceneRoom: CGFloat?"], in: code),
+                                "the scene does not know what the screen leaves for it")
+        #expect(scale.contains(/\bsceneRoom\b/), "the scale does not follow what the screen leaves: \(scale)")
+        return room + scale
     }
 
     /// The screen's visible height is known: the show measures the container it scrolls in (the

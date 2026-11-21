@@ -124,6 +124,25 @@ struct PlanCoversTests {
         #expect(Set(planned["planned:b"]?.ids ?? []) == ["b-1", "b-2"])
     }
 
+    /// One name for an album wherever its cover is looked up (`PlanCovers.key`): the receipt's
+    /// (`PlanReceipt.Album.id`), "planned:" and the key for a new album, the collection id for one
+    /// of the user's. The preview lists its albums by reference (`PlannedAlbumPreview.id`), so its
+    /// rows find the covers made before the run (`applied: false`) under the same names as the
+    /// receipt's rows find theirs after it (DS-15 part 2).
+    @Test func anAlbumHasOneNameInThePreviewAndTheReceipt() {
+        #expect(PlanCovers.key(of: .planned("rom")) == "planned:rom")
+        #expect(PlanCovers.key(of: .existing("mine")) == "mine")
+        let plan = Self.plan(Self.newAlbum("rom", Self.photos("rom", 2)) + [.addAssets(album: .existing("mine"), assets: ["own-1"])])
+        let receipt = PlanReceipt(plan: plan, inventory: CollectionInventory())
+        #expect(receipt.albums.map(\.id) == [PlanCovers.key(of: .planned("rom")), PlanCovers.key(of: .existing("mine"))])
+        #expect(Set(PlanCovers.albums(of: plan, dates: [:], ranks: [:]).keys) == Set(receipt.albums.map(\.id)))
+        let preview = plan.albumPreview(inventory: CollectionInventory())
+        #expect(preview.map(\.id) == [.planned("rom"), .existing("mine")])
+        let before = PlanCovers.albums(of: plan, applied: false, dates: [:], ranks: [:])
+        #expect(preview.map { before[PlanCovers.key(of: $0.id)]?.ids.isEmpty == false } == [true, true])
+        #expect(preview.map { PlanCovers.key(of: $0.id) } == receipt.albums.map(\.id))
+    }
+
     /// A big cover is a photo (design rule 9): never a sensitive document, never a screenshot or
     /// another document; analysed photos before photos the analysis has not looked at yet. An album
     /// of nothing but sensitive documents says "Vorschau ausgeblendet"; one of only screenshots has

@@ -7,17 +7,25 @@ import AlbumistCore
 /// never show). Kept apart from `AppModel.swift`.
 extension AppModel {
     /// The albums of the show for `filled` (`PlanReviewFacts.filledAlbums`) of `plan`, taken as
-    /// the plan starts: the photos' ranks (never a sensitive document), dates and favourites
-    /// pick each album's cover (`SortingShowAlbum.cast`).
-    func sortingShowAlbums(_ filled: [FilledAlbum], plan: ChangePlan) -> [SortingShowAlbum] {
+    /// the plan starts: `sources`, what the result's stack takes of the suggestions at the same
+    /// time (`resultCoverSources`, taken once for both); the photos' ranks (never a sensitive
+    /// document), dates and favourites pick each album's cover (`SortingShowAlbum.cast`). The
+    /// walk over every photo of the plan runs off the main thread, on copies of what the model
+    /// keeps (second review, K10: on the main actor it held the tap on "Anlegen" for a large plan).
+    func sortingShowAlbums(_ filled: [FilledAlbum], plan: ChangePlan, sources: ResultCoverSources) async -> [SortingShowAlbum] {
         guard !filled.isEmpty else { return [] }
-        let sources = resultCoverSources(for: plan)
         let facts = factsByID
-        var favorites = Set<AssetID>()
-        for album in filled {
-            for id in album.assets where facts[id]?.asset.isFavorite == true { favorites.insert(id) }
-        }
-        return SortingShowAlbum.cast(filled, plan: plan, cardCovers: sources.covers, personal: sources.personal,
-                                     ranks: previewRanks, dates: creationDates, favorites: favorites)
+        let ranks = previewRanks
+        let dates = creationDates
+        let covers = sources.covers
+        let personal = sources.personal
+        return await Task.detached(priority: .userInitiated) {
+            var favorites = Set<AssetID>()
+            for album in filled {
+                for id in album.assets where facts[id]?.asset.isFavorite == true { favorites.insert(id) }
+            }
+            return SortingShowAlbum.cast(filled, plan: plan, cardCovers: covers, personal: personal,
+                                         ranks: ranks, dates: dates, favorites: favorites)
+        }.value
     }
 }

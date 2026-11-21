@@ -18,48 +18,53 @@ final class FirstAnalysisMomentStore {
 
     private static let key = "analysis.firstFinishMoment"
 
-    /// `-AlbumistUITestFirstFinishMoment`: a UI test asks for the moment and finds it, held
-    /// `FirstAnalysisMoment.Timing.heldForUITest`. Other UI runs never show it: the start page
-    /// would change under the audits that follow the first analysis (UI run 43774578089 ended
-    /// test 1 on a page that changed during its audit). Always false in the shipped app.
-    static let askedByUITest = UITestSupport.isRunning && ProcessInfo.processInfo.arguments.contains("-AlbumistUITestFirstFinishMoment")
-
     private(set) var moment: FirstAnalysisMoment
-    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private var observers: [any NSObjectProtocol] = []
 
     private init() {
-        let kept = UserDefaults.standard.string(forKey: Self.key).flatMap(FirstAnalysisMoment.Kept.init(rawValue:))
-        moment = FirstAnalysisMoment(kept: kept, completedBefore: AnalysisMarker.completedOnce)
+        // A UI test that starts the first 100 % afresh (`UITestSupport.startsFirstFinishOwed`,
+        // always false in the shipped app) reads nothing kept and no analysis completed before.
+        let fresh = UITestSupport.startsFirstFinishOwed
+        let kept = fresh ? nil : UserDefaults.standard.string(forKey: Self.key).flatMap(FirstAnalysisMoment.Kept.init(rawValue:))
+        moment = FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce)
         keep()
-        let center = NotificationCenter.default
+        // Coming to the front looks at nothing: what completed the analysis meanwhile told the
+        // store itself (a run's end, the overnight refinement, `completedAway`), and a quick first
+        // analysis completed it without spending the moment (second review, K7).
         observers = [
-            center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil,
+                                                   queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.leftScreen() }
-            },
-            center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.cameToFront() }
             },
         ]
     }
 
-    /// At launch, first thing in `AppModel.load`: read while `AnalysisMarker` still says whether
-    /// an analysis was completed before (the load resets it for a restored backup or a new
-    /// database, and an analysis completed before this version spends the moment).
-    func launched() {
-        cameToFront()
-    }
+    /// At launch, first thing in `AppModel.load`: the store is made here (`shared`), while
+    /// `AnalysisMarker` still says whether an analysis was completed before (the load resets it
+    /// for a restored backup or a new database), which spends the moment of an installation that
+    /// completed its analysis before this version kept the moment.
+    func launched() {}
 
     /// The end of a run in the app (`AppModel.firstAnalysisRunEnded`).
-    func runEnded(finished: Bool, celebrates: Bool, completedBefore: Bool, onScreen: Bool) {
-        guard finished else { return }
-        moment.runEnded(finished: finished, celebrates: celebrates, completedBefore: completedBefore, onScreen: onScreen, at: Date())
+    func runEnded(finished: Bool, celebrates: Bool, onScreen: Bool) {
+        guard finished, celebrates else { return }
+        moment.runEnded(finished: finished, celebrates: celebrates, onScreen: onScreen, at: Date())
+        keep()
+    }
+
+    /// The analysis was completed where no run of the app ended (the overnight refinement):
+    /// `first`, it had not been completed before (`AnalysisMarker.completedOnce`, read before the
+    /// refinement sets it).
+    func completedAway(first: Bool) {
+        guard first, moment.kept == .owed else { return }
+        moment.completedAway(first: first)
         keep()
     }
 
     /// The card with "Analyse fertig" is there: true once, while due and on screen; it plays
     /// from now.
     func claim(onScreen: Bool) -> Bool {
-        guard moment.dueSince != nil, !UITestSupport.isRunning || Self.askedByUITest else { return false }
+        guard moment.dueSince != nil, !UITestSupport.isRunning || UITestSupport.showsFirstFinishMoment else { return false }
         return moment.claim(at: Date(), onScreen: onScreen)
     }
 
@@ -75,14 +80,6 @@ final class FirstAnalysisMomentStore {
         moment.leftScreen()
     }
 
-    /// In front again (or launched): an analysis completed meanwhile (overnight, in the
-    /// background) was not seen reaching 100 %.
-    private func cameToFront() {
-        guard moment.kept == .owed, AnalysisMarker.completedOnce else { return }
-        moment.cameToFront(completed: true)
-        keep()
-    }
-
     private func keep() {
         if UserDefaults.standard.string(forKey: Self.key) != moment.kept.rawValue {
             UserDefaults.standard.set(moment.kept.rawValue, forKey: Self.key)
@@ -92,10 +89,12 @@ final class FirstAnalysisMomentStore {
 
 extension AppModel {
     /// The end of a run in the app, decided before it waits for the overview (DS-08): whether it
-    /// finished the first full analysis on screen. `AnalysisMarker.completedOnce` still says how
-    /// it was before this run (its end sets it after this).
+    /// finished the analysis on screen with "Analyse fertig". On screen means not in the
+    /// background (second review, K7): Control Center, an alert or a call banner in front leave
+    /// the scene inactive, and the card claims the moment once it is active again
+    /// (`FirstAnalysisMomentHeader`); gone to the background before, it is not shown later.
     func firstAnalysisRunEnded(finished: Bool, celebrates: Bool) {
         FirstAnalysisMomentStore.shared.runEnded(finished: finished, celebrates: celebrates,
-                                                 completedBefore: AnalysisMarker.completedOnce, onScreen: isOnScreen)
+                                                 onScreen: UIApplication.shared.applicationState != .background)
     }
 }

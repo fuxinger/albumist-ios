@@ -7,7 +7,8 @@ import AlbumistTestSupport
 /// does in spirit: the user's places, a trip, a year, a topic and a kind such as screenshots,
 /// each with a real photo of its own from the device. Every starting point is a chip the search
 /// knows today (a tap searches its words); a place is a town as Photos names a photo's place;
-/// its picture is never a sensitive one, and never a screenshot where a photo of the kind exists.
+/// its picture is never a sensitive one, a screenshot or a paper, and never one another tile
+/// tries: a kind of nothing but screenshots and papers shows its symbol on the calm placeholder.
 @Suite("Search starting points with photos")
 struct SearchStartingPointsTests {
     static let now = Fixture.date("2026-11-15 12:00")
@@ -171,12 +172,16 @@ struct SearchStartingPointsTests {
     @Test(arguments: [false, true])
     func eachStartingPointIsTheSearchOfItsWords(english: Bool) {
         let index = Self.large.library.index
+        let ranks = Self.large.library.ranks
         for start in Self.large.library.starts(english: english) {
             let found = index.search(start.suggestion.completion, now: Self.now)
             #expect(!found.tokens.contains { $0.kind == .ignored }, "\(start.suggestion.label): a word not understood")
             #expect(!found.isRelaxed)
             #expect(start.suggestion.count == found.ids.count, "\(start.suggestion.label)")
-            #expect(!start.coverIDs.isEmpty, "\(start.suggestion.label): no picture")
+            // A picture, except for a kind of nothing but screenshots and papers (its symbol).
+            let hasPhotos = found.ids.contains { (ranks[$0] ?? .photo) <= .unknown }
+            #expect(start.coverIDs.isEmpty == (start.suggestion.kind == .mediaType && !hasPhotos),
+                    "\(start.suggestion.label): a picture where there should be none, or none where there should be one")
             #expect(start.coverIDs.allSatisfy(Set(found.ids).contains), "\(start.suggestion.label): a picture it does not find")
             #expect(start.coverIDs.count <= 4)
         }
@@ -212,24 +217,43 @@ struct SearchStartingPointsTests {
         }
     }
 
-    /// A screenshot only for a kind of nothing but screenshots: "2026" has photos, so it shows
-    /// one, although its newest pictures are screenshots.
-    @Test func noScreenshotWhereAPhotoOfTheKindExists() {
+    /// Never a screenshot or a paper, as a big cover never is one (design rule 9): a chat or an
+    /// order read at tile size is as personal as the papers the page keeps as words. "2026" has
+    /// photos, so it shows one, although its newest pictures are screenshots; the kind
+    /// "Screenshots" has none and keeps its tile on the calm placeholder with its symbol, as an
+    /// album of only screenshots shows in the tab "Alben" (review G5).
+    @Test func neverAScreenshotOrAPaperTheScreenshotsShowTheirSymbol() {
         let ranks = Self.large.library.ranks
-        for start in Self.large.library.starts(limit: 20) where start.suggestion.label != "Screenshots" {
+        for start in Self.large.library.starts(limit: 20) {
             #expect(start.coverIDs.allSatisfy { (ranks[$0] ?? .photo) <= .unknown }, "\(start.suggestion.label) shows a screenshot or paper")
         }
         let screenshots = try! #require(Self.large.library.starts().first { $0.suggestion.label == "Screenshots" })
-        #expect(screenshots.coverIDs.first == Self.large.newestHarmlessScreenshot)
-        #expect(screenshots.coverIDs.allSatisfy { ranks[$0] == .document })
+        #expect(screenshots.coverIDs.isEmpty)
+        #expect(!screenshots.coverIDs.contains(Self.large.newestHarmlessScreenshot))
+        #expect(screenshots.suggestion.count == 9)
     }
 
-    /// Each starting point has a picture of its own: none shows the photo another one shows.
+    /// Each starting point has a picture of its own: no tile tries a photo another one tries.
+    /// `CoverPhoto` shows the first candidate that is sharp on the device, so a tile whose first
+    /// photo is only a small preview there ("iPhone-Speicher optimieren") shows its next one,
+    /// which must not be another tile's (review G1).
     @Test func everyStartingPointHasAPictureOfItsOwn() {
         for limit in [6, 20] {
-            let firsts = Self.large.library.starts(limit: limit).compactMap(\.coverIDs.first)
-            #expect(Set(firsts).count == firsts.count)
+            let tried = Self.large.library.starts(limit: limit).flatMap(\.coverIDs)
+            #expect(Set(tried).count == tried.count, "a photo two tiles try")
         }
+    }
+
+    /// A tile whose photos are all tried by the tiles before it is left out: fewer tiles rather
+    /// than one photo on two (review G1). München tries all three photos of 2026.
+    @Test func aTileWhosePhotosTheTilesBeforeItTryIsLeftOut() {
+        var library = Library()
+        let first = library.add("2026-03-01 10:00", Self.munich)
+        let second = library.add("2026-04-01 10:00", Self.munich)
+        let third = library.add("2026-05-01 10:00", Self.munich)
+        let starts = library.starts()
+        #expect(starts.map(\.suggestion.label) == ["München"])
+        #expect(starts.first?.coverIDs == [third, second, first])
     }
 
     /// As the albums tab picks a cover: the user's favourite first, then the newest.
@@ -251,8 +275,9 @@ struct SearchStartingPointsTests {
 
     // MARK: Small libraries and before the analysis
 
-    /// Fewer starting points, never one without a picture: "2026" would only repeat München's
-    /// photo, so it is left out; the bank card is never shown.
+    /// Fewer starting points, never an empty one: "2026" would only repeat München's photo, so
+    /// it is left out; the bank card is never shown, nor the screenshot: "Screenshots" shows its
+    /// symbol.
     @Test func aSmallLibraryOffersFewerNeverAnEmptyOne() {
         var library = Library()
         let photo = library.add("2026-05-01 10:00", Self.munich)
@@ -261,34 +286,40 @@ struct SearchStartingPointsTests {
         for english in [false, true] {
             let starts = library.starts(english: english)
             #expect(starts.map(\.suggestion.label) == ["München", "Screenshots"])
-            #expect(starts.map { $0.coverIDs.first } == [photo, screenshot])
-            #expect(starts.allSatisfy { !$0.coverIDs.contains(card) })
+            #expect(starts.map(\.coverIDs) == [[photo], []])
+            #expect(starts.allSatisfy { !$0.coverIDs.contains(card) && !$0.coverIDs.contains(screenshot) })
         }
     }
 
     /// Before the image analysis (nothing known about the photos' content) the places and the
-    /// year still show photos; topics come with the analysis.
+    /// year still show photos; topics come with the analysis. The year shows a photo of its own,
+    /// none München tries (review G1): the one at home without a place.
     @Test func beforeTheImageAnalysisPlacesAndYearsShowPhotos() {
         var library = Library()
         let munichOld = library.add("2026-03-01 10:00", Self.munich, analysed: false)
         let munichNew = library.add("2026-04-01 10:00", Self.munich, analysed: false)
         let romeNew = library.add("2025-06-02 10:00", Self.rome, analysed: false)
         library.add("2025-06-01 10:00", Self.rome, analysed: false)
+        let atHome = library.add("2026-02-01 10:00", analysed: false)
         #expect(library.ranks.values.allSatisfy { $0 == .unknown })
         let starts = library.starts()
         #expect(starts.map(\.suggestion.label) == ["München", "Rom", "2026"])
-        #expect(starts.map { $0.coverIDs.first } == [munichNew, romeNew, munichOld])
+        #expect(starts.map { $0.coverIDs.first } == [munichNew, romeNew, atHome])
+        #expect(starts.last?.coverIDs == [atHome], "the year tries München's photos too")
+        #expect(starts.first?.coverIDs == [munichNew, munichOld])
     }
 
-    /// A kind whose pictures may all not be shown (screenshots whose text was never read) is
-    /// left out, rather than shown as "Vorschau ausgeblendet".
-    @Test func aKindOfOnlyHiddenPicturesIsLeftOut() {
+    /// A kind whose pictures may all not be shown (screenshots whose text was never read) shows
+    /// its symbol like any kind of nothing but screenshots: never one of them, never "Vorschau
+    /// ausgeblendet". A year of only them has no photo of its own and is left out.
+    @Test func aKindOfPicturesThatMayNotBeShownShowsItsSymbol() {
         var library = Library()
-        library.add("2026-05-01 10:00", Self.munich)
+        let photo = library.add("2025-05-01 10:00", Self.munich)
         library.add("2026-05-02 10:00", subtypes: [.screenshot])
         library.add("2026-05-03 10:00", subtypes: [.screenshot])
-        #expect(library.ranks.values.allSatisfy { $0 == .sensitive })
-        let labels = library.starts().map(\.suggestion.label)
-        #expect(labels == ["München"])
+        #expect(library.ranks.filter { $0.key != photo }.values.allSatisfy { $0 == .sensitive })
+        let starts = library.starts()
+        #expect(starts.map(\.suggestion.label) == ["München", "Screenshots"])
+        #expect(starts.map(\.coverIDs) == [[photo], []])
     }
 }

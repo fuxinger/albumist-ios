@@ -125,9 +125,12 @@ public enum ThemeColors {
 ///   itself. Taken: the main colour (`from`), the text on a quiet ground below the photo.
 ///
 /// How it is made (`from`): the pixels of the small image already in memory are read in Oklab;
-/// grey, very dark and very bright pixels carry no colour. The hue of the colour that covers
-/// most of the photo leads; how strong it is follows its chroma and how much of the photo it
-/// covers. The ground keeps that hue at a fixed lightness (`lightLightness`, `darkLightness`)
+/// grey, very dark and very bright pixels carry no colour. The hues are sorted into twelve
+/// sectors, and the sector with the largest summed chroma leads (how much of the photo has that
+/// hue, weighted by how strong it is there): mostly the colour that covers most of the photo,
+/// but a small, very saturated area can beat a large muted one; its share of the photo softens
+/// that in how strong the tint gets (`share * 3`, full from a third of the photo on). The ground
+/// keeps that hue at a fixed lightness (`lightLightness`, `darkLightness`)
 /// and a small chroma (`lightChroma`, `darkChroma`): a flat colour, no gradient, no glow. Then
 /// it is checked (`check`): `.noteText` 4.6:1 and more, the accent and the page's sign 4.5:1,
 /// the cards still lighter than the ground; if not, the lightness moves away from the text
@@ -145,8 +148,10 @@ public struct PhotoTint: Hashable, Sendable {
     /// As light as the grouped background or a touch lighter: the sign's accent on its 12 %
     /// capsule keeps 4.5:1 only there (4.52:1 on the plain background).
     public static let lightLightness = 0.968
-    /// Darker than the cards (`secondarySystemGroupedBackground`, Oklab 0.24), so they stand out
-    /// from it as from black.
+    /// Darker than the cards (`secondarySystemGroupedBackground`, Oklab lightness 0.2275), so
+    /// they still stand out from it, though less than from black: 1.12 to 1.13 : 1 on the tint
+    /// against 1.23 : 1 on black (second review, K9; worth a look on a device with a red or a
+    /// blue cover).
     public static let darkLightness = 0.17
     public static let lightChroma = 0.008...0.022
     public static let darkChroma = 0.008...0.026

@@ -10,9 +10,14 @@ import Foundation
 ///   and at most `maximumCover` (the iPad's focused column); a photo is `photoShare` of it, so it
 ///   shrinks into its album as it lands (`ArcFlight` ends at 62 % of it).
 /// - The text size changes only the room under the cover: the scene's labels stop growing at
-///   xxLarge (`largeText` from there on), its photos keep their size. Where the screen is too low
-///   for the whole scene, the show scales it down as before (`SortingShow.sceneScale`), so the
-///   counts and "Animation überspringen" stay on screen at every text size.
+///   xxLarge (`largeText` from there on), its photos keep their size.
+/// - Where the screen is too low for the whole scene (`room`), the pile gives way first: its loose
+///   photos lie closer together up and down, and the gap the photos fly through narrows to
+///   `minimumFlightGap` (second review, K6). Only what is still missing is scaled away with the
+///   whole scene (`SortingShow.sceneScale`), so the counts and "Animation überspringen" stay on
+///   screen at every text size. On the 4.7" iPhone (about 313 pt for a scene of 431) the photos
+///   show at about 82 pt instead of 73 with the whole scene scaled (76 pt in a scene of 360 pt
+///   before DS-17, about 66 pt on that screen).
 /// - All in points, whole numbers, so a cover asks Photos for the same pixels every time.
 public struct SortingShowLayout: Hashable, Sendable {
     /// How far the pile's loose photos lie from its centre at most, to each side.
@@ -41,6 +46,9 @@ public struct SortingShowLayout: Hashable, Sendable {
     static let topRoom = 4.0
     /// Between the pile and the album's layers: where the photos fly.
     static let flightGap = 16.0
+    /// The gap where the screen is low (`room`): the photos still lift off the pile before they
+    /// reach the album.
+    public static let minimumFlightGap = 12.0
     /// Between the cover and the album's name.
     public static let labelGap = 8.0
 
@@ -58,6 +66,11 @@ public struct SortingShowLayout: Hashable, Sendable {
     public var spacing: Double
     /// The loose photos lie at most this far from the pile's centre.
     public var scatter: Spread
+    /// How far up and down the loose photos lie, from 1 (as made) to 0 (side by side, where the
+    /// screen is low, `room`).
+    public var looseness: Double
+    /// Between the pile and the album's layers.
+    public var gap: Double
     public var pileHeight: Double
     public var pileCenterY: Double
     public var coverCenterY: Double
@@ -69,7 +82,9 @@ public struct SortingShowLayout: Hashable, Sendable {
     /// - Parameters:
     ///   - width: the width the show has on screen, in points (not measured yet: the smallest).
     ///   - largeText: the text size is xxLarge or one of the accessibility sizes.
-    public init(width: Double, largeText: Bool) {
+    ///   - room: the height the screen has for the scene, in points (nil: not measured yet, or
+    ///     no limit). Where the scene needs more, the pile gives way first, as far as it can.
+    public init(width: Double, largeText: Bool, room: Double? = nil) {
         let width = width.isFinite ? max(0, width) : 0
         cover = min(max(width * Self.coverShare, Self.minimumCover), Self.maximumCover).rounded()
         photo = (cover * Self.photoShare).rounded()
@@ -82,12 +97,23 @@ public struct SortingShowLayout: Hashable, Sendable {
             far.x = max(far.x, abs(loose.x))
             far.y = max(far.y, abs(loose.y))
         }
-        scatter = Spread(dx: (farthest.x * grown).rounded(.up), dy: (farthest.y * grown * Self.verticalScatter).rounded(.up))
+        let spread = farthest.y * grown * Self.verticalScatter
+        labelRoom = largeText ? 80 : 66
         // Turned by up to 10°, a photo needs 1.16 of its side.
+        let needed = Self.topRoom + (photo * 1.16 + spread.rounded(.up) * 2 + 4).rounded(.up) + Self.flightGap + layers
+            + cover + Self.labelGap + labelRoom
+        // What the pile can give: its scatter up and down, and the gap down to its minimum.
+        let most = spread.rounded(.up) * 2 + Self.flightGap - Self.minimumFlightGap
+        var squeeze = 0.0
+        if let room, room.isFinite, needed.rounded(.up) > room, most > 0 {
+            squeeze = min(1, (needed.rounded(.up) - room) / most)
+        }
+        looseness = 1 - squeeze
+        gap = (Self.flightGap - (Self.flightGap - Self.minimumFlightGap) * squeeze).rounded()
+        scatter = Spread(dx: (farthest.x * grown).rounded(.up), dy: (spread * looseness).rounded(.up))
         pileHeight = (photo * 1.16 + scatter.dy * 2 + 4).rounded(.up)
         pileCenterY = Self.topRoom + pileHeight / 2
-        labelRoom = largeText ? 80 : 66
-        let coverTop = Self.topRoom + pileHeight + Self.flightGap + layers
+        let coverTop = Self.topRoom + pileHeight + gap + layers
         coverCenterY = coverTop + cover / 2
         height = (coverTop + cover + Self.labelGap + labelRoom).rounded(.up)
     }
@@ -97,7 +123,7 @@ public struct SortingShowLayout: Hashable, Sendable {
     public func loose(_ index: Int) -> (x: Double, y: Double, angle: Double) {
         let base = Self.loosePhotos[((index % Self.loosePhotos.count) + Self.loosePhotos.count) % Self.loosePhotos.count]
         let grown = photo / Self.previousPhoto
-        return (base.x * grown, base.y * grown * Self.verticalScatter, base.angle * 0.6)
+        return (base.x * grown, base.y * grown * Self.verticalScatter * looseness, base.angle * 0.6)
     }
 }
 

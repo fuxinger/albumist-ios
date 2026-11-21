@@ -101,8 +101,8 @@ struct ResultHeadlineTests {
         #expect(headline.undoNote == .removesNewAlbums(2))
     }
 
-    /// Photos added to an album of the user's: "1 Album ergänzt", "mit 2 Fotos", and nothing
-    /// about new albums.
+    /// Photos added to an album of the user's (draft E3, "nur ergänzt"): "2 Fotos" big, "in
+    /// einem deiner Alben ergänzt" small, and nothing about new albums.
     @Test func anAlbumOfTheUsersGetsPhotos() async throws {
         let mine = CollectionSnapshot(id: "mine", title: "Italien", assetIDs: ["own"])
         let library = InMemoryPhotoLibrary(assets: Self.assets, collections: [mine])
@@ -112,10 +112,54 @@ struct ResultHeadlineTests {
 
         let headline = ResultHeadline(plan: made, inventory: after)
         #expect(headline.kind == .created)
-        #expect(headline.lead == .extendedAlbums(1))
-        #expect(headline.detail == .withPhotos(2))
+        #expect(headline.lead == .addedPhotos(2))
+        #expect(headline.detail == .inYourAlbums(1))
         #expect(!headline.showsWhereNewAlbumsAre)
         #expect(headline.undoNote == .takesOutAddedPhotos(albums: 1))
+    }
+
+    /// Draft E3, "nur ergänzt": "12 Fotos in 3 deiner Alben ergänzt", both numbers the receipt's
+    /// (photos that were already in an album are not counted, a photo in two albums once).
+    @Test func twelvePhotosInThreeOfTheUsersAlbums() async throws {
+        let japan = CollectionSnapshot(id: "japan", title: "Japan", assetIDs: ["own"])
+        let italy = CollectionSnapshot(id: "italy", title: "Italien", assetIDs: [])
+        let spain = CollectionSnapshot(id: "spain", title: "Spanien", assetIDs: [])
+        let photos = (1...12).map { AssetID("p\($0)") }
+        let tokyo = AlbumProposal(id: AlbumistID("tokyo"), kind: .trip, title: "Tokio", assetIDs: Set(photos[0..<5]))
+        let rome = AlbumProposal(id: AlbumistID("rome"), kind: .trip, title: "Rom", assetIDs: Set(photos[5..<9]))
+        // "p9" goes to "Italien" and to "Spanien": it counts once.
+        let madrid = AlbumProposal(id: AlbumistID("madrid"), kind: .trip, title: "Madrid", assetIDs: Set(photos[8..<12]))
+        let library = InMemoryPhotoLibrary(assets: Set(photos + ["own"]), collections: [japan, italy, spain])
+        let made = try await Self.make([ConfirmedProposal(proposal: tokyo, decision: .extendExisting("japan")),
+                                        ConfirmedProposal(proposal: rome, decision: .extendExisting("italy")),
+                                        ConfirmedProposal(proposal: madrid, decision: .extendExisting("spain"))], in: library)
+        let after = try await library.currentInventory()
+        let receipt = PlanReceipt(plan: made, inventory: after)
+        #expect(receipt.albumsCreated == 0 && receipt.albumsExtended == 3 && receipt.photosAdded == 12)
+
+        let headline = ResultHeadline(plan: made, inventory: after)
+        #expect(headline.lead == .addedPhotos(receipt.photosAdded))
+        #expect(headline.detail == .inYourAlbums(receipt.albumsExtended))
+        #expect(!headline.showsWhereNewAlbumsAre)
+        #expect(headline.undoNote == .takesOutAddedPhotos(albums: 3))
+    }
+
+    /// Draft E3, one album: "1 neues Album · mit 16 Fotos", the numbers of the receipt.
+    @Test func oneNewAlbumWithSixteenPhotos() async throws {
+        let photos = Set((1...16).map { AssetID("k\($0)") })
+        let kyoto = AlbumProposal(id: AlbumistID("kyoto16"), kind: .trip, title: "Kyoto, Oktober 2024", folderPath: ["Reisen"],
+                                  assetIDs: photos)
+        let library = InMemoryPhotoLibrary(assets: photos)
+        let made = try await Self.make([ConfirmedProposal(proposal: kyoto, decision: Self.new)], in: library)
+        let after = try await library.currentInventory()
+        let receipt = PlanReceipt(plan: made, inventory: after)
+        #expect(receipt.albumsCreated == 1 && receipt.photosAdded == 16)
+
+        let headline = ResultHeadline(plan: made, inventory: after)
+        #expect(headline.lead == .newAlbums(1))
+        #expect(headline.detail == .withPhotos(16))
+        #expect(headline.showsWhereNewAlbumsAre)
+        #expect(headline.undoNote == .removesNewAlbums(1))
     }
 
     /// New albums and an album of the user's in one run: the photos are not said to be in the
@@ -236,5 +280,31 @@ struct ResultHeadlineTests {
         }
         #expect(body.contains("ResultText.undoNote("), "the result card does not say what Rückgängig machen does")
         #expect(body.contains("ResultText.undoQuestion("), "the undo question does not follow the kind of plan")
+    }
+
+    /// Draft E3, "nur ergänzt": the card reads "12 Fotos in 3 deiner Alben ergänzt" ("12" big,
+    /// "Fotos" below it, the rest in the small line), in German and English, one album as "in
+    /// einem deiner Alben".
+    @Test func theCardSaysPhotosInTheUsersAlbums() throws {
+        let (_, file) = try Self.resultCard()
+        let detail = try #require(AppSource.body(of: "static func detail(", in: file))
+        #expect(detail.contains(#"case .inYourAlbums(let albums):"#), "\(detail)")
+        #expect(detail.contains(#""in \(albums) deiner Alben ergänzt""#), "\(detail)")
+        let noun = try #require(AppSource.body(of: "static func noun(", in: file))
+        #expect(noun.contains(#"case .addedPhotos(let count): count == 1 ? String(localized: "Foto") : String(localized: "Fotos")"#),
+                "\(noun)")
+        #expect(!file.contains(".extendedAlbums("), "the card still counts albums of the user's as the big number")
+
+        let url = AppSource.root.appendingPathComponent("App/Albumist/Resources/Localizable.xcstrings")
+        let catalog = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let entry = try #require((catalog["strings"] as? [String: Any])?["in %lld deiner Alben ergänzt"] as? [String: Any])
+        let localizations = try #require(entry["localizations"] as? [String: Any])
+        func plural(_ language: String) -> [String: String] {
+            let variations = (localizations[language] as? [String: Any])?["variations"] as? [String: Any]
+            let forms = variations?["plural"] as? [String: Any] ?? [:]
+            return forms.compactMapValues { (($0 as? [String: Any])?["stringUnit"] as? [String: Any])?["value"] as? String }
+        }
+        #expect(plural("de") == ["one": "in einem deiner Alben ergänzt", "other": "in %lld deiner Alben ergänzt"])
+        #expect(plural("en") == ["one": "added to one of your albums", "other": "added to %lld of your albums"])
     }
 }

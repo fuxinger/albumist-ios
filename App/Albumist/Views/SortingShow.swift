@@ -294,9 +294,12 @@ struct SortingShow: View {
         }
         await waitForEnd(started: started)
         guard !Task.isCancelled else { return }
-        // The counter ends on what really arrived (photos no longer in the library are not counted).
+        // The counter ends on what really arrived, counted as the receipt and the result count
+        // ("mit 342 Fotos"): photos no longer in the library, or in a step whose outcome is
+        // unclear, are not counted. Skipped or watched to its end, the show hands over to the
+        // same result (`onFinish`).
         if let finished = model.execution.finished {
-            let applied = finished.appliedAssets
+            let applied = finished.confirmedAddedMedia
             if applied != sorted { withAnimation(.snappy(duration: 0.3)) { sorted = applied } }
         }
         try? await Task.sleep(for: .seconds(0.5))

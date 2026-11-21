@@ -186,6 +186,7 @@ struct ProposalListView: View {
                     act(action, on: proposal)
                 }
                 .matchedTransitionSource(id: proposal.id, in: zoom)
+                .quickCreateMomentSource(proposal.id, aspectRatio: 4.0 / 3.0) // Design W2 H6: moment source
             }
         }
     }

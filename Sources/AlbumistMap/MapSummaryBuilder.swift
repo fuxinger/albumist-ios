@@ -139,6 +139,10 @@ extension MapSummary {
     /// an id (a library or a test listing one photo twice) the one first in `precedes` order
     /// stays, so the same facts in any order keep the same one.
     static func uniqueFacts(_ facts: [AssetFacts]) -> [AssetFacts] {
+        // Mostly every id comes once (the store keys facts by id): then they are all kept as they
+        // are, without copying them.
+        var seen = Set<AssetID>(minimumCapacity: facts.count)
+        guard facts.contains(where: { !seen.insert($0.id).inserted }) else { return facts }
         var kept: [AssetID: Int] = [:]
         kept.reserveCapacity(facts.count)
         var result: [AssetFacts] = []

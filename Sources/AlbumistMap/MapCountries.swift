@@ -34,10 +34,14 @@ public enum MapCountries {
             /// The clock of the first visit's photo (`clock(of:)`); "": `timeZone`.
             var firstVisitZone = ""
             var trips = Set<AlbumistID>()
+            /// The trip last inserted: photos of a trip come mostly in a run.
+            var lastTrip: AlbumistID?
 
             mutating func add(_ fact: AssetFacts) {
                 photos.insert(fact.id)
-                if let date = fact.asset.creationDate {
+                // A later photo changes nothing, whatever its clock: naming the clock only when
+                // it may decide keeps it out of the loop over every photo.
+                if let date = fact.asset.creationDate, firstVisit.map({ date <= $0 }) ?? true {
                     // The earlier photo, or of two at the same moment the one whose clock comes
                     // first by name, so the order of the facts never changes the year.
                     let zone = MapCountries.clock(of: fact)
@@ -46,15 +50,33 @@ public enum MapCountries {
                         firstVisitZone = zone
                     }
                 }
-                if let trip = fact.tripID { trips.insert(trip) }
+                if let trip = fact.tripID, trip != lastTrip {
+                    trips.insert(trip)
+                    lastTrip = trip
+                }
             }
         }
-        var tallies: [String: Tally] = [:]
+        // The tallies by code; photos come mostly in runs in one country, so the last one's tally
+        // is at hand without a look-up.
+        var tallies: [Tally] = [], codes: [String] = [], index: [String: Int] = [:]
+        var last: (code: String, tally: Int)?
         for fact in facts {
             guard let code = isoCode(fact.gpsPlace?.isoCountryCode), !airborne.contains(fact.id) else { continue }
-            tallies[code, default: Tally()].add(fact)
+            let tally: Int
+            if let last, last.code == code {
+                tally = last.tally
+            } else if let known = index[code] {
+                tally = known
+            } else {
+                tally = tallies.count
+                index[code] = tally
+                tallies.append(Tally())
+                codes.append(code)
+            }
+            tallies[tally].add(fact)
+            last = (code, tally)
         }
-        let countries = tallies.compactMap { code, tally -> MapCountry? in
+        let countries = zip(codes, tallies).compactMap { code, tally -> MapCountry? in
             guard tally.photos.count >= minimumPhotos, let firstVisit = tally.firstVisit else { return nil }
             let trips = tally.trips.sorted { a, b in
                 (tripStarts[a] ?? .distantFuture, a.rawValue) < (tripStarts[b] ?? .distantFuture, b.rawValue)
@@ -84,10 +106,15 @@ public enum MapCountries {
             var name: String
         }
         var towns = Set<Town>()
+        // Photos come mostly in runs at one town: one already counted needs no look at the set.
+        var last: Town?
         for fact in facts {
-            guard let place = fact.gpsPlace, let town = place.locality, !town.isEmpty, let country = countryKey(of: place),
-                  !airborne.contains(fact.id) else { continue }
-            towns.insert(Town(country: country, name: town))
+            guard let place = fact.gpsPlace, let town = place.locality, !town.isEmpty, let country = countryKey(of: place) else { continue }
+            if let last, last.name == town, last.country == country { continue }
+            guard !airborne.contains(fact.id) else { continue }
+            let key = Town(country: country, name: town)
+            towns.insert(key)
+            last = key
         }
         return towns.count
     }

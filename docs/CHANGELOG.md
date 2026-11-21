@@ -10,6 +10,8 @@
   VoiceOver sagt „Video, 15 Sekunden“; wo ein Foto nur schmückt (Cover, Mosaike, die Schau der ersten Analyse),
   steht keine Dauer. Beim Laden stehen ruhige, getönte Flächen statt grauer Kacheln und Kreisel; die Foto-Ansicht
   zeigt bis zum scharfen Bild die Miniatur aus dem Raster und nie ein großes unscharfes Bild.
+  Die Beispiel-Mediathek im Simulator hat jetzt ein kurzes Video; der Mac-Test spielt es ab, hält es an, schiebt
+  den Regler und schaltet den Ton an und aus.
 - 21.11. App-Icon im Ebenen-Format von iOS 26 (DS-20, noch in keinem Build): „Glass Stack“ als
   Icon-Composer-Datei, Milchglas auf der vorderen Karte, hell, dunkel, klar und getönt aus einer Datei;
   das alte Bild-Icon ist entfernt. Neue Prüfung in CI: höchstens ein farbiger Hauptknopf pro Seite

@@ -979,6 +979,7 @@ final class AlbumistFlowUITests: XCTestCase {
                 tap(button("Fertig"), "end selection")
             }
             ignoreAndUndo()
+            videoPlaysInThePhotoView()
         }
 
         // Albums. Until 20.11. this used the albums DeviceConditionUITests 05, 07 and 08 left on
@@ -1328,6 +1329,107 @@ final class AlbumistFlowUITests: XCTestCase {
             // The info sheet is up (its close button; not asserted: the callers' taps are).
             _ = UITestWait.holds(timeout: 10) { app.buttons["detail.close"].exists }
         }
+    }
+
+    /// Design wave 3 (DS-16): the demo library's one video (at home, 14 March 2021, 4 s, a day
+    /// of its own) says its length to VoiceOver in "Unsortiert" (the thumbnail's value in its
+    /// cell), plays by itself in the photo view (Reduce Motion off here), and its controls
+    /// answer: "Anhalten"/"Abspielen", the position slider, "Ton an"/"Ton aus". Audited while
+    /// paused (the tree stands still), which covers the controls' tap areas; a pull down closes
+    /// it as it closes a photo.
+    private func videoPlaysInThePhotoView() {
+        let video = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ OR value BEGINSWITH %@", "14. März 2021", "Video, ")).firstMatch
+        let tabs = app.tabBars.firstMatch
+        // The newest day first: the video of 2021 lies further down (or above, after the
+        // swipes of the steps before), in "Unsortiert" or, once a plan sorted the rest, in
+        // "Unsicher". Clear of the floating tab bar and of the navigation bar, where a tap
+        // would change the tab or land on the bar.
+        func inReach() -> Bool {
+            guard video.exists, video.isHittable else { return false }
+            if UITestWait.underNavigationBar(video, app.navigationBars.firstMatch) { return false }
+            return !tabs.exists || video.frame.maxY < tabs.frame.minY - 8
+        }
+        func found() -> Bool {
+            var swipes = 0
+            while !inReach() && swipes < 16 { app.swipeUp(); swipes += 1 }
+            swipes = 0
+            while !inReach() && swipes < 32 { app.swipeDown(); swipes += 1 }
+            return inReach()
+        }
+        var seen = found()
+        // The other filters, never the one just searched.
+        for (area, name) in [("unorganized", "Unsortiert"), ("uncertain", "Unsicher")]
+        where !seen && !UITestScreens.Unsorted.filter(app, area).isSelected {
+            if UITestScreens.Unsorted.show(app, area, named: name, "\(name) for the video") { seen = found() }
+        }
+        print(seen ? "UI_STEP_OK the video in the grid" : "UI_STEP_MISSING the video in the grid")
+        XCTAssertTrue(seen, "The demo library's video is not in the tab \"Unsortiert\"")
+        guard seen else {
+            shot("x-no-video-in-the-grid")
+            return
+        }
+        let value = (video.value as? String) ?? ""
+        print("UI_FACT video cell: label \(video.label), value \(value)")
+        XCTAssertTrue(value.hasPrefix("Video, ") && value.contains("Sekunde"), "VoiceOver does not hear the video's length in its cell: \"\(value)\"")
+        shot("14v-library-video")
+        video.tap()
+        print("UI_STEP_OK open the video")
+        // The controls are the viewer's own; pressed in place (the scrolling taps of `tap`
+        // would page or close the viewer).
+        func press(_ element: XCUIElement, _ step: String) -> Bool {
+            guard element.waitForExistence(timeout: 5) else {
+                print("UI_STEP_MISSING \(step)")
+                XCTFail("Missing: \(step)")
+                return false
+            }
+            element.tap()
+            print("UI_STEP_OK \(step)")
+            return true
+        }
+        let controls = app.descendants(matching: .any)["viewer.video"]
+        guard UITestWait.appears(controls, "the video's controls", timeout: 15) else {
+            shot("x-no-video-controls")
+            closeViewerIfOpen()
+            return
+        }
+        let play = app.buttons["viewer.video.play"]
+        // It starts by itself 0.35 s after the page comes to rest.
+        UITestWait.until("the video plays by itself", timeout: 10) { play.exists && play.label == "Anhalten" }
+        if press(play, "pause the video") {
+            UITestWait.until("the video pauses", timeout: 5) { play.label == "Abspielen" }
+        }
+        let position = app.sliders["viewer.video.position"]
+        let spoken = #/^[0-9]+ Sekunden? von [0-9]+ Sekunden?$/#
+        if UITestWait.appears(position, "the video's position", timeout: 5) {
+            let before = (position.value as? String) ?? ""
+            print("UI_FACT video position \(before)")
+            XCTAssertNotNil(before.wholeMatch(of: spoken), "The position does not say where the video is: \"\(before)\"")
+            position.adjust(toNormalizedSliderPosition: 0.5)
+            let moved = UITestWait.holds(timeout: 5) {
+                let now = (position.value as? String) ?? ""
+                return now.wholeMatch(of: spoken) != nil && (now != before || now.hasPrefix("2 "))
+            }
+            print("UI_FACT video position after the slider \((position.value as? String) ?? "")")
+            XCTAssertTrue(moved, "The slider did not move the video")
+        }
+        let sound = app.buttons["viewer.video.sound"]
+        if press(sound, "turn the video's sound on") {
+            UITestWait.until("the video's sound is on", timeout: 5) { sound.label == "Ton aus" }
+            shot("15v-video")
+            audit("video in the photo view")
+            if press(sound, "turn the video's sound off") {
+                UITestWait.until("the video's sound is off", timeout: 5) { sound.label == "Ton an" }
+            }
+        }
+        if press(play, "play the video again") {
+            UITestWait.until("the video plays again", timeout: 5) { play.label == "Anhalten" }
+        }
+        let close = app.buttons["viewer.close"]
+        app.swipeDown(velocity: .slow)
+        let closed = waitGone(close, timeout: 5)
+        print(closed ? "UI_STEP_OK pull down closes the video" : "UI_STEP_MISSING pull down closes the video")
+        XCTAssertTrue(closed, "Pulling the video down did not close it")
+        if !closed { closeViewerIfOpen() }
     }
 
     private func closeViewerIfOpen() {

@@ -1,4 +1,5 @@
 #if targetEnvironment(simulator)
+import AVFoundation
 import CoreLocation
 import ImageIO
 import Photos
@@ -9,7 +10,8 @@ import UniformTypeIdentifiers
 /// Simulator only (browser testing on Appetize, App Store screenshots): fills the empty
 /// simulator library with a realistic example library. Travel photos are crops of the
 /// simulator's own sample photos with dates and GPS of real trips; screenshots and
-/// paper documents are rendered text. Never part of a device build.
+/// paper documents are rendered text; one short video at home (`clip`). Never part of a
+/// device build.
 @MainActor
 @Observable
 final class DemoLibrary {
@@ -60,7 +62,7 @@ final class DemoLibrary {
     ]
 
     var expectedCount: Int {
-        Self.trips.reduce(0) { $0 + $1.photos } + 45 + 12 + Self.screenshots.count + Self.documents.count
+        Self.trips.reduce(0) { $0 + $1.photos } + 45 + 12 + Self.screenshots.count + Self.documents.count + 1 // the video
     }
 
 
@@ -103,7 +105,8 @@ final class DemoLibrary {
         for (i, lines) in Self.documents.enumerated() {
             specs.append(.document(lines, date: date(2024, 2 + 2 * i, 10, hour: 20, minute: 15)))
         }
-        total = specs.count
+        // The photos, then one video (`clip`).
+        total = specs.count + 1
 
         let sources = SourceImages(images: await Self.sampleImages())
         var number = 1000
@@ -132,6 +135,18 @@ final class DemoLibrary {
             }
             await Task.yield()
         }
+        // One short video at home on a day of its own (design wave 3, DS-16): the grids show its
+        // length, the photo view plays it, and the UI tests and screenshots have a video too.
+        // Written off the main actor. A simulator that cannot encode it leaves the library
+        // without it, as before.
+        if let clip = await Task.detached(operation: { await Self.clip(from: sources) }).value {
+            do {
+                try await Self.save(video: clip, date: date(2021, 3, 14, hour: 16, minute: 20), at: Self.home)
+                created += 1
+            } catch {
+                try? FileManager.default.removeItem(at: clip)
+            }
+        }
         isDone = true
         UserDefaults.standard.set(true, forKey: "demo.seeded")
         model.startAnalysis(cause: .tap)
@@ -150,6 +165,22 @@ final class DemoLibrary {
                 request.creationDate = item.date
                 request.location = item.location
             }
+        }
+    }
+
+    /// The video into the library as the camera saves one: its file moves into Photos.
+    /// Nonisolated for the same reason as `save(_:)`.
+    nonisolated static func save(video url: URL, date: Date, at spot: Spot) async throws {
+        let latitude = spot.lat, longitude = spot.lon
+        try await PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetCreationRequest.forAsset()
+            let options = PHAssetResourceCreationOptions()
+            options.originalFilename = "IMG_2000.MOV"
+            options.uniformTypeIdentifier = UTType.quickTimeMovie.identifier
+            options.shouldMoveFile = true
+            request.addResource(with: .video, fileURL: url, options: options)
+            request.creationDate = date
+            request.location = CLLocation(latitude: latitude, longitude: longitude)
         }
     }
 
@@ -243,6 +274,72 @@ final class DemoLibrary {
             let factor = output.width / rectW
             source.draw(in: CGRect(x: -x * factor, y: -y * factor, width: source.size.width * factor, height: source.size.height * factor))
         }
+    }
+
+    // MARK: Video
+
+    /// Four seconds of 1280 × 720 at 30 frames a second (H.264): a slow pan across one of the
+    /// sample photos, so it looks like a filmed moment. Written to a temporary file; nil when
+    /// the simulator cannot encode it. Runs off the main actor (`seed`).
+    nonisolated static func clip(from sources: SourceImages, seconds: Int = 4) async -> URL? {
+        guard let image = sources.images.first?.cgImage else { return nil }
+        let size = CGSize(width: 1280, height: 720)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("IMG_2000.MOV")
+        try? FileManager.default.removeItem(at: url)
+        guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mov) else { return nil }
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(size.width),
+            AVVideoHeightKey: Int(size.height),
+        ])
+        input.expectsMediaDataInRealTime = false
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+            kCVPixelBufferWidthKey as String: Int(size.width),
+            kCVPixelBufferHeightKey as String: Int(size.height),
+        ])
+        guard writer.canAdd(input) else { return nil }
+        writer.add(input)
+        guard writer.startWriting() else { return nil }
+        writer.startSession(atSourceTime: .zero)
+        let rate: Int32 = 30
+        let frames = seconds * Int(rate)
+        // The photo a little larger than the frame, so it can move from left to right.
+        let scale = max(size.width / CGFloat(image.width), size.height / CGFloat(image.height)) * 1.2
+        let drawn = CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
+        for frame in 0..<frames {
+            while !input.isReadyForMoreMediaData {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            guard let pool = adaptor.pixelBufferPool else { break }
+            var made: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &made)
+            guard let buffer = made else { break }
+            let progress = CGFloat(frame) / CGFloat(max(frames - 1, 1))
+            let place = CGRect(x: -(drawn.width - size.width) * progress, y: -(drawn.height - size.height) / 2,
+                               width: drawn.width, height: drawn.height)
+            Self.draw(image, at: place, into: buffer, size: size)
+            guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: rate)) else { break }
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        guard writer.status == .completed else {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+        return url
+    }
+
+    /// One frame of the video: the photo drawn at `place` into the frame's pixels.
+    nonisolated private static func draw(_ image: CGImage, at place: CGRect, into buffer: CVPixelBuffer, size: CGSize) {
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        guard let context = CGContext(data: CVPixelBufferGetBaseAddress(buffer), width: Int(size.width), height: Int(size.height),
+                                      bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return }
+        context.draw(image, in: place)
     }
 
     nonisolated static func fallbackImage() -> UIImage {

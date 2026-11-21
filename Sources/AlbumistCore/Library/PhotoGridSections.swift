@@ -7,10 +7,14 @@ public struct PhotoGridEntry: Identifiable, Hashable, Sendable {
     /// The capture date on the clock where the photo was taken (`LocalTime.wallClock`), read in
     /// UTC: what its name for VoiceOver says, on the day its header says. Nil without a date.
     public let wallClock: Date?
+    /// Its place among all photos of the grid in the grid's order (0 for the first photo of the
+    /// first day), across the days: what drag to select counts in (`PhotoGridDrag`).
+    public let position: Int
 
-    public init(id: AssetID, wallClock: Date?) {
+    public init(id: AssetID, wallClock: Date?, position: Int) {
         self.id = id
         self.wallClock = wallClock
+        self.position = position
     }
 }
 
@@ -34,9 +38,13 @@ public struct PhotoGridSection: Identifiable, Equatable, Sendable {
     /// A suggestion's days (`PhotoDays.group`: oldest day first, its photos in the suggestion's
     /// order) as the grid's sections, each photo with its wall clock (`wallClock`, from its facts).
     public static func sections(_ days: [PhotoDay], wallClock: (AssetID) -> Date?) -> [PhotoGridSection] {
-        days.map { day in
-            PhotoGridSection(id: day.id, title: day.title, countText: day.countText,
-                             entries: day.ids.map { PhotoGridEntry(id: $0, wallClock: wallClock($0)) })
+        var position = 0
+        return days.map { day in
+            let entries = day.ids.map { id in
+                defer { position += 1 }
+                return PhotoGridEntry(id: id, wallClock: wallClock(id), position: position)
+            }
+            return PhotoGridSection(id: day.id, title: day.title, countText: day.countText, entries: entries)
         }
     }
 }
@@ -96,31 +104,40 @@ public struct InboxDays: Equatable, Sendable {
                             shouldStop: () -> Bool = { false }) -> InboxDays? {
         if shouldStop() { return nil }
         // Photos of a day in the order given (newest first), turned around below.
-        var byDay: [Int: [PhotoGridEntry]] = [:]
-        var undated: [PhotoGridEntry] = []
+        var byDay: [Int: [(id: AssetID, wall: Date)]] = [:]
+        var undated: [AssetID] = []
         for (index, item) in items.enumerated() {
             if index % 5_000 == 4_999, shouldStop() { return nil }
             guard let date = item.date else {
-                undated.append(PhotoGridEntry(id: item.id, wallClock: nil))
+                undated.append(item.id)
                 continue
             }
             let zone = clock(of: facts[item.id], homeZone: homeZone, currentZone: currentZone)
             let wall = LocalTime.wallClock(date, in: zone)
-            byDay[LocalTime.day(wall), default: []].append(PhotoGridEntry(id: item.id, wallClock: wall))
+            byDay[LocalTime.day(wall), default: []].append((item.id, wall))
         }
         if shouldStop() { return nil }
         let today = CalendarDay(wallClock: LocalTime.wallClock(now, in: currentZone))
         var sections: [PhotoGridSection] = []
         sections.reserveCapacity(byDay.count + 1)
+        // Each photo's place in the grid's order, counted as the days are laid out.
+        var position = 0
         for number in byDay.keys.sorted(by: >) {
             guard let newestFirst = byDay[number] else { continue }
+            var entries: [PhotoGridEntry] = []
+            entries.reserveCapacity(newestFirst.count)
+            for photo in newestFirst.reversed() {
+                entries.append(PhotoGridEntry(id: photo.id, wallClock: photo.wall, position: position))
+                position += 1
+            }
             let day = CalendarDay(number: number)
             sections.append(PhotoGridSection(id: number, title: title(of: day, today: today, words: words),
-                                             countText: words.photos(newestFirst.count), entries: newestFirst.reversed()))
+                                             countText: words.photos(entries.count), entries: entries))
         }
         if !undated.isEmpty {
-            sections.append(PhotoGridSection(id: .max, title: words.noDate, countText: words.photos(undated.count),
-                                             entries: undated))
+            let entries = undated.enumerated().map { PhotoGridEntry(id: $0.element, wallClock: nil, position: position + $0.offset) }
+            sections.append(PhotoGridSection(id: .max, title: words.noDate, countText: words.photos(entries.count),
+                                             entries: entries))
         }
         return InboxDays(sections: sections)
     }

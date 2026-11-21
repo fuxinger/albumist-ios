@@ -57,6 +57,8 @@ struct InboxDaysTests {
         #expect(days.photoCount == 7)
         // Every photo once, none lost.
         #expect(Set(days.sections.flatMap(Self.ids)) == Set(library.items.map(\.id.rawValue)))
+        // Each photo knows its place in the grid's order, across the days (drag to select).
+        #expect(days.sections.flatMap(\.entries).map(\.position) == Array(0..<7))
     }
 
     @Test func theHeadersInEnglish() throws {
@@ -176,6 +178,11 @@ struct InboxDaysTests {
             #expect(days.shownDays(forPhotos: asked) == shown, "\(asked) photos")
         }
         #expect([0, 1, 2, 3, 4, 5].map(days.photos(inFirst:)) == [0, 3, 5, 9, 10, 10])
+        // The days shown hold the first positions, without a gap.
+        for shown in 0...4 {
+            let positions = days.sections.prefix(shown).flatMap(\.entries).map(\.position)
+            #expect(positions == Array(0..<days.photos(inFirst: shown)), "\(shown) days")
+        }
     }
 
     /// One day larger than a page is shown whole.
@@ -209,6 +216,7 @@ struct InboxDaysTests {
         let numbers = days.sections.dropLast().map(\.id)
         #expect(numbers == numbers.sorted(by: >), "newest day first")
         #expect(days.sections.last?.id == .max && days.sections.last?.entries.count == 200, "„Ohne Datum“ last")
+        #expect(days.sections.flatMap(\.entries).map(\.position) == Array(0..<100_000))
         #expect(days.sections.allSatisfy { section in
             let walls = section.entries.compactMap(\.wallClock).map(LocalTime.day)
             return walls.allSatisfy { $0 == section.id }
@@ -234,5 +242,6 @@ struct InboxDaysTests {
         #expect(sections.map(\.countText) == days.map(\.countText))
         #expect(sections.map { $0.entries.map(\.id) } == days.map(\.ids))
         #expect(sections.flatMap(\.entries).map(\.wallClock) == [nil, Fixture.date("2026-10-12 10:00")])
+        #expect(sections.flatMap(\.entries).map(\.position) == [0, 1])
     }
 }

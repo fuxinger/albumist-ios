@@ -1,6 +1,8 @@
 import SwiftUI
 
-/// The app's icon as the Home Screen shows it, on the welcome page and in the purchase sheet.
+/// The app's icon as the Home Screen shows it, where the app speaks of itself: on the welcome
+/// page (`OnboardingView`), in the purchase sheet (`UnlockSheet`) and, small beside the app's
+/// name, in Settings › Über (`SettingsView`). Nowhere on content (DS-11).
 /// An app cannot draw its own `AppIcon` set, so the same artwork is in the image set
 /// `AppIconImage`, light and dark. The rounded square of iOS, a hairline edge that keeps its
 /// shape on a light background, and a soft shadow that grows with the icon. Decorative: the

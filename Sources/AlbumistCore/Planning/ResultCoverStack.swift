@@ -14,9 +14,10 @@ import Foundation
 ///   (`PreviewPicker.coverCandidates`). Never a sensitive document, a screenshot or another
 ///   document (a big cover is a photo, design rule 9). Whatever order the plan lists its photos
 ///   in, the same photos in the same order.
-/// - Never an album or a photo of a personal suggestion (`personalSources`: a sensitive suggestion
-///   or one whose card hides its preview, "Vorschau ausgeblendet"), and never a photo another card
-///   tries before (a country album holds its trips): the same photo never lies on two cards.
+/// - Never an album or a photo of a personal suggestion (`personalSources`: a sensitive suggestion,
+///   one whose card hides its preview, "Vorschau ausgeblendet", or one the analysis does not know),
+///   and never a photo another card tries before (a country album holds its trips): the same
+///   photo never lies on two cards.
 /// - At most `tried` albums are tried (one whose photos are only in iCloud makes room for the
 ///   next), at most `limit` lie on the stack (`limitAtLargestText` at the accessibility text
 ///   sizes), and four lie as three (`ResultCoverFan.count`).
@@ -143,6 +144,17 @@ public struct ResultCoverStack: Hashable, Sendable {
             shown.append(Shown(card: card.id, photo: photo))
         }
         return Array(shown.prefix(ResultCoverFan.count(shown.count)))
+    }
+
+    /// The suggestions of `plan` whose albums and photos stay off the stack (`personalSources`):
+    /// the personal ones (`personal`: sensitive, or their card hides its preview) and every one
+    /// the analysis does not know (`known`). A step keeps the suggestion it came from, also in
+    /// "Fehlendes erneut versuchen" and after the analysis made its suggestions anew, so an
+    /// unknown one may have been personal; a plan made by hand has an id of its own, which the
+    /// analysis does not know either, and keeps the symbol.
+    public static func personalSources(of plan: ChangePlan, known: Set<AlbumistID>, personal: Set<AlbumistID>) -> Set<AlbumistID> {
+        let sources = Set(plan.steps.lazy.compactMap(\.sourceID))
+        return sources.subtracting(known).union(sources.intersection(personal))
     }
 
     /// The receipt's name of the album `ref` (`PlanReceipt.Album.id`).

@@ -128,15 +128,18 @@ struct MomentsSourceTests {
 
     /// Personal content never shows: a sensitive suggestion's or a hidden preview's photo is
     /// neither on the stack nor flies. What the result knows of the suggestions is taken as the
-    /// plan starts; a suggestion the analysis no longer has is taken as personal.
+    /// plan starts; a suggestion the analysis does not know is taken as personal, at the start as
+    /// later (`ResultCoverStack.personalSources`, review E of design wave 2, finding 10).
     @Test func personalContentNeverShows() throws {
         let model = try Self.code(Self.model)
         let taken = try Self.body(["func resultCoverSources("], in: model)
         #expect(taken.contains("proposal.isSensitive || previewHidden(for: proposal)"), "\(taken)")
-        #expect(taken.contains("taken.personal.insert(proposal.id)"), "\(taken)")
+        #expect(taken.contains("known.insert(proposal.id)") && taken.contains("personal.insert(proposal.id)"), "\(taken)")
+        #expect(taken.contains("ResultCoverStack.personalSources(of: plan, known: known, personal: personal)"), "\(taken)")
         let stack = try Self.body(["func resultCoverStack("], in: model)
         #expect(stack.contains("taken.plan == plan.id"), "\(stack)")
-        #expect(stack.contains(".subtracting(known)") && stack.contains("sources.personal.formUnion("), "\(stack)")
+        #expect(stack.contains("resultCoverSources(for: plan)"), "\(stack)")
+        #expect(!stack.contains(".subtracting("), "the stack decides personal sources a second way: \(stack)")
         #expect(stack.contains("personalSources: sources.personal"), "\(stack)")
         let layer = try Self.code(Self.layer)
         let photo = try Self.body(["final class QuickCreateMomentSources", "func photo(for"], in: layer)

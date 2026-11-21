@@ -18,18 +18,15 @@ final class FirstAnalysisMomentStore {
 
     private static let key = "analysis.firstFinishMoment"
 
-    /// `-AlbumistUITestFirstFinishMoment`: a UI test asks for the moment and finds it, held
-    /// `FirstAnalysisMoment.Timing.heldForUITest`. Other UI runs never show it: the start page
-    /// would change under the audits that follow the first analysis (UI run 43774578089 ended
-    /// test 1 on a page that changed during its audit). Always false in the shipped app.
-    static let askedByUITest = UITestSupport.isRunning && ProcessInfo.processInfo.arguments.contains("-AlbumistUITestFirstFinishMoment")
-
     private(set) var moment: FirstAnalysisMoment
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
     private init() {
-        let kept = UserDefaults.standard.string(forKey: Self.key).flatMap(FirstAnalysisMoment.Kept.init(rawValue:))
-        moment = FirstAnalysisMoment(kept: kept, completedBefore: AnalysisMarker.completedOnce)
+        // A UI test that starts the first 100 % afresh (`UITestSupport.startsFirstFinishOwed`,
+        // always false in the shipped app) reads nothing kept and no analysis completed before.
+        let fresh = UITestSupport.startsFirstFinishOwed
+        let kept = fresh ? nil : UserDefaults.standard.string(forKey: Self.key).flatMap(FirstAnalysisMoment.Kept.init(rawValue:))
+        moment = FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce)
         keep()
         let center = NotificationCenter.default
         observers = [
@@ -46,6 +43,9 @@ final class FirstAnalysisMomentStore {
     /// an analysis was completed before (the load resets it for a restored backup or a new
     /// database, and an analysis completed before this version spends the moment).
     func launched() {
+        // Started afresh by a UI test: an analysis completed before does not count (its database
+        // is rebuilt next, which resets the marker).
+        guard !UITestSupport.startsFirstFinishOwed else { return }
         cameToFront()
     }
 
@@ -59,7 +59,7 @@ final class FirstAnalysisMomentStore {
     /// The card with "Analyse fertig" is there: true once, while due and on screen; it plays
     /// from now.
     func claim(onScreen: Bool) -> Bool {
-        guard moment.dueSince != nil, !UITestSupport.isRunning || Self.askedByUITest else { return false }
+        guard moment.dueSince != nil, !UITestSupport.isRunning || UITestSupport.showsFirstFinishMoment else { return false }
         return moment.claim(at: Date(), onScreen: onScreen)
     }
 

@@ -17,6 +17,8 @@ struct FirstAnalysisMomentSourceTests {
     static let progressCard = "App/Albumist/Views/AnalysisProgressCard.swift"
     static let marker = "App/Albumist/Platform/AnalysisMarker.swift"
     static let mark = "// Design W3 H13"
+    static let switches = "App/Albumist/Platform/UITestSwitches.swift"
+    static let uiTest = "App/AlbumistUITests/ShowAndHandwritingUITests.swift"
 
     static func code(_ path: String) throws -> String {
         AppSource.code(try AppSource.read(path), keepStrings: true)
@@ -68,7 +70,7 @@ struct FirstAnalysisMomentSourceTests {
         #expect(type.contains("private static let key = \"analysis.firstFinishMoment\""))
         #expect(type.contains("UserDefaults.standard.set(moment.kept.rawValue, forKey: Self.key)"))
         let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
-        #expect(initializer.contains("FirstAnalysisMoment(kept: kept, completedBefore: AnalysisMarker.completedOnce)"), "\(initializer)")
+        #expect(initializer.contains("FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce)"), "\(initializer)")
         #expect(initializer.contains("UIApplication.didEnterBackgroundNotification") && initializer.contains("self?.leftScreen()"))
         #expect(initializer.contains("UIApplication.willEnterForegroundNotification") && initializer.contains("self?.cameToFront()"))
         let front = try Self.body(["final class FirstAnalysisMomentStore", "private func cameToFront()"], in: store)
@@ -139,15 +141,55 @@ struct FirstAnalysisMomentSourceTests {
 
     /// UI runs show it only when a test asks for it (`-AlbumistUITestFirstFinishMoment`), held
     /// long enough to be found; otherwise the start page would change under the audits after
-    /// the first analysis. Never so in the shipped app (`UITestSupport.isRunning` is false there).
+    /// the first analysis. A test may also start it afresh (`-AlbumistUITestFirstFinishOwed`):
+    /// the simulators of the UI groups are not fresh. Never so in the shipped app.
     @Test func uiRunsShowItOnlyWhenATestAsks() throws {
         let store = try Self.code(Self.store)
-        #expect(store.contains("static let askedByUITest = UITestSupport.isRunning && ProcessInfo.processInfo.arguments.contains(\"-AlbumistUITestFirstFinishMoment\")"))
         let claim = try Self.body(["final class FirstAnalysisMomentStore", "func claim(onScreen: Bool)"], in: store)
-        #expect(claim.contains("guard moment.dueSince != nil, !UITestSupport.isRunning || Self.askedByUITest else { return false }"), "\(claim)")
+        #expect(claim.contains("guard moment.dueSince != nil, !UITestSupport.isRunning || UITestSupport.showsFirstFinishMoment else { return false }"), "\(claim)")
         let ring = try Self.code(Self.ringCard)
         let play = try Self.body(["struct FirstAnalysisMomentHeader", "private func play() async"], in: ring)
-        #expect(play.contains("let hold = FirstAnalysisMomentStore.askedByUITest ? T.heldForUITest : T.hold"), "\(play)")
+        #expect(play.contains("let hold = UITestSupport.showsFirstFinishMoment ? T.heldForUITest : T.hold"), "\(play)")
+        // Afresh: nothing kept is read, no analysis completed before counts, and the launch does
+        // not look at the marker (the test rebuilds the database, which resets it right after).
+        let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
+        #expect(initializer.contains("let fresh = UITestSupport.startsFirstFinishOwed"), "\(initializer)")
+        #expect(initializer.contains("let kept = fresh ? nil : UserDefaults.standard.string(forKey: Self.key)"), "\(initializer)")
+        let launched = try Self.body(["final class FirstAnalysisMomentStore", "func launched()"], in: store)
+        #expect(launched.contains("guard !UITestSupport.startsFirstFinishOwed else { return }"), "\(launched)")
+        // The UI test that asks for both, and finds the moment by its identifier.
+        let test = try AppSource.read(Self.uiTest)
+        for asked in ["\"-AlbumistUITestFirstFinishMoment\"", "\"-AlbumistUITestFirstFinishOwed\"",
+                      "\"-AlbumistUITestRebuildDatabase\"", "\"analysis.firstFinish\""] {
+            #expect(test.contains(asked), "the UI test does not use \(asked)")
+        }
+    }
+
+    /// The switches of DS-08 live with the other UI-test switches (`UITestSwitches.swift`), read
+    /// through `flag`, which is false unless a debug build was started by the UI tests
+    /// (`UITestSupport.isRunning` is false in a release build), and nothing else in the App reads
+    /// them than the store and the ring card.
+    @Test func theFirstFinishSwitchesAreInertOutsideUIRuns() throws {
+        let switches = try Self.code(Self.switches)
+        #expect(switches.contains("static let showsFirstFinishMoment = flag(\"-AlbumistUITestFirstFinishMoment\")"))
+        #expect(switches.contains("static let startsFirstFinishOwed = flag(\"-AlbumistUITestFirstFinishOwed\")"))
+        let flag = try Self.body(["extension UITestSupport", "private static func flag(_ name: String) -> Bool"], in: switches)
+        #expect(flag.contains("isRunning && ProcessInfo.processInfo.arguments.contains(name)"), "\(flag)")
+        let support = try Self.code("App/Albumist/Platform/UITestSupport.swift")
+        let running = try Self.body(["enum UITestSupport", "static let isRunning: Bool ="], in: support)
+        let release = try #require(running.range(of: "#else"), "\(running)")
+        #expect(running[release.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("false"), "\(running)")
+        // Read by the store (the claim and the fresh start) and the ring card (the hold) only.
+        var readers: [String: Int] = [:]
+        for path in AppSource.swiftFiles(under: "App/Albumist") {
+            let code = try Self.code(path)
+            let count = code.components(separatedBy: "UITestSupport.showsFirstFinishMoment").count - 1
+                + code.components(separatedBy: "UITestSupport.startsFirstFinishOwed").count - 1
+            if count > 0 { readers[path] = count }
+        }
+        #expect(readers == [Self.store: 3, Self.ringCard: 1], "\(readers)")
+        // No other trace of the old flag in the store.
+        #expect(!(try Self.code(Self.store)).contains("ProcessInfo.processInfo.arguments"))
     }
 
     /// What VoiceOver says, in German and English.

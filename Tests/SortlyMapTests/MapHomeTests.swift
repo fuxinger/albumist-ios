@@ -227,9 +227,18 @@ struct MapHomeTests {
         let facts = hamburgTime + regensburgTime + iceland.facts
         let home = try #require(MapHome.homes(for: [iceland.trip], facts: facts, settings: HomeSettings(former: [Self.formerHamburg]), detected: nil)[iceland.trip.id])
         #expect(GeoMath.distance(home.coordinate, Places.regensburg) < 10_000)
-        // Left to the detection all along, the same photos put it in Hamburg: the rule decides.
+        // Left to the detection all along, the months before it are mostly Hamburg's, but the
+        // weeks before it (`moveLookback`) tell the move: Regensburg too.
         let automatic = try #require(MapHome.homes(for: [iceland.trip], facts: facts, settings: HomeSettings(), detected: nil)[iceland.trip.id])
-        #expect(GeoMath.distance(automatic.coordinate, Self.hamburg) < 10_000)
+        #expect(GeoMath.distance(automatic.coordinate, Places.regensburg) < 10_000)
+        // Four days after the move only the user's word tells it, the weeks before being Hamburg's
+        // as well: the rule decides.
+        let soon = Self.trip("soon", at: Places.reykjavik, day: "2019-01-05", country: "IS")
+        let soonFacts = hamburgTime + regensburgTime + soon.facts
+        let told = try #require(MapHome.homes(for: [soon.trip], facts: soonFacts, settings: HomeSettings(former: [Self.formerHamburg]), detected: nil)[soon.trip.id])
+        #expect(GeoMath.distance(told.coordinate, Places.regensburg) < 10_000)
+        let guessed = try #require(MapHome.homes(for: [soon.trip], facts: soonFacts, settings: HomeSettings(), detected: nil)[soon.trip.id])
+        #expect(GeoMath.distance(guessed.coordinate, Self.hamburg) < 10_000)
     }
 
     /// "Kein Zuhause": no home for any trip and no house; a former home the user entered still

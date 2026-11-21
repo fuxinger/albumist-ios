@@ -211,25 +211,25 @@ extension WorldNumbers {
     /// than in `previous`, the numbers shown before (concept §5: "Zahlen springen nicht zurück,
     /// solange die Analyse läuft"):
     /// - counts and sums keep the larger value: countries, states, world share, each continent's
-    ///   visited states, cities, trips, both distances (the Earth comparison follows "unterwegs"),
-    ///   the longest trip's days (with its trip) and the day with the most photos;
+    ///   visited states, cities, trips, both distances (the Earth comparison follows "unterwegs");
     /// - a record kind missing now keeps the previous record; farthest and highest keep the larger
     ///   value, northernmost and easternmost the larger, southernmost and westernmost the smaller;
-    /// - the favourite country keeps the previous one while it has more trips (then more photos)
-    ///   or there is none now, so its "3 Reisen" do not drop either;
     /// - "seit 2011" keeps the earlier year (`firstTripYear`, `firstCountryYear`).
     /// On equal values the current one stands. What is no number stays current: `year`,
     /// `newThisYear` (a country can rightly stop being new when an older visit turns up) and the
     /// totals per continent.
     ///
-    /// Something kept must still lead somewhere: with `trips` (the summary's trips now), a
-    /// previous record is kept only while its trip is there with a place at its index, the
-    /// previous longest trip and day with the most photos only while their trip is there; with
-    /// `countries`, the previous favourite only while its country is there. The running analysis
-    /// splits and merges trips; a record pointing to a trip that is gone would open nothing, so
-    /// the current one stands then, even if smaller. Only the numbers are held: lists (trips,
-    /// countries, years, pins) are always the current ones, and share images take their numbers
-    /// from those lists (`MapShare`), so an image never says "3 Länder" over two flags.
+    /// What is kept must still be true of what it leads to. With `trips` (the summary's trips
+    /// now), a previous record is kept only while its trip still has a place where the record's
+    /// place was (`relocated`), and then leads to that place: the running analysis numbers a
+    /// trip's places anew as photos arrive, and splits and merges trips, so its old index may name
+    /// another place. The longest trip, the day with the most photos (with `trips`) and the
+    /// favourite country (with `countries`) are then always the current ones: a kept one would
+    /// name a trip, a day or a country that no longer has its number ("14 Tage" opening a trip of
+    /// 6 days), and they only drop when the analysis splits a trip or moves its photos. Without
+    /// them (the lists are not known), those are held like the counts. Lists (trips, countries,
+    /// years, pins) are always the current ones, and share images take their numbers from those
+    /// lists (`MapShare`), so an image never says "3 Länder" over two flags.
     ///
     /// Not preliminary (the analysis is complete), or without `previous`: `self`, unchanged.
     /// After deleting photos, correcting a trip or changing home, numbers may go down, and that
@@ -237,18 +237,6 @@ extension WorldNumbers {
     public func holdingHighs(over previous: WorldNumbers?, trips shownTrips: [MapTrip]? = nil,
                              countries shownCountries: [MapCountry]? = nil) -> WorldNumbers {
         guard isPreliminary, let previous else { return self }
-        // Places per trip id, for checking that a kept record or trip still exists.
-        let placeCounts: [String: Int]? = shownTrips.map { trips in
-            Dictionary(trips.map { ($0.id.rawValue, $0.geometry.places.count) }, uniquingKeysWith: { first, _ in first })
-        }
-        func exists(_ trip: SortlyID?) -> Bool {
-            guard let placeCounts else { return true }
-            return trip.map { placeCounts[$0.rawValue] != nil } ?? false
-        }
-        func leadsSomewhere(_ record: MapRecord) -> Bool {
-            guard let placeCounts else { return true }
-            return (0..<(placeCounts[record.tripID.rawValue] ?? 0)).contains(record.placeIndex)
-        }
         var held = self
         held.countries = max(countries, previous.countries)
         held.states = max(states, previous.states)
@@ -268,27 +256,48 @@ extension WorldNumbers {
         held.metersOnSite = Self.larger(metersOnSite, previous.metersOnSite)
         held.earth = EarthComparison(meters: held.metersTraveled)
         held.records = MapRecord.Kind.allCases.compactMap { kind in
-            let before = previous.record(kind).flatMap { leadsSomewhere($0) ? $0 : nil }
+            var before = previous.record(kind)
+            if let shownTrips, let record = before { before = Self.relocated(record, in: shownTrips) }
             switch (record(kind), before) {
             case let (now?, before?): return RecordBoard.beats(before.value, now.value, kind: kind) ? before : now
             case let (now, before): return now ?? before
             }
         }
-        if let days = previous.longestTripDays, days > (longestTripDays ?? .min), exists(previous.longestTripID) {
-            held.longestTripID = previous.longestTripID
-            held.longestTripDays = days
+        if shownTrips == nil {
+            if let days = previous.longestTripDays, days > (longestTripDays ?? .min) {
+                held.longestTripID = previous.longestTripID
+                held.longestTripDays = days
+            }
+            if let before = previous.mostPhotosInADay, before.photoCount > (mostPhotosInADay?.photoCount ?? .min) {
+                held.mostPhotosInADay = before
+            }
         }
-        if let before = previous.mostPhotosInADay, before.photoCount > (mostPhotosInADay?.photoCount ?? .min), exists(before.tripID) {
-            held.mostPhotosInADay = before
-        }
-        let favoriteStillThere = { (code: String) in
-            shownCountries.map { $0.contains { MapCountries.isoCode($0.code) == MapCountries.isoCode(code) } } ?? true
-        }
-        if let before = previous.favoriteCountry, favoriteStillThere(before.code),
+        if shownCountries == nil, let before = previous.favoriteCountry,
            favoriteCountry.map({ (before.tripCount, before.photoCount) > ($0.tripCount, $0.photoCount) }) ?? true {
             held.favoriteCountry = before
         }
         return held
+    }
+
+    /// `record` leading to the place of its trip in `trips` where its place was: the nearest place
+    /// within `TripGeometry.placeRadiusMeters` of the record's point, ties to the lower index, with
+    /// that place's index, name, point and day (the record's day if the place still has photos on
+    /// it, else its first); its value stays. Nil when its trip is gone or has no place there.
+    static func relocated(_ record: MapRecord, in trips: [MapTrip]) -> MapRecord? {
+        guard let trip = trips.first(where: { $0.id == record.tripID }) else { return nil }
+        var nearest: (index: Int, meters: Double)?
+        for (index, place) in trip.geometry.places.enumerated() {
+            let meters = GeoMath.distance(place.coordinate, record.coordinate)
+            if meters <= TripGeometry.placeRadiusMeters && meters < (nearest?.meters ?? .infinity) { nearest = (index, meters) }
+        }
+        guard let nearest else { return nil }
+        let place = trip.geometry.places[nearest.index]
+        var relocated = record
+        relocated.placeIndex = nearest.index
+        relocated.placeName = place.name
+        relocated.coordinate = place.coordinate
+        relocated.day = place.days.contains(record.day) ? record.day : (place.days.min() ?? record.day)
+        return relocated
     }
 
     /// The larger of two values, a broken one (NaN) never winning.

@@ -7,7 +7,8 @@ import SortlyTestSupport
 /// The map summary of a 50,000-photo library (concept §9: "Zusammenfassung für 50.000 Fotos unter
 /// 300 ms"). Runs in every Linux test run; the bound there is loose because debug builds on CI
 /// are several times slower than the app, and the real figure is printed (MAP_PERF) and kept in
-/// the test plan.
+/// the test plan. A release build (`swift test -c release -Xswiftc -enable-testing`) checks the
+/// 300 ms themselves.
 @Suite("Map summary speed")
 struct MapSummaryLoadTests {
     static func ms(_ d: Duration) -> Double { Double(d.components.seconds) * 1_000 + Double(d.components.attoseconds) / 1e15 }
@@ -62,5 +63,9 @@ struct MapSummaryLoadTests {
         // Debug build on a shared CI machine: the bound catches a quadratic step, the printed
         // figure is the one that matters (the app runs a release build).
         #expect(Self.ms(best) < 3_000)
+        #if !DEBUG
+        // A release build, as the app runs: the concept's bound itself.
+        #expect(Self.ms(best) < 300, "release build: \(Self.ms(best)) ms")
+        #endif
     }
 }

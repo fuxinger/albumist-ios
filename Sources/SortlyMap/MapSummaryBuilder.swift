@@ -55,9 +55,19 @@ extension MapSummary {
         // Photos taken in flight count for nothing: no place, no country, no record.
         let airborne = AirborneFilter.airborne(facts.map(\.asset), altitudes: input.altitudes)
 
+        // Today's home exactly, in memory only: a trip's photo nearer to it than the house's
+        // rounding is drawn as little as one taken at home (a visit to the flat before moving in
+        // would otherwise put a pin on it, as exact as the house is not).
+        let homeToday = exactHomeToday(input)
         var membersByTrip: [SortlyID: [AssetFacts]] = [:]
         for fact in facts {
-            if let trip = fact.tripID { membersByTrip[trip, default: []].append(fact) }
+            guard let trip = fact.tripID else { continue }
+            var member = fact
+            if !member.atHome, let homeToday, let location = member.asset.usableLocation,
+               GeoMath.distance(location, homeToday) <= MapHome.maximumRoundingMeters {
+                member.atHome = true
+            }
+            membersByTrip[trip, default: []].append(member)
         }
         let homes = MapHome.homes(for: input.trips, facts: facts, settings: input.homeSettings, detected: input.detectedHome)
 
@@ -104,11 +114,25 @@ extension MapSummary {
 
     /// A photo the map draws (as `TripGeometry.build` takes them): a usable location and a date,
     /// not taken in flight, no screenshot, and not taken at home (`AssetFacts.atHome`: the map
-    /// shows trips, and a trip's photos at home would put a place on the exact home). A trip
-    /// without one has no place on the map, even before its places are named.
+    /// shows trips, and a trip's photos at home would put a place on the exact home; `build`
+    /// also marks so a trip's photos within `MapHome.maximumRoundingMeters` of today's home). A
+    /// trip without one has no place on the map, even before its places are named.
     static func isDrawn(_ fact: AssetFacts, airborne: Set<AssetID>) -> Bool {
         fact.asset.usableLocation != nil && fact.asset.creationDate != nil && !fact.asset.isScreenshotLike && !fact.atHome
             && !airborne.contains(fact.id)
+    }
+
+    /// Today's home exactly, as the house is worked out before rounding (`MapHome.current`): the
+    /// home the user chose, else the detected one; none for "Kein Zuhause" or one the library
+    /// could not have. Only ever in memory.
+    static func exactHomeToday(_ input: MapInput) -> GeoCoordinate? {
+        let center: GeoCoordinate?
+        switch input.homeSettings.home(at: input.now) {
+        case .none: center = nil
+        case .chosen(let place): center = place.center
+        case .detected: center = input.detectedHome?.center
+        }
+        return center.flatMap { $0.isPlausible ? $0 : nil }
     }
 
     /// `facts` with every asset id once, at the place where the id first comes. Of facts sharing
@@ -130,13 +154,23 @@ extension MapSummary {
         return result
     }
 
-    /// A total order on what the map reads of a fact, to pick one of two facts with the same id
-    /// whatever order they came in: one taken at home first (if any copy says so, the photo is
-    /// never drawn: privacy first, as `TripGeometry.build` picks), then trip, date, location,
-    /// place and clock. Facts equal in all of it give the same map, so which of them stays does
-    /// not matter.
+    /// A total order on facts sharing an id (two states of the analysis), to pick one whatever
+    /// order they came in:
+    /// - one taken at home first: if any copy says so, the photo is never drawn (privacy first,
+    ///   as `TripGeometry.build` picks);
+    /// - then the one most careful about showing it (`PreviewRank`: a sensitive document, then a
+    ///   document, then an analysed photo, then one not analysed yet), so a copy the analysis
+    ///   took for a bank card never loses to its twin not looked at yet, and an analysed photo
+    ///   wins over its not yet analysed twin;
+    /// - then trip, date, location, place and clock;
+    /// - then everything else the map reads of it: what the trip geometry reads
+    ///   (`TripGeometryBuilder.duplicateKey`), the location's stated accuracy and where the place
+    ///   came from;
+    /// - last, the whole fact as text, so facts that tie on all of it are equal.
     static func precedes(_ a: AssetFacts, _ b: AssetFacts) -> Bool {
         if a.atHome != b.atHome { return a.atHome }
+        let (showA, showB) = (showingOrder(PreviewRank(a)), showingOrder(PreviewRank(b)))
+        if showA != showB { return showA < showB }
         // In two parts: the standard library compares tuples of up to six elements.
         func when(_ fact: AssetFacts) -> (String, Double, Double, Double) {
             let location = fact.asset.usableLocation
@@ -148,6 +182,25 @@ extension MapSummary {
         }
         let (whenA, whenB) = (when(a), when(b))
         if whenA != whenB { return whenA < whenB }
-        return what(a) < what(b)
+        let (whatA, whatB) = (what(a), what(b))
+        if whatA != whatB { return whatA < whatB }
+        let (keyA, keyB) = (TripGeometryBuilder.duplicateKey(a), TripGeometryBuilder.duplicateKey(b))
+        if keyA != keyB { return keyA.lexicographicallyPrecedes(keyB) }
+        func rest(_ fact: AssetFacts) -> (Double, String) {
+            (fact.asset.locationAccuracy ?? -1, fact.placeSource?.rawValue ?? "")
+        }
+        let (restA, restB) = (rest(a), rest(b))
+        if restA != restB { return restA < restB }
+        return String(describing: a) < String(describing: b)
+    }
+
+    /// `PreviewRank` from the most careful about showing a photo to the least.
+    static func showingOrder(_ rank: PreviewRank) -> Int {
+        switch rank {
+        case .sensitive: 0
+        case .document: 1
+        case .photo: 2
+        case .unknown: 3
+        }
     }
 }

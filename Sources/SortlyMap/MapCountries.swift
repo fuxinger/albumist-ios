@@ -20,9 +20,10 @@ public enum MapCountries {
     ///   almost always dates a photo, so this is a damaged library, where showing less is safer
     ///   than showing a made-up year.)
     /// - `firstVisitYear`: the Gregorian year of `firstVisit` on the clock where that photo was
-    ///   taken (`AssetFacts.timeZone`, else `timeZone`, the device's), as the app's albums and
-    ///   every year of the map count it (`MapYears.compute`): a first visit on New Year's Eve in
-    ///   New York is one of the old year wherever the iPhone is.
+    ///   taken (`AssetFacts.timeZone`, else the zone of its GPS place, else `timeZone`, the
+    ///   device's), as the app's albums, a trip's days (`TripGeometry.build`) and every year of
+    ///   the map count it (`MapYears.compute`): a first visit on New Year's Eve in New York is one
+    ///   of the old year wherever the iPhone is.
     /// - `tripIDs`: the trips (`AssetFacts.tripID`) with at least one counted photo there, ordered
     ///   by their start in `tripStarts`, then id; a trip missing from `tripStarts` comes last.
     public static func compute(facts: [AssetFacts], airborne: Set<AssetID>, tripStarts: [SortlyID: Date],
@@ -30,8 +31,8 @@ public enum MapCountries {
         struct Tally {
             var photos = Set<AssetID>()
             var firstVisit: Date?
-            /// The clock of the first visit's photo; `nil`: `timeZone`.
-            var firstVisitZone: TimeZone?
+            /// The clock of the first visit's photo (`clock(of:)`); "": `timeZone`.
+            var firstVisitZone = ""
             var trips = Set<SortlyID>()
 
             mutating func add(_ fact: AssetFacts) {
@@ -39,10 +40,10 @@ public enum MapCountries {
                 if let date = fact.asset.creationDate {
                     // The earlier photo, or of two at the same moment the one whose clock comes
                     // first by name, so the order of the facts never changes the year.
-                    let zone = fact.timeZone?.identifier ?? ""
-                    if firstVisit.map({ (date, zone) < ($0, firstVisitZone?.identifier ?? "") }) ?? true {
+                    let zone = MapCountries.clock(of: fact)
+                    if firstVisit.map({ (date, zone) < ($0, firstVisitZone) }) ?? true {
                         firstVisit = date
-                        firstVisitZone = fact.timeZone
+                        firstVisitZone = zone
                     }
                 }
                 if let trip = fact.tripID { trips.insert(trip) }
@@ -58,12 +59,19 @@ public enum MapCountries {
             let trips = tally.trips.sorted { a, b in
                 (tripStarts[a] ?? .distantFuture, a.rawValue) < (tripStarts[b] ?? .distantFuture, b.rawValue)
             }
-            return MapCountry(code: code, firstVisit: firstVisit, firstVisitYear: LocalDay(firstVisit, timeZone: tally.firstVisitZone ?? timeZone).year,
+            let clock = TimeZone(identifier: tally.firstVisitZone) ?? timeZone
+            return MapCountry(code: code, firstVisit: firstVisit, firstVisitYear: LocalDay(firstVisit, timeZone: clock).year,
                               photoCount: tally.photos.count, tripIDs: trips,
                               isState: WorldStates.isState(code), continent: Continent.forCountryCode(code),
                               region: WorldRegion.of(countryCode: code))
         }
         return inFirstVisitOrder(countries)
+    }
+
+    /// The identifier of the clock a photo was taken on: its own (`AssetFacts.timeZone`), else
+    /// its GPS place's zone, as `TripGeometry.build` dates its day; "" when neither is known.
+    static func clock(of fact: AssetFacts) -> String {
+        fact.timeZone?.identifier ?? fact.gpsPlace?.timeZoneIdentifier ?? ""
     }
 
     /// Distinct towns, as the atlas counts them: a town is its country key and its name, so

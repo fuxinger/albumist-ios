@@ -19,9 +19,14 @@ public enum MapHome {
     /// (`MapShare.nearHomeMeters`).
     public static let maximumRoundingMeters = 7_250.0
     /// How far before a trip (or after it) the photos at home tell where home was: the trip
-    /// detection's window for the home of a time (`TripDetector.Configuration.homeWindowDays`),
-    /// so the map's home of a trip is the one the detection judged the trip by.
+    /// detection's window for the home of a time (`TripDetector.Configuration.homeWindowDays`).
+    /// The detection may count several homes at one time; the map takes the one most of these
+    /// photos were at, or the newest weeks' after a move (`moveLookback`).
     public static let lookback: TimeInterval = TimeInterval(TripDetector.Configuration().homeWindowDays) * 86_400
+    /// The newest weeks of the `lookback`: where the photos at home of these were tells a move in
+    /// them (`Resolver.detected(from:to:)`). A trip a month after a move would otherwise start at
+    /// the old home, whose photos still fill most of the months before it.
+    public static let moveLookback: TimeInterval = 30 * 86_400
 
     /// Photos at home within this distance of a home tell its country: the trip detection's home
     /// radius, inside which photos count as at home (`TripDetector.Configuration.homeRadiusMeters`).
@@ -94,15 +99,17 @@ public enum MapHome {
     /// - a chosen home (current or former): its centre; its country from the place the user
     ///   chose, else from the photos at home near it;
     /// - "Kein Zuhause": no entry;
-    /// - left to the detection: where the photos at home of the `lookback` before the trip's
-    ///   start were (`GeoMath.dayPoint` of them in time order: the place of most of them, a real
-    ///   photo location); none there: those of the `lookback` after its end. Only photos on dates
-    ///   the user also left to the detection count, so a former home the user entered never
-    ///   leaks into the months after it. With no photo at home in either window, `detected`
-    ///   (Albumist's home at the end of the library) when it already held at the trip's start
-    ///   (`since` nil or not later); otherwise no entry. The country: the most common one among
-    ///   the photos used (ties: the smaller code); for `detected`, among the photos at home near
-    ///   it.
+    /// - left to the detection: `detected` (Albumist's home at the end of the library) when the
+    ///   trip starts on or after the move there (`since`); else where the photos at home of the
+    ///   `lookback` before the trip's start were (`GeoMath.dayPoint` of them in time order: the
+    ///   place of most of them, a real photo location), or of its newest `moveLookback` alone
+    ///   when those were more than `countryRadiusMeters` away from that (a move in those weeks);
+    ///   none there: those of the `lookback` after its end. Only photos on dates the user also
+    ///   left to the detection count, so a former home the user entered never leaks into the
+    ///   months after it. With no photo at home in either window, `detected` when it already held
+    ///   at the trip's start (`since` nil or not later); otherwise no entry. The country: the most
+    ///   common one among the photos used (ties: the smaller code); for `detected`, among the
+    ///   photos at home near it.
     ///
     /// Photos at home are the trip detection's (`AssetFacts.atHome`, with a usable location and a
     /// date). Linear: they are sorted once and each trip's windows are found by binary search;
@@ -184,7 +191,18 @@ public enum MapHome {
 
         /// The detected home of a trip from `start` to `end`.
         mutating func detected(from start: Date, to end: Date) -> RoundedHome? {
+            // After the move to today's home, as the detection dates it: that home.
+            if let since = detected?.since, since <= start, let home = detectedHome() { return home }
             let before = evidence.window(from: start.addingTimeInterval(-MapHome.lookback), before: start)
+            if !before.isEmpty, let months = evidence.home(in: before) {
+                // A move in the newest weeks: those tell the home, not the months mostly before it.
+                let recent = evidence.window(from: start.addingTimeInterval(-MapHome.moveLookback), before: start)
+                if recent.lowerBound > before.lowerBound, let weeks = evidence.home(in: recent),
+                   GeoMath.distance(weeks.coordinate, months.coordinate) > MapHome.countryRadiusMeters {
+                    return weeks
+                }
+                return months
+            }
             let window = before.isEmpty ? evidence.window(after: end, through: end.addingTimeInterval(MapHome.lookback)) : before
             if let home = evidence.home(in: window) { return home }
             guard let detected, detected.since.map({ $0 <= start }) ?? true else { return nil }

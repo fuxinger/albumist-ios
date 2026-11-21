@@ -9,7 +9,9 @@ import SortlyCore
 // Privacy by construction (concept §8):
 // - Home is only ever kept rounded to `MapHome.gridMeters` (`RoundedHome`).
 // - Everyday photos at home never become a pin, a place or a record: every pin, place, route
-//   point and record comes from the photos of a trip.
+//   point and record comes from the photos of a trip, and of those none taken at home
+//   (`AssetFacts.atHome`, the home of their date) or within `MapHome.maximumRoundingMeters` of
+//   today's home (`MapSummary.isDrawn`).
 // - The share data (`ShareWorld`, `SharePassport`, `ShareYear`, `SharePostcard`) has no field for
 //   home at all; arcs there start in the middle of the home country, never at home.
 // - The diagnostics (`MapDiagnostics`) hold counts only, no coordinates.

@@ -35,11 +35,23 @@ extension AppModel {
 
     /// The photos a cover of `proposal` tries, best first (`PreviewPicker.coverCandidates`): its
     /// own cover, then favourites (`favorites`), then the newest analysed photos; never a
-    /// screenshot, a document or a sensitive photo, and none it no longer holds.
+    /// screenshot, a document or a sensitive photo, and none it no longer holds. Kept per
+    /// suggestion until its photos, its cover or the photos' facts change
+    /// (`CoverCandidatesCache`): the start page and the list ask for every card in each pass of
+    /// their body, and working them out goes once over all photos of the suggestion (review A of
+    /// design wave 1). The work is a marked section of the main thread (`MainThreadWatch`).
     func proposalCoverIDs(for proposal: AlbumProposal, favorites: Set<AssetID> = []) -> [AssetID] {
-        PreviewPicker.coverCandidates(proposal.assetIDs.subtracting(removedFromProposals[proposal.id] ?? []),
-                                      cover: coverID(for: proposal), dates: creationDates, ranks: previewRanks,
-                                      favorites: favorites)
+        let removed = removedFromProposals[proposal.id] ?? []
+        let dates = creationDates
+        let ranks = previewRanks
+        let source = CoverCandidatesCache.Source(photos: proposal.assetIDs, removed: removed,
+                                                 cover: proposal.coverAssetID, favorites: favorites)
+        return CoverCandidatesCache.shared.candidates(of: proposal.id, from: source, dates: dates, ranks: ranks) {
+            MainThreadWatch.shared.section("cover candidates") {
+                PreviewPicker.coverCandidates(proposal.assetIDs.subtracting(removed), cover: coverID(for: proposal),
+                                              dates: dates, ranks: ranks, favorites: favorites)
+            }
+        }
     }
 
     /// The favourites among the photos of `proposal`, for its big cover on its own page (one

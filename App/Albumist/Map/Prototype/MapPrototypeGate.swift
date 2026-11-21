@@ -10,6 +10,10 @@ import SwiftUI
 /// (verified or not, both count). That answer is asynchronous, so the last one is kept in the
 /// user defaults and the entry shows at once on the next visit; the App Store build always
 /// answers "production" and so never shows it.
+///
+/// App Review runs its builds in the sandbox environment too, so a reviewer would see the
+/// entry: the prototype (this gate, `MapPrototypeView` and its files) has to leave the app
+/// before the first build goes to App Review. It exists for wave 0 only.
 @MainActor
 enum MapPrototypeGate {
     private static let testFlightKey = "mapPrototype.isTestFlight"

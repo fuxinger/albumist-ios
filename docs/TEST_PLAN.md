@@ -597,6 +597,9 @@ keinen Stand wie die Abdeckung oben: die Karte ist noch in keinem Build.
 | Diagnosebericht ohne Koordinaten, ohne Zuhause, ohne Namen | MapDiagnosticsTests.theReportHoldsCountsOnly, MapSummaryTests.storedSummaryAndDiagnosticsGiveNoHomeAway |
 | „Apples Karte verwenden“ ab Werk an (Fuchs 20.11.), alte Einstellungen lesen sich als an | MapSettingsTests (alle) |
 | Zeitreise, „Neues Land“, „Überrasch mich“ | MapYearsTests (alle) |
+| Globus-Szene und Kamera (Welle 0, Prototyp): dieselbe Szene für unseren Globus, Apples Globus und die Karte nach der Übergabe; Demo-Last 150 Bögen und 60 Stecknadeln, immer gleich (Messungen vergleichbar), Zuhause gerundet; erste Kamera zeigt den Fokus, nie näher als die Übergabe (3.000 km), nie weiter als die ganze Erde; kaputte Werte geben die ganze Erde | GlobeSceneTests (alle) |
+| Messungen des Prototyps (§9, §13): Bildrate, Ruckler (länger als anderthalb Mediane, keine Lücke zwischen Läufen), Speicher, Akku, Wärme, 60-Sekunden-Test je Ansicht, Höhenprüfung; der Bericht hat nur Zahlen und Zeiten, eine Notiz, die eine Koordinate enthalten kann, bleibt auf dem Gerät | MapMeasurementsTests (alle) |
+| Prototyp-Seite nur in Debug, TestFlight (StoreKit: Sandbox) und im UI-Lauf mit `-AlbumistUITestMapPrototype`, nie im App-Store-Build; App Review läuft auch als Sandbox, darum verlässt der Prototyp die App vor der ersten Einreichung | MapPrototypeUITests.testMapPrototypePage (Mac) |
 
 Offen bis Welle 1 (App): alle Fälle aus §11 mit Bedienungstest, Bildschirmfoto oder Bildvergleich
 (keine Fotos mit Ort, ausgewählte Fotos, Zugriff entzogen, Fotos nur in iCloud, ohne Internet,

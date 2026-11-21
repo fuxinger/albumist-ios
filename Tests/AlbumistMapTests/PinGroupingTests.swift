@@ -197,7 +197,7 @@ struct PinGroupingTests {
         let broken = [MapViewport(center: Places.regensburg, widthMeters: 0, widthPoints: 390, heightPoints: 844),
                       MapViewport(center: Self.at(.nan, 0), widthMeters: 100_000, widthPoints: 390, heightPoints: 844),
                       MapViewport(center: Places.regensburg, widthMeters: .infinity, widthPoints: 390, heightPoints: 844),
-                      MapViewport(center: Places.regensburg, widthMeters: 1e-320, widthPoints: 390, heightPoints: 844),
+                      MapViewport(center: Places.regensburg, widthMeters: .leastNonzeroMagnitude, widthPoints: 390, heightPoints: 844),
                       MapViewport(center: Places.regensburg, widthMeters: 100_000, widthPoints: 0, heightPoints: 844),
                       MapViewport(center: Places.regensburg, widthMeters: 100_000, widthPoints: 390, heightPoints: -1)]
         for view in broken { #expect(MapPins.visible(pins, in: view).isEmpty) }

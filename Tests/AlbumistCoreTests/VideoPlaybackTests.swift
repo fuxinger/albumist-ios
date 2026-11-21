@@ -44,6 +44,25 @@ struct VideoPlaybackTests {
         #expect(VideoDuration.oneSecond.text == "0:01")
     }
 
+    /// The slider and the times follow what plays (review F, F7): a slow-motion video plays as a
+    /// composition longer than the asset says, an edit may trim it. Once the playing item knows
+    /// its length and it differs from the asset's by more than a second, that length; else the
+    /// asset's, so the times do not jump by a rounding.
+    @Test func theLengthIsWhatPlays() throws {
+        let asset = try #require(VideoDuration(seconds: 10))
+        #expect(VideoDuration.playing(asset: asset, item: 40.2)?.seconds == 40, "slow motion")
+        #expect(VideoDuration.playing(asset: asset, item: 6)?.seconds == 6, "trimmed")
+        for close in [10.4, 9.2, 11, 9] {
+            #expect(VideoDuration.playing(asset: asset, item: close) == asset, "\(close) s")
+        }
+        for unknown in [Double.nan, .infinity, 0, -1] {
+            #expect(VideoDuration.playing(asset: asset, item: unknown) == asset, "\(unknown)")
+        }
+        // Photos said nothing of its length: the item's, once it knows it.
+        #expect(VideoDuration.playing(asset: nil, item: 12.6)?.seconds == 13)
+        #expect(VideoDuration.playing(asset: nil, item: .nan) == nil)
+    }
+
     /// The figures read the same in German and English; what VoiceOver says does not.
     @Test func theFiguresAreTheSameInBothLanguages() {
         let length = VideoDuration(seconds: 3723)

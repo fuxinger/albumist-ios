@@ -39,6 +39,8 @@ final class ViewerVideo {
     private(set) var length: VideoDuration?
     private(set) var sound = VideoSound()
 
+    /// The length Photos' asset says; what plays may differ (`length`, `VideoDuration.playing`).
+    @ObservationIgnored private var assetLength: VideoDuration?
     @ObservationIgnored private var looper: AVPlayerLooper?
     @ObservationIgnored private var observer: Any?
     @ObservationIgnored private var start = VideoStart(reduceMotion: true, autoplayVideos: false)
@@ -61,6 +63,7 @@ final class ViewerVideo {
         stop()
         self.id = id
         self.length = length
+        assetLength = length
         self.start = start
         if onlyInICloud.contains(id) {
             availability = .onlyInICloud
@@ -197,8 +200,12 @@ final class ViewerVideo {
 
     private func ticked(_ seconds: Double) {
         guard let player else { return }
-        // Photos said nothing of its length (rare): the item's, once it knows it.
-        if length == nil, let item = player.value.currentItem { length = VideoDuration(seconds: item.duration.seconds) }
+        // What plays may be longer than the asset says (slow motion) or shorter (trimmed): the
+        // item's length, once it knows it and the core prefers it (review F, F7).
+        if let item = player.value.currentItem {
+            let playing = VideoDuration.playing(asset: assetLength, item: item.duration.seconds)
+            if playing != length { length = playing }
+        }
         if !scrubbing { time = seconds.isFinite ? max(seconds, 0) : 0 }
         let playing = player.value.timeControlStatus != .paused
         if !scrubbing, playing != isPlaying { isPlaying = playing }
@@ -252,6 +259,7 @@ final class ViewerVideo {
         isPlaying = false
         time = 0
         length = nil
+        assetLength = nil
         seek = ChaseSeek()
         scrubbing = false
         playsAfterScrub = false

@@ -33,6 +33,17 @@ public struct VideoDuration: Equatable, Sendable {
     public func spoken(_ words: ProposalWords) -> String {
         "Video, " + VideoClock.spoken(seconds, words)
     }
+
+    /// The length the slider and the times use while a video plays (review F, F7). Photos' asset
+    /// says how long the video is, but what plays may differ: a slow-motion video plays as a
+    /// longer composition, an edit may trim it. Once the playing item knows its own length
+    /// (`item`, in seconds) and it differs from the asset's by more than a second, that one; else
+    /// the asset's, so the times do not jump by a rounding. Without the asset's, the item's.
+    public static func playing(asset: VideoDuration?, item seconds: Double) -> VideoDuration? {
+        guard let item = VideoDuration(seconds: seconds) else { return asset }
+        guard let asset else { return item }
+        return abs(seconds - Double(asset.seconds)) > 1 ? item : asset
+    }
 }
 
 /// Where a playing video is (DS-16): the time passed and the time left, in whole seconds that

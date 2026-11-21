@@ -112,6 +112,11 @@ struct VideoViewerSourceTests {
         #expect(Self.inOrder(["looper?.disableLooping()", "removeAllItems()"], in: leave), "the looper fills the emptied queue again")
         let keep = try #require(AppSource.body(of: "func keepOnly(", in: model))
         #expect(keep.contains("guard id != current else { return }"))
+        // The slider's length is what plays (review F, F7): the item's once the core's rule
+        // prefers it to the asset's, which `open` keeps.
+        #expect(open.contains("assetLength = length"))
+        let ticked = try #require(AppSource.body(of: "private func ticked(", in: model))
+        #expect(ticked.contains("VideoDuration.playing(asset: assetLength, item: item.duration.seconds)"), "\(ticked)")
         // Scrubbing as Apple's QA1820: one exact seek at a time, the last place when it ends.
         #expect(model.contains("ChaseSeek()"))
         #expect(model.contains("toleranceBefore: .zero, toleranceAfter: .zero"))

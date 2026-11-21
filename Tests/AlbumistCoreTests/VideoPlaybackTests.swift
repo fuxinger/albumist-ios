@@ -151,13 +151,34 @@ struct VideoPlaybackTests {
     /// a long one, so the times change on the second (review F, F13: a three-second clip jumped
     /// twelve times). Before its length is known, as for a short clip.
     @Test func theThumbGlides() throws {
-        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 3))) == 1.0 / 30)
-        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 10))) == 1.0 / 30)
-        #expect(abs(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 30))) - 0.1) < 1e-9)
-        #expect(abs(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 90))) - 0.3) < 1e-9)
-        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 150))) == 0.5)
-        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 3600))) == 0.5)
-        #expect(VideoPosition.tickInterval(for: nil) == 1.0 / 30)
+        func interval(_ seconds: Double?) -> Double {
+            VideoPosition.tickInterval(for: seconds.flatMap { VideoDuration(seconds: $0) }, lowPowerMode: false)
+        }
+        #expect(interval(3) == 1.0 / 30)
+        #expect(interval(10) == 1.0 / 30)
+        #expect(abs(interval(30) - 0.1) < 1e-9)
+        #expect(abs(interval(90) - 0.3) < 1e-9)
+        #expect(interval(150) == 0.5)
+        #expect(interval(3600) == 0.5)
+        #expect(interval(nil) == 1.0 / 30)
+    }
+
+    /// In Low Power Mode the photo view reads where a playing video is at most 10 times a second
+    /// (review V14): the thumb still moves without jumps, and a short clip costs the iPhone a
+    /// third of the work. A long video ticks as before. The photo view knows the mode from its
+    /// start (`VideoStart`).
+    @Test func inLowPowerModeTheThumbTicksAtMostTenTimesASecond() throws {
+        func interval(_ seconds: Double?) -> Double {
+            VideoPosition.tickInterval(for: seconds.flatMap { VideoDuration(seconds: $0) }, lowPowerMode: true)
+        }
+        for seconds in [1.0, 3, 10, 29] {
+            #expect(interval(seconds) == 0.1, "\(seconds) s")
+        }
+        #expect(abs(interval(90) - 0.3) < 1e-9)
+        #expect(interval(3600) == 0.5)
+        #expect(interval(nil) == 0.1)
+        #expect(VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: true).lowPowerMode)
+        #expect(!VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: false).lowPowerMode)
     }
 
     // MARK: Starting by itself

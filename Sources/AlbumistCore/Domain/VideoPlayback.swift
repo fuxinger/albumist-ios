@@ -85,10 +85,12 @@ public struct VideoPosition: Equatable, Sendable {
     /// How often the photo view reads where a playing video is, in seconds (review F, F13): so
     /// often that the slider's thumb moves by about a 300th of its track at a time and glides,
     /// at most 30 times a second (a short clip), at least twice a second (the times show whole
-    /// seconds). Before its length is known, as for a short clip.
-    public static func tickInterval(for duration: VideoDuration?) -> Double {
-        guard let duration else { return 1.0 / 30 }
-        return min(0.5, max(1.0 / 30, Double(duration.seconds) / 300))
+    /// seconds). In Low Power Mode at most 10 times a second (review V14): the thumb still moves
+    /// without jumps, at a third of the work. Before its length is known, as for a short clip.
+    public static func tickInterval(for duration: VideoDuration?, lowPowerMode: Bool) -> Double {
+        let shortest = lowPowerMode ? 0.1 : 1.0 / 30
+        guard let duration else { return shortest }
+        return min(0.5, max(shortest, Double(duration.seconds) / 300))
     }
 }
 
@@ -132,10 +134,14 @@ public struct VideoStart: Equatable, Sendable {
     public let byItself: Bool
     /// It starts over at its end.
     public let loops: Bool
+    /// Low Power Mode was on when it came on screen: it plays once, and its position is read less
+    /// often (`VideoPosition.tickInterval`, review V14).
+    public let lowPowerMode: Bool
 
     public init(reduceMotion: Bool, autoplayVideos: Bool, lowPowerMode: Bool) {
         byItself = !reduceMotion && autoplayVideos
         loops = byItself && !lowPowerMode
+        self.lowPowerMode = lowPowerMode
     }
 
     /// Whether the playing video keeps the screen on (review F, F8): while it plays, as any video

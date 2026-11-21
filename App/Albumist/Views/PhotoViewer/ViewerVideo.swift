@@ -235,9 +235,11 @@ final class ViewerVideo {
             queue.insert(item, after: nil)
         }
         // As often as the slider's thumb glides (30 times a second for a short clip, review F,
-        // F13), and whenever it starts, stops or jumps (AVFoundation calls it then too): the time
-        // and whether it plays, which an end, a call or another app may change.
-        let interval = CMTime(seconds: VideoPosition.tickInterval(for: length), preferredTimescale: 600)
+        // F13; 10 in Low Power Mode, review V14), and whenever it starts, stops or jumps
+        // (AVFoundation calls it then too): the time and whether it plays, which an end, a call
+        // or another app may change.
+        let interval = CMTime(seconds: VideoPosition.tickInterval(for: length, lowPowerMode: start.lowPowerMode),
+                              preferredTimescale: 600)
         observer = queue.addPeriodicTimeObserver(forInterval: interval, queue: .main, using: Self.timeHandler(self))
         player = Player(value: queue)
         time = 0

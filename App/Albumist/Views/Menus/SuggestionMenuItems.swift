@@ -10,8 +10,8 @@ import AlbumistCore
 ///   (`quickCreateAtOnce`), the purchase sheet or the suggestion otherwise, "Ergänzen …" the
 ///   preview first.
 /// - "Anpassen", "Reise teilen oder zusammenlegen" and "Keine Reise, hier bin ich öfter" open
-///   what the open suggestion's "…" opens, on the page (`suggestionMenuFlows()`): its sheets, and
-///   the question before "Keine Reise", which waits and says why as it does there.
+///   what the open suggestion's "…" opens, on the page (`suggestionMenuFlows(_:)`): its sheets,
+///   and the question before "Keine Reise", which waits and says why as it does there.
 /// - "Nicht jetzt" sets the suggestion aside as its button does; photos and albums stay.
 ///
 /// The menu stays open as long as the user leaves it, while the analysis may change the
@@ -19,15 +19,20 @@ import AlbumistCore
 /// (`AppModel.currentSuggestion`; the word through the page's action, which looks it up first),
 /// and on one that went meanwhile not at all, which is said (review C of design wave 2, H1).
 ///
-/// Reads the model only when the menu is drawn, so a card is as cheap to build as before. The
-/// card hands in the model and the page's ways: what a menu shows is read from nothing of the
-/// environment's (the system draws the menu, and VoiceOver reads its items, apart from the card).
-/// The card's body has the items as actions for VoiceOver, Voice Control and Switch Control
-/// (`forVoiceOver`, `PhotoCard.menuAccessibilityActions`): all that can be done now but the
-/// card's word, which is the card's own button there (review C of design wave 2, L1, L3).
+/// Reads the model in its own body, not in the card's: the card reads none of it, so it is as
+/// cheap to build as before. SwiftUI evaluates these items to show the menu, and to give the
+/// card's actions to an assistive technology (VoiceOver, Voice Control, Switch Control) or a UI
+/// test that asks for them: while one of those is on, every card follows what its items read
+/// (the decisions, the albums; for a trip its facts, and where "Keine Reise" is offered the
+/// analysis; review C2 of design wave 2, N3). The card hands in the model and the page's ways:
+/// what a menu shows is read from nothing of the environment's (the system draws the menu, and
+/// VoiceOver reads its items, apart from the card). The card's body has the items as actions for
+/// VoiceOver, Voice Control and Switch Control (`forVoiceOver`,
+/// `PhotoCard.menuAccessibilityActions`): all that can be done now but the card's word, which is
+/// the card's own button there (review C of design wave 2, L1, L3).
 struct SuggestionMenuItems: View {
     var model: AppModel
-    /// The page's sheets and question (`suggestionMenuFlows()`); nil on a page without them.
+    /// The page's sheets and question (`suggestionMenuFlows(_:)`); nil on a page without them.
     var openFlow: SuggestionMenuFlowAction?
     var proposal: AlbumProposal
     var card: ProposalCardText
@@ -138,13 +143,18 @@ struct SuggestionMenuItems: View {
         openFlow?.open(SuggestionMenuFlow(kind: kind, proposal: current))
     }
 
-    /// "Nicht jetzt" as its button does it, then said to VoiceOver in the button's words
-    /// (`ProposalCardText.spokenNotNow`): the card leaves the start page, or moves to "Nicht
-    /// jetzt" in the list, and the focus with it (review C of design wave 2, L2).
+    /// "Nicht jetzt" as its button does it, then said to VoiceOver: the card leaves the start
+    /// page, or moves to "Nicht jetzt" in the list, and the focus with it (review C of design
+    /// wave 2, L2). With high priority, so VoiceOver moving its focus to what comes next does not
+    /// cut it off (review C2 of design wave 2, N5). In the words VoiceOver names the suggestion's
+    /// own "Nicht jetzt" with (`ProposalCardText.spokenNotNow`, the same catalog key): a `Text`
+    /// cannot be posted, so the words are written twice, and a test holds them together.
     private func setAside() {
         guard let current = model.currentSuggestion(proposal) else { return }
         model.setDecision(.reject, for: current)
-        AccessibilityNotification.Announcement(String(localized: "Nicht jetzt: „\(card.title)“")).post()
+        var spoken = AttributedString(String(localized: "Nicht jetzt: „\(card.title)“"))
+        spoken.accessibilitySpeechAnnouncementPriority = .high
+        AccessibilityNotification.Announcement(spoken).post()
     }
 }
 

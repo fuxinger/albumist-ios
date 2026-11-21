@@ -126,8 +126,9 @@ public struct SuggestionMenu: Equatable, Sendable {
 
     /// Whether the card has a menu at all, known from the card's state on its page alone: none
     /// once it is made, while it works or while the list selects. The app switches the long
-    /// press off with it (an empty menu closure: no lift, no menu, no actions; review C of
-    /// design wave 2, M4), before anything else is read.
+    /// press off with it, before anything else is read: a menu closure that returns nothing, as
+    /// Apple documents it for a context menu that lifts its own view (no lift, no menu, no
+    /// actions; review C of design wave 2, M4).
     public static func isOffered(made: Bool, working: Bool, selecting: Bool) -> Bool {
         !made && !working && !selecting
     }

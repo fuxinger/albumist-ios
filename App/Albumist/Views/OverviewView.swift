@@ -23,6 +23,9 @@ struct OverviewView: View {
     /// The sheet "Analyse" behind the analysis' line.
     @State private var showAnalysis = false
     @State private var notifications = FinishNotificationAsk.shared
+    /// Design W2 H7: what a suggestion card's long press opens, kept by the page, made when the
+    /// page is made, not at each of its drawings (`suggestionMenuFlows(_:)`; review C2, N2).
+    @State private var menuFlows = SuggestionMenuFlowAction() // Design W2 H7
     /// The overview tab's stack (`MainTabs`). The suggestions, the plan, the starter plan and
     /// the atlas are pushed onto it, not from a NavigationLink inside the condition that shows
     /// its button: a run that starts while one is open (a check for new photos after the
@@ -82,7 +85,7 @@ struct OverviewView: View {
         // Design W2 H7: what a suggestion card's long press opens ("Anpassen", the trip workshop,
         // "Keine Reise?"), on the scroll view, so the question comes from the screen, not from the
         // middle of all the cards (review C of design wave 2, M1).
-        .suggestionMenuFlows()
+        .suggestionMenuFlows(menuFlows)
         .background(Theme.background)
         .navigationTitle("Vorschläge")
         .navigationBarTitleDisplayMode(.large)

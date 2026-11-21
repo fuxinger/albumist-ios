@@ -24,6 +24,7 @@ struct LongPressSourceTests {
     static let overview = "App/Albumist/Views/OverviewView.swift"
     static let photoQuestion = "App/Albumist/Views/Menus/PhotoRemovalQuestion.swift"
     static let photoCard = "App/Albumist/DesignSystem/PhotoCard.swift"
+    static let thumbnails = "App/Albumist/Views/AssetThumbnail.swift"
 
     /// The code of `path` (comments blanked, strings kept).
     static func code(_ path: String) throws -> String {
@@ -38,6 +39,49 @@ struct LongPressSourceTests {
     /// `text` without any white space, so a check does not depend on how a line is broken.
     static func squeezed(_ text: String) -> String {
         String(text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.map(Character.init))
+    }
+
+    /// How often `pattern` (ICU, as `NSRegularExpression` reads it) matches in `text`.
+    static func count(_ pattern: String, in text: String) -> Int {
+        (try? NSRegularExpression(pattern: pattern))?.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text)) ?? 0
+    }
+
+    /// Whether a function's body (comments blanked) acts only on the suggestion it looked up:
+    /// its first statement is `guard let current = model.currentSuggestion(proposal) else {
+    /// return }`, and after it `current` is used and the drawn `proposal` is never named again
+    /// (`proposal:` as an argument's label is no use of it).
+    static func actsOnTheLookedUp(_ body: String) -> Bool {
+        let lookUp = #"\A\{\s*guard\s+let\s+current\s*=\s*model\.currentSuggestion\(\s*proposal\s*\)\s*else\s*\{\s*return\s*\}"#
+        guard let regex = try? NSRegularExpression(pattern: lookUp),
+              let match = regex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)),
+              let end = Range(match.range, in: body)?.upperBound else { return false }
+        let after = String(body[end...])
+        return count(#"(?<![\w.])proposal\b(?!\s*:)"#, in: after) == 0 && count(#"(?<![\w.])current\b"#, in: after) > 0
+    }
+
+    /// The labels of a call's arguments, read at the call's own level ("id: id, side: 80" →
+    /// ["id", "side"]; "_" for an argument without one).
+    static func labels(_ arguments: String) -> [String] {
+        var parts: [String] = []
+        var part = ""
+        var depth = 0
+        for character in arguments {
+            if "([{".contains(character) { depth += 1 }
+            if ")]}".contains(character) { depth -= 1 }
+            if character == ",", depth == 0 {
+                parts.append(part)
+                part = ""
+            } else {
+                part.append(character)
+            }
+        }
+        parts.append(part)
+        return parts.map { part in
+            let trimmed = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let colon = trimmed.firstIndex(of: ":") else { return "_" }
+            let label = trimmed[..<colon]
+            return !label.isEmpty && label.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" } ? String(label) : "_"
+        }
     }
 
     // MARK: Suggestion cards
@@ -74,23 +118,36 @@ struct LongPressSourceTests {
         // The page shows what the menu opens ("Anpassen", the trip workshop, "Keine Reise?"): on
         // its scroll view, so the question comes from the screen, not from the middle of all the
         // cards (review C of design wave 2, M1).
-        #expect(!(try Self.code(Self.start)).contains(".suggestionMenuFlows()"), "on the cards' tall stack")
+        #expect(!(try Self.code(Self.start)).contains(".suggestionMenuFlows("), "on the cards' tall stack")
         let overview = Self.squeezed(try Self.body(["struct OverviewView", "var body: some View"], in: Self.overview))
-        #expect(overview.contains("}.suggestionMenuFlows().background(Theme.background).navigationTitle(\"Vorschläge\")"), "\(overview)")
-        #expect(overview.components(separatedBy: ".suggestionMenuFlows()").count == 2, "once, on the scroll view")
+        #expect(overview.contains("}.suggestionMenuFlows(menuFlows).background(Theme.background).navigationTitle(\"Vorschläge\")"),
+                "\(overview)")
+        #expect(overview.components(separatedBy: ".suggestionMenuFlows(").count == 2, "once, on the scroll view")
     }
 
-    /// The page hands its cards one object for what their menus open, kept by the page: the same
-    /// one each time the page is drawn, so handing it down redraws no card (a closure made anew
-    /// would, at every change of the analysis, now that the start page's scroll view has it).
+    /// The page hands its cards one object for what their menus open: the same one each time the
+    /// page is drawn, so handing it down redraws no card (a closure made anew would, at every
+    /// change of the analysis, now that the start page's scroll view has it). The page keeps it
+    /// in its own state, made when the page is made: as the state of the modifier, its first
+    /// value was made anew at every drawing of the page and thrown away (review C2 of design
+    /// wave 2, N2).
     @Test func thePageHandsItsCardsOneLastingWayToOpen() throws {
         let flows = try Self.code(Self.flows)
         #expect(flows.contains("@MainActor @Observable\nfinal class SuggestionMenuFlowAction {"))
-        #expect(flows.contains("@State private var flows = SuggestionMenuFlowAction()"))
+        #expect(!flows.contains("SuggestionMenuFlowAction()"), "made by the modifier at each drawing of the page")
+        #expect(flows.contains("func suggestionMenuFlows(_ flows: SuggestionMenuFlowAction) -> some View {"))
+        let modifier = try Self.body(["private struct SuggestionMenuFlows: ViewModifier"], in: Self.flows)
+        #expect(modifier.contains("    var flows: SuggestionMenuFlowAction\n") && !modifier.contains("@State"), "\(modifier)")
         #expect(flows.contains(".environment(\\.openSuggestionMenuFlow, flows)"))
         #expect(!flows.contains("SuggestionMenuFlowAction(open:"), "a closure made anew at each drawing")
         #expect(flows.contains(".sheet(item: $flows.adjusting)") && flows.contains(".sheet(item: $flows.reshaping)"))
         #expect(flows.contains("presenting: flows.askingNotATrip"))
+        // Each page keeps its own and hands it to its sheets and question.
+        for (path, page) in [(Self.overview, "struct OverviewView"), (Self.suggestions, "struct ProposalListView")] {
+            let type = try Self.body([page], in: path)
+            #expect(type.contains("@State private var menuFlows = SuggestionMenuFlowAction()"), "\(path)")
+            #expect(type.components(separatedBy: ".suggestionMenuFlows(menuFlows)").count == 2, "\(path): handed once")
+        }
     }
 
     /// The list's cards: the same, in their state (made, the list selecting).
@@ -110,7 +167,7 @@ struct LongPressSourceTests {
         let spoken = Self.squeezed(try Self.body(["private struct ProposalListCard", "private var voiceOverItems: SuggestionMenuItems"], in: Self.suggestions))
         #expect(spoken.contains("forVoiceOver:true") && spoken.contains("act:{act(card.action)}"), "\(spoken)")
         let list = try Self.body(["struct ProposalListView", "var body: some View"], in: Self.suggestions)
-        #expect(list.contains(".suggestionMenuFlows()"))
+        #expect(list.contains(".suggestionMenuFlows(menuFlows)"))
     }
 
     /// Each item goes the way that exists: the word through the card's action, "Anpassen" and
@@ -169,17 +226,26 @@ struct LongPressSourceTests {
         #expect(resolved.lowerBound < turn.lowerBound, "resolved after the turn is taken")
         #expect(try AppSource.read(Self.quickCreate).contains("// Design W2 H7: current suggestion."))
         // The card's action, from its button or its menu's word: the page's way, first of all.
+        // The suggestion found takes the parameter's name, so nothing after it can reach the
+        // drawn copy (as in `createNow`).
         let start = Self.squeezed(try Self.body(["struct StartSections", "private func perform("], in: Self.start))
         #expect(start.hasPrefix("{guardletproposal=model.currentSuggestion(proposal)else{return}"), "\(start)")
         let list = Self.squeezed(try Self.body(["struct ProposalListView", "private func act("], in: Self.suggestions))
         #expect(list.hasPrefix("{guardletproposal=model.currentSuggestion(proposal)else{return}"), "\(list)")
-        // The menu's other items, and the answer to "Keine Reise?" (the question can stay open too).
-        let open = Self.squeezed(try Self.body(["struct SuggestionMenuItems", "private func open("], in: Self.suggestionItems))
-        #expect(open.hasPrefix("{guardletcurrent=model.currentSuggestion(proposal)else{return}"), "\(open)")
-        let notNow = Self.squeezed(try Self.body(["struct SuggestionMenuItems", "private func setAside("], in: Self.suggestionItems))
-        #expect(notNow.hasPrefix("{guardletcurrent=model.currentSuggestion(proposal)else{return}"), "\(notNow)")
-        let answer = Self.squeezed(try Self.body(["private func answer("], in: Self.flows))
-        #expect(answer.hasPrefix("{guardletcurrent=model.currentSuggestion(proposal)else{return}"), "\(answer)")
+        // The menu's other items, and the answer to "Keine Reise?" (the question can stay open
+        // too): the suggestion found (`current`), never the drawn copy after it. A check of the
+        // first line alone passed with a later `for: proposal` (review C2 of design wave 2, N6);
+        // this one fails on it.
+        let lookedUp = [
+            ("open", try Self.body(["struct SuggestionMenuItems", "private func open("], in: Self.suggestionItems)),
+            ("setAside", try Self.body(["struct SuggestionMenuItems", "private func setAside("], in: Self.suggestionItems)),
+            ("answer", try Self.body(["private func answer("], in: Self.flows)),
+        ]
+        for (name, body) in lookedUp {
+            #expect(Self.actsOnTheLookedUp(body), "\(name): \(body)")
+            let stale = body.replacingOccurrences(of: "current)", with: "proposal)")
+            #expect(stale != body && !Self.actsOnTheLookedUp(stale), "\(name): the check misses the drawn copy acted on")
+        }
         // Nothing in the menu or its ways acts on the drawn copy any more.
         let items = try Self.code(Self.suggestionItems)
         #expect(!items.contains("for: proposal)") && !items.contains("proposal: proposal)"), "the drawn copy acted on")
@@ -197,14 +263,54 @@ struct LongPressSourceTests {
 
     /// "Nicht jetzt" from a card's menu is said to VoiceOver as its button is named ("Nicht jetzt:
     /// „Kyoto, Oktober 2024“"): the card leaves the start page (in the list it moves), and the
-    /// focus with it (L2).
+    /// focus with it (L2). With high priority, so the focus moving on does not cut it off (review
+    /// C2 of design wave 2, N5).
     @Test func nichtJetztIsSaidToVoiceOver() throws {
         let notNow = try Self.body(["struct SuggestionMenuItems", "private func setAside("], in: Self.suggestionItems)
-        let set = try #require(notNow.range(of: "model.setDecision(.reject, for: current)"))
-        let said = try #require(notNow.range(of: "AccessibilityNotification.Announcement(String(localized: \"Nicht jetzt: „\\(card.title)“\")).post()"))
-        #expect(set.lowerBound < said.lowerBound)
+        let steps = Self.squeezed(notNow)
+        let set = try #require(steps.range(of: "model.setDecision(.reject,for:current)"), "\(steps)")
+        let words = try #require(steps.range(of: "varspoken=AttributedString(String(localized:\"Nichtjetzt:„\\(card.title)“\"))"), "\(steps)")
+        let high = try #require(steps.range(of: "spoken.accessibilitySpeechAnnouncementPriority=.high"), "\(steps)")
+        let said = try #require(steps.range(of: "AccessibilityNotification.Announcement(spoken).post()"), "\(steps)")
+        #expect(set.lowerBound < words.lowerBound && words.lowerBound < high.lowerBound && high.lowerBound < said.lowerBound)
+        // One catalog key for the words said and the name of the suggestion's own "Nicht jetzt"
+        // (`spokenNotNow`): a `Text` cannot be posted, so the words are written twice, and held
+        // together here.
+        let posted = try #require(Self.key(after: "String(localized: ", in: notNow), "\(notNow)")
         let labels = try Self.code("App/Albumist/Views/Proposal/ProposalCardLabels.swift")
-        #expect(labels.contains("var spokenNotNow: Text { Text(\"Nicht jetzt: „\\(title)“\") }"), "the button's name, the same words")
+        let name = try #require(AppSource.body(of: "var spokenNotNow: Text", in: labels))
+        let named = try #require(Self.key(after: "Text(", in: name), "\(name)")
+        #expect(posted == named, "said „\(posted)“, the button named „\(named)“")
+        #expect(posted == "Nicht jetzt: „%@“")
+    }
+
+    /// The catalog key of the first string literal after `call` in `code`: its words, each
+    /// interpolation `\(…)` as "%@" (the names said here are strings).
+    static func key(after call: String, in code: String) -> String? {
+        guard let start = code.range(of: call + "\"") else { return nil }
+        var key = ""
+        var rest = code[start.upperBound...]
+        while let character = rest.first {
+            if character == "\"" { return key }
+            if rest.hasPrefix("\\(") {
+                var depth = 0
+                var index = rest.index(after: rest.startIndex)
+                repeat {
+                    if rest[index] == "(" { depth += 1 }
+                    if rest[index] == ")" { depth -= 1 }
+                    index = rest.index(after: index)
+                } while depth > 0 && index < rest.endIndex
+                key += "%@"
+                rest = rest[index...]
+            } else if rest.hasPrefix("\\\"") {
+                key += "\""
+                rest = rest.dropFirst(2)
+            } else {
+                key.append(character)
+                rest = rest.dropFirst()
+            }
+        }
+        return nil
     }
 
     /// What the menu offers is read where the open suggestion reads it: "Keine Reise" from one
@@ -252,8 +358,19 @@ struct LongPressSourceTests {
         #expect(card.contains("private var isMenuOffered = true"))
         #expect(card.contains("private var accessibilityMenuItems: MenuItems?"))
         let body = Self.squeezed(try Self.body(["struct PhotoCard<", "var body: some View"], in: Self.photoCard))
-        #expect(body.contains("shaped.contextMenu{ifisMenuOffered{menuItems}}preview:{menuPreview}"), "\(body)")
-        #expect(body.contains("shaped.contextMenu{ifisMenuOffered{menuItems}}"), "\(body)")
+        // Both kinds of card, each branch checked on its own (review C2 of design wave 2, N6: the
+        // check for the card that lifts itself was a prefix of the other and passed without it).
+        let offered = "shaped.contextMenu{ifisMenuOffered{menuItems}}"
+        #expect(body.components(separatedBy: offered).count - 1 == 2, "\(body)")
+        #expect(body.contains("elseifhasMenuPreview{\(offered)preview:{menuPreview}}"), "with a preview of its own: \(body)")
+        #expect(body.hasSuffix("}else{\(offered)}}"), "the card that lifts itself: \(body)")
+        // Only cards that lift themselves are switched off (the suggestion cards): beside a
+        // preview of its own, a menu that returns nothing is not documented to lift nothing (N1).
+        var switched: [String] = []
+        for path in AppSource.swiftFiles(under: "App/Albumist") where path != Self.photoCard {
+            if !AppSource.calls(of: "menuOffered(", in: try AppSource.read(path)).isEmpty { switched.append(path) }
+        }
+        #expect(switched == [Self.suggestions, Self.start], "\(switched)")
         let actions = Self.squeezed(try Self.body(["struct PhotoCard<", "private func describedAsBody("], in: Self.photoCard))
         #expect(actions.contains("described.accessibilityActions{ifisMenuOffered{accessibilityMenuItems??menuItems}}"), "\(actions)")
         let code = try Self.code(Self.photoCard)
@@ -273,7 +390,7 @@ struct LongPressSourceTests {
             (Self.library, ["struct LibraryView", "private func cell("],
              ".photoMenu(id, place: .unsorted, side: Self.photoSide, selecting: selecting)", 110, "id"),
             (Self.suggestions, ["struct ProposalPhotosView", "private func tile("],
-             ".photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled)", 140, "id"),
+             ".photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled && isCurrent)", 140, "id"),
             (Self.albums, ["struct AlbumScreen", "private func tile("], ".photoMenu(photo, place: .album, side: Self.photoSide)", 110,
              "photo"),
             (Self.search, ["struct SearchView", "private func thumbnail("],
@@ -300,26 +417,21 @@ struct LongPressSourceTests {
     /// cell shows a photo, no lift counted as a cover), worked out in its own body (M5).
     @Test func thePhotosLongPressLiftsThePhotoAndGivesVoiceOverTheItems() throws {
         let press = try Self.body(["private struct PhotoLongPress", "func body(content: Content)"], in: Self.photoMenu)
-        #expect(press.contains(".contextMenu {"))
-        #expect(press.contains("} preview: {"))
-        #expect(press.contains(".accessibilityActions {"))
-        #expect(press.contains("items(forVoiceOver: true)") && press.contains("items(forVoiceOver: false)"))
-        // Switched off the documented way while the grid selects or the photo cannot open: the
-        // closures return nothing (review C of design wave 2, M4).
+        // With a menu now: the menu, the photo lifted, the same items as the photo's actions.
+        // Without one (the grid selects, the photo cannot open), none of them at all:
+        // `aPhotoWithoutAMenuHasNoContextMenuAtAll` (review C2 of design wave 2, N1).
         let squeezedPress = Self.squeezed(press)
-        #expect(squeezedPress.contains(".contextMenu{ifoffered{items(forVoiceOver:false)}}preview:{"), "\(squeezedPress)")
-        #expect(squeezedPress.contains(".accessibilityActions{ifoffered{items(forVoiceOver:true)}}"), "\(squeezedPress)")
+        #expect(squeezedPress.contains("ifoffered{content.contextMenu{items(forVoiceOver:false)}preview:{PhotoPreview(id:id,side:side)}"
+                                       + ".accessibilityActions{items(forVoiceOver:true)}}"), "\(squeezedPress)")
         let offered = Self.squeezed(try Self.body(["private struct PhotoLongPress", "private var offered: Bool"], in: Self.photoMenu))
         #expect(offered == "{PhotoMenu.isOffered(selecting:selecting,available:available)}", "\(offered)")
         let items = try Self.body(["struct PhotoMenuItems", "var body: some View"], in: Self.photoMenu)
         #expect(items.contains("menu.accessibilityItems"))
         #expect(!(try Self.body(["struct PhotoMenuItems"], in: Self.photoMenu)).contains("@Environment("),
                 "the items read nothing from the environment: the long press hands the model in")
-        #expect(Self.squeezed(press).contains("items(forVoiceOver:true)"))
         let handed = Self.squeezed(try Self.body(["private struct PhotoLongPress", "private func items("], in: Self.photoMenu))
         #expect(handed.contains("PhotoMenuItems(model:model,"), "\(handed)")
         #expect(items.contains("PhotoMenu(place: place"))
-        #expect(squeezedPress.contains("preview:{PhotoPreview(id:id,side:side)}"), "\(squeezedPress)")
         #expect(!(try Self.body(["private struct PhotoLongPress"], in: Self.photoMenu)).contains("factsByID"),
                 "every cell tied to the facts")
         let lifted = try Self.body(["struct PhotoPreview"], in: Self.photoMenu)
@@ -332,6 +444,63 @@ struct LongPressSourceTests {
         // Sharp by the covers' rule, the same 70 % (`ThumbnailRequest.sharpShare`).
         let thumbnails = try Self.code("App/Albumist/Views/AssetThumbnail.swift")
         #expect(thumbnails.contains("static let sharpShare: CGFloat = \(PhotoMenu.sharpShare)"))
+    }
+
+    /// A photo without a menu now (the grid selects, the photo cannot open) gets no context menu
+    /// and no actions at all, not a menu closure that returns nothing beside a preview of its
+    /// own: whether such a menu still lifts the photo is not documented (UIKit shows a preview
+    /// without actions), and a lift would take the press that ticks a photo (review C2 of design
+    /// wave 2, N1). The switch rebuilds the photo's cell, unseen: not animated (the pages toggle
+    /// "Auswählen" in `withAnimation`, which would cross-fade every photo on screen), and the
+    /// rebuilt thumbnail shows its photo at once (`aThumbnailStartsWithTheImageInMemory`).
+    @Test func aPhotoWithoutAMenuHasNoContextMenuAtAll() throws {
+        let press = Self.squeezed(try Self.body(["private struct PhotoLongPress", "func body(content: Content)"], in: Self.photoMenu))
+        // One branch with all of the long press, the other the photo as it is.
+        let withMenu = try #require(press.range(of: "{Group{ifoffered{"), "\(press)")
+        let without = try #require(press.range(of: "}else{content}}"), "\(press)")
+        #expect(withMenu.upperBound <= without.lowerBound, "\(press)")
+        for modifier in [".contextMenu{", ".accessibilityActions{"] {
+            let found = press.ranges(of: modifier)
+            #expect(found.count == 1, "\(modifier) \(found.count) times: \(press)")
+            #expect(found.allSatisfy { withMenu.upperBound <= $0.lowerBound && $0.upperBound <= without.lowerBound },
+                    "\(modifier) outside the branch with a menu: \(press)")
+        }
+        #expect(!press.contains("{ifoffered{items("), "a menu switched off by a closure that returns nothing: \(press)")
+        // Not animated, whichever page toggles it and however it does.
+        #expect(press.hasSuffix("}else{content}}.transaction(value:offered){$0.animation=nil}}"), "\(press)")
+    }
+
+    /// A thumbnail made anew starts with the image the thumbnails' memory holds for it, so a cell
+    /// that is rebuilt (a photo's long press is switched on or off as "Auswählen" toggles; review
+    /// C2 of design wave 2, N1) shows its photo from its first frame, not its grey ground until
+    /// its task has read the memory again. Only from memory: its initializer asks Photos nothing
+    /// (the task asks, as before), and every caller keeps the labels it has.
+    @Test func aThumbnailStartsWithTheImageInMemory() throws {
+        let made = try Self.body(["struct AssetThumbnail", "init(id: AssetID, side: CGFloat = 80, anchor: Alignment = .center)"],
+                                 in: Self.thumbnails)
+        let seeded = Self.squeezed(made)
+        #expect(seeded.contains("letkept=ThumbnailCache.shared.cachedThumbnail(for:id,side:side)"), "\(seeded)")
+        #expect(seeded.contains("_image=State(initialValue:kept)"), "\(seeded)")
+        #expect(seeded.contains("_loadedID=State(initialValue:kept==nil?nil:id)"), "\(seeded)")
+        for request in ["image(for:", "await", "Task", "requestImage(", "lookUp", "cover(for:", "largeImage(", "asset("] {
+            #expect(!made.contains(request), "the initializer asks Photos: \(request)")
+        }
+        // What is not in memory the task asks for, as before; the shown image is the photo's own.
+        let shown = try Self.body(["struct AssetThumbnail", "var body: some View"], in: Self.thumbnails)
+        #expect(shown.contains(".task(id: id) {") && shown.contains("await ThumbnailCache.shared.image(for: id, side: side)"))
+        #expect(shown.contains("if let image, loadedID == id {"))
+        // Every caller keeps working: `id:`, then `side:` and `anchor:` where it gives them.
+        var callers = 0
+        for path in AppSource.swiftFiles(under: "App/Albumist") {
+            for arguments in AppSource.calls(of: "AssetThumbnail(", in: try AppSource.read(path)) {
+                callers += 1
+                let labels = Self.labels(arguments)
+                let order = labels.compactMap { ["id", "side", "anchor"].firstIndex(of: $0) }
+                #expect(labels.first == "id" && order.count == labels.count && order == order.sorted() && Set(order).count == order.count,
+                        "\(path): AssetThumbnail(\(arguments))")
+            }
+        }
+        #expect(callers >= 10, "\(callers) callers")
     }
 
     /// Each photo item goes the place's way: "Ansehen" as the tap opens it, "Zu Album
@@ -371,12 +540,39 @@ struct LongPressSourceTests {
         let detail = Self.squeezed(try Self.body(["struct ProposalDetailView", "var body: some View"], in: Self.suggestions))
         #expect(detail.contains("}askToRemove:{idinremovingPhoto=id}"), "\(detail)")
         let several = try #require(detail.range(of: ".confirmationDialog(\"FotosausdiesemVorschlagentfernen?\""))
-        let one = try #require(detail.range(of: ".photoRemovalQuestion($removingPhoto){idinTask{awaitmodel.removeFromProposal([id],proposal:proposal)}}"))
+        let one = try #require(detail.range(of: ".photoRemovalQuestion($removingPhoto){idinguardisCurrentelse{return}"
+                                                + "Task{awaitmodel.removeFromProposal([id],proposal:proposal)}}"), "\(detail)")
         #expect(several.lowerBound < one.lowerBound)
         let question = try Self.code(Self.photoQuestion)
         #expect(question.contains(".confirmationDialog(\"Foto aus diesem Vorschlag entfernen?\""))
         #expect(question.contains("Button(\"Entfernen\", role: .destructive) { remove(id) }"))
         #expect(question.contains("Text(\"Es kommt nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleibt es.\")"))
+    }
+
+    /// A suggestion that went while its page is open (made from its card, split, merged, made
+    /// anew) still shows its photos as it was opened, but none can be taken out of it any more:
+    /// its photos' long press offers nothing, "Auswählen" and "N aus Vorschlag entfernen" wait
+    /// as the page's other buttons do, and both questions take nothing out once answered, as
+    /// the override would be kept for a suggestion no one has (review C2 of design wave 2, N4).
+    @Test func nothingIsTakenOutOfASuggestionThatWent() throws {
+        let photos = try Self.body(["struct ProposalPhotosView"], in: Self.suggestions)
+        #expect(photos.contains("    var isCurrent: Bool\n"), "\(photos)")
+        let tile = try Self.body(["struct ProposalPhotosView", "private func tile("], in: Self.suggestions)
+        #expect(tile.contains("available: !disabled && isCurrent)"), "\(tile)")
+        let detail = Self.squeezed(try Self.body(["struct ProposalDetailView", "var body: some View"], in: Self.suggestions))
+        #expect(detail.contains("ProposalPhotosView(days:days,selecting:selecting,selected:$selected,hidden:photosHidden,"
+                                + "disabled:busy,isCurrent:isCurrent)"), "\(detail)")
+        // Both questions: for the photos ticked with "Auswählen", and for one photo's long press.
+        let several = try #require(detail.range(of: "Button(\"Entfernen\",role:.destructive){"), "\(detail)")
+        #expect(detail[several.upperBound...].hasPrefix("guardisCurrentelse{return}letchosen=selected"), "\(detail)")
+        let one = try #require(detail.range(of: ".photoRemovalQuestion($removingPhoto){idin"), "\(detail)")
+        #expect(detail[one.upperBound...].hasPrefix("guardisCurrentelse{return}Task{"), "\(detail)")
+        // Their buttons wait, as "Nicht jetzt" and the main button do (only "Fertig" stays).
+        #expect(detail.contains(".disabled(!selecting&&(busy||!isCurrent||days.isEmpty||photosHidden))"), "\(detail)")
+        #expect(detail.contains(".disabled(selected.isEmpty||!isCurrent)"), "\(detail)")
+        // One rule of the page for what went: the same id with the same photos.
+        let current = Self.squeezed(try Self.body(["struct ProposalDetailView", "private var isCurrent: Bool"], in: Self.suggestions))
+        #expect(current == "{model.proposals.contains{$0.id==proposal.id&&$0.assetIDs==proposal.assetIDs}}", "\(current)")
     }
 
     /// A photo the user ignored offers "Nicht mehr ignorieren" also without a state of its own

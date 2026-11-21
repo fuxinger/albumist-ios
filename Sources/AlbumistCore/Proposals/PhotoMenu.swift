@@ -46,7 +46,7 @@ public struct PhotoMenu: Equatable, Sendable {
     ///   - isIgnored: the photo is ignored (its "Info" offers "Nicht mehr ignorieren").
     ///   - selecting: the grid selects photos.
     ///   - available: the photo can be opened now (a search hit has its facts; a suggestion's
-    ///     photos are not waiting for its album).
+    ///     photos are not waiting for its album, and the suggestion is still there).
     public init(place: Place, isIgnored: Bool = false, selecting: Bool = false, available: Bool = true) {
         guard Self.isOffered(selecting: selecting, available: available) else {
             sections = []
@@ -71,8 +71,9 @@ public struct PhotoMenu: Equatable, Sendable {
     public var accessibilityItems: [Item] { items.filter { $0 != .view } }
 
     /// Whether the photo has a menu at all, known from its grid alone: none while the grid
-    /// selects or the photo cannot be opened. The app switches the long press off with it (an
-    /// empty menu closure: no lift, no menu, no actions; review C of design wave 2, M4).
+    /// selects or the photo cannot be opened. Without one the app attaches no context menu and no
+    /// actions to the photo at all, so nothing lifts (`PhotoLongPress`; review C2 of design wave
+    /// 2, N1: a menu that returns nothing beside a preview of its own is not documented to).
     public static func isOffered(selecting: Bool, available: Bool) -> Bool {
         !selecting && available
     }

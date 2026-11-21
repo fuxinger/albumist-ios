@@ -87,8 +87,9 @@ final class ThumbnailCache {
         covers.object(forKey: Self.coverKey(id, pixels))
     }
 
-    /// The kept thumbnail of `id` at `side` points, if there is one (for the tests: covers never
-    /// land here).
+    /// The kept thumbnail of `id` at `side` points, if there is one, from memory only: what a
+    /// thumbnail made anew shows first (`AssetThumbnail.init`) and a long press lifts
+    /// (`PhotoPreview`). Covers never land here (`PhotoCardPiecesTests`).
     func cachedThumbnail(for id: AssetID, side: CGFloat) -> UIImage? {
         cache.object(forKey: Self.thumbnailKey(id, side))
     }
@@ -449,13 +450,27 @@ enum ThumbnailRequest {
 
 struct AssetThumbnail: View {
     var id: AssetID
-    var side: CGFloat = 80
+    var side: CGFloat
     /// Which part stays visible when the photo is cropped; screenshots keep their top.
-    var anchor: Alignment = .center
+    var anchor: Alignment
     @State private var image: UIImage?
     /// The photo `image` shows: when the same view gets another `id` (a trip's cover), the old
     /// photo is not shown while the new one loads.
     @State private var loadedID: AssetID?
+
+    /// Starts with the thumbnail the cache holds in memory, if it has one: a thumbnail made anew
+    /// (a grid cell rebuilt when its photo's long press is switched on or off as "Auswählen"
+    /// toggles, `photoMenu`) shows its photo from its first frame, not its grey ground until the
+    /// task below has read the cache again (review C2 of design wave 2, N1). Only from memory:
+    /// nothing is asked of Photos here, the task asks for what is not in memory, as before.
+    init(id: AssetID, side: CGFloat = 80, anchor: Alignment = .center) {
+        self.id = id
+        self.side = side
+        self.anchor = anchor
+        let kept = ThumbnailCache.shared.cachedThumbnail(for: id, side: side)
+        _image = State(initialValue: kept)
+        _loadedID = State(initialValue: kept == nil ? nil : id)
+    }
 
     var body: some View {
         Rectangle()

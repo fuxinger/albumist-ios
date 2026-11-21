@@ -24,6 +24,9 @@ struct ProposalListView: View {
     @State private var made: [AlbumistID: AlbumProposal] = [:]
     /// The cards zoom into the suggestion they open and back (`ProposalDetailView.zoom`).
     @Namespace private var zoom
+    /// What a card's long press opens, kept by the list, made when the list is made, not at each
+    /// of its drawings (`suggestionMenuFlows(_:)`; review C2 of design wave 2, N2).
+    @State private var menuFlows = SuggestionMenuFlowAction()
 
     /// The suggestions shown, in the app's one suggestion order (also the start page's and the
     /// preview's), with one just made from a card while its banner shows.
@@ -162,7 +165,7 @@ struct ProposalListView: View {
             made = made.filter { $0.key == banner }
         }
         // What a card's long press opens: "Anpassen", the trip workshop, "Keine Reise?" (DS-06a).
-        .suggestionMenuFlows()
+        .suggestionMenuFlows(menuFlows)
     }
 
     private var columns: [GridItem] {
@@ -263,7 +266,7 @@ struct ProposalListView: View {
 /// Photos will show it, its status, and its one action, or a tick while the list selects.
 private struct ProposalListCard: View {
     @Environment(AppModel.self) private var model
-    /// The list's sheets and question for the long press (`suggestionMenuFlows()`).
+    /// The list's sheets and question for the long press (`suggestionMenuFlows(_:)`).
     @Environment(\.openSuggestionMenuFlow) private var openFlow
     var proposal: AlbumProposal
     /// Its words (`AppModel.proposalCard`), made once for the whole list.
@@ -620,7 +623,7 @@ struct ProposalDetailView: View {
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.l)
                 ProposalPhotosView(days: days, selecting: selecting, selected: $selected, hidden: photosHidden,
-                                   disabled: busy) {
+                                   disabled: busy, isCurrent: isCurrent) {
                     revealed = true
                 } askToRemove: { id in
                     removingPhoto = id
@@ -673,7 +676,8 @@ struct ProposalDetailView: View {
                         selected = []
                     }
                 }
-                .disabled(!selecting && (busy || days.isEmpty || photosHidden))
+                // Picks only photos to take out: not of a suggestion that went (review C2, N4).
+                .disabled(!selecting && (busy || !isCurrent || days.isEmpty || photosHidden))
                 .accessibilityIdentifier(selecting ? "proposalPhotos.selectDone" : "proposalPhotos.select")
             }
             if !selecting {
@@ -687,13 +691,17 @@ struct ProposalDetailView: View {
                     } label: {
                         Text("\(selected.count.formatted()) aus Vorschlag entfernen")
                     }
-                    .disabled(selected.isEmpty)
+                    // Waits for a suggestion that went meanwhile, as the page's own buttons do.
+                    .disabled(selected.isEmpty || !isCurrent)
                     .accessibilityIdentifier("proposalPhotos.remove")
                 }
             }
         }
         .confirmationDialog("Fotos aus diesem Vorschlag entfernen?", isPresented: $confirmRemove, titleVisibility: .visible) {
             Button("Entfernen", role: .destructive) {
+                // The question can stay open while the suggestion goes: nothing is kept for one
+                // that no one has any more (review C2 of design wave 2, N4).
+                guard isCurrent else { return }
                 let chosen = selected
                 Task {
                     await model.removeFromProposal(chosen, proposal: proposal)
@@ -708,6 +716,7 @@ struct ProposalDetailView: View {
         }
         // One photo from its long press, asked the same way here, not from the middle of its days.
         .photoRemovalQuestion($removingPhoto) { id in
+            guard isCurrent else { return }
             Task { await model.removeFromProposal([id], proposal: proposal) }
         }
         // Asked for by "Keine Reise, hier bin ich öfter" in the menu; on the screen, because the
@@ -1697,6 +1706,10 @@ struct ProposalPhotosView: View {
     /// The photos do not open while the suggestion is being made (its preview would be pushed
     /// under them).
     var disabled: Bool
+    /// The suggestion is still the analysis' (`ProposalDetailView.isCurrent`): a photo's long
+    /// press offers nothing for one that went, whose photos can no longer be taken out of it
+    /// (review C2 of design wave 2, N4).
+    var isCurrent: Bool
     var reveal: () -> Void
     /// A photo's long press chose "Aus Vorschlag entfernen": the suggestion asks first, on its
     /// scroll view (`photoRemovalQuestion`), and takes it out as "Auswählen" takes several out.
@@ -1808,7 +1821,7 @@ struct ProposalPhotosView: View {
         .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
         .accessibilityIdentifier("proposalPhotos.photo")
         // The long press (DS-06a): the photo larger, "Ansehen" and "Aus Vorschlag entfernen".
-        .photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled) { item in
+        .photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled && isCurrent) { item in
             perform(item, on: id)
         }
     }

@@ -22,8 +22,11 @@ extension AppModel {
     /// What the long press on `proposal`'s card offers now. `made`, `working`, `waits` and
     /// `selecting` are the card's state as its page knows it. Each fact is read only where the
     /// menu shows what it decides: nothing without a menu, and whether "Keine Reise" can be
-    /// answered now (the analysis, the plans) only where it is offered, so a card is not tied to
-    /// the analysis' changes (review C of design wave 2, M5).
+    /// answered now (the analysis, the plans) only where it is offered (review C of design wave
+    /// 2, M5). Called where the menu's items are evaluated (`SuggestionMenuItems`): to show the
+    /// menu, and for a card's actions while an assistive technology or a UI test asks for them;
+    /// then every card follows what it reads here, a trip card where "Keine Reise" is offered
+    /// the analysis too (review C2 of design wave 2, N3).
     func suggestionMenu(for proposal: AlbumProposal, action: ProposalCardAction, made: Bool, working: Bool,
                         waits: Bool, selecting: Bool) -> SuggestionMenu {
         SuggestionMenu(action: action, made: made, working: working, waits: waits, selecting: selecting,

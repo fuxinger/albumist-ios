@@ -287,8 +287,6 @@ struct MapSummaryTests {
         #expect(done.numbers.countries == 2)
     }
 
-    /// Concept §8: the stored summary knows home only rounded, the diagnostic report no
-    /// coordinate at all.
     /// A library listing photos twice gives the map of listing them once: one photo three times
     /// would otherwise make a place and a record (review finding 5).
     @Test func aPhotoListedTwiceCountsOnce() throws {
@@ -371,6 +369,8 @@ struct MapSummaryTests {
         #expect(!summary.pins.contains { $0.id == "country:FR" })
     }
 
+    /// Concept §8: the stored summary knows home only rounded, the diagnostic report no
+    /// coordinate at all.
     @Test func storedSummaryAndDiagnosticsGiveNoHomeAway() throws {
         let data = try JSONEncoder().encode(Self.summary)
         let json = try #require(String(data: data, encoding: .utf8))

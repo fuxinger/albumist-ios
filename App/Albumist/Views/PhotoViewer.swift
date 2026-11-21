@@ -91,7 +91,7 @@ struct PhotoViewer: View {
         NavigationRoot { pager }
             // Dark inside the viewer only; the sheets below keep the app's own appearance.
             .environment(\.colorScheme, .dark)
-            .accessibilityAction(.escape) { dismiss() }
+            .accessibilityAction(.escape) { closeNow() }
             .sheet(item: $info) { facts in details(facts) }
             .sheet(isPresented: addingBinding) { addSheet }
             // Said here, over the photo: the app's own alert cannot show over this full-screen
@@ -111,6 +111,13 @@ struct PhotoViewer: View {
     private func opened() {
         PhotoShare.removeLeftovers()
         LiveAudio.prepare()
+    }
+
+    /// The photo view closes by the button, a pull or VoiceOver's escape: a video stops at once,
+    /// so its sound does not run on over the grid while the view slides away (review F, F15).
+    private func closeNow() {
+        video.pause()
+        dismiss()
     }
 
     /// The video stops, and the app's sound mixes with the user's again (DS-16).
@@ -183,7 +190,7 @@ struct PhotoViewer: View {
         let id = ids[index]
         let photo = ZoomablePhoto(id: id, label: label(of: id), position: position(of: index), isCurrent: id == current,
                                   isVideo: isVideo(id), player: video.surface(for: id),
-                                  top: top, pull: $pull, onTap: { toggleChrome() }, onClose: { dismiss() },
+                                  top: top, pull: $pull, onTap: { toggleChrome() }, onClose: { closeNow() },
                                   onLive: { _ = livePhotos.insert($0) }, onZoom: { zoomChrome() },
                                   onPressing: { livePress(id, $0) }, onPicture: { pictureCame($0, sharp: $1) },
                                   onPlayPause: { if video.id == id { video.togglePlay() } })
@@ -243,7 +250,7 @@ struct PhotoViewer: View {
     }
 
     private var closeButton: some View {
-        Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
+        Button { closeNow() } label: { Label("Schließen", systemImage: "xmark") }
             .accessibilityIdentifier("viewer.close")
     }
 

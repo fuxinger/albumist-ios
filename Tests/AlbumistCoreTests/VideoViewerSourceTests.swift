@@ -92,6 +92,13 @@ struct VideoViewerSourceTests {
         #expect(try #require(AppSource.body(of: "private func closed(", in: viewer)).contains("video.close()"))
         #expect(viewer.contains(".onChange(of: scenePhase)"))
         #expect(viewer.contains("video.pause()"), "a video plays on in the background")
+        // It stops at once when the photo view closes, by the button, the pull or VoiceOver's
+        // escape: its sound does not run on over the grid while the view slides away (review F,
+        // F15; `closed` lets its player go only after that).
+        let closeNow = try #require(AppSource.body(of: "private func closeNow(", in: viewer))
+        #expect(Self.inOrder(["video.pause()", "dismiss()"], in: closeNow), "\(closeNow)")
+        #expect(Self.count(#"(?<![\w.])dismiss\(\)"#, in: viewer) == 1, "a way to close that leaves the video playing")
+        #expect(Self.count(#"(?<!func )closeNow\(\)"#, in: viewer) == 3, "the button, the pull and the escape")
 
         let model = try Self.file("ViewerVideo.swift")
         #expect(model.contains("@MainActor"))

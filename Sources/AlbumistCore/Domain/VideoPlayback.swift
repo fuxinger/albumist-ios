@@ -139,10 +139,11 @@ public struct VideoStart: Equatable, Sendable {
     }
 
     /// Whether the playing video keeps the screen on (review F, F8): while it plays, as any video
-    /// the user watches; one that loops only through its first play (`loopsDone` 0), then the
-    /// iPhone may lock as usual, since it loops on while nobody watches.
-    public func keepsScreenOn(loopsDone: Int) -> Bool {
-        !loops || loopsDone == 0
+    /// the user watches. One that loops without its sound only through its first play
+    /// (`loopsDone` 0), then the iPhone may lock as usual, since it loops on while nobody
+    /// watches; with its sound on it is watched, and keeps the screen on as it loops (review V3).
+    public func keepsScreenOn(loopsDone: Int, soundOn: Bool) -> Bool {
+        !loops || loopsDone == 0 || soundOn
     }
 }
 

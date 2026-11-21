@@ -193,13 +193,26 @@ struct VideoPlaybackTests {
     /// F, F8: before, an open video kept the iPhone awake for good).
     @Test func aLoopingVideoLetsTheIPhoneLockAfterItsFirstPlay() {
         let looping = VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: false)
-        #expect(looping.keepsScreenOn(loopsDone: 0))
-        #expect(!looping.keepsScreenOn(loopsDone: 1))
-        #expect(!looping.keepsScreenOn(loopsDone: 40))
+        #expect(looping.keepsScreenOn(loopsDone: 0, soundOn: false))
+        #expect(!looping.keepsScreenOn(loopsDone: 1, soundOn: false))
+        #expect(!looping.keepsScreenOn(loopsDone: 40, soundOn: false))
         for once in [VideoStart(reduceMotion: true, autoplayVideos: true, lowPowerMode: false),
                      VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: true)] {
-            #expect(once.keepsScreenOn(loopsDone: 0), "\(once)")
+            #expect(once.keepsScreenOn(loopsDone: 0, soundOn: false), "\(once)")
         }
+    }
+
+    /// A looping video with its sound on is watched: it keeps the screen on while it plays, as
+    /// any video with sound; only a muted loop lets the iPhone lock after its first play (review
+    /// V3: half a minute into a 20-second clip with "Ton an" the screen dimmed and locked).
+    @Test func aLoopingVideoWithItsSoundKeepsTheScreenOn() {
+        let looping = VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: false)
+        for loops in [0, 1, 40] {
+            #expect(looping.keepsScreenOn(loopsDone: loops, soundOn: true), "\(loops) loops")
+        }
+        #expect(!looping.keepsScreenOn(loopsDone: 1, soundOn: false), "a muted loop")
+        let once = VideoStart(reduceMotion: true, autoplayVideos: true, lowPowerMode: false)
+        #expect(once.keepsScreenOn(loopsDone: 0, soundOn: true))
     }
 
     // MARK: Sound

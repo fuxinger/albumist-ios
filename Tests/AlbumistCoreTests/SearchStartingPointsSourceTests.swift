@@ -76,10 +76,15 @@ struct SearchStartingPointsSourceTests {
     }
 
     /// The albums tab's grid: two columns on the smallest iPhone, one at the accessibility sizes;
-    /// the page's margins, none of its own.
+    /// the page's margins, none of its own. `AlbumGrid` is generic over its content, so its
+    /// narrowest column is read through a concrete type: `AlbumGrid.minimumColumn` leaves the
+    /// content type open and does not compile ("generic parameter 'Content' could not be
+    /// inferred").
     @Test func theGridIsTheAlbumsTabsGrid() throws {
         let grid = Self.squeezed(try Self.body(["struct SearchStartingPointGrid", "var body"], in: Self.tiles))
-        #expect(grid.contains("typeSize.isAccessibilitySize?[GridItem(.flexible(),alignment:.top)]:[GridItem(.adaptive(minimum:AlbumGrid.minimumColumn,maximum:260),spacing:Theme.Spacing.l,alignment:.top)]"))
+        #expect(grid.contains("typeSize.isAccessibilitySize?[GridItem(.flexible(),alignment:.top)]:[GridItem(.adaptive(minimum:AlbumGrid<EmptyView>.minimumColumn,maximum:260),spacing:Theme.Spacing.l,alignment:.top)]"))
+        #expect(!Self.squeezed(try Self.code(Self.tiles)).contains("AlbumGrid.minimumColumn"),
+                "the generic AlbumGrid's column width without a content type does not compile")
         #expect(grid.contains("LazyVGrid(columns:columns,alignment:.leading,spacing:20)"))
         #expect(grid.contains("SearchStartingPointTile(point:point){choose(point.suggestion)}"))
         #expect(!grid.contains(".padding("))

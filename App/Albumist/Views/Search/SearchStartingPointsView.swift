@@ -16,9 +16,11 @@ struct SearchStartingPointGrid: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        // The albums tab's narrowest column; `AlbumGrid` is generic, so it is read through a
+        // concrete content type.
         let columns = typeSize.isAccessibilitySize
             ? [GridItem(.flexible(), alignment: .top)]
-            : [GridItem(.adaptive(minimum: AlbumGrid.minimumColumn, maximum: 260), spacing: Theme.Spacing.l, alignment: .top)]
+            : [GridItem(.adaptive(minimum: AlbumGrid<EmptyView>.minimumColumn, maximum: 260), spacing: Theme.Spacing.l, alignment: .top)]
         LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
             ForEach(points) { point in
                 SearchStartingPointTile(point: point) { choose(point.suggestion) }

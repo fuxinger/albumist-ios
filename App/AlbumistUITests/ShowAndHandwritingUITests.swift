@@ -238,23 +238,20 @@ final class ShowAndHandwritingUITests: XCTestCase {
         return (skip, value)
     }
 
-    /// The photos at the end of the show's value, with grouped digits: "0 von 1 Album fertig, 0
-    /// Fotos einsortiert", "3 von 12 Alben fertig, 1.234 Fotos einsortiert"; nil when the value
-    /// does not end so.
-    private static func sortedPhotos(_ value: String) -> Int? {
-        guard let match = value.firstMatch(of: #/(?:^|[^0-9.])([0-9]{1,3}(?:\.[0-9]{3})*) Fotos einsortiert$/#) else { return nil }
-        return Int(match.1.filter(\.isNumber))
-    }
-
     /// DS-17: while a plan's sorting show runs, "Animation überspringen" (`show.skip`) is there
-    /// and the show's one VoiceOver element ("Fotos werden einsortiert") says how far it is,
-    /// its photos with grouped digits at the end. The plan is one new album of two photos made
-    /// by hand, with the slow plan (`-AlbumistUITestSlowPlan`: every change after a launch's
-    /// first waits 30 s), so the show stays on screen while its album waits, long enough to be
-    /// read and pictured on a slow Mac; the album lands once its photos are in.
+    /// and the show's one VoiceOver element ("Fotos werden einsortiert") says how far it is, its
+    /// photos at the end: "…, 0 Fotos einsortiert" while its album waits, "…, 2 Fotos
+    /// einsortiert" once it landed with its two photos (verification review V8; the grouping of
+    /// bigger numbers, which two photos cannot show, is a unit test of the words:
+    /// `SortingShowSourceTests.theCountReadsAsTheCatalogWritesIt`). The plan is one new album of
+    /// two photos made by hand, with the slow plan (`-AlbumistUITestSlowPlan`: every change after
+    /// a launch's first waits 30 s), so the show stays on screen while its album waits, long
+    /// enough to be read and pictured on a slow Mac. The album lands once its photos are in, and
+    /// the show then holds its end 15 s (`-AlbumistUITestShowHold`) instead of half a second, so
+    /// a look sees it landed: a test whose looks all miss it fails.
     func test2_SortingShowCountsThePhotosItSorts() {
         continueAfterFailure = true
-        prepare("show", ["-AlbumistUITestSlowPlan"])
+        prepare("show", ["-AlbumistUITestSlowPlan", "-AlbumistUITestShowHold"])
         guard tap(tab("Unsortiert"), "show: tab Unsortiert"),
               UITestScreens.Unsorted.planNewAlbum(app, titled: "Testalbum Show", "show") else {
             XCTFail("show: no plan of a new album could be opened")
@@ -269,17 +266,18 @@ final class ShowAndHandwritingUITests: XCTestCase {
         if running, let value = state?.value {
             shot("10x-show")
             print("UI_FACT show: '\(value)'")
-            let counted = Self.sortedPhotos(value)
-            print(counted != nil ? "UI_STEP_OK show: its value ends in grouped \"Fotos einsortiert\""
-                                 : "UI_STEP_MISSING show: its value ends in grouped \"Fotos einsortiert\" ('\(value)')")
-            XCTAssertNotNil(counted, "The show says '\(value)', not \"… N Fotos einsortiert\" with grouped digits")
+            let waiting = value.hasSuffix(", 0 Fotos einsortiert")
+            print(waiting ? "UI_STEP_OK show: its value ends in \", 0 Fotos einsortiert\" while its album waits"
+                          : "UI_STEP_MISSING show: its value ends in \", 0 Fotos einsortiert\" while its album waits ('\(value)')")
+            XCTAssertTrue(value.hasSuffix(", 0 Fotos einsortiert"), "The show says '\(value)' while its album waits, not \"…, 0 Fotos einsortiert\"")
         }
-        // The album lands once its photos are in: the count runs up while the show is still on.
+        // The album lands once its photos are in: the count changes while the show is still on,
+        // and the show holds its end for this look.
         var landed: String?
         let ended = UITestWait.until("show: the album landed or the show ended", timeout: 120) {
             guard let now = showState() else { return false }
             if now.value == nil && !now.skip { return true }
-            if let value = now.value, (Self.sortedPhotos(value) ?? 0) > 0 {
+            if let value = now.value, !value.hasSuffix(", 0 Fotos einsortiert") {
                 landed = value
                 return true
             }
@@ -288,9 +286,13 @@ final class ShowAndHandwritingUITests: XCTestCase {
         if ended, let landed {
             shot("10y-show-landed")
             print("UI_FACT show: '\(landed)'")
-            XCTAssertTrue(landed.hasSuffix("Fotos einsortiert"), "The show says '\(landed)' once its album landed")
+            let two = landed.hasSuffix(", 2 Fotos einsortiert")
+            print(two ? "UI_STEP_OK show: its value ends in \", 2 Fotos einsortiert\" once its album landed"
+                      : "UI_STEP_MISSING show: its value ends in \", 2 Fotos einsortiert\" once its album landed ('\(landed)')")
+            XCTAssertTrue(landed.hasSuffix(", 2 Fotos einsortiert"), "The show says '\(landed)' once its album landed, not \"…, 2 Fotos einsortiert\" for its two photos")
         } else if ended {
-            print("UI_FACT show: it ended before a look saw its album land")
+            print("UI_STEP_MISSING show: a look saw its album land")
+            XCTFail("The show ended before a look saw its album land, though it holds its end 15 s in this run")
         }
         let result = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Rückgängig machen")).firstMatch
         let finished = UITestWait.appears(result, "show: the plan's result after the show", timeout: 300)

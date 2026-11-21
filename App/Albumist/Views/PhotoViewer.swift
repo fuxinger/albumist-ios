@@ -138,9 +138,24 @@ struct PhotoViewer: View {
         }
         // The photos lie on the whole screen, under a bar of fixed height (`top`).
         .ignoresSafeArea()
+        // No photo under the title (design rule 1), also zoomed, after a tap while zoomed and
+        // with VoiceOver (review D2, N8).
+        .mask { photosArea }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { measured in
             if chrome.isShown { top = measured }
         }
+    }
+
+    /// Where the photos show: the whole screen but the bar's area while the bars show. With the
+    /// bars hidden a zoomed photo fills the screen, as in Photos; the area fades with the bars
+    /// (a fade with Reduce Motion too), and nothing moves.
+    private var photosArea: some View {
+        VStack(spacing: 0) {
+            Color.black.opacity(chrome.isShown ? 0 : 1)
+                .frame(height: top)
+            Color.black
+        }
+        .ignoresSafeArea()
     }
 
     private func page(at index: Int) -> some View {

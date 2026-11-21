@@ -170,6 +170,28 @@ struct PhotoViewerSourceTests {
         #expect(!notes.contains("if chrome.isShown {"), "the undo bar goes with the bars")
     }
 
+    /// The title never stands on the photo (design rule 1, strict; review D2, N8): while the bars
+    /// show, the bar's area shows no photo, also zoomed, after a tap while zoomed and with
+    /// VoiceOver or Switch Control (whose bars never go). The photo's own area stays where it is
+    /// (`top`, kept while the bars are hidden), so nothing jumps; with the bars hidden a zoomed
+    /// photo fills the screen, as in Photos, and the bar's area fades with the bars.
+    @Test func theTitleNeverStandsOnThePhoto() throws {
+        let viewer = AppSource.code(try Self.viewer())
+        let pages = try #require(AppSource.body(of: "private var pages", in: viewer))
+        let whole = try #require(pages.range(of: ".ignoresSafeArea()"))
+        let masked = try #require(pages.range(of: ".mask { photosArea }"), "the photo passes under the title")
+        #expect(whole.upperBound <= masked.lowerBound, "the mask is not the whole screen's")
+        let area = try #require(AppSource.body(of: "private var photosArea", in: viewer))
+        let band = try #require(area.range(of: "Color.black.opacity(chrome.isShown ? 0 : 1)"))
+        let height = try #require(area.range(of: ".frame(height: top)", range: band.upperBound..<area.endIndex))
+        _ = try #require(area.range(of: "Color.black", range: height.upperBound..<area.endIndex), "nothing of the photo shows")
+        #expect(area.contains(".ignoresSafeArea()"))
+        // The bar's height is measured only while the bars show, so the photo never moves.
+        #expect(pages.contains("if chrome.isShown { top = measured }"))
+        let content = try #require(AppSource.body(of: "private func content(in size: CGSize)", in: viewer))
+        #expect(content.contains(".padding(.top, top)"))
+    }
+
     // MARK: Live Photos
 
     /// A Live Photo moves in Photos' own view, which takes no touch of its own (the photo view's

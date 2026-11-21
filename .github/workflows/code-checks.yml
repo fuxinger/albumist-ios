@@ -7,7 +7,7 @@ name: Code checks
 #
 # Xcode's analyzer ("xcodebuild analyze") is left out on purpose: it is the Clang static analyzer,
 # which checks C, C++ and Objective-C only, and this app is Swift (the one C file is the SQLite
-# module header Sources/CSQLite/shim.h). SwiftLint runs in ci.yml ("SwiftLint report").
+# module header Sources/CSQLite/shim.h). SwiftLint runs in ci.yml ("SwiftLint").
 #
 # Once a night (a Mac for about 10 minutes, at an hour without UI runs), by hand, and in a pull
 # request that changes this check itself. Not in the Mac queue of the UI runs (ui.yml): it

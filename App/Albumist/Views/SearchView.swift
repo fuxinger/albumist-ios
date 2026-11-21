@@ -62,7 +62,9 @@ struct SearchView: View {
                     if result.ids.isEmpty {
                         // The previous answer stays while the next one is computed (no flicker).
                         if resultQuery.isEmpty {
-                            ProgressView().frame(maxWidth: .infinity)
+                            // The first answer is worked out: calm tiles where the hits will be
+                            // (design wave 3, DS-18: no spinner).
+                            waitingTiles(count: 6)
                                 .accessibilityLabel(Text("Suche läuft"))
                         } else {
                             emptyState
@@ -243,17 +245,29 @@ struct SearchView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
         if result.ids.count > shown {
-            // The next hits load by themselves at the end of the grid (design review N10).
-            ProgressView()
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Theme.Spacing.m)
-                .accessibilityLabel(Text("Weitere Treffer werden geladen"))
+            // The next hits load by themselves at the end of the grid (design review N10), on
+            // calm tiles where they will be (DS-18).
+            waitingTiles(count: 3)
                 .onScrollVisibilityChange(threshold: 0.1) { visible in
                     if visible { shown += Self.page }
                 }
                 .accessibilityLabel(Text("Weitere Treffer werden geladen"))
                 .accessibilityIdentifier("search.loadingMore")
         }
+    }
+
+    /// Tiles on the thumbnails' calm ground (`ThumbnailGround`) where hits will be, while they
+    /// are worked out: no spinner (design wave 3, DS-18). One element for VoiceOver, which the
+    /// caller names.
+    private func waitingTiles(count: Int) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
+            ForEach(0..<count, id: \.self) { _ in
+                ThumbnailGround()
+                    .aspectRatio(1, contentMode: .fill)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
+        .accessibilityElement(children: .ignore)
     }
 
     private func thumbnail(_ id: AssetID, source: String) -> some View {

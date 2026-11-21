@@ -121,4 +121,19 @@ struct VideoViewerSourceTests {
             #expect(body.contains(".environment(\\.thumbnailShowsVideoLength, false)"), "\(owner)")
         }
     }
+
+    // MARK: Search
+
+    /// Search waits on calm tiles where its hits will be, not on spinners: the first answer and
+    /// the next page of hits, each said once to VoiceOver.
+    @Test func searchWaitsOnCalmTiles() throws {
+        let search = try Self.code("App/Albumist/Views/SearchView.swift", keepStrings: true)
+        #expect(!search.contains("ProgressView("))
+        #expect(Self.count(#"Text\("Suche läuft"\)"#, in: search) == 1)
+        #expect(Self.count(#"Text\("Weitere Treffer werden geladen"\)"#, in: search) == 1)
+        #expect(search.contains("\"search.loadingMore\""))
+        let tiles = try #require(AppSource.body(of: "private func waitingTiles(", in: search))
+        #expect(tiles.contains("ThumbnailGround()"))
+        #expect(tiles.contains(".accessibilityElement(children: .ignore)"))
+    }
 }

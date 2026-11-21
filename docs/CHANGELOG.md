@@ -2,6 +2,10 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. Zwei Momente (Design-Welle 2, Entwürfe E3 und E6, noch in keinem Build): Nach dem Umsetzen legen sich die
+  Cover der neuen Alben gefächert über die Zahl, das Hauptcover zuletzt und mit dem einen Erfolgs-Tap; nur ergänzte
+  Alben heißen jetzt „12 Fotos in 3 deiner Alben ergänzt“. Nach „Anlegen“ auf einer Karte fliegt ihr Cover in den
+  Tab „Alben“. Mit „Bewegung reduzieren“ wird nur eingeblendet.
 - Neue Fortschrittsanzeige der Analyse (Entwurf v3 mit den 5 Punkten vom 15.11.): ein Balken in
   6 Abschnitten nach Zeitanteil, „Fertig gegen 23:40“ für die ganze Analyse, gleitender Balken,
   „Schon fertig: 51 Reisen, 38 Orte · Ansehen“, Fertig-Moment mit Häkchen, Details-Blatt,

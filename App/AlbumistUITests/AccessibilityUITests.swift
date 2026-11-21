@@ -529,6 +529,7 @@ final class AccessibilityUITests: XCTestCase {
         case .moving: break // failed in the wait
         case .unread: print("A11Y_WARN \(screen) | not checked at rest: no snapshot")
         }
+        answerLateNotificationAlert(before: screen)
         shot("a11y-" + slug(screen))
         let chrome = chromeFrames()
         UITestOnboarding.clock("check start \(screen)")
@@ -1314,6 +1315,24 @@ final class AccessibilityUITests: XCTestCase {
             return false
         }
         print(answered ? "UI_STEP_OK notification alert" : "UI_FACT no notification alert within 20 s")
+    }
+
+    /// The notification question can come later than the 20 s `allowNotificationsIfAsked` waits:
+    /// on a busy Mac (load 669, UI run 44880878362) it came only after the demo library was made
+    /// and covered "overview after first analysis". The audit then could not reach the app
+    /// ("Invalid target app" twice) and the screen went unaudited. So every check first looks
+    /// once whether the system alert is in front and answers it as the onboarding does.
+    private func answerLateNotificationAlert(before screen: String) {
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        guard alert.exists else { return }
+        let aboutNotifications = ["Notification", "Mitteilung"].contains { alert.label.localizedCaseInsensitiveContains($0) }
+        for label in ["Erlauben", "Allow"] where aboutNotifications && alert.buttons[label].exists {
+            alert.buttons[label].tap()
+            UITestWait.disappears(alert, "late notification alert before \(screen) answered", timeout: 10)
+            print("UI_FACT notification alert came late, answered before \(screen)")
+            return
+        }
+        print("UI_FACT system alert in front before \(screen): \(alert.label)")
     }
 
     @discardableResult

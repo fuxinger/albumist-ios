@@ -595,14 +595,50 @@ struct VideoViewerSourceTests {
         let thumbnails = try Self.code(Self.thumbnailsPath)
         let refresh = try #require(AppSource.body(of: "func libraryChanged(_ change: ThumbnailRequest.Change) async", in: thumbnails))
         #expect(Self.inOrder(["for key in videoLengths.keys", "assets.object(forKey: key as NSString)",
-                              "await ThumbnailRequest.changed(kept, by: change)", "case .changed(let asset):",
-                              "assets.setObject(asset.value, forKey: key as NSString)", "videoLengths[key] = asset.value.duration",
-                              "case .deleted:", "assets.removeObject(forKey: key as NSString)", "videoLengths[key] = nil"], in: refresh),
-                "\(refresh)")
+                              "await ThumbnailRequest.changed(kept, by: change)",
+                              "if case .changed(let asset) = answer { assets.setObject(asset.value, forKey: key as NSString) }"],
+                             in: refresh), "\(refresh)")
+        // Each record as the core's rule says (`aTrimmedVideosCellOnScreenShowsItsNewLength`).
         #expect(!refresh.contains("removeAll"), "the records emptied on every change")
         let details = try #require(AppSource.body(of: "nonisolated static func changed(", in: thumbnails))
         #expect(Self.inOrder(["lookups.async {", "change.value.changeDetails(for: asset.value)", "objectWasDeleted",
                               "objectAfterChanges"], in: details), "\(details)")
+    }
+
+    /// A trimmed video's cell on screen shows its new length at once, on its badge and to
+    /// VoiceOver (review V4): each record follows the core's rule (`KeptVideoLength`), and a
+    /// small observed revision, raised when a length a cell may show changed, makes the cells on
+    /// screen read their record again. A record whose asset is no longer in memory cannot be
+    /// checked: it goes with the thumbnail kept for it, so the next look asks Photos again (a
+    /// thumbnail from memory passes no lookup that would write the record anew).
+    @Test func aTrimmedVideosCellOnScreenShowsItsNewLength() throws {
+        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let refresh = try #require(AppSource.body(of: "func libraryChanged(", in: thumbnails))
+        #expect(Self.inOrder(["for key in videoLengths.keys", "if let asset = assets.object(forKey: key as NSString)",
+                              "kept[key] = ThumbnailRequest.Asset(asset)", "} else if let seconds = videoLengths[key]",
+                              "apply(KeptVideoLength.step(kept: seconds, inMemory: false, found: nil), to: key)",
+                              "await ThumbnailRequest.changed(kept, by: ", "guard let seconds = videoLengths[key] else { continue }",
+                              "assets.setObject(asset.value, forKey: key as NSString)",
+                              "apply(KeptVideoLength.step(kept: seconds, inMemory: true, found: answer.lengthFound), to: key)",
+                              "if readAgain { lengthRevision.raise() }"], in: refresh), "\(refresh)")
+        let apply = try #require(AppSource.body(of: "private func apply(_ step: KeptVideoLength.Step, to key: String) -> Bool", in: thumbnails))
+        #expect(Self.inOrder(["case .keep:", "case .update(let seconds, _):", "videoLengths[key] = seconds", "case .drop(let checked):",
+                              "videoLengths[key] = nil", "if checked {", "assets.removeObject(forKey: key as NSString)",
+                              "} else if let side = keptSides[key] {", "cache.removeObject(forKey: Self.thumbnailKey(AssetID(key), side))",
+                              "keptSides[key] = nil", "return step.readsAgain"], in: apply), "\(apply)")
+        let found = try #require(AppSource.body(of: "var lengthFound: KeptVideoLength.Found", in: thumbnails))
+        #expect(Self.inOrder(["case .changed(let asset): .changed(seconds: asset.value.duration)", "case .deleted: .deleted"], in: found))
+        // The revision is observed (the cache is not), raised only by a correction.
+        #expect(thumbnails.contains("let lengthRevision = VideoLengthRevision()"))
+        #expect(Self.inOrder(["@MainActor", "@Observable", "final class VideoLengthRevision"], in: thumbnails))
+        let revision = try #require(AppSource.body(of: "final class VideoLengthRevision", in: thumbnails))
+        #expect(revision.contains("private(set) var value = 0") && revision.contains("value &+= 1"), "\(revision)")
+        #expect(Self.count(#"lengthRevision\.raise\(\)"#, in: thumbnails) == 1)
+        // The cell on screen reads its record again: the badge and VoiceOver's words follow.
+        let shown = try #require(AppSource.body(of: ["struct AssetThumbnail", "var body: some View"], in: thumbnails))
+        #expect(shown.contains(".onChange(of: ThumbnailCache.shared.lengthRevision.value) { readLengthAgain() }"), "\(shown)")
+        let again = try #require(AppSource.body(of: ["struct AssetThumbnail", "private func readLengthAgain("], in: thumbnails))
+        #expect(Self.squeezed(again) == "{guardloadedID==idelse{return}video=ThumbnailCache.shared.videoLength(for:id)}", "\(again)")
     }
 
     // MARK: Search

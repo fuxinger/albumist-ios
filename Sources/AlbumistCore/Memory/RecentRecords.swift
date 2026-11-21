@@ -54,3 +54,54 @@ public struct RecentRecords<Value> {
 }
 
 extension RecentRecords: Sendable where Value: Sendable {}
+
+/// What a change in Photos does to the kept record of one video's length (review F of design
+/// wave 3, F14 c, V4). The thumbnails keep each video's length (`ThumbnailCache`) from the asset
+/// their lookup fetched, a snapshot: a video trimmed in Photos keeps its old length until the
+/// change corrects it, and the cells on screen read theirs again when a length they may show
+/// changed, so the badge and VoiceOver's words follow at once.
+public enum KeptVideoLength {
+    /// What the change said of a kept video whose asset was in memory.
+    public enum Found: Equatable, Sendable {
+        /// It changed (trimmed, edited, a favourite): its length now, in seconds.
+        case changed(seconds: Double)
+        case deleted
+    }
+
+    /// What happens to the record.
+    public enum Step: Equatable, Sendable {
+        /// Nothing: the change did not touch the video, or not its length.
+        case keep
+        /// The record takes the new length; `shown`: the length a thumbnail shows changed.
+        case update(seconds: Double, shown: Bool)
+        /// The record goes. Checked: the video was deleted. Unchecked: its asset is no longer in
+        /// memory, so the change cannot be checked against it; the thumbnail kept for it goes
+        /// too, so the next look asks Photos again (a thumbnail from memory passes no lookup that
+        /// would write the record anew), and an old length never stays on unchecked.
+        case drop(checked: Bool)
+
+        /// The cells on screen read their record again: a length one may show changed or went.
+        public var readsAgain: Bool {
+            switch self {
+            case .keep, .drop(checked: false): false
+            case .update(_, let shown): shown
+            case .drop(checked: true): true
+            }
+        }
+    }
+
+    /// - Parameters:
+    ///   - seconds: The length kept.
+    ///   - inMemory: The video's asset is in memory to check the change against.
+    ///   - found: What the change said of it; nil when it did not touch it.
+    public static func step(kept seconds: Double, inMemory: Bool, found: Found?) -> Step {
+        guard inMemory else { return .drop(checked: false) }
+        switch found {
+        case nil: return .keep
+        case .deleted: return .drop(checked: true)
+        case .changed(let now):
+            guard now != seconds else { return .keep }
+            return .update(seconds: now, shown: VideoDuration(seconds: now) != VideoDuration(seconds: seconds))
+        }
+    }
+}

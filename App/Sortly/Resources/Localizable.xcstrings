@@ -4681,12 +4681,22 @@
         }
       }
     },
-    "Während diese Vorschau offen war, hat Albumist Alben geändert. Öffne sie noch einmal, dann zeigt sie den neuen Stand." : {
+    "Öffne die Vorschau noch einmal, dann zeigt sie den neuen Stand." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist changed albums while this preview was open. Open it again to see what it would change now."
+            "value" : "Open the preview again to see what it would change now."
+          }
+        }
+      }
+    },
+    "Die Vorschläge dieser Vorschau sind inzwischen erledigt oder nicht mehr aktuell." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The suggestions in this preview are already done or no longer current."
           }
         }
       }

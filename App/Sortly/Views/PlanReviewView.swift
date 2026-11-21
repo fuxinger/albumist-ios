@@ -28,10 +28,11 @@ struct PlanReviewView: View {
     /// under "Alben", "Ergänzen …" on a card) never replaces it.
     @State private var plan: ChangePlan?
     /// When `plan` was made, and whether it went to its run: a plan made before another run
-    /// ended is made again or taken away before it can run (`makeAgainIfStale`).
+    /// ended, or before a choice made elsewhere, is made again or taken away before it can run
+    /// (`makePlanIfNeeded`).
     @State private var freshness = PlanFreshness()
-    /// A plan built elsewhere went stale and was taken away (`makeAgainIfStale`).
-    @State private var droppedAsStale = false
+    /// Why there is no plan any more (`makePlanIfNeeded`, `take`).
+    @State private var dropped: Dropped?
     @State private var loading = true
     /// Albums of the plan that is running, for the "photos fly into albums" show.
     @State private var show: [SortingShow.Album]?
@@ -82,18 +83,25 @@ struct PlanReviewView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     } else if model.execution.isRunning {
                         runningCard
-                    } else if loading || isStale || (plan != nil && !factsKey.samePlan(as: factsMadeFor)) {
+                    } else if loading || isStale || needsFirstPlan || (plan != nil && !factsKey.samePlan(as: factsMadeFor)) {
                         // Facts of another plan (or of this plan before "Nur die Gratis-Alben"
                         // or a change of steps) are never shown. After a change of the album
                         // list alone the shown facts stay until the new ones are made, so the
                         // screen neither jumps to the top nor takes away "Anlegen" while Photos
-                        // reports a change. A plan made before another run ended is being made again.
+                        // reports a change. A plan made before another change is being made
+                        // again; one that waited for a run to end is being made.
                         ProgressView("Plan wird erstellt").frame(maxWidth: .infinity).padding(.top, 60)
                     } else if let previewed {
                         planContent(previewed.plan, previewed.facts, obstacle: previewed.obstacle)
-                    } else if droppedAsStale {
-                        ContentUnavailableView("Inzwischen hat sich etwas geändert", systemImage: "arrow.triangle.2.circlepath",
-                                               description: Text("Während diese Vorschau offen war, hat Albumist Alben geändert. Öffne sie noch einmal, dann zeigt sie den neuen Stand."))
+                    } else if let dropped {
+                        switch dropped {
+                        case .changed:
+                            ContentUnavailableView("Inzwischen hat sich etwas geändert", systemImage: "arrow.triangle.2.circlepath",
+                                                   description: Text("Öffne die Vorschau noch einmal, dann zeigt sie den neuen Stand."))
+                        case .nothingLeft:
+                            ContentUnavailableView("Nichts zu tun", systemImage: "checkmark.circle",
+                                                   description: Text("Die Vorschläge dieser Vorschau sind inzwischen erledigt oder nicht mehr aktuell."))
+                        }
                     } else {
                         ContentUnavailableView("Nichts zu tun", systemImage: "checkmark.circle",
                                                description: Text("Es gibt gerade keine ausgewählten Vorschläge."))
@@ -138,20 +146,22 @@ struct PlanReviewView: View {
                 // every screen that reads `execution`.
                 if model.execution.finished != nil { model.execution.finished = nil }
                 if model.execution.failure != nil { model.execution.failure = nil }
-                // Read before the plan is made: a run that ends meanwhile makes it stale.
-                let runs = model.runsEnded
+                // Read before the plan is made: a change meanwhile makes it stale.
+                let seen = changes
                 if let prebuilt {
                     plan = prebuilt
                 } else if let selection {
-                    plan = await model.buildPlan(for: selection)
+                    take(await model.buildPlan(for: selection))
                 }
-                freshness.made(after: runs)
+                freshness.made(after: seen)
             }
+            // While a run is on, no plan is made: its end makes it (`makePlanIfNeeded`).
             loading = false
         }
         .task(id: factsKey) { await makeFacts() }
-        // Each run that ends, and each change of `freshness`, checks the plan again.
-        .task(id: StaleCheck(runsEnded: model.runsEnded, freshness: freshness)) { await makeAgainIfStale() }
+        // Each change (a run that ended, a choice made elsewhere), each change of `freshness`
+        // and the end of loading check the plan again.
+        .task(id: StaleCheck(changes: changes, freshness: freshness, loading: loading)) { await makePlanIfNeeded() }
         .onChange(of: scenePhase) { _, phase in
             // Back from the Settings app: the full-access card disappears by itself.
             if phase == .active { Task { await model.refreshAccess() } }
@@ -171,45 +181,85 @@ struct PlanReviewView: View {
     }
 
     /// The plan on screen, with what stops it: nil during the sorting show, the run, over a
-    /// result and while the plan is made (also again, `makeAgainIfStale`). One value for the
+    /// result and while the plan is made (also again, `makePlanIfNeeded`). One value for the
     /// plan and the bar under it, so the button never stands where the plan is not shown.
     private var previewed: (plan: ChangePlan, facts: PlanReviewFacts, obstacle: Obstacle?)? {
         guard show == nil, !model.execution.isRunning, model.execution.finished == nil, !loading,
-              !freshness.isStale(runsEnded: model.runsEnded),
+              !freshness.isStale(changes: changes),
               let plan, let facts, factsKey.samePlan(as: factsMadeFor) else { return nil }
         return (plan, facts, obstacle(for: plan, facts))
     }
 
-    /// A plan is on screen that was made before another run ended (`PlanFreshness`).
+    /// What makes the plan stale once it moved on (`PlanFreshness`): each run that ended, and
+    /// each choice made elsewhere that changes what a plan holds (`AppModel.choicesMade`: a
+    /// suggestion set aside, photos taken out of it, another album under "Anpassen", a name).
+    /// Also for a plan built elsewhere: the suggestion it makes may have been set aside.
+    private var changes: Int {
+        model.runsEnded + model.choicesMade
+    }
+
+    /// A plan is on screen that was made before another change (`PlanFreshness`).
     private var isStale: Bool {
-        plan != nil && freshness.isStale(runsEnded: model.runsEnded)
+        plan != nil && freshness.isStale(changes: changes)
     }
 
-    /// What `makeAgainIfStale` looks at.
+    /// The preview opened while a run was on and has made no plan yet; the run's end makes it
+    /// (`makePlanIfNeeded`). Review B of design wave 1, finding 3: opened while a quick create
+    /// or its "Widerrufen" still ran, it stayed on "Nichts zu tun".
+    private var needsFirstPlan: Bool {
+        didLoad && !freshness.wasMade && dropped == nil
+    }
+
+    /// Why a preview shows no plan any more.
+    private enum Dropped {
+        /// A plan built elsewhere went stale: it cannot be made again here.
+        case changed
+        /// The plan made again plans nothing: its suggestions were made or set aside meanwhile.
+        case nothingLeft
+    }
+
+    /// What `makePlanIfNeeded` looks at.
     private struct StaleCheck: Equatable {
-        var runsEnded: Int
+        var changes: Int
         var freshness: PlanFreshness
+        var loading: Bool
     }
 
-    /// A run that ended after this preview's plan was made may have done part of it already
-    /// (second review of design wave 1: "Jetzt anlegen" in a preview left open made an album a
-    /// second time that "Album anlegen" had made on another tab meanwhile). A preview of picks
-    /// makes its plan again, and the picks that were applied plan nothing more; a plan built
-    /// elsewhere cannot be made again here and is taken away, with a word why. Not while a run
-    /// is on: its end checks again.
-    private func makeAgainIfStale() async {
-        guard isStale, !model.execution.isRunning else { return }
+    /// The plan is made again, or for the first time, when it may not fit any more:
+    /// - a run ended after it was made, which may have done part of it already (second review of
+    ///   design wave 1: "Jetzt anlegen" in a preview left open made an album a second time that
+    ///   "Album anlegen" had made on another tab meanwhile), or a choice was made elsewhere
+    ///   meanwhile (review B, finding 2: a suggestion set aside on another tab was made anyway);
+    /// - none was made, because a run was on when the preview opened (finding 3).
+    /// A preview of picks makes its plan again: what was applied or set aside meanwhile plans
+    /// nothing more, and a plan with nothing left says so (`take`). A plan built elsewhere
+    /// cannot be made again here and is taken away, with a word why. Not while a run is on or
+    /// the screen loads: their end checks again.
+    private func makePlanIfNeeded() async {
+        guard !loading, !model.execution.isRunning, isStale || needsFirstPlan else { return }
         guard prebuilt == nil, let selection else {
             plan = nil
-            droppedAsStale = true
+            dropped = .changed
             return
         }
-        let runs = model.runsEnded
+        let seen = changes
         let made = await model.buildPlan(for: selection)
-        // Another run ended meanwhile, or the screen went: the next check makes it again.
+        // Another change came meanwhile, or the screen went: the next check makes it again.
         guard !Task.isCancelled else { return }
-        plan = made
-        freshness.made(after: runs)
+        take(made)
+        freshness.made(after: seen)
+    }
+
+    /// The plan of the picks, made on opening or again: one that plans nothing is no plan, and
+    /// the screen says why instead of a plan of zeros with a grey button (review B of design
+    /// wave 1, finding 8).
+    private func take(_ made: ChangePlan?) {
+        if let made, made.steps.isEmpty, made.conflicts.isEmpty {
+            plan = nil
+            dropped = .nothingLeft
+        } else {
+            plan = made
+        }
     }
 
     /// What stops the plan before it runs; shown at the top of the plan instead of the button.
@@ -452,9 +502,9 @@ struct PlanReviewView: View {
         let free = purchases.remainingFreeAlbums
         return {
             Task {
-                let runs = model.runsEnded
+                let seen = changes
                 plan = await model.keepFirst(free, in: selection)
-                freshness.made(after: runs)
+                freshness.made(after: seen)
             }
         }
     }

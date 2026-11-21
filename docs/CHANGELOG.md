@@ -176,6 +176,12 @@
   schon Angelegte; eine Vorschau, deren Plan anderswo entstand, sagt „Inzwischen hat sich etwas geändert“. Wer einen
   unterbrochenen Vorgang rückgängig macht, bekommt keine Auswahl einer Vorschau zurück, die inzwischen zu ist; „Passt
   nicht zu diesem Album“ nimmt das Album auch aus einer offenen Vorschau.
+- 20.11.: Eine offene Vorschau folgt auch dem, was du anderswo entscheidest (Fable-Prüfung von Welle 1): Legst du
+  einen ihrer Vorschläge auf einem anderen Tab mit „Nicht jetzt“ beiseite, nimmst Fotos heraus, wählst unter
+  „Anpassen“ ein anderes Album oder gibst einen Namen, macht sie ihren Plan neu; vorher legte „Jetzt anlegen“ den
+  beiseitegelegten Vorschlag trotzdem an. Eine Vorschau, die geöffnet wurde, während ein „Anlegen“ oder sein
+  „Widerrufen“ noch lief, macht ihren Plan, sobald das fertig ist (sie blieb bei „Nichts zu tun“). Bleibt beim Neu-
+  Planen nichts übrig, sagt sie „Nichts zu tun“ und warum, statt Nullen und einen grauen Knopf zu zeigen.
 - 20.11.: Größte Schrift (P3-18): Das Mosaik eines Vorschlags zeigt „+24“ statt „+…“; die Zahl wächst nur bis
   zur ersten Bedienungshilfe-Größe, steht in einer Zeile und wird eher etwas
   kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht

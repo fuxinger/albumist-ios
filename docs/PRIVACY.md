@@ -6,9 +6,11 @@ Konto, keine Werbung, kein Tracking und keine Analyse-SDKs. Für Ortsnamen schic
 Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst; das ist ab
 Werk an und in den Einstellungen abschaltbar (siehe „Externe Dienste“).
 
-Albumist liest die Mediathek, um Alben vorzuschlagen, und schreibt erst, wenn der Nutzer einen
-Plan bestätigt: Es legt Alben und Ordner in Fotos an, benennt und verschiebt sie, fügt Fotos zu
-Alben hinzu oder nimmt sie aus Alben heraus; „Rückgängig machen“ entfernt die Alben wieder, die
+Albumist liest die Mediathek, um Alben vorzuschlagen, und schreibt erst, wenn der Nutzer es antippt:
+Ein neues Album legt „Anlegen“ auf einem Vorschlag sofort an, mit „Widerrufen“ gleich danach
+(Entscheidung 7B); alles andere, auch jede Änderung an einem eigenen Album, zeigt vorher eine
+Vorschau, die der Nutzer bestätigt. Es legt Alben und Ordner in Fotos an, benennt und verschiebt sie,
+fügt Fotos zu Alben hinzu oder nimmt sie aus Alben heraus; „Rückgängig machen“ entfernt die Alben wieder, die
 Albumist angelegt hat. Originale werden nie verändert. Fotos fügt Albumist nur auf Wunsch hinzu
 („Mit Beispielfotos ausprobieren“) und löscht nur diese eigenen Beispielfotos, mit der
 Löschabfrage von iOS. Vor dem Löschen prüft Albumist jedes Foto noch einmal an Dateiname und
@@ -97,8 +99,9 @@ Atlas-Lands und das Foto im teilbaren Reise-Atlas-Bild.
 
 ## Berechtigungen
 - Fotos, Lesen und Schreiben (voll oder ausgewählte Fotos). Lesen für die Vorschläge; Schreiben
-  (Alben und Ordner anlegen, Fotos hinzufügen oder aus Alben nehmen) erst nach Bestätigung und
-  nur mit vollem Zugriff. Ohne Zugriff funktioniert die App nicht. Der Berechtigungstext
+  (Alben und Ordner anlegen, Fotos hinzufügen oder aus Alben nehmen) erst, wenn der Nutzer es
+  antippt („Anlegen“ für ein neues Album, sonst der Knopf unter der Vorschau), und nur mit vollem
+  Zugriff. Ohne Zugriff funktioniert die App nicht. Der Berechtigungstext
   (`NSPhotoLibraryUsageDescription`, Deutsch in `App/project.yml`, Englisch in
   `App/Sortly/Resources/InfoPlist.xcstrings`) nennt beides.
 - Keine Standortberechtigung: Orte stammen aus den GPS-Daten der Fotos.

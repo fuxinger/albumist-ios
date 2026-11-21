@@ -481,6 +481,7 @@ final class AppModel {
         }
         saveSafetyBackup()
         if let rematched = try? await pipeline?.rematch() { snapshot = rematched }
+        choicesMade += 1
     }
 
     /// The photos of one atlas country (all years or one year), newest first.
@@ -614,6 +615,12 @@ final class AppModel {
     /// The runs that ended since launch, of any plan, also an undo and a quick create: a
     /// preview whose plan was made before the last of them makes it again (`PlanFreshness`).
     private(set) var runsEnded = 0
+    /// The choices made since launch that change what a plan holds: a decision ("Nicht jetzt",
+    /// another album under "Anpassen"), a name, photos taken out of a suggestion, an album that
+    /// does not fit, decisions set back by a recheck. A preview open meanwhile makes its plan
+    /// again (`PlanFreshness`; review B of design wave 1, finding 2: a suggestion set aside on
+    /// another tab was made anyway by the preview left open).
+    private(set) var choicesMade = 0
     /// A constant: views observe its properties, not the model (see `ExecutionProgress`).
     let executionProgress = ExecutionProgress()
     var message: AppMessage?
@@ -2210,6 +2217,7 @@ final class AppModel {
         let wasRejected = decisions[proposal.id] == .reject
         decisions[proposal.id] = decision
         previewPicks.unmark(proposal.id) // chosen on purpose now
+        choicesMade += 1
         persistDecisions()
         if decision == .reject {
             let override = UserOverride(scope: .source(proposal.id), decision: .rejectProposal)
@@ -2629,6 +2637,9 @@ final class AppModel {
     /// pointed at the album is dropped, and the matching runs again right away.
     func rejectMatch(_ album: CollectionID, for proposal: AlbumProposal) async {
         guard let store else { return }
+        // Counted once the matching ran again (or failed): a preview made again before would
+        // still plan with the album.
+        defer { choicesMade += 1 }
         do {
             try await store.addOverride(UserOverride(scope: .albumForSource(album, proposal.id), decision: .notMatchingAlbum))
             saveSafetyBackup()
@@ -2657,12 +2668,14 @@ final class AppModel {
             decisions[id] = nil
             previewPicks.unmark(id)
         }
+        choicesMade += 1
         persistDecisions()
     }
 
     /// A blank title removes the name (the suggestion says "Name fehlt" again).
     func setUserTitle(_ title: String, for proposal: AlbumProposal) {
         userTitles[proposal.id] = UserTitle.stored(title)
+        choicesMade += 1
         Task { [userTitles] in
             try? await store?.setValue(userTitles, forKey: Key.titles)
             saveSafetyBackup()

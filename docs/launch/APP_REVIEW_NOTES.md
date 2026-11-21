@@ -3,7 +3,10 @@
 In App Store Connect unter „App-Prüfung → Notizen“ einfügen (Englisch reicht für die Prüfung;
 Deutsch für einen deutschsprachigen Prüfer). Kein Konto, kein Login, kein Server.
 Plugin-Prüfung 15.11.2026, K6: Prüfgeräte haben oft nur wenige Fotos ohne Ort, dann gibt es nichts
-vorzuschlagen. Seit 16.11. erklärt die Übersicht das und bietet Beispielfotos an.
+vorzuschlagen. Seit 16.11. erklärt die Startseite „Vorschläge“ das und bietet Beispielfotos an.
+Stand Design-Welle 1 (20.11.): Einführung ohne Bereiche und ohne Jahreswahl, Startseite mit Fotokarten,
+„Anlegen“ auf einer Karte legt ein neues Album sofort an (mit „Widerrufen“), der Knopf der Vorschau heißt
+„Jetzt anlegen“.
 
 ## English (paste this)
 
@@ -11,17 +14,19 @@ Albumist sorts the user's own photo library into albums for countries and trips.
 the device; there is no account and no server.
 
 **See everything in about one minute**
-1. Start the app, tap "Let’s go", allow access to **all photos** (albums can only be created with
-   full access), then "Start analysis".
+1. Start the app, tap "Let’s Go", then "Continue" and allow access to **all photos** (albums can only
+   be created with full access). The analysis starts right away.
 2. Review devices usually hold only a few photos without a location, so there is nothing to suggest.
-   The overview then says so ("Not Enough Photos Yet" / "No Photos Yet") and offers
+   The start page ("Suggestions") then says so ("Not Enough Photos Yet" / "No Photos Yet") and offers
    **"Try It with Sample Photos"**. Before anything is added, the app explains that the sample photos
    are really added to the Photos library (only there can it make albums of them). They are drawn by
    the app itself: 78 pictures of everyday life at home and four trips (Rome, Dolomites, Lisbon,
    Copenhagen), each with a date and a place.
-3. After a few seconds of analysis the overview shows suggestions. Tap "Review … suggestions" or the
-   starter set "Create … albums for free", look at the preview (nothing changes before you confirm)
-   and tap "Create Albums Now". The albums appear in Photos under Collections › Albums.
+3. After a few seconds of analysis the start page shows suggestions as photo cards. Tap the starter set
+   "Create … albums for free", look at the preview (nothing changes before you confirm) and tap
+   "Create Now". The albums appear in Photos under Collections › Albums. "Create" on a single card
+   makes that one new album at once and shows "Undo" right after; anything that changes an album of
+   the user's own always shows the preview first.
 4. "Undo" on the result card takes everything back. The change receipt lists exactly what was done.
 5. Settings › "Remove Sample Photos" deletes the sample photos the app added (by their stored
    identifiers, with the system's own delete confirmation; they then stay in "Recently Deleted" for
@@ -48,17 +53,19 @@ Albumist ordnet die eigene Fotomediathek in Alben für Länder und Reisen. Alles
 es gibt kein Konto und keinen Server.
 
 **Alles in etwa einer Minute sehen**
-1. App starten, „Los geht's“, Zugriff auf **alle Fotos** erlauben (Alben lassen sich nur mit vollem
-   Zugriff anlegen), dann „Analyse starten“.
-2. Prüfgeräte haben meist nur wenige Fotos ohne Ort, dann gibt es nichts vorzuschlagen. Die Übersicht
-   sagt das („Noch zu wenige Fotos“ / „Noch keine Fotos“) und bietet **„Mit Beispielfotos
+1. App starten, „Los geht's“, dann „Weiter“ und Zugriff auf **alle Fotos** erlauben (Alben lassen sich
+   nur mit vollem Zugriff anlegen). Die Analyse beginnt gleich.
+2. Prüfgeräte haben meist nur wenige Fotos ohne Ort, dann gibt es nichts vorzuschlagen. Die Startseite
+   „Vorschläge“ sagt das („Noch zu wenige Fotos“ / „Noch keine Fotos“) und bietet **„Mit Beispielfotos
    ausprobieren“** an. Vorher erklärt die App, dass die Beispielfotos wirklich in der Fotos-Mediathek
    angelegt werden (nur dort kann sie Alben daraus machen). Die Bilder zeichnet die App selbst:
    78 Bilder aus dem Alltag zu Hause und von vier Reisen (Rom, Dolomiten, Lissabon, Kopenhagen), jedes
    mit Datum und Ort.
-3. Nach wenigen Sekunden Analyse zeigt die Übersicht Vorschläge. „Vorschläge prüfen“ oder das
-   Startpaket „… Alben kostenlos anlegen“ antippen, die Vorschau ansehen (vor dem Bestätigen ändert
-   sich nichts) und „Alben jetzt anlegen“. Die Alben stehen in Fotos unter Sammlungen › Alben.
+3. Nach wenigen Sekunden Analyse zeigt die Startseite Vorschläge als Fotokarten. Das Startpaket
+   „… Alben kostenlos anlegen“ antippen, die Vorschau ansehen (vor dem Bestätigen ändert sich nichts)
+   und „Jetzt anlegen“. Die Alben stehen in Fotos unter Sammlungen › Alben. „Anlegen“ auf einer
+   einzelnen Karte legt dieses eine neue Album sofort an und zeigt gleich danach „Widerrufen“; was ein
+   eigenes Album des Nutzers ändert, zeigt immer zuerst die Vorschau.
 4. „Rückgängig machen“ auf der Ergebniskarte nimmt alles zurück; der Änderungsbeleg zeigt genau, was
    passiert ist.
 5. Einstellungen › „Beispielfotos wieder entfernen“ löscht die Beispielfotos, die die App angelegt
@@ -89,11 +96,11 @@ löschen und neu installieren, Nicht-Stören an, keine privaten Fotos im Bild, d
 
 | Zeit | Bild | Was zu sehen sein muss |
 |---|---|---|
-| 0–8 s | Start, „Los geht's“, Bereiche, „Weiter“ | Das Versprechen: Fotos bleiben auf dem Gerät |
-| 8–15 s | Zugriff „Alle Fotos erlauben“, „Albumist arbeitet mit“, „Analyse starten“ | Der iOS-Dialog für vollen Zugriff |
-| 15–30 s | Übersicht während der Analyse | Fortschritt, die eigenen Fotos im Mosaik |
-| 30–40 s | „Vorschläge prüfen“, eine Reise öffnen, Fotos wischen | Echte Reisen mit Ort und Datum |
-| 40–50 s | Startpaket oder Auswahl, Vorschau, „Alben jetzt anlegen“ | Vorschau vor jeder Änderung, Fotos fliegen in Alben |
+| 0–8 s | Start mit App-Symbol und Versprechen, „Los geht's“ | Das Versprechen: Fotos bleiben auf dem Gerät |
+| 8–15 s | „Weiter“, Zugriff „Alle Fotos erlauben“, die Analyse beginnt | Der iOS-Dialog für vollen Zugriff |
+| 15–30 s | Startseite während der Analyse | Fortschritt, die eigenen Fotos im Mosaik, die ersten Reisen |
+| 30–40 s | Eine Reise-Karte öffnen, Fotos nach Tagen, Fotos wischen | Echte Reisen mit Ort und Datum |
+| 40–50 s | Startpaket, Vorschau, „Jetzt anlegen“ | Vorschau vor dem Anlegen, Fotos fliegen in Alben |
 | 50–55 s | „Fotos-App öffnen“, Sammlungen › Alben | Die neuen Alben in Fotos |
 | 55–60 s | Zurück, „Rückgängig machen“ | Alles lässt sich rückgängig machen |
 

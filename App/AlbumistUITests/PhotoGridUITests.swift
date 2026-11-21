@@ -161,9 +161,10 @@ final class PhotoGridUITests: XCTestCase {
 
     // MARK: 1 Drag to select
 
-    /// While "Auswählen" is on, a finger drawn sideways from the first photo on screen to a photo
-    /// of a later row, two or more to the right, ticks every photo between them in the grid's
-    /// order (across rows and days), the first and the last too. A second drag along the row of
+    /// After the tab was left and shown again, and while "Auswählen" is on, a finger drawn
+    /// sideways from the first photo on screen to a photo of a later row, two or more to the
+    /// right, ticks every photo between them in the grid's order (across rows and days), the
+    /// first and the last too. A second drag along the row of
     /// that last photo, from its first photo two to the right, starts on a ticked photo and so
     /// takes those three ticks away. A vertical swipe scrolls and changes nothing.
     func test1_DragTicksARangeAcrossRowsAndDays() {
@@ -171,6 +172,15 @@ final class PhotoGridUITests: XCTestCase {
         let test = "PhotoGridUITests.test1"
         prepare(test)
         guard openUnsorted(test) != nil else { return }
+        // Away and back first: the page still finds its photos under the finger after it was out
+        // of sight (a tab switch hides it and shows it again without building its photos anew).
+        let suggestions = UITestScreens.Tabs.german.suggestions
+        let unsorted = UITestScreens.Tabs.german.unsorted
+        if tap(tabButton(suggestions), "\(test): tab \(suggestions) for a moment") {
+            UITestWait.until("\(test): tab \(suggestions) shown", timeout: 5) { app.tabBars.buttons[suggestions].isSelected }
+            tap(tabButton(unsorted), "\(test): back to \(unsorted)")
+            UITestWait.appears(app.buttons.matching(identifier: "library.photo").firstMatch, "\(test): its photos again", timeout: 10)
+        }
         guard tap(app.buttons["Auswählen"], "\(test): Auswählen") else { return }
         UITestWait.appears(app.buttons["Fertig"], "\(test): selecting", timeout: 5)
         UITestWait.appears(selectedCount(0), "\(test): 0 ausgewählt", timeout: 5)

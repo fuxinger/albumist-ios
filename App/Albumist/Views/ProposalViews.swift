@@ -267,33 +267,49 @@ private struct ProposalListCard: View {
     var toggle: () -> Void
     var act: (ProposalCardAction) -> Void
 
+    // The body is built from small parts, each with its own type: as one expression (a closure
+    // chosen by a condition, the card and all its modifiers) Xcode could not type-check it
+    // ("failed to produce diagnostic for expression", CI 44847306162).
     var body: some View {
-        // The card's body opens the suggestion, or ticks it while the list selects (`onOpen`:
-        // its own button behind cover and texts); its one action stays a real button. A card
-        // just made opens nothing.
-        let opens: (@MainActor () -> Void)? = made ? nil : { tap() }
+        photoCard
+            // Names the card's container (UI tests: the card, its body and its one button).
+            .accessibilityIdentifier("suggestion.row")
+            .overlay(alignment: .topTrailing) {
+                if selectable {
+                    tick
+                }
+            }
+            // What cannot be ticked steps back while the list selects, and cannot be tapped.
+            .opacity(selecting && !selectable ? 0.45 : 1)
+            .disabled(selecting && !selectable)
+    }
+
+    /// The photo card, ticked while the list selects and the card is chosen.
+    private var photoCard: some View {
         PhotoCard(coverIDs: model.proposalCoverIDs(for: proposal), title: Text(verbatim: card.title),
                   subtitle: card.styledSubtitle, hidesPreview: card.hidesPreview,
                   placeholderSymbol: proposal.placeholderSymbol, onOpen: opens) {
-            actionButton
-                // While the list selects, a tap ticks the card: the button keeps its place, so
-                // nothing moves, but cannot be seen, tapped or reached any other way.
-                .opacity(selecting ? 0 : 1)
-                .allowsHitTesting(!selecting)
-                .accessibilityHidden(selecting)
-                .disabled(selecting)
+            cardAction
         }
         .selected(selecting && isSelected)
-        // Names the card's container (UI tests: the card, its body and its one button).
-        .accessibilityIdentifier("suggestion.row")
-        .overlay(alignment: .topTrailing) {
-            if selectable {
-                tick
-            }
-        }
-        // What cannot be ticked steps back while the list selects, and cannot be tapped.
-        .opacity(selecting && !selectable ? 0.45 : 1)
-        .disabled(selecting && !selectable)
+    }
+
+    /// The card's body opens the suggestion, or ticks it while the list selects (`onOpen`: its
+    /// own button behind cover and texts); its one action stays a real button. A card just made
+    /// opens nothing, so its body is no button.
+    private var opens: (@MainActor () -> Void)? {
+        if made { return nil }
+        return { tap() }
+    }
+
+    /// While the list selects, a tap ticks the card: the button keeps its place, so nothing
+    /// moves, but cannot be seen, tapped or reached any other way.
+    private var cardAction: some View {
+        actionButton
+            .opacity(selecting ? 0 : 1)
+            .allowsHitTesting(!selecting)
+            .accessibilityHidden(selecting)
+            .disabled(selecting)
     }
 
     /// The tick of a card the list can select, as in Photos. A touch goes through to the card's

@@ -111,7 +111,7 @@ struct SuggestionPageWordsTests {
     /// While the list selects, a tap ticks the card and its button is hidden; it is disabled
     /// too, so nothing reaches it (review B, smaller notes).
     @Test func aCardsButtonWaitsWhileTheListSelects() throws {
-        let card = try Self.body(["private struct ProposalListCard", "var body: some View"], in: Self.views)
+        let card = try Self.body(["private struct ProposalListCard", "private var cardAction: some View"], in: Self.views)
         #expect(card.contains(".accessibilityHidden(selecting)"))
         #expect(card.contains(".disabled(selecting)"))
     }

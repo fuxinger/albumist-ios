@@ -151,13 +151,34 @@ struct VideoPlaybackTests {
     /// a long one, so the times change on the second (review F, F13: a three-second clip jumped
     /// twelve times). Before its length is known, as for a short clip.
     @Test func theThumbGlides() throws {
-        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 3))) == 1.0 / 30)
-        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 10))) == 1.0 / 30)
-        #expect(abs(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 30))) - 0.1) < 1e-9)
-        #expect(abs(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 90))) - 0.3) < 1e-9)
-        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 150))) == 0.5)
-        #expect(VideoPosition.tickInterval(for: try #require(VideoDuration(seconds: 3600))) == 0.5)
-        #expect(VideoPosition.tickInterval(for: nil) == 1.0 / 30)
+        func interval(_ seconds: Double?) -> Double {
+            VideoPosition.tickInterval(for: seconds.flatMap { VideoDuration(seconds: $0) }, lowPowerMode: false)
+        }
+        #expect(interval(3) == 1.0 / 30)
+        #expect(interval(10) == 1.0 / 30)
+        #expect(abs(interval(30) - 0.1) < 1e-9)
+        #expect(abs(interval(90) - 0.3) < 1e-9)
+        #expect(interval(150) == 0.5)
+        #expect(interval(3600) == 0.5)
+        #expect(interval(nil) == 1.0 / 30)
+    }
+
+    /// In Low Power Mode the photo view reads where a playing video is at most 10 times a second
+    /// (review V14): the thumb still moves without jumps, and a short clip costs the iPhone a
+    /// third of the work. A long video ticks as before. The photo view knows the mode from its
+    /// start (`VideoStart`).
+    @Test func inLowPowerModeTheThumbTicksAtMostTenTimesASecond() throws {
+        func interval(_ seconds: Double?) -> Double {
+            VideoPosition.tickInterval(for: seconds.flatMap { VideoDuration(seconds: $0) }, lowPowerMode: true)
+        }
+        for seconds in [1.0, 3, 10, 29] {
+            #expect(interval(seconds) == 0.1, "\(seconds) s")
+        }
+        #expect(abs(interval(90) - 0.3) < 1e-9)
+        #expect(interval(3600) == 0.5)
+        #expect(interval(nil) == 0.1)
+        #expect(VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: true).lowPowerMode)
+        #expect(!VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: false).lowPowerMode)
     }
 
     // MARK: Starting by itself
@@ -193,13 +214,26 @@ struct VideoPlaybackTests {
     /// F, F8: before, an open video kept the iPhone awake for good).
     @Test func aLoopingVideoLetsTheIPhoneLockAfterItsFirstPlay() {
         let looping = VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: false)
-        #expect(looping.keepsScreenOn(loopsDone: 0))
-        #expect(!looping.keepsScreenOn(loopsDone: 1))
-        #expect(!looping.keepsScreenOn(loopsDone: 40))
+        #expect(looping.keepsScreenOn(loopsDone: 0, soundOn: false))
+        #expect(!looping.keepsScreenOn(loopsDone: 1, soundOn: false))
+        #expect(!looping.keepsScreenOn(loopsDone: 40, soundOn: false))
         for once in [VideoStart(reduceMotion: true, autoplayVideos: true, lowPowerMode: false),
                      VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: true)] {
-            #expect(once.keepsScreenOn(loopsDone: 0), "\(once)")
+            #expect(once.keepsScreenOn(loopsDone: 0, soundOn: false), "\(once)")
         }
+    }
+
+    /// A looping video with its sound on is watched: it keeps the screen on while it plays, as
+    /// any video with sound; only a muted loop lets the iPhone lock after its first play (review
+    /// V3: half a minute into a 20-second clip with "Ton an" the screen dimmed and locked).
+    @Test func aLoopingVideoWithItsSoundKeepsTheScreenOn() {
+        let looping = VideoStart(reduceMotion: false, autoplayVideos: true, lowPowerMode: false)
+        for loops in [0, 1, 40] {
+            #expect(looping.keepsScreenOn(loopsDone: loops, soundOn: true), "\(loops) loops")
+        }
+        #expect(!looping.keepsScreenOn(loopsDone: 1, soundOn: false), "a muted loop")
+        let once = VideoStart(reduceMotion: true, autoplayVideos: true, lowPowerMode: false)
+        #expect(once.keepsScreenOn(loopsDone: 0, soundOn: true))
     }
 
     // MARK: Sound
@@ -265,6 +299,20 @@ struct VideoPlaybackTests {
         #expect(VideoAvailability.onDevice.note == nil)
         #expect(VideoAvailability.onlyInICloud.note == .onlyInICloud)
         #expect(VideoAvailability.unavailable.note == .unavailable)
+    }
+
+    /// A video its player cannot play (a file it cannot decode) is not available now: the calm
+    /// note "Dieses Video lässt sich gerade nicht abspielen.", said at once, also when it never
+    /// played (review F, F11). A failure changes nothing else: a video not on the iPhone, or not
+    /// answered yet, stays as it is.
+    @Test func aVideoItsPlayerCannotPlayIsNotAvailable() {
+        #expect(VideoAvailability.onDevice.afterPlayer(failed: true) == .unavailable)
+        #expect(VideoAvailability.onDevice.afterPlayer(failed: true).note == .unavailable)
+        #expect(VideoAvailability.onDevice.afterPlayer(failed: false) == .onDevice)
+        for other in [VideoAvailability.unknown, .onlyInICloud, .unavailable] {
+            #expect(other.afterPlayer(failed: true) == other, "\(other)")
+            #expect(other.afterPlayer(failed: false) == other, "\(other)")
+        }
     }
 
     // MARK: Seeking with the finger

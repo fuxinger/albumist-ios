@@ -5,10 +5,11 @@ import AlbumistCore
 
 /// The video on screen in the photo view (design wave 3, DS-16), played as Photos plays it:
 ///
-/// - It starts by itself once the swipe has come to rest and starts over at its end, where
-///   motion is welcome; with Reduce Motion or "Auto-Play Video Previews" off it waits for
-///   "Abspielen" and stops at its end, in Low Power Mode it plays once (`VideoStart`). Looping,
-///   it lets the iPhone lock after its first play.
+/// - It starts by itself once the swipe has come to rest, unless the user paused, scrubbed or
+///   closed meanwhile, and starts over at its end, where motion is welcome; with Reduce Motion
+///   or "Auto-Play Video Previews" off it waits for "Abspielen" and stops at its end, in Low
+///   Power Mode it plays once (`VideoStart`). Looping without its sound, it lets the iPhone lock
+///   after its first play.
 /// - Without sound until the user turns it on; the choice holds for the next videos of this
 ///   photo view (`VideoSound`, `LiveAudio.videoSound`).
 /// - Only from the iPhone (`VideoLoader`): a video only in iCloud is said to be there and not
@@ -44,6 +45,9 @@ final class ViewerVideo {
     @ObservationIgnored private var assetLength: VideoDuration?
     @ObservationIgnored private var looper: AVPlayerLooper?
     @ObservationIgnored private var observer: Any?
+    /// Tells when the item (a video that plays once) or the looper (it plays copies of the item)
+    /// fails, also before the video ever played, when no tick may come (review F, F11).
+    @ObservationIgnored private var statusObservation: NSKeyValueObservation?
     @ObservationIgnored private var start = VideoStart(reduceMotion: true, autoplayVideos: false, lowPowerMode: false)
     @ObservationIgnored private var chase = ChaseSeek()
     @ObservationIgnored private var scrubbing = false
@@ -59,10 +63,21 @@ final class ViewerVideo {
     @ObservationIgnored private var seekSerial = 0
     /// Videos Photos said are only in iCloud: not asked again while the photo view is open.
     @ObservationIgnored private var onlyInICloud: Set<AssetID> = []
+    /// The start by itself that `open` planned still stands: what comes in its moment of waiting
+    /// cancels it (review V2), a pause (the button, VoiceOver, closing the photo view, the
+    /// background), a finger on the slider, a swipe on.
+    @ObservationIgnored private var startsByItself = false
 
     /// The player of `id`'s page, while it is the video on screen.
     func surface(for id: AssetID) -> Player? {
         self.id == id ? player : nil
+    }
+
+    /// Where the video `id` is, for its page: `.unknown` while it is not the video on screen (not
+    /// asked for yet, or swiped away), so its page waits instead of saying it is not available
+    /// (review V1).
+    func availability(for id: AssetID) -> VideoAvailability {
+        self.id == id ? availability : .unknown
     }
 
     /// The video `id` came on screen: asks Photos for it, only from the iPhone, and plays it
@@ -86,11 +101,15 @@ final class ViewerVideo {
             availability = .onDevice
             make(item.value)
             guard start.byItself else { return }
+            startsByItself = true
             try? await Task.sleep(for: .milliseconds(350))
             // Only once the app's sound mixes with the user's music (`LiveAudio`), or with the
             // sound the user turned on: before, even this muted start would stop their music.
             await LiveAudio.settled()
-            guard !Task.isCancelled, self.id == id, sound.isOn || LiveAudio.isReady else { return }
+            // Unless the user paused, scrubbed, closed or swiped on meanwhile (review V2).
+            guard !Task.isCancelled, self.id == id, startsByItself else { return }
+            startsByItself = false
+            guard sound.isOn || LiveAudio.isReady else { return }
             play()
         case .missing(let found):
             if found == .onlyInICloud { onlyInICloud.insert(id) }
@@ -150,10 +169,12 @@ final class ViewerVideo {
         isPlaying = true
     }
 
+    /// Also before the video started by itself: it then does not start (review V2).
     func pause() {
         player?.value.pause()
         isPlaying = false
         resumes = false
+        startsByItself = false
     }
 
     func toggleSound() {
@@ -164,8 +185,10 @@ final class ViewerVideo {
 
     // MARK: The slider
 
-    /// The finger is on the slider: the video holds still under it.
+    /// The finger is on the slider: the video holds still under it, and does not start by itself
+    /// meanwhile (review V2).
     func beginScrub() {
+        startsByItself = false
         guard let player, !scrubbing else { return }
         scrubbing = true
         playsAfterScrub = isPlaying
@@ -209,16 +232,22 @@ final class ViewerVideo {
         let queue = AVQueuePlayer()
         queue.isMuted = !sound.isOn
         seekSerial += 1
+        // A file it cannot decode is said at once (`.initial`: also a failure before this line).
         if start.loops {
-            looper = AVPlayerLooper(player: queue, templateItem: item)
+            let looper = AVPlayerLooper(player: queue, templateItem: item)
+            statusObservation = looper.observe(\.status, options: [.initial, .new], changeHandler: Self.statusHandler(self))
+            self.looper = looper
         } else {
             queue.actionAtItemEnd = .pause
             queue.insert(item, after: nil)
+            statusObservation = item.observe(\.status, options: [.initial, .new], changeHandler: Self.statusHandler(self))
         }
         // As often as the slider's thumb glides (30 times a second for a short clip, review F,
-        // F13), and whenever it starts, stops or jumps (AVFoundation calls it then too): the time
-        // and whether it plays, which an end, a call or another app may change.
-        let interval = CMTime(seconds: VideoPosition.tickInterval(for: length), preferredTimescale: 600)
+        // F13; 10 in Low Power Mode, review V14), and whenever it starts, stops or jumps
+        // (AVFoundation calls it then too): the time and whether it plays, which an end, a call
+        // or another app may change.
+        let interval = CMTime(seconds: VideoPosition.tickInterval(for: length, lowPowerMode: start.lowPowerMode),
+                              preferredTimescale: 600)
         observer = queue.addPeriodicTimeObserver(forInterval: interval, queue: .main, using: Self.timeHandler(self))
         player = Player(value: queue)
         time = 0
@@ -237,8 +266,9 @@ final class ViewerVideo {
             let itemLength = VideoDuration.playing(asset: assetLength, item: item.duration.seconds)
             if itemLength != length { length = itemLength }
         }
-        // A looping video lets the iPhone lock after its first play (review F, F8).
-        let keepsOn = start.keepsScreenOn(loopsDone: looper?.loopCount ?? 0)
+        // A muted loop lets the iPhone lock after its first play (review F, F8); with its sound
+        // on it is watched (review V3).
+        let keepsOn = start.keepsScreenOn(loopsDone: looper?.loopCount ?? 0, soundOn: sound.isOn)
         if player.value.preventsDisplaySleepDuringVideoPlayback != keepsOn {
             player.value.preventsDisplaySleepDuringVideoPlayback = keepsOn
         }
@@ -284,6 +314,22 @@ final class ViewerVideo {
         }
     }
 
+    /// What key-value observing calls when the item's or the looper's status changed, on a thread
+    /// AVFoundation picks: a hop to the main actor, which looks whether the video failed. Made
+    /// outside the main actor, as `timeHandler`.
+    nonisolated private static func statusHandler<Object, Value>(_ video: ViewerVideo) -> @Sendable (Object, NSKeyValueObservedChange<Value>) -> Void {
+        { [weak video] _, _ in
+            guard let video else { return }
+            Task { @MainActor in video.statusChanged() }
+        }
+    }
+
+    /// The item's or the looper's status changed: a video that cannot play says so at once, also
+    /// one that never played (review F, F11).
+    private func statusChanged() {
+        if failed { fail() }
+    }
+
     /// The end of a seek, which AVFoundation tells on a queue of its own: a hop to the main actor,
     /// with the seek's number (`seekSerial`).
     nonisolated private static func seekHandler(_ video: ViewerVideo, serial: Int, settles: Bool) -> @Sendable (Bool) -> Void {
@@ -300,19 +346,24 @@ final class ViewerVideo {
         return player.value.status == .failed || player.value.currentItem?.status == .failed || looper?.status == .failed
     }
 
-    /// The video cannot be played: its player goes, and the calm note says so under its still
-    /// (`VideoAvailability.unavailable`); not asked again until the user comes back to it.
+    /// The video cannot be played: its player goes, and the calm note says so under its still or
+    /// on its page (`VideoAvailability.afterPlayer`); not asked again until the user comes back
+    /// to it.
     private func fail() {
         let failedID = id
+        let found = availability.afterPlayer(failed: true)
         stop()
         id = failedID
-        availability = .unavailable
+        availability = found
     }
 
     /// Stops the video and lets its player go: off screen nothing of it stays alive.
     private func stop() {
         if let observer, let player { player.value.removeTimeObserver(observer) }
         observer = nil
+        // Before the looper stops: what it says then is no failure to tell.
+        statusObservation?.invalidate()
+        statusObservation = nil
         player?.value.pause()
         // The looper first, so it puts no new copy of the video into the emptied queue.
         looper?.disableLooping()
@@ -330,6 +381,7 @@ final class ViewerVideo {
         settling = false
         playsAfterScrub = false
         resumes = false
+        startsByItself = false
         seekSerial += 1
     }
 }

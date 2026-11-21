@@ -27,6 +27,14 @@ final class ThumbnailCache {
     /// More entries than any grid shows between two memory warnings: past it the older half of
     /// the records goes (they are only a shortcut to what is in memory, review F, F14).
     private static let recordLimit = 20_000
+    /// Raised when a change in Photos corrected a length a thumbnail may show: the cells on
+    /// screen read theirs again (review V4).
+    let lengthRevision = VideoLengthRevision()
+    /// Changes in Photos waiting for one walk over the video records (review V11).
+    private var backlog = ChangeBacklog<ThumbnailRequest.Change>(limit: ThumbnailCache.changeLimit)
+    /// A long iCloud sync restarts the watcher's pause with each change: with this many waiting
+    /// the walk starts at once.
+    private static let changeLimit = 32
 
     static let thumbnailCostLimit = 80 * 1024 * 1024
     static let coverCostLimit = 24 * 1024 * 1024
@@ -175,26 +183,68 @@ final class ThumbnailCache {
         await photoAsset(for: id)
     }
 
-    /// Photos changed (review F, F14): the assets kept here are snapshots, so a video trimmed in
-    /// Photos kept its old length on its badge. Each kept video the change touched gets its new
-    /// asset and length, or loses both when it was deleted; the rest stays, so the grids keep
-    /// their badges and the photo view its waiting thumbnail (emptied, they went on each change).
-    func libraryChanged(_ change: ThumbnailRequest.Change) async {
-        var kept: [String: ThumbnailRequest.Asset] = [:]
-        for key in videoLengths.keys {
-            if let asset = assets.object(forKey: key as NSString) { kept[key] = ThumbnailRequest.Asset(asset) }
+    /// A change in Photos came (`LibraryChangeWatcher`, in the order Photos told them): it waits
+    /// for the watcher's debounced walk, which starts at once when many wait (review V11).
+    func changeArrived(_ change: ThumbnailRequest.Change) {
+        if backlog.arrived(change) { followChanges() }
+    }
+
+    /// The video records follow the changes that waited, all at once, one walk at a time, never
+    /// once per change (review V11): from the watcher's debounced task. Nothing to walk without
+    /// a video record.
+    func followChanges() {
+        guard let waiting = backlog.take(recordsKept: videoLengths.count > 0) else { return }
+        Task {
+            await libraryChanged(waiting)
+            if backlog.walked() { followChanges() }
         }
-        guard !kept.isEmpty else { return }
-        for (key, found) in await ThumbnailRequest.changed(kept, by: change) {
-            switch found {
-            case .changed(let asset):
-                assets.setObject(asset.value, forKey: key as NSString)
-                videoLengths[key] = asset.value.duration
-            case .deleted:
-                assets.removeObject(forKey: key as NSString)
-                videoLengths[key] = nil
+    }
+
+    /// Photos changed (review F, F14): the assets kept here are snapshots, so a video trimmed in
+    /// Photos kept its old length on its badge. Each kept video the changes touched gets its new
+    /// asset and length, or loses both when it was deleted; one whose asset is no longer in
+    /// memory cannot be checked, and goes with its kept thumbnail so the next look asks Photos
+    /// again (`KeptVideoLength`). The rest stays, so the grids keep their badges and the photo
+    /// view its waiting thumbnail (emptied, they went on each change). When a length a cell may
+    /// show changed, the cells on screen read theirs again (`lengthRevision`, review V4).
+    private func libraryChanged(_ changes: [ThumbnailRequest.Change]) async {
+        var kept: [String: ThumbnailRequest.Asset] = [:]
+        var readAgain = false
+        for key in videoLengths.keys {
+            if let asset = assets.object(forKey: key as NSString) {
+                kept[key] = ThumbnailRequest.Asset(asset)
+            } else if let seconds = videoLengths[key] {
+                if apply(KeptVideoLength.step(kept: seconds, inMemory: false, found: nil), to: key) { readAgain = true }
             }
         }
+        if !kept.isEmpty {
+            for (key, answer) in await ThumbnailRequest.changed(kept, by: changes) {
+                // Gone meanwhile (a memory warning): nothing to correct.
+                guard let seconds = videoLengths[key] else { continue }
+                if case .changed(let asset) = answer { assets.setObject(asset.value, forKey: key as NSString) }
+                if apply(KeptVideoLength.step(kept: seconds, inMemory: true, found: answer.lengthFound), to: key) { readAgain = true }
+            }
+        }
+        if readAgain { lengthRevision.raise() }
+    }
+
+    /// Does what the core's rule says to the record of `key`; true when the cells on screen read
+    /// theirs again.
+    private func apply(_ step: KeptVideoLength.Step, to key: String) -> Bool {
+        switch step {
+        case .keep: break
+        case .update(let seconds, _):
+            videoLengths[key] = seconds
+        case .drop(let checked):
+            videoLengths[key] = nil
+            if checked {
+                assets.removeObject(forKey: key as NSString)
+            } else if let side = keptSides[key] {
+                cache.removeObject(forKey: Self.thumbnailKey(AssetID(key), side))
+                keptSides[key] = nil
+            }
+        }
+        return step.readsAgain
     }
 
     /// `asset(for:)`, telling "Photos does not know the photo" from "Photos did not answer in
@@ -323,6 +373,20 @@ final class ThumbnailCache {
     }
 }
 
+/// Raised when a change in Photos corrected a length a thumbnail may show (review V4 of design
+/// wave 3): the thumbnails on screen read theirs again (`AssetThumbnail`), so a video trimmed in
+/// Photos shows its new length at once, on its badge and to VoiceOver. Observed on its own: the
+/// cache itself is not.
+@MainActor
+@Observable
+final class VideoLengthRevision {
+    private(set) var value = 0
+
+    func raise() {
+        value &+= 1
+    }
+}
+
 /// What `ThumbnailCache.cover` found for one photo of a photo card.
 enum CoverFetch {
     /// The photo at the asked size, or only the small preview Photos keeps of it
@@ -367,6 +431,14 @@ enum ThumbnailRequest {
     enum Changed: Sendable {
         case changed(Asset)
         case deleted
+
+        /// What it says of a video's length (`KeptVideoLength`).
+        var lengthFound: KeptVideoLength.Found {
+            switch self {
+            case .changed(let asset): .changed(seconds: asset.value.duration)
+            case .deleted: .deleted
+            }
+        }
     }
 
     /// Asset lookups wait while Photos writes its database, so they run on their own serial
@@ -394,19 +466,26 @@ enum ThumbnailRequest {
         }
     }
 
-    /// The kept assets `change` touched, by key, and what it did to each (review F, F14), worked
-    /// out on the lookups' queue: a change's details may read the Photos database, which waits
-    /// while Photos writes.
-    nonisolated static func changed(_ kept: [String: Asset], by change: Change) async -> [String: Changed] {
+    /// The kept assets the changes touched, by key, and what they did to each (review F, F14),
+    /// worked out on the lookups' queue: a change's details may read the Photos database, which
+    /// waits while Photos writes. The changes count in the order Photos told them (review V11):
+    /// the last one that touched an asset decides, and a deletion is final.
+    nonisolated static func changed(_ kept: [String: Asset], by changes: [Change]) async -> [String: Changed] {
         await withCheckedContinuation { (continuation: CheckedContinuation<[String: Changed], Never>) in
             lookups.async {
                 var found: [String: Changed] = [:]
                 for (key, asset) in kept {
-                    guard let details = change.value.changeDetails(for: asset.value) else { continue }
-                    if details.objectWasDeleted {
-                        found[key] = .deleted
-                    } else if let after = details.objectAfterChanges {
-                        found[key] = .changed(Asset(after))
+                    var current = asset.value
+                    for change in changes {
+                        guard let details = change.value.changeDetails(for: current) else { continue }
+                        if details.objectWasDeleted {
+                            found[key] = .deleted
+                            break
+                        }
+                        if let after = details.objectAfterChanges {
+                            current = after
+                            found[key] = .changed(Asset(after))
+                        }
                     }
                 }
                 continuation.resume(returning: found)
@@ -616,6 +695,7 @@ struct AssetThumbnail: View {
                 guard !Task.isCancelled else { return }
                 show(loaded, seeded: seeded, since: asked)
             }
+            .onChange(of: ThumbnailCache.shared.lengthRevision.value) { readLengthAgain() }
             // Only a video says something, with the cell around it: its length as a value.
             .accessibilityElement(children: .ignore)
             .accessibilityValue(spokenLength.map { Text(verbatim: $0) } ?? Text(verbatim: ""))
@@ -632,6 +712,13 @@ struct AssetThumbnail: View {
             loadedID = id
             video = ThumbnailCache.shared.videoLength(for: id)
         }
+    }
+
+    /// A change in Photos corrected a video's length (a video trimmed in Photos, review V4): the
+    /// cell on screen reads its record again, so its badge and VoiceOver's words follow at once.
+    private func readLengthAgain() {
+        guard loadedID == id else { return }
+        video = ThumbnailCache.shared.videoLength(for: id)
     }
 
     /// "Video, 15 Sekunden" for the cell around it; nil for a photo, while it loads, and where

@@ -3,7 +3,8 @@ import UIKit
 
 /// Photos changed outside Albumist (an album made in the Photos app, new pictures, a changed
 /// selection): a moment later the analysis catches up, so "Deine Alben" and the suggestions
-/// match what Photos shows (Fuchs, 14.11.: albums made in Photos did not appear).
+/// match what Photos shows (Fuchs, 14.11.: albums made in Photos did not appear), and the
+/// thumbnails' video lengths follow (`ThumbnailCache.followChanges`).
 @MainActor
 final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
     static let shared = LibraryChangeWatcher()
@@ -26,14 +27,22 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
         }
     }
 
+    /// Photos tells its changes one after the other, on a queue of its own: they reach the main
+    /// actor in that order (the main queue keeps it), so the kept videos' lengths take them in
+    /// turn (review V11).
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         let change = ThumbnailRequest.Change(changeInstance)
-        Task { @MainActor in
-            LibraryChangeWatcher.shared.scheduleCatchUp()
-            // A video trimmed in Photos: the length on its thumbnail follows (review F, F14).
-            // Albumist's own albums change no photo.
-            if !AppModel.shared.execution.isRunning { await ThumbnailCache.shared.libraryChanged(change) }
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { LibraryChangeWatcher.shared.changed(change) }
         }
+    }
+
+    /// A change in Photos: a moment later the analysis catches up, and the lengths on the
+    /// thumbnails of videos trimmed in Photos follow (review F, F14), all changes of the moment
+    /// in one walk (review V11). Albumist's own albums change no photo.
+    private func changed(_ change: ThumbnailRequest.Change) {
+        if !AppModel.shared.execution.isRunning { ThumbnailCache.shared.changeArrived(change) }
+        scheduleCatchUp()
     }
 
     /// Also called when a run ends that saw changes arrive meanwhile.
@@ -55,6 +64,8 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
             if let last = model.analysis.lastRun { delay = max(delay, Self.minimumGap - Date().timeIntervalSince(last)) }
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled else { return }
+            // The lengths of the kept videos follow the changes that waited, in one walk.
+            ThumbnailCache.shared.followChanges()
             // A run in progress read the library at its start: one more pass follows it, so
             // new screenshots do not wait for the next app start.
             if model.analysis.isRunning {

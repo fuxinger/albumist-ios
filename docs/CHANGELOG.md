@@ -2,6 +2,14 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. Videos ohne Flackern und gekürzte Videos sofort richtig (Design-Welle 3, Prüfung von Review F, noch in
+  keinem Build): Ein Video mit kleinem Standbild zeigt beim Öffnen nicht mehr kurz „nicht verfügbar“, sondern
+  wartet mit der Miniatur, bis es spielt. Ein Video startet nicht mehr von selbst, wenn man es vorher angehalten,
+  gespult, weitergewischt oder die Ansicht geschlossen hat. Ein Video in Schleife mit Ton hält den Bildschirm an.
+  Im Stromsparmodus liest die Foto-Ansicht die Stelle eines Videos höchstens zehnmal je Sekunde. Ein Video, das
+  sich nicht abspielen lässt, sagt es sofort, auch bevor es je lief. Ein in Fotos gekürztes Video zeigt seine
+  neue Dauer sofort auch in den sichtbaren Zellen; viele Änderungen in Fotos (iCloud) werden gesammelt und in
+  einem Durchgang nachgezogen.
 - 21.11. Vorschau mit Titelbildern und ein klarer Verlauf (Design-Welle 3, DS-15 Teil 2 und Zweitprüfung G, noch
   in keinem Build): In der Vorschau vor dem Umsetzen hat jedes Album schon das Titelbild, das später sein Beleg und
   der Tab „Alben“ zeigen (72 statt 44 Punkte, aus den Fotos, die der Plan hinzufügen will; heikle Fotos,

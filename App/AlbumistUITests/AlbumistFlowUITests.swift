@@ -1381,6 +1381,11 @@ final class AlbumistFlowUITests: XCTestCase {
         shot("14v-library-video")
         video.tap()
         print("UI_STEP_OK open the video")
+        // While the video comes, its page waits with the grid's thumbnail or black, never with
+        // "Dieses Video ist gerade nicht verfügbar" (verification review of H11, V1: a small
+        // still flashed the note before the player came).
+        let unavailable = app.descendants(matching: .any)["viewer.unavailable"]
+        UITestWait.never("the video's page says it is not available while it comes", for: 2) { unavailable.exists }
         // The controls are the viewer's own; pressed in place (the scrolling taps of `tap`
         // would page or close the viewer).
         func press(_ element: XCUIElement, _ step: String) -> Bool {
@@ -1402,6 +1407,7 @@ final class AlbumistFlowUITests: XCTestCase {
         let play = app.buttons["viewer.video.play"]
         // It starts by itself 0.35 s after the page comes to rest.
         UITestWait.until("the video plays by itself", timeout: 10) { play.exists && play.label == "Anhalten" }
+        XCTAssertFalse(unavailable.exists, "The playing video's page says \"Dieses Video ist gerade nicht verfügbar\"")
         if press(play, "pause the video") {
             UITestWait.until("the video pauses", timeout: 5) { play.label == "Abspielen" }
         }

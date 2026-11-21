@@ -109,11 +109,32 @@ struct PhotoViewerSourceTests {
         #expect(bar.contains("spoken(live:"))
         #expect(bar.contains(".accessibilityShowsLargeContentViewer"))
         #expect(bar.contains(".foregroundStyle(.noteText)"))
-        // The short form where the long one does not fit, cut at its start if even that is too
-        // long, so the time is never what goes on a narrow iPhone (L1).
-        #expect(bar.contains("ViewThatFits(in: .horizontal)"))
-        #expect(bar.contains("title.shortTitle, title.shortSubtitle"))
-        #expect(bar.contains(".truncationMode(.head)"))
+    }
+
+    /// The short form where the long one does not fit, cut at its start if even that is too
+    /// long, so the time is never what goes on a narrow iPhone (L1). Each line picks its own
+    /// form (review D2, N6): a long place no longer turns "30. September 2024 · 14:32" into
+    /// "30.09.2024" when the long date fits; the first line has a short form only when it is
+    /// an older day (a place has none).
+    @Test func eachLineOfTheTitlePicksItsOwnForm() throws {
+        let bar = AppSource.code(try Self.file("PhotoTitleBar.swift"))
+        #expect(Self.count(#"ViewThatFits\("#, in: bar) == 2)
+        let body = try #require(AppSource.body(of: "var body: some View", in: bar))
+        #expect(!body.contains("ViewThatFits("), "both lines pick their form together")
+        let first = try #require(body.range(of: "titleLine"))
+        let second = try #require(body.range(of: "subtitleLine"))
+        #expect(first.upperBound < second.lowerBound)
+        for (line, guarded, long, short) in [("private var titleLine", "if title.shortTitle != title.title {", "heading(title.title)", "heading(title.shortTitle)"),
+                                             ("private var subtitleLine", "if title.shortSubtitle != title.subtitle {", "line(title.subtitle)", "line(title.shortSubtitle)")] {
+            let code = try #require(AppSource.body(of: line, in: bar), "\(line) is missing")
+            let condition = try #require(code.range(of: guarded), "\(line) picks a form it does not have")
+            let fits = try #require(code.range(of: "ViewThatFits(in: .horizontal) {", range: condition.upperBound..<code.endIndex))
+            let longForm = try #require(code.range(of: long, range: fits.upperBound..<code.endIndex))
+            let shortForm = try #require(code.range(of: short, range: longForm.upperBound..<code.endIndex))
+            #expect(!code[fits.lowerBound..<shortForm.upperBound].contains(line == "private var titleLine" ? "subtitle" : "title.title"),
+                    "\(line) picks with the other line")
+        }
+        #expect(try #require(AppSource.body(of: "private func line(", in: bar)).contains(".truncationMode(.head)"))
     }
 
     // MARK: A tap hides everything

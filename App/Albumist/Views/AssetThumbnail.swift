@@ -175,6 +175,28 @@ final class ThumbnailCache {
         await photoAsset(for: id)
     }
 
+    /// Photos changed (review F, F14): the assets kept here are snapshots, so a video trimmed in
+    /// Photos kept its old length on its badge. Each kept video the change touched gets its new
+    /// asset and length, or loses both when it was deleted; the rest stays, so the grids keep
+    /// their badges and the photo view its waiting thumbnail (emptied, they went on each change).
+    func libraryChanged(_ change: ThumbnailRequest.Change) async {
+        var kept: [String: ThumbnailRequest.Asset] = [:]
+        for key in videoLengths.keys {
+            if let asset = assets.object(forKey: key as NSString) { kept[key] = ThumbnailRequest.Asset(asset) }
+        }
+        guard !kept.isEmpty else { return }
+        for (key, found) in await ThumbnailRequest.changed(kept, by: change) {
+            switch found {
+            case .changed(let asset):
+                assets.setObject(asset.value, forKey: key as NSString)
+                videoLengths[key] = asset.value.duration
+            case .deleted:
+                assets.removeObject(forKey: key as NSString)
+                videoLengths[key] = nil
+            }
+        }
+    }
+
     /// `asset(for:)`, telling "Photos does not know the photo" from "Photos did not answer in
     /// time", for the photo view's share: no answer is no verdict (review D, M6).
     func assetLookup(for id: AssetID) async -> AssetLookup {
@@ -335,6 +357,17 @@ enum ThumbnailRequest {
         let value: PHAsset
         init(_ value: PHAsset) { self.value = value }
     }
+    /// What changed in Photos; read on any thread, but not marked Sendable either.
+    struct Change: @unchecked Sendable {
+        let value: PHChange
+        init(_ value: PHChange) { self.value = value }
+    }
+
+    /// What a change in Photos did to a kept asset it touched.
+    enum Changed: Sendable {
+        case changed(Asset)
+        case deleted
+    }
 
     /// Asset lookups wait while Photos writes its database, so they run on their own serial
     /// queue: neither the main thread nor the few threads of Swift's shared pool (the analysis
@@ -357,6 +390,26 @@ enum ThumbnailRequest {
                     }
                     continuation.resume(returning: found)
                 }
+            }
+        }
+    }
+
+    /// The kept assets `change` touched, by key, and what it did to each (review F, F14), worked
+    /// out on the lookups' queue: a change's details may read the Photos database, which waits
+    /// while Photos writes.
+    nonisolated static func changed(_ kept: [String: Asset], by change: Change) async -> [String: Changed] {
+        await withCheckedContinuation { (continuation: CheckedContinuation<[String: Changed], Never>) in
+            lookups.async {
+                var found: [String: Changed] = [:]
+                for (key, asset) in kept {
+                    guard let details = change.value.changeDetails(for: asset.value) else { continue }
+                    if details.objectWasDeleted {
+                        found[key] = .deleted
+                    } else if let after = details.objectAfterChanges {
+                        found[key] = .changed(Asset(after))
+                    }
+                }
+                continuation.resume(returning: found)
             }
         }
     }

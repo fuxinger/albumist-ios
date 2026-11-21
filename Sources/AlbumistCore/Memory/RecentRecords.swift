@@ -20,6 +20,9 @@ public struct RecentRecords<Value> {
 
     public var count: Int { values.count }
 
+    /// The keys of the records kept, in no order.
+    public var keys: [String] { Array(values.keys) }
+
     /// The record of `key`; setting it makes it the latest, nil lets it go.
     public subscript(key: String) -> Value? {
         get { values[key] }

@@ -52,6 +52,15 @@ struct RecentRecordsTests {
         #expect(records.count == 0 && records["a"] == nil)
     }
 
+    /// The keys of the records kept, to look at each (a change in Photos, review F, F14 c).
+    @Test func theKeysAreTheRecordsKept() {
+        var records = Self.filled(limit: 4, ["a", "b", "c", "d"])
+        records["e"] = 4
+        #expect(Set(records.keys) == ["c", "d", "e"])
+        records["d"] = nil
+        #expect(Set(records.keys) == ["c", "e"])
+    }
+
     /// A long scroll through a large library: the newest half is always there.
     @Test func aLongScrollKeepsTheNewestHalf() {
         var records = RecentRecords<Int>(limit: 1000)

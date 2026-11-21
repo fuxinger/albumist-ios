@@ -481,6 +481,31 @@ struct VideoViewerSourceTests {
         }
     }
 
+    /// A video trimmed in Photos: the length on its thumbnail follows (review F, F14 c). The
+    /// assets kept in memory are snapshots; on a change in Photos each kept video the change
+    /// touched gets its new asset and length, or loses both when it was deleted, worked out on
+    /// the lookups' queue (a change's details may read the Photos database). Nothing else goes:
+    /// emptied on each change, the grids lost their badges and the photo view its waiting
+    /// thumbnail, and Albumist's own albums alone are many changes (they change no photo).
+    @Test func aVideosLengthFollowsAChangeInPhotos() throws {
+        let watcher = try Self.code("App/Albumist/Platform/LibraryChangeWatcher.swift")
+        let changed = try #require(AppSource.body(of: "nonisolated func photoLibraryDidChange(", in: watcher))
+        #expect(Self.inOrder(["let change = ThumbnailRequest.Change(changeInstance)", "Task { @MainActor in", "scheduleCatchUp()",
+                              "if !AppModel.shared.execution.isRunning { await ThumbnailCache.shared.libraryChanged(change) }"],
+                             in: changed), "\(changed)")
+        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let refresh = try #require(AppSource.body(of: "func libraryChanged(_ change: ThumbnailRequest.Change) async", in: thumbnails))
+        #expect(Self.inOrder(["for key in videoLengths.keys", "assets.object(forKey: key as NSString)",
+                              "await ThumbnailRequest.changed(kept, by: change)", "case .changed(let asset):",
+                              "assets.setObject(asset.value, forKey: key as NSString)", "videoLengths[key] = asset.value.duration",
+                              "case .deleted:", "assets.removeObject(forKey: key as NSString)", "videoLengths[key] = nil"], in: refresh),
+                "\(refresh)")
+        #expect(!refresh.contains("removeAll"), "the records emptied on every change")
+        let details = try #require(AppSource.body(of: "nonisolated static func changed(", in: thumbnails))
+        #expect(Self.inOrder(["lookups.async {", "change.value.changeDetails(for: asset.value)", "objectWasDeleted",
+                              "objectAfterChanges"], in: details), "\(details)")
+    }
+
     // MARK: Search
 
     /// Search waits on calm tiles where its hits will be, not on spinners: the first answer and

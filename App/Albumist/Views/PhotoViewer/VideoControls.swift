@@ -59,10 +59,12 @@ struct VideoControls: View {
                 Image(systemName: video.isPlaying ? "pause.fill" : "play.fill")
                     .contentTransition(.symbolEffect(.replace))
             }
+            // The 44-pt tap area is the label's: around a borderless button a frame only adds
+            // empty space, and a near miss would move the slider.
+            .labelStyle(.iconOnly)
+            .minimumHitTarget()
         }
-        .labelStyle(.iconOnly)
         .font(.title2)
-        .minimumHitTarget()
         .buttonStyle(.borderless)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .accessibilityShowsLargeContentViewer()
@@ -101,10 +103,10 @@ struct VideoControls: View {
                 Image(systemName: video.sound.isOn ? "speaker.wave.2.fill" : "speaker.slash.fill")
                     .contentTransition(.symbolEffect(.replace))
             }
+            .labelStyle(.iconOnly)
+            .minimumHitTarget()
         }
-        .labelStyle(.iconOnly)
         .font(.title3)
-        .minimumHitTarget()
         .buttonStyle(.borderless)
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .accessibilityShowsLargeContentViewer()

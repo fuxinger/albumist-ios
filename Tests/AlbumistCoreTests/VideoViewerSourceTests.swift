@@ -195,12 +195,21 @@ struct VideoViewerSourceTests {
         let controls = try Self.file("VideoControls.swift", keepStrings: true)
         for text in ["Text(\"Anhalten\")", "Text(\"Abspielen\")", "Text(\"Ton aus\")", "Text(\"Ton an\")",
                      "Text(\"Wiedergabeposition\")", "\"viewer.video.play\"", "\"viewer.video.sound\"", "\"viewer.video.position\"",
-                     ".labelStyle(.iconOnly)", ".minimumHitTarget()", ".floatingPanel(", ".monospacedDigit()",
+                     ".floatingPanel(", ".monospacedDigit()",
                      "VideoPosition(at:", ".spoken(words)", "VideoPosition.step(for:", ".accessibilityAdjustableAction"] {
             #expect(controls.contains(text), "\(text) is missing")
         }
         #expect(!controls.contains(".lineLimit(1)"), "a time cut off at a large text size")
         #expect(Self.count(#"\.buttonStyle\(\.borderless\)"#, in: controls) == 2)
+        // The 44-pt tap area is the label's own: a frame around a borderless button only adds
+        // empty space, and a near miss moves the slider instead (review F, F3).
+        for button in ["private var playButton", "private var soundButton"] {
+            let label = try #require(AppSource.body(of: [button, "} label:"], in: controls))
+            #expect(Self.inOrder(["Label {", "} icon: {", ".labelStyle(.iconOnly)", ".minimumHitTarget()"], in: label),
+                    "\(button): tappable on its symbol only")
+            let whole = try #require(AppSource.body(of: button, in: controls))
+            #expect(Self.count(#"\.minimumHitTarget\(\)"#, in: whole) == 1, "\(button): a frame around the button")
+        }
         let slider = try #require(AppSource.body(of: "private var slider", in: controls))
         #expect(slider.contains("onEditingChanged:") || slider.contains("{ editing in"))
         #expect(slider.contains("video.beginScrub()") && slider.contains("video.endScrub()"))

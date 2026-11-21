@@ -6,22 +6,27 @@ import AlbumistCore
 /// fanned above the count, lying down one after another, the main cover last and on top; without
 /// a stack the symbol as before (undo, removal, failed steps, or no cover sharp on the device).
 ///
-/// - Which albums and photos: `ResultCoverStack` (core). The covers load through `CoverLoader`
-///   at the card's full size, only from the device (never iCloud, never blurry): an album without
-///   a sharp cover is left out, and with none at all the symbol shows. The preview loads them
-///   ahead while the plan runs (`ResultMomentLoader.prefetch`), so they are there with the result.
-/// - The screen's success tap comes as the main cover lies down (`onSettled`; `ExecutionHaptics`
-///   waits for it): no haptic of its own.
+/// - Which albums and photos: `ResultCoverStack` (core), worked out once per plan as the result
+///   shows and kept (`make`; review E of design wave 2, finding 7). The covers come from the
+///   covers' store only (`ResultMomentLoader.kept`): what the preview loaded through `CoverLoader`
+///   while the plan ran, sharp and from the device (never iCloud, never blurry). The result never
+///   waits for Photos (finding 1): an album without a kept cover is left out, and with none the
+///   symbol shows at once, with no room held for covers that might come (finding 9).
+/// - The screen's success tap comes as the main cover lies down (`onSettled`, within
+///   `ResultCoverFan.settleTime`; the screen lets it go after `successDeadline` anyway). No
+///   haptic of its own.
 /// - Reduce Motion: the covers only fade in where they lie; so in the UI tests, whose picture of
 ///   the result is taken a second after it shows.
 /// - Decorative for VoiceOver: the count below ("10 neue Alben") is the heading that is read.
 /// - Room: at most five covers, three at the accessibility text sizes; the fan shrinks to the
-///   width and to the room `room` leaves (the count and "Fotos-App öffnen" stay on screen), down
-///   to `ResultCoverFan.minimumScale`. Its height is held while the covers load.
+///   width and to the room `room` leaves (everything below it stays on screen), down to
+///   `ResultCoverFan.minimumScale`; below that the screen scrolls.
 /// - Once per result: coming back to the tab shows the covers where they lie.
 struct ResultCoverMoment: View {
     let plan: ChangePlan
-    let stack: ResultCoverStack
+    /// What the stack knows of the suggestions the plan came from, taken as it started (nil:
+    /// taken now, `AppModel.resultCoverStack`).
+    let sources: ResultCoverSources?
     /// The symbol without a stack, and its colour.
     let symbol: String
     let tint: Color
@@ -30,17 +35,19 @@ struct ResultCoverMoment: View {
     /// The moment is there: the main cover lay down, or the symbol shows.
     let onSettled: () -> Void
 
+    @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.displayScale) private var displayScale
-    /// The covers of `loadedFor`, in the order of the stack.
+    /// The covers of `madeFor`, in the order of the stack: kept on the device as the result showed.
     @State private var covers: [ResultMomentCover] = []
-    @State private var loadedFor: AlbumistID?
+    @State private var madeFor: AlbumistID?
     /// How many covers lie down, in laying order.
     @State private var laid = 0
     @State private var settledFor: AlbumistID?
     @State private var width: CGFloat = 360
-    @State private var appeared = false
+    /// Changes as a moment starts: the symbol bounces once.
+    @State private var bounce = false
 
     /// The covers only fade in where they lie: Reduce Motion, and the UI tests.
     private var calm: Bool {
@@ -53,29 +60,23 @@ struct ResultCoverMoment: View {
 
     /// The covers on the stack now (three of five at the accessibility sizes).
     private var shown: [ResultMomentCover] {
-        guard loadedFor == plan.id else { return [] }
+        guard madeFor == plan.id else { return [] }
         return Array(covers.prefix(ResultCoverFan.count(min(covers.count, limit))))
-    }
-
-    /// While the covers load: as many as the stack may show.
-    private var expected: Int {
-        ResultCoverFan.count(min(stack.cards.count, limit))
-    }
-
-    private var showsSymbol: Bool {
-        stack.isEmpty || (loadedFor == plan.id && covers.isEmpty)
     }
 
     var body: some View {
         Group {
-            if showsSymbol {
+            if madeFor != plan.id {
+                // Worked out as it appears (`make`), before its first frame.
+                Color.clear.frame(height: 0)
+            } else if shown.isEmpty {
                 symbolView
             } else {
                 fanArea
             }
         }
+        .onChange(of: plan.id, initial: true) { make() }
         .task(id: plan.id) { await play() }
-        .onAppear { appeared = true }
         // Left before the main cover lay down: the moment is over, and coming back shows the
         // covers where they lie.
         .onDisappear { settle(laidDown: true) }
@@ -87,16 +88,17 @@ struct ResultCoverMoment: View {
         Image(systemName: symbol)
             .font(.system(size: 56))
             .foregroundStyle(tint)
-            .symbolEffect(.bounce, value: appeared)
+            .symbolEffect(.bounce, value: bounce)
             .accessibilityHidden(true)
     }
 
-    /// The fan across the width, as high as it is drawn (held while the covers load).
+    /// The fan across the width, as high as it is drawn.
     private var fanArea: some View {
-        let scale = fanScale
+        let count = shown.count
+        let scale = fanScale(count)
         return Color.clear
             .frame(maxWidth: .infinity)
-            .frame(height: heldHeight * scale)
+            .frame(height: CGFloat(ResultCoverFan.size(count).height) * scale)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .overlay { fan(scale: scale) }
             .allowsHitTesting(false)
@@ -119,49 +121,41 @@ struct ResultCoverMoment: View {
         .scaleEffect(scale)
     }
 
-    /// The tallest fan the stack may become while it loads, so nothing below it moves.
-    private var heldHeight: CGFloat {
-        let most = loadedFor == plan.id ? max(1, shown.count) : max(1, expected)
-        let tallest = (1...most).map { ResultCoverFan.size($0).height }.max() ?? ResultCoverFan.cardHeight
-        return CGFloat(tallest)
-    }
-
-    private var fanScale: CGFloat {
-        let count = loadedFor == plan.id ? max(1, shown.count) : max(1, expected)
+    /// The scale that fits `count` covers into the width and into the room left above the rest.
+    private func fanScale(_ count: Int) -> CGFloat {
         let height = room.map { Double($0) } ?? .infinity
         return CGFloat(ResultCoverFan.scale(count: count, width: Double(width), height: height))
     }
 
     // MARK: Choreography
 
+    /// Works the stack out for this plan, once: which albums and photos, and which covers are
+    /// kept sharp on the device now. Nothing is loaded here.
+    private func make() {
+        guard madeFor != plan.id else { return }
+        let stack = model.resultCoverStack(for: plan, taken: sources)
+        covers = ResultMomentLoader.kept(stack, scale: displayScale)
+        if settledFor != plan.id { laid = 0 }
+        madeFor = plan.id
+    }
+
     private func play() async {
-        guard !stack.isEmpty else {
-            settle(laidDown: true)
-            return
-        }
-        if loadedFor != plan.id {
-            if settledFor != plan.id { laid = 0 }
-            let loaded = await ResultMomentLoader.load(stack, scale: displayScale)
-            guard !Task.isCancelled else { return }
-            withAnimation(.smooth(duration: 0.3)) {
-                covers = loaded
-                loadedFor = plan.id
-            }
-        }
+        make()
         // Back on the tab: the covers lie where they lay.
         guard settledFor != plan.id else { return }
         let count = shown.count
         guard count > 0 else {
+            bounce.toggle()
             settle(laidDown: true)
             return
         }
         if calm {
-            withAnimation(.easeOut(duration: 0.35)) { laid = count }
-            try? await Task.sleep(for: .milliseconds(350))
+            withAnimation(.easeOut(duration: ResultCoverFan.fadeIn)) { laid = count }
+            try? await Task.sleep(for: .seconds(ResultCoverFan.fadeIn))
         } else {
             for step in 1...count {
                 withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) { laid = step }
-                try? await Task.sleep(for: .milliseconds(step == count ? 300 : 110))
+                try? await Task.sleep(for: .seconds(step == count ? ResultCoverFan.lastFall : ResultCoverFan.layingStep))
                 guard !Task.isCancelled else { return }
             }
         }
@@ -232,55 +226,59 @@ private struct FannedCover: View {
     }
 }
 
-/// Loads the covers of the result's stack through `CoverLoader` (the cards' own loader: only
-/// from the device, the first candidate that is sharp, kept in the covers' store), at the card's
-/// full size whatever the fan is scaled to, so what was loaded ahead is what is shown.
+/// The covers of the result's stack: loaded through `CoverLoader` (the cards' own loader: only
+/// from the device, the first candidate that is sharp, kept in the covers' store) while the plan
+/// runs (`prefetch`), and taken from that store as the result shows (`kept`), at the card's full
+/// size whatever the fan is scaled to. The result never asks Photos itself.
 @MainActor
 enum ResultMomentLoader {
-    /// How long the result waits for covers at most: what has not come by then stays off the stack.
-    static let patience: Duration = .milliseconds(1500)
-    /// How long the covers may load while the plan runs and the show plays.
+    /// How long the covers may load while the plan runs and the show plays; the screen cancels
+    /// the loading as the result shows, or when the run ends without one.
     static let prefetchPatience: Duration = .seconds(20)
     /// Photos did not answer (busy with the run): the cover asks once more after this.
     static let retryDelay: Duration = .milliseconds(800)
 
-    /// The size in pixels each cover is asked for.
+    /// The size in pixels each cover is asked for and kept at.
     static func pixels(scale: CGFloat) -> CGSize {
         CGSize(width: CGFloat(ResultCoverFan.cardWidth) * scale, height: CGFloat(ResultCoverFan.cardHeight) * scale)
     }
 
-    /// The covers that lie on the stack (`ResultCoverStack.shown`), card by card in order; each
-    /// card tries its own photos, an album with none sharp on the device is left out.
-    static func load(_ stack: ResultCoverStack, scale: CGFloat,
-                     patience: Duration = ResultMomentLoader.patience) async -> [ResultMomentCover] {
+    /// Loads the covers of the stack ahead, card by card in order, while the plan runs: each card
+    /// tries its own photos, and the sharp ones are kept in the covers' store. Nothing is shown.
+    static func prefetch(_ stack: ResultCoverStack, scale: CGFloat) async {
         let pixels = pixels(scale: scale)
         let started = ContinuousClock.now
-        var sharp: [String: AssetID] = [:]
-        var found: [AssetID: ResultMomentCover] = [:]
+        var sharp = 0
         for card in stack.cards {
-            guard sharp.count < ResultCoverStack.limit, !Task.isCancelled,
-                  ContinuousClock.now - started < patience else { break }
+            guard sharp < ResultCoverStack.limit, !Task.isCancelled,
+                  ContinuousClock.now - started < prefetchPatience else { return }
             let request = CoverLoader.Request(ids: card.candidates, pixels: pixels)
             var loaded = await CoverLoader.load(request)
             // Photos did not answer: asked once more while there is time.
-            if loaded.counted == nil, !Task.isCancelled, ContinuousClock.now - started + retryDelay < patience {
+            if loaded.counted == nil, !Task.isCancelled, ContinuousClock.now - started + retryDelay < prefetchPatience {
                 try? await Task.sleep(for: retryDelay)
                 loaded = await CoverLoader.load(request)
             }
-            guard case .photo(let image, let focus) = loaded.shown else { continue }
-            // The photo it showed: the first candidate whose sharp cover is now kept.
-            let photo = card.candidates.first { ThumbnailCache.shared.cachedCover(for: $0, pixels: pixels) != nil }
-                ?? card.candidates[0]
-            sharp[card.id] = photo
-            found[photo] = ResultMomentCover(card: card.id, image: image, focus: focus)
+            if case .photo = loaded.shown { sharp += 1 }
         }
-        return stack.shown(sharp: sharp, limit: ResultCoverStack.limit).compactMap { found[$0.photo] }
     }
 
-    /// Loads the covers while the plan runs, so they are at hand when the result comes (sharp ones
-    /// are kept in the covers' store; nothing is shown).
-    static func prefetch(_ stack: ResultCoverStack, scale: CGFloat) async {
-        guard !stack.isEmpty else { return }
-        _ = await load(stack, scale: scale, patience: prefetchPatience)
+    /// The covers that lie on the stack (`ResultCoverStack.shown`), card by card in order, from
+    /// the covers' store only: each card's first photo whose sharp cover is kept at the card's
+    /// size. Asks Photos nothing, so the result never waits; an album without one is left out.
+    static func kept(_ stack: ResultCoverStack, scale: CGFloat) -> [ResultMomentCover] {
+        let pixels = pixels(scale: scale)
+        var sharp: [String: AssetID] = [:]
+        var found: [AssetID: ResultMomentCover] = [:]
+        for card in stack.cards {
+            for photo in card.candidates {
+                guard let cover = ThumbnailCache.shared.cachedCover(for: photo, pixels: pixels) else { continue }
+                let focus = CoverLoader.focus(imageSize: cover.image.size, screenshot: cover.screenshot, target: pixels)
+                sharp[card.id] = photo
+                found[photo] = ResultMomentCover(card: card.id, image: cover.image, focus: focus)
+                break
+            }
+        }
+        return stack.shown(sharp: sharp, limit: ResultCoverStack.limit).compactMap { found[$0.photo] }
     }
 }

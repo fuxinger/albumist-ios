@@ -14,9 +14,10 @@ import Foundation
 ///   (`PreviewPicker.coverCandidates`). Never a sensitive document, a screenshot or another
 ///   document (a big cover is a photo, design rule 9). Whatever order the plan lists its photos
 ///   in, the same photos in the same order.
-/// - Never an album or a photo of a personal suggestion (`personalSources`: a sensitive suggestion
-///   or one whose card hides its preview, "Vorschau ausgeblendet"), and never a photo another card
-///   tries before (a country album holds its trips): the same photo never lies on two cards.
+/// - Never an album or a photo of a personal suggestion (`personalSources`: a sensitive suggestion,
+///   one whose card hides its preview, "Vorschau ausgeblendet", or one the analysis does not know),
+///   and never a photo another card tries before (a country album holds its trips): the same
+///   photo never lies on two cards.
 /// - At most `tried` albums are tried (one whose photos are only in iCloud makes room for the
 ///   next), at most `limit` lie on the stack (`limitAtLargestText` at the accessibility text
 ///   sizes), and four lie as three (`ResultCoverFan.count`).
@@ -145,6 +146,17 @@ public struct ResultCoverStack: Hashable, Sendable {
         return Array(shown.prefix(ResultCoverFan.count(shown.count)))
     }
 
+    /// The suggestions of `plan` whose albums and photos stay off the stack (`personalSources`):
+    /// the personal ones (`personal`: sensitive, or their card hides its preview) and every one
+    /// the analysis does not know (`known`). A step keeps the suggestion it came from, also in
+    /// "Fehlendes erneut versuchen" and after the analysis made its suggestions anew, so an
+    /// unknown one may have been personal; a plan made by hand has an id of its own, which the
+    /// analysis does not know either, and keeps the symbol.
+    public static func personalSources(of plan: ChangePlan, known: Set<AlbumistID>, personal: Set<AlbumistID>) -> Set<AlbumistID> {
+        let sources = Set(plan.steps.lazy.compactMap(\.sourceID))
+        return sources.subtracting(known).union(sources.intersection(personal))
+    }
+
     /// The receipt's name of the album `ref` (`PlanReceipt.Album.id`).
     static func id(of ref: AlbumRef) -> String {
         switch ref {
@@ -202,9 +214,28 @@ public enum ResultCoverFan {
 
     public static let cardWidth = 124.0
     public static let cardHeight = 156.0
-    /// Below this the covers stop being photos one can make out; the stack keeps this size and
-    /// the screen scrolls.
-    public static let minimumScale = 0.45
+    /// The stack gives way to what stands below it (the count, the way to Photos, "Alle
+    /// Änderungen" and "Rückgängig machen"), but not below six tenths: smaller covers stop being
+    /// photos one can make out. The stack keeps this size then and the screen scrolls.
+    public static let minimumScale = 0.6
+
+    /// How the covers lie down (`ResultCoverMoment`): one after another, `layingStep` apart, the
+    /// main cover last, lying `lastFall` after it began to fall; with Reduce Motion all of them
+    /// fade in where they lie over `fadeIn`.
+    public static let layingStep = 0.11
+    public static let lastFall = 0.3
+    public static let fadeIn = 0.35
+    /// The success tap comes as the main cover lies down, and the screen never holds it longer
+    /// than this after the result shows (`PlanReviewView`), whatever the covers do.
+    public static let successDeadline = 1.5
+
+    /// Seconds from the start of the moment until the main cover lies, which is when the success
+    /// tap comes: none without covers (the symbol shows at once).
+    public static func settleTime(count covers: Int, calm: Bool) -> Double {
+        let laid = count(covers)
+        guard laid > 0 else { return 0 }
+        return calm ? fadeIn : Double(laid - 1) * layingStep + lastFall
+    }
 
     /// How many covers the fan lays: four as three, so the main cover keeps the middle, and five
     /// at most.

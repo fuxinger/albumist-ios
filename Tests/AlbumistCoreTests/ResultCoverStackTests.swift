@@ -204,6 +204,96 @@ struct ResultCoverStackTests {
         #expect(ResultCoverStack(plan: familyMade, personalSources: [family.id]).isEmpty)
     }
 
+    /// A suggestion the analysis does not know may have been personal: a step keeps the
+    /// suggestion it came from, also in "Fehlendes erneut versuchen" and after the analysis made
+    /// its suggestions anew, so an unknown one stays off the stack, at the plan's start as at its
+    /// end (review E of design wave 2, finding 10). Known ones are personal only when they are.
+    @Test func anUnknownSuggestionCountsAsPersonal() async throws {
+        let family = AlbumProposal(id: AlbumistID("family"), kind: .personOrPet, title: "Familie",
+                                   assetIDs: ["fam-1", "fam-2"], isSensitive: true)
+        let kyoto = Self.trip("kyoto")
+        let library = Self.library([family, kyoto])
+        let (planned, _) = try await Self.planAndRun([ConfirmedProposal(proposal: family, decision: Self.new),
+                                                     ConfirmedProposal(proposal: kyoto, decision: Self.new)], in: library)
+        #expect(ResultCoverStack.personalSources(of: planned, known: [family.id, kyoto.id], personal: []).isEmpty)
+        #expect(ResultCoverStack.personalSources(of: planned, known: [family.id, kyoto.id], personal: [family.id]) == [family.id])
+        // Personal suggestions of other plans do not matter here.
+        #expect(ResultCoverStack.personalSources(of: planned, known: [family.id, kyoto.id], personal: [AlbumistID("other")]).isEmpty)
+        // The analysis made its suggestions anew: the family's old id is unknown now.
+        #expect(ResultCoverStack.personalSources(of: planned, known: [kyoto.id], personal: []) == [family.id])
+        #expect(ResultCoverStack.personalSources(of: planned, known: [], personal: []) == [family.id, kyoto.id])
+
+        // "Fehlendes erneut versuchen": the family's photos did not arrive in its album the first
+        // time. The retry adds them to the album that run made, under the family's old id.
+        let alone = Self.library([family])
+        let (_, made) = try await Self.planAndRun([ConfirmedProposal(proposal: family, decision: Self.new)], in: alone)
+        var gapped = made
+        let add = try #require(gapped.steps.firstIndex { if case .addAssets = $0.operation { true } else { false } })
+        gapped.steps[add].state = .failed(reason: "Fotos hat nicht geantwortet.")
+        gapped.status = .completedWithErrors
+        let key = try #require(gapped.steps.lazy.compactMap { step -> String? in
+            if case .createAlbum(let key, _, _) = step.operation { key } else { nil }
+        }.first)
+        let album = try #require(gapped.resolvedKeys[key])
+        try await alone.removeAssets(["fam-1", "fam-2"], from: album)
+        let retry = try #require(RetryPlanner().retryPlan(for: gapped, current: try await alone.currentInventory()))
+        #expect(!retry.steps.isEmpty && retry.steps.allSatisfy { $0.sourceID == family.id })
+        let retried = try await Self.run(retry, in: alone)
+        #expect(retried.status == .completed)
+        let open = ResultCoverStack(plan: retried)
+        #expect(open.albums == .extended && open.cards.map(\.id) == [album.rawValue], "the family's photos would lie on the stack")
+        let personal = ResultCoverStack.personalSources(of: retry, known: [AlbumistID("family-anew")], personal: [])
+        #expect(personal == [family.id])
+        #expect(ResultCoverStack(plan: retried, personalSources: personal).isEmpty)
+    }
+
+    /// The stack never shows more albums than the count above it says: an album found after an
+    /// interruption ("adopted", counted as "Fotos einsortiert", not as new) lies on no card, in a
+    /// run that made albums as in one that only added photos to the user's (review E, finding 16).
+    @Test func neverMoreCoversThanTheCountSays() async throws {
+        func key(of title: String, in plan: ChangePlan) throws -> String {
+            try #require(plan.steps.lazy.compactMap { step -> String? in
+                if case .createAlbum(let key, let name, _) = step.operation, name == title { key } else { nil }
+            }.first)
+        }
+        func allSharp(_ stack: ResultCoverStack) -> [String: AssetID] {
+            var sharp: [String: AssetID] = [:]
+            for card in stack.cards { sharp[card.id] = card.candidates.first }
+            return sharp
+        }
+        let kyoto = Self.trip("kyoto"), rom = Self.trip("rom"), lissabon = Self.trip("lissabon")
+        let mine = CollectionSnapshot(id: "mine", title: "Italien", assetIDs: ["own"])
+        let library = Self.library([kyoto, rom, lissabon], extra: ["own"], collections: [mine])
+        let (_, made) = try await Self.planAndRun([ConfirmedProposal(proposal: kyoto, decision: Self.new),
+                                                  ConfirmedProposal(proposal: rom, decision: .extendExisting("mine")),
+                                                  ConfirmedProposal(proposal: lissabon, decision: Self.new)], in: library)
+        var adopted = made
+        let lisbon = try key(of: lissabon.title, in: adopted)
+        adopted.record?.adoptedKeys.insert(lisbon)
+        let receipt = PlanReceipt(plan: adopted, inventory: CollectionInventory())
+        #expect(receipt.albumsCreated == 1 && receipt.albumsExtended == 1)
+        let stack = ResultCoverStack(plan: adopted)
+        #expect(stack.albums == .created)
+        #expect(stack.cards.map(\.id) == ["planned:" + (try key(of: kyoto.title, in: adopted))], "\(stack.cards.map(\.id))")
+        #expect(stack.shown(sharp: allSharp(stack), limit: ResultCoverStack.limit).count <= receipt.albumsCreated)
+
+        // Nothing made verifiably, photos in the user's album and in an adopted one: the user's
+        // album alone, as "in einem deiner Alben ergänzt" says.
+        let kobe = Self.trip("kobe"), porto = Self.trip("porto")
+        let japan = CollectionSnapshot(id: "japan", title: "Japan", assetIDs: ["own2"])
+        let other = Self.library([kobe, porto], extra: ["own2"], collections: [japan])
+        let (_, second) = try await Self.planAndRun([ConfirmedProposal(proposal: kobe, decision: .extendExisting("japan")),
+                                                    ConfirmedProposal(proposal: porto, decision: Self.new)], in: other)
+        var found = second
+        let portoKey = try key(of: porto.title, in: second)
+        found.record?.adoptedKeys.insert(portoKey)
+        let foundReceipt = PlanReceipt(plan: found, inventory: CollectionInventory())
+        #expect(foundReceipt.albumsCreated == 0 && foundReceipt.albumsExtended == 1)
+        let extended = ResultCoverStack(plan: found)
+        #expect(extended.albums == .extended && extended.cards.map(\.id) == ["japan"], "\(extended.cards.map(\.id))")
+        #expect(extended.shown(sharp: allSharp(extended), limit: ResultCoverStack.limit).count <= foundReceipt.albumsExtended)
+    }
+
     /// The cover the suggestion's card showed comes first, so the stack shows the photos the user
     /// knows from the cards; otherwise the newest photo (Photos keeps the newest on the device).
     @Test func theCardsOwnCoverComesFirst() async throws {
@@ -342,9 +432,31 @@ struct ResultCoverFanTests {
         #expect(abs(pair.minX + pair.maxX) < 8, "\(pair)")
     }
 
+    /// The success tap comes as the main cover lies down: the covers one after another, the main
+    /// cover last, at most 0.74 s after the moment starts (five covers), 0.35 s with Reduce Motion,
+    /// at once with the symbol. The screen lets the tap go after `successDeadline` whatever happens
+    /// (review E of design wave 2, finding 1: it waited for Photos without a limit).
+    @Test func theMainCoverLiesWithinTheDeadline() {
+        #expect(ResultCoverFan.successDeadline == 1.5)
+        for count in 0...7 {
+            for calm in [false, true] {
+                let settle = ResultCoverFan.settleTime(count: count, calm: calm)
+                #expect(settle >= 0 && settle < ResultCoverFan.successDeadline, "\(count), calm \(calm): \(settle)")
+            }
+        }
+        #expect(ResultCoverFan.settleTime(count: 0, calm: false) == 0, "the symbol: the tap at once")
+        #expect(ResultCoverFan.settleTime(count: 0, calm: true) == 0)
+        #expect(abs(ResultCoverFan.settleTime(count: 5, calm: false) - (4 * ResultCoverFan.layingStep + ResultCoverFan.lastFall)) < 1e-9)
+        #expect(ResultCoverFan.settleTime(count: 1, calm: false) == ResultCoverFan.lastFall)
+        #expect(ResultCoverFan.settleTime(count: 5, calm: true) == ResultCoverFan.fadeIn)
+        // Four lie as three.
+        #expect(ResultCoverFan.settleTime(count: 4, calm: false) == ResultCoverFan.settleTime(count: 3, calm: false))
+    }
+
     /// Five covers fit across a 6.1" iPhone at their full size; on the 4.7" iPhone they get a
-    /// little smaller, and where the screen is short they shrink, but never below a size where a
-    /// cover is still a photo.
+    /// little smaller, and where the screen is short they shrink, but never below six tenths:
+    /// below that the screen scrolls, and the buttons under the stack keep their room (review E,
+    /// finding 8).
     @Test func theFanFitsTheScreen() {
         let five = ResultCoverFan.size(5)
         #expect(five.width > 343 && five.width <= 361, "\(five)")
@@ -353,7 +465,8 @@ struct ResultCoverFanTests {
         #expect(small < 1 && small > 0.9)
         #expect(ResultCoverFan.scale(count: 3, width: 343, height: 100) < 1)
         #expect(ResultCoverFan.scale(count: 3, width: 343, height: 10) == ResultCoverFan.minimumScale)
-        #expect(ResultCoverFan.minimumScale == 0.45)
+        #expect(ResultCoverFan.minimumScale == 0.6)
+        #expect(ResultCoverFan.scale(count: 5, width: 100, height: 100) == 0.6)
         // One cover is the card's own size.
         #expect(ResultCoverFan.size(1).width == ResultCoverFan.cardWidth)
         #expect(ResultCoverFan.size(1).height == ResultCoverFan.cardHeight)

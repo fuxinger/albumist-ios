@@ -78,8 +78,8 @@ class CatalogTests(unittest.TestCase):
             catalog = root / english_rule.CATALOG
             catalog.parent.mkdir(parents=True)
             catalog.write_text(json.dumps({"sourceLanguage": "de", "strings": strings}), encoding="utf-8")
-            (root / "App" / "Sortly" / "Views").mkdir(parents=True, exist_ok=True)
-            (root / "App" / "Sortly" / "Views" / "A.swift").write_text(swift, encoding="utf-8")
+            (root / "App" / "Albumist" / "Views").mkdir(parents=True, exist_ok=True)
+            (root / "App" / "Albumist" / "Views" / "A.swift").write_text(swift, encoding="utf-8")
             return [(key, problem.split(" ")[0]) for key, _, problem in english_rule.offenders(root)]
 
     def test_safe_british_spelling_trial_run_and_take_back_are_found(self):

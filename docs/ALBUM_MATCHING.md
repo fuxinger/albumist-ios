@@ -1,6 +1,6 @@
 # Abgleich mit vorhandenen Alben
 
-Quelle: `Sources/SortlyCore/Matching/AlbumMatcher.swift`, Tests: `Tests/SortlyCoreTests/MatchingTests.swift`.
+Quelle: `Sources/AlbumistCore/Matching/AlbumMatcher.swift`, Tests: `Tests/AlbumistCoreTests/MatchingTests.swift`.
 
 ## Verfahren
 Für jeden Vorschlag P wird jedes vorhandene Album A über die **Inhalte** verglichen. Ein

@@ -402,7 +402,7 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertIn("python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}", verdict)
         self.assertIn(f"UI_QUICK: ${{{{ {quick} && 'true' || '' }}}}", text)
         self.assertIn("plan --groups \"$UI_GROUPS\" ${UI_QUICK:+--quick}", text)
-        self.assertIn("TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}", text)
+        self.assertIn("TEST_RUNNER_ALBUMIST_UI_QUICK: ${{ matrix.quick && '1' || '' }}", text)
         testflight = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         # Full, never --quick; the stress pass of 10,000 photos too (decision 20.11.2026, 17:20).
         self.assertIn("python3 .github/scripts/ui_evidence.py gate --stress 10000-15\n", testflight)
@@ -494,7 +494,7 @@ class CompileFirstTests(unittest.TestCase):
         runs = {name: run for name, _, run in steps}
         first = runs["Build app and its tests"]
         self.assertRegex(first, r"xcodebuild build-for-testing\b")
-        self.assertIn("-scheme Sortly\n", first.replace(" \\", ""))
+        self.assertIn("-scheme Albumist\n", first.replace(" \\", ""))
         # The same build settings as the test step, so that one compiles nothing again.
         test = runs["Build and test app"]
         for setting in ("COMPILER_INDEX_STORE_ENABLE=NO", "CODE_SIGNING_ALLOWED=NO"):
@@ -699,7 +699,7 @@ class ReleaseSkipTests(unittest.TestCase):
 
 
 class ReleaseSmokeTests(unittest.TestCase):
-    """Review P5-03: every UI test ran a Debug build with -SortlyUITest switches, and the Release
+    """Review P5-03: every UI test ran a Debug build with -AlbumistUITest switches, and the Release
     build that is uploaded was never started before the upload (the archive and the manual
     Appetize job were the only Release builds). One UI test now runs on a Release build in every
     TestFlight run, beside the UI flow and the stress pass, and the upload needs it green."""
@@ -712,14 +712,14 @@ class ReleaseSmokeTests(unittest.TestCase):
         steps = {name: run for name, _, run in job_steps(text, "release-smoke")}
         build = steps["Build for testing (Release)"]
         self.assertRegex(build, r"xcodebuild build-for-testing\b")
-        self.assertIn("-scheme SortlyUI", build)
+        self.assertIn("-scheme AlbumistUI", build)
         self.assertIn("-configuration Release", build)
-        self.assertIn("Release-iphonesimulator/Sortly.app", build)
+        self.assertIn("Release-iphonesimulator/Albumist.app", build)
         run = steps["Run UI tests"]
         self.assertIn("--only ReleaseSmokeUITests", run)
-        self.assertIn("TEST_RUNNER_SORTLY_RELEASE_SMOKE: '1'", smoke)
+        self.assertIn("TEST_RUNNER_ALBUMIST_RELEASE_SMOKE: '1'", smoke)
         # A skipped test is no pass (the test skips itself without the variable).
-        self.assertIn("Test Case '-[SortlyUITests.ReleaseSmokeUITests test1_ReleaseBuildOnboardsAnalysesAndApplies]' passed", run)
+        self.assertIn("Test Case '-[AlbumistUITests.ReleaseSmokeUITests test1_ReleaseBuildOnboardsAnalysesAndApplies]' passed", run)
         # Beside the UI flow and the stress pass, not after them: it needs the tests only.
         self.assertEqual([n.strip() for n in job_field(text, "release-smoke", "needs").split(",")], ["tests"])
         self.assertEqual(job_field(text, "release-smoke", "if"), "")
@@ -748,16 +748,16 @@ class ReleaseSmokeTests(unittest.TestCase):
         self.assertLessEqual(in_release + len(beside), 5)
 
     def test_the_smoke_test_runs_only_there_and_as_a_user_would(self):
-        path = os.path.join(ROOT, "App", "SortlyUITests", "ReleaseSmokeUITests.swift")
+        path = os.path.join(ROOT, "App", "AlbumistUITests", "ReleaseSmokeUITests.swift")
         swift = read(path)
-        self.assertIn('environment["SORTLY_RELEASE_SMOKE"] == "1"', swift)
+        self.assertIn('environment["ALBUMIST_RELEASE_SMOKE"] == "1"', swift)
         self.assertIn("throw XCTSkip(", swift)
         self.assertIn("func test1_ReleaseBuildOnboardsAnalysesAndApplies()", swift)
         # No test switch of the app: a Release build ignores them, and the test must not lean on one.
-        self.assertNotIn('"-SortlyUITest', swift)
+        self.assertNotIn('"-AlbumistUITest', swift)
         for name in ("ui.yml", "ui-stress.yml", "ci.yml"):
             with self.subTest(workflow=name):
-                self.assertNotIn("SORTLY_RELEASE_SMOKE", read(os.path.join(ROOT, ".github", "workflows", name)))
+                self.assertNotIn("ALBUMIST_RELEASE_SMOKE", read(os.path.join(ROOT, ".github", "workflows", name)))
 
 
 if __name__ == "__main__":

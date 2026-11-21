@@ -31,12 +31,12 @@ CASE_ID = re.compile(r"^([A-G]\d+(?:[–-][A-G]?\d+)?)\b")
 def test_inventory():
     """{function name: kind} and {display name: function name} for all tests in the repo."""
     names, display = {}, {}
-    unit = glob.glob(f"{ROOT}/Tests/**/*.swift", recursive=True) + glob.glob(f"{ROOT}/App/SortlyTests/**/*.swift", recursive=True)
-    ui = glob.glob(f"{ROOT}/App/SortlyUITests/**/*.swift", recursive=True)
+    unit = glob.glob(f"{ROOT}/Tests/**/*.swift", recursive=True) + glob.glob(f"{ROOT}/App/AlbumistTests/**/*.swift", recursive=True)
+    ui = glob.glob(f"{ROOT}/App/AlbumistUITests/**/*.swift", recursive=True)
     attribute = re.compile(r'@Test\b(\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))?[\s\S]{0,200}?\bfunc\s+(\w+)\s*\(')
     for path in unit:
         source = open(path, encoding="utf-8").read()
-        kind = "load" if re.search(r"SORTLY_LOAD_TEST", source) else ("app" if "/App/" in path else "core")
+        kind = "load" if re.search(r"ALBUMIST_LOAD_TEST", source) else ("app" if "/App/" in path else "core")
         for match in attribute.finditer(source):
             name = match.group(2)
             names[name] = kind
@@ -106,7 +106,7 @@ def swift_test_names(source):
 def suite_files():
     """{file stem without "Tests": [test names]} for references like "Load:" or "DecisionLifecycle"."""
     result = {}
-    for path in glob.glob(f"{ROOT}/Tests/**/*Tests.swift", recursive=True) + glob.glob(f"{ROOT}/App/SortlyTests/*.swift"):
+    for path in glob.glob(f"{ROOT}/Tests/**/*Tests.swift", recursive=True) + glob.glob(f"{ROOT}/App/AlbumistTests/*.swift"):
         stem = os.path.basename(path)[:-len(".swift")]
         source = open(path, encoding="utf-8").read()
         result[stem.removesuffix("Tests")] = swift_test_names(source)

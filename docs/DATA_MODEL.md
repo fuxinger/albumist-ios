@@ -1,6 +1,6 @@
 # Datenmodell
 
-SQLite, Version über `PRAGMA user_version`, Migrationen in `Sources/SortlyStore/Migrations.swift`.
+SQLite, Version über `PRAGMA user_version`, Migrationen in `Sources/AlbumistStore/Migrations.swift`.
 
 ## Tabellen
 | Tabelle | Schlüssel | Inhalt |
@@ -29,7 +29,7 @@ verwalteter Alben.
 
 ## Identitäten
 Fotos und Alben werden über PhotoKit-`localIdentifier` angesprochen. Vorschläge haben
-stabile `SortlyID`s, abgeleitet aus Bereich und Inhalt (Reise-ID, Ortsschlüssel, Kategorie),
+stabile `AlbumistID`s, abgeleitet aus Bereich und Inhalt (Reise-ID, Ortsschlüssel, Kategorie),
 damit Entscheidungen neue Analyseläufe überleben. Planschritte haben deterministische
 Idempotenzschlüssel (Plan-ID + Index + Inhalts-Hash).
 

@@ -11,7 +11,7 @@ name: CodeQL
 #     compiler cannot start Xcode's macro plugin server ("swift-plugin-server could not be
 #     loaded: Bad CPU type in executable", CodeQL run 44202319351, after 24 min of building),
 #     like sandbox-exec before it. The core package uses no macros. The app's own Swift
-#     (App/Sortly) is NOT analysed by CodeQL today; it is again once CodeQL's tracer can start
+#     (App/Albumist) is NOT analysed by CodeQL today; it is again once CodeQL's tracer can start
 #     the plugin server on the arm64 runners (try: a manual run with the newest codeql-action;
 #     docs/TESTFLIGHT.md), under its own category.
 # Sources/CSQLite is a module map and a header shim with no C code, so c-cpp is not analysed.

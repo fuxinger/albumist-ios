@@ -22,7 +22,7 @@ name: UI stress
 # "Run workflow" (gh workflow run) is not offered either.
 #
 # Too long for every UI run, so not part of ui.yml: in its group "device conditions" test12
-# skips itself, because only this workflow sets SORTLY_STRESS_PHOTOS. Here a skipped test12 is
+# skips itself, because only this workflow sets ALBUMIST_STRESS_PHOTOS. Here a skipped test12 is
 # no pass: "Stress run" fails unless the log says test12 passed.
 #
 # The test tries Pause 200 photos or 2 min into the image step, whichever comes first (since
@@ -197,8 +197,8 @@ jobs:
           set +e
           cd App && xcodegen generate
           xcodebuild build-for-testing \
-            -project Sortly.xcodeproj \
-            -scheme SortlyUI \
+            -project Albumist.xcodeproj \
+            -scheme AlbumistUI \
             -destination "generic/platform=iOS Simulator" \
             -derivedDataPath ../build/dd \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
@@ -215,8 +215,8 @@ jobs:
         env:
           UDID: ${{ steps.sim.outputs.udid }}
           # xcodebuild hands TEST_RUNNER_* variables to the tests without the prefix.
-          TEST_RUNNER_SORTLY_STRESS_PHOTOS: ${{ env.STRESS_PHOTOS }}
-          TEST_RUNNER_SORTLY_STRESS_MINUTES: ${{ env.STRESS_MINUTES }}
+          TEST_RUNNER_ALBUMIST_STRESS_PHOTOS: ${{ env.STRESS_PHOTOS }}
+          TEST_RUNNER_ALBUMIST_STRESS_MINUTES: ${{ env.STRESS_MINUTES }}
         run: |
           set +e
           XCTESTRUN=$(ls build/dd/Build/Products/*.xctestrun 2>/dev/null | head -1)
@@ -226,7 +226,7 @@ jobs:
           # Memory of the app process every 5 s, tagged with the test's phase (create / measure).
           echo prepare > phase.txt
           ( while true; do
-              pid=$(pgrep -f "Sortly.app/Sortly" | head -1)
+              pid=$(pgrep -f "Albumist.app/Albumist" | head -1)
               [ -n "$pid" ] && echo "$(date +%s) $(ps -o rss= -p "$pid" | tr -d ' ') $(cat phase.txt)" >> memory.txt
               sleep 5
             done ) &
@@ -257,7 +257,7 @@ jobs:
           status=${PIPESTATUS[0]}
           # ui_tests.py counts a skipped test as done; a pass needs test12 to have passed (in the
           # first run or in its repeat after a simulator failure, build/stress-retry-log.txt).
-          PASSED="Test Case '-[SortlyUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' passed"
+          PASSED="Test Case '-[AlbumistUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' passed"
           passed=no
           for f in "$LOG" build/stress-retry-log.txt; do
             if [ -f "$f" ] && grep -aqF "$PASSED" "$f"; then passed=yes; fi
@@ -275,7 +275,7 @@ jobs:
           done
           tail -1 memory.txt | awk '{printf "STRESS_MEMORY_END %d MB (%s)\n", $2/1024, $3}'
           # Why the app ended, if it did: iOS's reason (RunningBoard, jetsam), the app's own
-          # markers and its main-thread stalls (-SortlyUITestWatchMain), crash reports in the
+          # markers and its main-thread stalls (-AlbumistUITestWatchMain), crash reports in the
           # simulator, and the result bundle.
           xcrun simctl spawn "$UDID" log show --last 3h --style compact --predicate 'eventMessage CONTAINS "UITEST_"' 2>/dev/null | grep -av UITEST_MAIN_BLOCKED | cut -c 1-300 | tail -80 | sed 's/^/STRESS_LOG /'
           xcrun simctl spawn "$UDID" log show --last 3h --style compact --predicate 'eventMessage CONTAINS "UITEST_MAIN_BLOCKED"' 2>/dev/null | grep -a "UITEST_MAIN_BLOCKED" > main-blocked.txt

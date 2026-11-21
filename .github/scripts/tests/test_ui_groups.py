@@ -82,11 +82,11 @@ GROUPS = {"groups": [
 
 def repo(**changes):
     files = {
-        "App/Sortly/App/AlbumistApp.swift": "@main struct AlbumistApp {}",
-        "App/Sortly/Resources/Info.plist": "<plist/>",
+        "App/Albumist/App/AlbumistApp.swift": "@main struct AlbumistApp {}",
+        "App/Albumist/Resources/Info.plist": "<plist/>",
         "App/StoreKit/Albumist.storekit": "{}",
-        "App/project.yml": "name: Sortly",
-        "Sources/SortlyCore/Core.swift": "public struct Core {}",
+        "App/project.yml": "name: Albumist",
+        "Sources/AlbumistCore/Core.swift": "public struct Core {}",
         "Package.swift": "// swift-tools-version: 6.0",
         ".github/toolchain.json": '{"xcode": "27.2"}',
         ".github/workflows/ui.yml": "name: UI flow\n  run: python3 .github/scripts/toolchain.py xcode\n"
@@ -100,14 +100,14 @@ def repo(**changes):
         ".github/scripts/ci_gate.py": "# release gate, no UI job runs it",
         ".github/scripts/other.py": "# not the harness",
         ".github/ui-groups.json": json.dumps(GROUPS),
-        "App/SortlyUITests/FlowUITests.swift": FLOW,
-        "App/SortlyUITests/DeviceUITests.swift": DEVICE,
-        "App/SortlyUITests/SearchUITests.swift": SEARCH,
-        "App/SortlyUITests/UITestOnboarding.swift": ONBOARDING,
-        "App/SortlyUITests/UITestStalls.swift": STALLS,
-        "App/SortlyUITests/XCUIElement+Tap.swift": TAP,
-        "App/SortlyTests/UnitTests.swift": "final class UnitTests {}",
-        "Tests/SortlyCoreTests/CoreTests.swift": "@Test func x() {}",
+        "App/AlbumistUITests/FlowUITests.swift": FLOW,
+        "App/AlbumistUITests/DeviceUITests.swift": DEVICE,
+        "App/AlbumistUITests/SearchUITests.swift": SEARCH,
+        "App/AlbumistUITests/UITestOnboarding.swift": ONBOARDING,
+        "App/AlbumistUITests/UITestStalls.swift": STALLS,
+        "App/AlbumistUITests/XCUIElement+Tap.swift": TAP,
+        "App/AlbumistTests/UnitTests.swift": "final class UnitTests {}",
+        "Tests/AlbumistCoreTests/CoreTests.swift": "@Test func x() {}",
         "docs/TESTFLIGHT.md": "# TestFlight",
         "README.md": "# Albumist",
     }
@@ -253,12 +253,12 @@ class GroupTests(unittest.TestCase):
             ".github/scripts/ui_tests.py": ["device", "full", "other", "small"],
             ".github/workflows/ui-stress.yml": ["device", "full", "other", "small"],
             ".github/workflows/ui.yml": ["device", "full", "other", "small"],
-            "App/SortlyUITests/DeviceUITests.swift": ["device"],
-            "App/SortlyUITests/FlowUITests.swift": ["full", "other", "small"],
-            "App/SortlyUITests/SearchUITests.swift": ["other"],
-            "App/SortlyUITests/UITestOnboarding.swift": ["device", "full", "other", "small"],
-            "App/SortlyUITests/UITestStalls.swift": ["device"],
-            "App/SortlyUITests/XCUIElement+Tap.swift": ["other"],
+            "App/AlbumistUITests/DeviceUITests.swift": ["device"],
+            "App/AlbumistUITests/FlowUITests.swift": ["full", "other", "small"],
+            "App/AlbumistUITests/SearchUITests.swift": ["other"],
+            "App/AlbumistUITests/UITestOnboarding.swift": ["device", "full", "other", "small"],
+            "App/AlbumistUITests/UITestStalls.swift": ["device"],
+            "App/AlbumistUITests/XCUIElement+Tap.swift": ["other"],
         })
 
     def test_group_names_must_fit_a_job_name(self):
@@ -268,8 +268,8 @@ class GroupTests(unittest.TestCase):
                 ui_groups.Groups(repo(**{".github__ui-groups.json": json.dumps(groups)}))
 
     def test_quick_mode_changes_every_group(self):
-        device = DEVICE.replace("func test02_Cold() {", 'func test02_Cold() {\n        if env["SORTLY_UI_QUICK"] == "1" { return }')
-        groups = ui_groups.Groups(repo(**{"App__SortlyUITests__DeviceUITests.swift": device}))
+        device = DEVICE.replace("func test02_Cold() {", 'func test02_Cold() {\n        if env["ALBUMIST_UI_QUICK"] == "1" { return }')
+        groups = ui_groups.Groups(repo(**{"App__AlbumistUITests__DeviceUITests.swift": device}))
         self.assertTrue(groups.reads_quick("device"))
         self.assertFalse(groups.reads_quick("full"))
         # Fails safe: in a quick run every group has another fingerprint, also one whose files
@@ -324,17 +324,17 @@ class FingerprintTests(unittest.TestCase):
                 sorted(g for g in before["groups"] if before["groups"][g] != after["groups"].get(g)))
 
     def test_app_changes_are_app_changes(self):
-        for path in ("App/Sortly/App/AlbumistApp.swift", "App/Sortly/Resources/Info.plist", "App/project.yml",
-                     "App/StoreKit/Albumist.storekit", "Sources/SortlyCore/Core.swift", "Package.swift",
-                     "Package.resolved", ".github/toolchain.json", "Sources/SortlyWorldMap/Resources/world.sortlymap",
-                     "NewFolder/unknown.txt", ".gitattributes", "App/Sortly/Resources/Licenses.md"):
+        for path in ("App/Albumist/App/AlbumistApp.swift", "App/Albumist/Resources/Info.plist", "App/project.yml",
+                     "App/StoreKit/Albumist.storekit", "Sources/AlbumistCore/Core.swift", "Package.swift",
+                     "Package.resolved", ".github/toolchain.json", "Sources/AlbumistWorldMap/Resources/world.albumistmap",
+                     "NewFolder/unknown.txt", ".gitattributes", "App/Albumist/Resources/Licenses.md"):
             with self.subTest(path=path):
                 self.assertTrue(self.changed(**{path.replace("/", "__"): "changed"})[0])
-        self.assertTrue(self.changed(**{"Sources__SortlyCore__Core.swift": None})[0], "a deleted app file")
+        self.assertTrue(self.changed(**{"Sources__AlbumistCore__Core.swift": None})[0], "a deleted app file")
 
     def test_test_docs_and_workflow_changes_leave_the_app_alone(self):
-        for path in ("App/SortlyUITests/FlowUITests.swift", "App/SortlyTests/UnitTests.swift",
-                     "Tests/SortlyCoreTests/CoreTests.swift", "docs/TESTFLIGHT.md", "README.md", "docs/launch/x.md",
+        for path in ("App/AlbumistUITests/FlowUITests.swift", "App/AlbumistTests/UnitTests.swift",
+                     "Tests/AlbumistCoreTests/CoreTests.swift", "docs/TESTFLIGHT.md", "README.md", "docs/launch/x.md",
                      ".github/workflows/ui.yml", ".github/scripts/other.py", ".github/ui-groups.json",
                      "scripts/gen_codemap.py", "tools/x.sh", "design/icon/icon.svg"):
             with self.subTest(path=path):
@@ -344,45 +344,45 @@ class FingerprintTests(unittest.TestCase):
     def test_a_test_file_changes_only_its_groups(self):
         # A group left without tests is an error, not an empty fingerprint.
         with self.assertRaisesRegex(ValueError, "device .* select no UI test"):
-            ui_groups.Groups(repo(**{"App__SortlyUITests__DeviceUITests.swift": None}))
+            ui_groups.Groups(repo(**{"App__AlbumistUITests__DeviceUITests.swift": None}))
         changed = DEVICE.replace("test02_Cold", "test02_Colder")
-        self.assertEqual(self.changed(**{"App__SortlyUITests__DeviceUITests.swift": changed}), (False, ["device"]))
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__DeviceUITests.swift": changed}), (False, ["device"]))
         longer = FLOW.replace("func test2_Other() throws {}", "func test2_Other() throws { sleep(20) }")
-        self.assertEqual(self.changed(**{"App__SortlyUITests__FlowUITests.swift": longer}), (False, ["full", "other", "small"]))
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__FlowUITests.swift": longer}), (False, ["full", "other", "small"]))
         tapped = SEARCH.replace("app.tapIfThere()", "app.tapIfThere(); app.swipeUp()")
-        self.assertEqual(self.changed(**{"App__SortlyUITests__SearchUITests.swift": tapped}), (False, ["other"]))
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__SearchUITests.swift": tapped}), (False, ["other"]))
 
     def test_comments_and_indentation_leave_every_fingerprint(self):
         # Prüfer B G5-04: the rule is "red until the test or the app changes"; a comment is no change.
         flow = FLOW.replace("    func test2_Other", "    // waits 20 s\n  func test2_Other").replace("XCTestCase {\n", "XCTestCase { // open\n")
-        self.assertEqual(self.changed(**{"App__SortlyUITests__FlowUITests.swift": flow}), (False, []))
-        self.assertEqual(self.changed(**{"App__SortlyUITests__UITestOnboarding.swift": "/* the onboarding */\n" + ONBOARDING}),
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__FlowUITests.swift": flow}), (False, []))
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__UITestOnboarding.swift": "/* the onboarding */\n" + ONBOARDING}),
                          (False, []))
         # Text in a string literal is test code (what the test types or looks for).
         in_string = FLOW.replace("func testNotATest() {\n", "func testNotATest() { // open\n")
-        self.assertEqual(self.changed(**{"App__SortlyUITests__FlowUITests.swift": in_string}),
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__FlowUITests.swift": in_string}),
                          (False, ["full", "other", "small"]))
-        self.assertEqual(self.changed(**{"App__SortlyUITests__FlowUITests.swift": FLOW.replace("a { brace", "a {  brace")}),
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__FlowUITests.swift": FLOW.replace("a { brace", "a {  brace")}),
                          (False, ["full", "other", "small"]))
         # A file the reader cannot read for sure counts by its bytes, comments too.
         unsure = DEVICE.replace("func test01_Hot() {", "func test01_Hot() { let half = 1/2")
-        base = ui_groups.fingerprints(repo(**{"App__SortlyUITests__DeviceUITests.swift": unsure}))
-        after = ui_groups.fingerprints(repo(**{"App__SortlyUITests__DeviceUITests.swift": unsure + "// note\n"}))
+        base = ui_groups.fingerprints(repo(**{"App__AlbumistUITests__DeviceUITests.swift": unsure}))
+        after = ui_groups.fingerprints(repo(**{"App__AlbumistUITests__DeviceUITests.swift": unsure + "// note\n"}))
         self.assertNotEqual(base["groups"]["device"], after["groups"]["device"])
 
     def test_a_shared_helper_changes_every_group_that_uses_it(self):
-        self.assertEqual(self.changed(**{"App__SortlyUITests__UITestOnboarding.swift": ONBOARDING.replace(
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__UITestOnboarding.swift": ONBOARDING.replace(
             "XCUIApplication) {}", "XCUIApplication) { app.launch() }")}), (False, ["device", "full", "other", "small"]))
-        self.assertEqual(self.changed(**{"App__SortlyUITests__UITestStalls.swift": STALLS_SLOWER}), (False, ["device"]))
-        self.assertEqual(self.changed(**{"App__SortlyUITests__XCUIElement+Tap.swift": TAP.replace(
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__UITestStalls.swift": STALLS_SLOWER}), (False, ["device"]))
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__XCUIElement+Tap.swift": TAP.replace(
             "func tapIfThere() {}", "func tapIfThere() { tap() }")}), (False, ["other"]))
 
     def test_harness_resources_and_observers_count_for_every_group(self):
         everyone = (False, ["device", "full", "other", "small"])
         self.assertEqual(self.changed(**{".github__scripts__ui_tests.py": "# changed"}), everyone)
-        self.assertEqual(self.changed(**{"App__SortlyUITests__Info.plist": "<plist/>"}), everyone)
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__Info.plist": "<plist/>"}), everyone)
         observer = "final class Observer: NSObject, XCTestObservation {}\n"
-        self.assertEqual(self.changed(**{"App__SortlyUITests__Observer.swift": observer}), everyone)
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__Observer.swift": observer}), everyone)
         self.assertEqual(self.changed(**{".github__workflows__ui.yml": "name: UI flow changed\n"
                                          "  run: python3 .github/scripts/ui_tests.py run"}), everyone)
         self.assertEqual(self.changed(**{".github__workflows__ui-stress.yml": "name: UI stress\n"
@@ -392,7 +392,7 @@ class FingerprintTests(unittest.TestCase):
         self.assertEqual(self.changed(**{".github__scripts__toolchain.py": "# changed"}), everyone)
         self.assertEqual(self.changed(**{".github__scripts__tests__test_x.py": "# new"}), (False, []))
         # Fails closed: a file no group's tests reach (here a helper nobody uses yet) counts for all.
-        self.assertEqual(self.changed(**{"App__SortlyUITests__Unused.swift": "enum Unused {}\n"}), everyone)
+        self.assertEqual(self.changed(**{"App__AlbumistUITests__Unused.swift": "enum Unused {}\n"}), everyone)
 
     def test_a_script_or_workflow_no_ui_job_runs_leaves_every_green(self):
         # Review P5-08 (c): every script and workflow counted for every group, so a fix to the
@@ -531,7 +531,7 @@ class FingerprintTests(unittest.TestCase):
                 self.assertEqual(changed_groups(script, other), everyone)
                 self.assertEqual(changed_groups(script, gate), [])
         for name, script in {
-            "glob of the Swift tests": here + "glob.glob(f'{ROOT}/App/SortlyUITests/**/*.swift', recursive=True)\n",
+            "glob of the Swift tests": here + "glob.glob(f'{ROOT}/App/AlbumistUITests/**/*.swift', recursive=True)\n",
             "glob of a folder handed in": "import glob, os\ndef f(folder):\n    return glob.glob(os.path.join(folder, '**', 'x'))\n",
             "glob of /Applications": "import glob\nglob.glob('/Applications/Xcode*.app')\n",
             "re.compile": "import re\nPATTERN = re.compile(r'x')\n",
@@ -635,18 +635,18 @@ class FingerprintTests(unittest.TestCase):
         self.assertEqual(self.changed(**{".github__ui-groups.json": json.dumps(groups)}), (False, ["small"]))
 
     def test_affected_says_why(self):
-        run, why = ui_groups.affected(self.BASE, repo(**{"App__SortlyUITests__UITestStalls.swift": STALLS_SLOWER}),
-                                      ["App/SortlyUITests/UITestStalls.swift"])
-        self.assertEqual((run, why), (["device"], {"device": ["App/SortlyUITests/UITestStalls.swift"]}))
+        run, why = ui_groups.affected(self.BASE, repo(**{"App__AlbumistUITests__UITestStalls.swift": STALLS_SLOWER}),
+                                      ["App/AlbumistUITests/UITestStalls.swift"])
+        self.assertEqual((run, why), (["device"], {"device": ["App/AlbumistUITests/UITestStalls.swift"]}))
         # Only comments and indentation changed: nothing to run again.
-        run, why = ui_groups.affected(self.BASE, repo(**{"App__SortlyUITests__UITestStalls.swift":
+        run, why = ui_groups.affected(self.BASE, repo(**{"App__AlbumistUITests__UITestStalls.swift":
                                                           "// Stalls\n" + STALLS.replace("    static", "  static")}),
-                                      ["App/SortlyUITests/UITestStalls.swift"])
+                                      ["App/AlbumistUITests/UITestStalls.swift"])
         self.assertEqual((run, why), ([], {}))
-        run, why = ui_groups.affected(self.BASE, repo(**{"Sources__SortlyCore__Core.swift": "changed"}),
-                                      ["Sources/SortlyCore/Core.swift", "docs/TESTFLIGHT.md"])
+        run, why = ui_groups.affected(self.BASE, repo(**{"Sources__AlbumistCore__Core.swift": "changed"}),
+                                      ["Sources/AlbumistCore/Core.swift", "docs/TESTFLIGHT.md"])
         self.assertEqual(run, ["device", "full", "other", "small"])
-        self.assertEqual(why["full"], ["app changed: Sources/SortlyCore/Core.swift"])
+        self.assertEqual(why["full"], ["app changed: Sources/AlbumistCore/Core.swift"])
         self.assertEqual(ui_groups.affected(self.BASE, repo(**{"docs__TESTFLIGHT.md": "x"}), ["docs/TESTFLIGHT.md"]),
                          ([], {}))
 
@@ -682,7 +682,7 @@ class RepositoryTests(unittest.TestCase):
                                 f"{path}: ui_groups.swift_code cannot read it for sure (a \"/\" without spaces?)")
 
     def test_the_shared_onboarding_belongs_to_every_group_that_onboards(self):
-        users = self.groups.file_map().get("App/SortlyUITests/UITestOnboarding.swift", [])
+        users = self.groups.file_map().get("App/AlbumistUITests/UITestOnboarding.swift", [])
         test_files = [p for p, f in self.groups.files.items() if "UITestOnboarding" in f.words and p.endswith("UITests.swift")]
         expected = sorted({n for n in self.groups.names() for p in test_files if p in self.groups.own_files(n)})
         self.assertEqual(sorted(users), expected)

@@ -50,6 +50,14 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Geändert
+<!-- rename:keep-begin: the rename names the old spelling -->
+- 20.11.: Arbeitsname Sortly → Albumist auch im Code: Paket und Module (`AlbumistKit`, `AlbumistCore` …), Ordner
+  `App/Albumist*`, Xcode-Ziele und Schemata, Typ- und Testnamen, Start-Schalter der UI-Tests, Skripte und
+  Dokumente (`tools/rename_albumist.py --apply`). Sichtbarer Name und Bundle-IDs waren schon richtig. Die Datenbank
+  zieht beim ersten Start einmal von `sortly.sqlite` nach `albumist.sqlite` um (mit `-wal`/`-shm`, Rückweg bei
+  einem Fehler); die gespeicherten Schlüssel der Albumist-Alben (`addedBySortly`, `createdBySortly`) bleiben.
+  Der Name des Repositorys und die Adresse der Webseite folgen nach der Umbenennung auf GitHub.
+<!-- rename:keep-end -->
 - 20.11.: Große Mediatheken: Weniger Rechnungen über alle Fotos auf dem Haupt-Strang, wenn ein Bildschirm sie
   braucht (Fable P4-09). Die Fotodaten nach Kennung (Foto-Ansicht, Treffer der Suche) entstehen beim Auffrischen der
   Übersicht abseits des Haupt-Strangs und kommen mit den Fotodaten; sie sind keine zweite Kopie aller Fotodaten

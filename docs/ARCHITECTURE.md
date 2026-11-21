@@ -4,12 +4,12 @@
 ```
 App (SwiftUI, @Observable AppModel)
  ├─ Platform: PhotoKitLibrary · VisionAnalyzer · SystemGeocoder · DeviceConditions · BackgroundWork · Purchases
- └─ SortlyEngine: AnalysisPipeline (actor) · FactsAssembler · LibraryStatus
-       ├─ SortlyCore  (reine Logik, keine Apple-Frameworks außer Foundation)
-       ├─ SortlyStore (SQLite)
-       └─ SortlyWorldMap (Ressource world.sortlymap)
+ └─ AlbumistEngine: AnalysisPipeline (actor) · FactsAssembler · LibraryStatus
+       ├─ AlbumistCore  (reine Logik, keine Apple-Frameworks außer Foundation)
+       ├─ AlbumistStore (SQLite)
+       └─ AlbumistWorldMap (Ressource world.albumistmap)
 ```
-Die gesamte Fachlogik liegt in `SortlyCore` und ist auf Linux testbar. Plattformzugriffe
+Die gesamte Fachlogik liegt in `AlbumistCore` und ist auf Linux testbar. Plattformzugriffe
 stehen hinter Protokollen (`PhotoLibraryReading`, `PhotoLibraryWriting`, `ContentAnalyzing`,
 `ReverseGeocoding`, `AnalysisConditions`), die in Tests durch Fakes ersetzt werden.
 
@@ -64,7 +64,7 @@ Hintergrund. Beim Start einer leeren Datenbank kommen die Entscheidungen sofort 
 Verlauf erst, wenn die Mediathek passt (mindestens die Hälfte der verwalteten Alben existiert).
 
 ## Nebenläufigkeit
-Swift 6 mit strikter Prüfung. `AnalysisPipeline`, `PlaceResolutionService` und `SortlyStore`
+Swift 6 mit strikter Prüfung. `AnalysisPipeline`, `PlaceResolutionService` und `AlbumistStore`
 sind Actors; die UI-Schicht ist `@MainActor`.
 
 <!-- rename:keep-begin: tools/rename_albumist.py leaves this section as it is -->

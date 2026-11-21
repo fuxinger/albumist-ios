@@ -5,13 +5,13 @@ Source: Natural Earth 1:10m Admin-0 countries and Admin-1 states/provinces,
 public domain (https://www.naturalearthdata.com/about/terms-of-use/).
 
 Usage:
-    python3 -I build_world_map.py <admin0.geojson> <admin1.geojson> <out.sortlymap>
+    python3 -I build_world_map.py <admin0.geojson> <admin1.geojson> <out.albumistmap>
 
 Download the inputs from
     https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson
     https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_1_states_provinces.geojson
 
-Binary format "SWM1" (little endian), read by SortlyCore/Places/OfflineWorldMap.swift:
+Binary format "SWM1" (little endian), read by AlbumistCore/Places/OfflineWorldMap.swift:
     magic "SWM1", u16 version, u16 reserved, i32 scale (coordinates are degrees * scale)
     u32 stringCount, then per string: u16 byteLength + UTF-8 bytes
     u32 regionCount, then per region (40 bytes):

@@ -15,6 +15,10 @@ import Foundation
 /// Only what still makes sense: nothing while the card's album is made or its preview prepared,
 /// once it is made ("✓ Angelegt"; "Widerrufen" is on its banner), or while the list selects
 /// (a press ticks then). While another card works, the word waits as the card's button does.
+///
+/// A menu can stay open while the analysis goes on, so an item acts on the suggestion as the
+/// analysis has it at the tap (`current`), never on the copy the card was drawn with; one that
+/// went meanwhile is acted on no more (review C of design wave 2, H1).
 public struct SuggestionMenu: Equatable, Sendable {
     public enum Item: Equatable, Sendable {
         /// The card's one action, exactly as its button shows and does it.
@@ -93,7 +97,7 @@ public struct SuggestionMenu: Equatable, Sendable {
     public let sections: [[Entry]]
 
     public init(_ card: Card) {
-        guard !card.made, !card.working, !card.selecting else {
+        guard Self.isOffered(made: card.made, working: card.working, selecting: card.selecting) else {
             sections = []
             return
         }
@@ -118,5 +122,50 @@ public struct SuggestionMenu: Equatable, Sendable {
     /// Whether `item` is ready; nil when the menu does not offer it.
     public func isEnabled(_ item: Item) -> Bool? {
         entries.first { $0.item == item }?.isEnabled
+    }
+
+    /// Whether the card has a menu at all, known from the card's state on its page alone: none
+    /// once it is made, while it works or while the list selects. The app switches the long
+    /// press off with it (an empty menu closure: no lift, no menu, no actions; review C of
+    /// design wave 2, M4), before anything else is read.
+    public static func isOffered(made: Bool, working: Bool, selecting: Bool) -> Bool {
+        !made && !working && !selecting
+    }
+
+    /// The items as actions of the card's body for VoiceOver, Voice Control and Switch Control:
+    /// all that can be done now but the card's word, which is the card's own button there (as
+    /// a photo leaves out "Ansehen"); an item that waits is left out, it could not be done
+    /// (review C of design wave 2, L1, L3).
+    public var accessibilityItems: [Item] {
+        entries.filter { entry in
+            guard entry.isEnabled else { return false }
+            if case .action = entry.item { return false }
+            return true
+        }
+        .map(\.item)
+    }
+
+    /// The menu of a card, reading the suggestion's facts only where the menu shows what they
+    /// decide (review C of design wave 2, M5): nothing for a card without a menu, and whether
+    /// "Keine Reise" can be answered now (the state of the analysis and of the plans) only
+    /// where the suggestion offers it. The same menu as `init(_:)` with these values.
+    public init(action: ProposalCardAction, made: Bool, working: Bool, waits: Bool, selecting: Bool,
+                setAside: () -> Bool, canReshape: () -> Bool, offersNotATrip: () -> Bool,
+                canAnswerNotATrip: () -> Bool) {
+        guard Self.isOffered(made: made, working: working, selecting: selecting) else {
+            self.init(Card(action: action, made: made, working: working, waits: waits, selecting: selecting))
+            return
+        }
+        let offers = offersNotATrip()
+        self.init(Card(action: action, waits: waits, setAside: setAside(), canReshape: canReshape(),
+                       offersNotATrip: offers, canAnswerNotATrip: offers ? canAnswerNotATrip() : true))
+    }
+
+    /// The suggestion `drawn` as the analysis has it now: the one with its id, with its photos
+    /// and its name now (as the purchase sheet's "Anlegen" finds it, `continueQuickCreate`);
+    /// nil once it went (made anew, split, merged, made). The same photos under another id are
+    /// another suggestion.
+    public static func current(_ drawn: AlbumProposal, in proposals: [AlbumProposal]) -> AlbumProposal? {
+        proposals.first { $0.id == drawn.id }
     }
 }

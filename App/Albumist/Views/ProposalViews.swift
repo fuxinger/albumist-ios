@@ -205,8 +205,14 @@ struct ProposalListView: View {
     /// "Ergänzen …" opens the preview (an album of the user's is changed only after a look,
     /// Punkt 5), "Benennen …" and "Ansehen …" open the suggestion.
     private func act(_ action: ProposalCardAction, on proposal: AlbumProposal) {
+        // The suggestion as the analysis has it now: the card's menu stays open while it may
+        // change, or go, which is said then (review C of design wave 2, H1).
+        guard let proposal = model.currentSuggestion(proposal) else { return }
         switch action {
         case .create:
+            // One album at a time, as the button waits: the menu's word and VoiceOver reach this
+            // too, and the card would say "✓ Angelegt" before it is taken back (L1).
+            guard model.quickCreating == nil else { return }
             // Where no banner shows (a sheet's own stack), the suggestion opens instead, as for
             // a card that needs a look; its "Album anlegen" goes through the preview there.
             guard quickCreateAtOnce else {
@@ -289,7 +295,9 @@ private struct ProposalListCard: View {
             .disabled(selecting && !selectable)
     }
 
-    /// The photo card, ticked while the list selects and the card is chosen.
+    /// The photo card, ticked while the list selects and the card is chosen. Its long press lifts
+    /// the card itself: the photo it shows, what it hides hidden, in its shape (review C of
+    /// design wave 2, M2).
     private var photoCard: some View {
         PhotoCard(coverIDs: covers, title: Text(verbatim: card.title),
                   subtitle: card.styledSubtitle, hidesPreview: card.hidesPreview,
@@ -297,10 +305,10 @@ private struct ProposalListCard: View {
             cardAction
         } menu: {
             menuItems
-        } preview: {
-            menuPreview
         }
         .selected(selecting && isSelected)
+        .menuOffered(SuggestionMenu.isOffered(made: made, working: model.quickCreating == proposal.id, selecting: selecting))
+        .menuAccessibilityActions(voiceOverItems)
     }
 
     /// The cover's candidates; none while its photos are hidden (every one a sensitive document).
@@ -318,10 +326,12 @@ private struct ProposalListCard: View {
                             selecting: selecting, act: { act(card.action) })
     }
 
-    /// What the long press lifts: the suggestion large, as an album's long press shows the album.
-    private var menuPreview: SuggestionPreview {
-        SuggestionPreview(covers: covers, hidesPreview: card.hidesPreview, title: card.title, line: card.styledSubtitle,
-                          placeholderSymbol: proposal.placeholderSymbol)
+    /// The same items as actions of the card's body, but the word (review C of design wave 2, L3).
+    private var voiceOverItems: SuggestionMenuItems {
+        SuggestionMenuItems(model: model, openFlow: openFlow, proposal: proposal, card: card, made: made,
+                            working: model.quickCreating == proposal.id,
+                            waits: model.quickCreating != nil && model.quickCreating != proposal.id,
+                            selecting: selecting, forVoiceOver: true, act: { act(card.action) })
     }
 
     /// The card's body opens the suggestion, or ticks it while the list selects (`onOpen`: its
@@ -477,6 +487,8 @@ struct ProposalDetailView: View {
     @State private var selecting = false
     @State private var selected: Set<AssetID> = []
     @State private var confirmRemove = false
+    /// The photo whose long press chose "Aus Vorschlag entfernen", being asked about.
+    @State private var removingPhoto: AssetID?
     /// "Fotos anzeigen": the photos of a suggestion of sensitive documents only, shown on purpose.
     @State private var revealed = false
     /// The cover shows a sharp photo, not the calm placeholder: the status bar and the bar's
@@ -604,8 +616,8 @@ struct ProposalDetailView: View {
                 ProposalPhotosView(days: days, selecting: selecting, selected: $selected, hidden: photosHidden,
                                    disabled: busy) {
                     revealed = true
-                } remove: { id in
-                    Task { await model.removeFromProposal([id], proposal: proposal) }
+                } askToRemove: { id in
+                    removingPhoto = id
                 }
                 .padding(.top, Theme.Spacing.xl)
             }
@@ -687,6 +699,10 @@ struct ProposalDetailView: View {
             }
         } message: {
             Text("Sie kommen nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleiben sie.")
+        }
+        // One photo from its long press, asked the same way here, not from the middle of its days.
+        .photoRemovalQuestion($removingPhoto) { id in
+            Task { await model.removeFromProposal([id], proposal: proposal) }
         }
         // Asked for by "Keine Reise, hier bin ich öfter" in the menu; on the screen, because the
         // menu is gone once its item is tapped.
@@ -1677,15 +1693,15 @@ struct ProposalPhotosView: View {
     /// under them).
     var disabled: Bool
     var reveal: () -> Void
-    /// Takes one photo out of the suggestion, once its long press's "Aus Vorschlag entfernen"
-    /// was confirmed (`AppModel.removeFromProposal`, as "Auswählen" takes several out).
-    var remove: (AssetID) -> Void
+    /// A photo's long press chose "Aus Vorschlag entfernen": the suggestion asks first, on its
+    /// scroll view (`photoRemovalQuestion`), and takes it out as "Auswählen" takes several out.
+    var askToRemove: (AssetID) -> Void
     @State private var viewing: PhotoViewer.Start?
-    /// The photo whose "Aus Vorschlag entfernen" is being asked about.
-    @State private var removing: AssetID?
     @Namespace private var zoom
     /// Three in a row from the narrowest iPhone (375 pt) to the widest (440 pt); more on an iPad.
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 2)]
+    /// The side a photo's thumbnail is asked for, and its long press lifts that image.
+    private static let photoSide: CGFloat = 140
 
     var body: some View {
         Group {
@@ -1716,17 +1732,6 @@ struct ProposalPhotosView: View {
             PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
                 .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
-        // One photo from its long press: asked first, as "Auswählen" asks for several.
-        .confirmationDialog("Foto aus diesem Vorschlag entfernen?", isPresented: asking, titleVisibility: .visible,
-                            presenting: removing) { id in
-            Button("Entfernen", role: .destructive) { remove(id) }
-        } message: { _ in
-            Text("Es kommt nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleibt es.")
-        }
-    }
-
-    private var asking: Binding<Bool> {
-        Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })
     }
 
     /// The photo large, the suggestion's others to swipe through (a snapshot: a photo ignored
@@ -1740,7 +1745,7 @@ struct ProposalPhotosView: View {
     private func perform(_ item: PhotoMenu.Item, on id: AssetID) {
         switch item {
         case .view: open(id)
-        case .removeFromSuggestion: removing = id
+        case .removeFromSuggestion: askToRemove(id)
         // Not offered for a suggestion's photos (`PhotoMenu`): they stay behind "Ansehen" › "Info".
         case .addToAlbum, .ignore, .stopIgnoring: break
         }
@@ -1775,7 +1780,7 @@ struct ProposalPhotosView: View {
             }
             if isSelected { selected.remove(id) } else { selected.insert(id) }
         } label: {
-            AssetThumbnail(id: id, side: 140)
+            AssetThumbnail(id: id, side: Self.photoSide)
                 .aspectRatio(1, contentMode: .fill)
                 .clipped()
                 .matchedTransitionSource(id: id, in: zoom)
@@ -1798,7 +1803,7 @@ struct ProposalPhotosView: View {
         .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
         .accessibilityIdentifier("proposalPhotos.photo")
         // The long press (DS-06a): the photo larger, "Ansehen" and "Aus Vorschlag entfernen".
-        .photoMenu(id, place: .suggestion, selecting: selecting, available: !disabled) { item in
+        .photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled) { item in
             perform(item, on: id)
         }
     }

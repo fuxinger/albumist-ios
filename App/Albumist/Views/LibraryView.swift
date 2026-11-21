@@ -22,6 +22,8 @@ struct LibraryView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private static let page = 3_000
+    /// The side a photo's thumbnail is asked for, and its long press lifts that image.
+    private static let photoSide: CGFloat = 110
 
     var body: some View {
         let _ = MainThreadWatch.shared.count("library body")
@@ -157,13 +159,13 @@ struct LibraryView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(Text(item.date?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
         .accessibilityAddTraits(selecting && selection.contains(id) ? .isSelected : [])
-        .photoMenu(id, place: .unsorted, selecting: selecting) { action in
+        .photoMenu(id, place: .unsorted, side: Self.photoSide, selecting: selecting) { action in
             perform(action, on: id, in: members)
         }
     }
 
     private func thumbnail(_ id: AssetID) -> some View {
-        AssetThumbnail(id: id, side: 110)
+        AssetThumbnail(id: id, side: Self.photoSide)
             .aspectRatio(1, contentMode: .fill)
             .matchedTransitionSource(id: id, in: zoom)
             .overlay(alignment: .bottomTrailing) {

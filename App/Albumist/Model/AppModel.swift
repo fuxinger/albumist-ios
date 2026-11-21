@@ -272,7 +272,7 @@ final class AppModel {
     /// The photos the user ignored, and the state of each once it is no longer ignored, from
     /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
     /// "Nicht mehr ignorieren" are shown at once, before the recount.
-    @ObservationIgnored private var ignoredIDs: Set<AssetID> = []
+    private(set) var ignoredIDs: Set<AssetID> = [] // Design W2 H7: read by the long press (`isIgnored`), observed so its menu follows a tap
     @ObservationIgnored private var statesIfNotIgnored: [AssetID: AssetOrganizationState] = [:]
     @ObservationIgnored private var ignoreChanges = IgnoreChange()
     /// The store writes of ignore taps, one after the other in the order of the taps, and how

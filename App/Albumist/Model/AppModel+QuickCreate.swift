@@ -78,6 +78,10 @@ extension AppModel {
     /// it never does nothing without a word.
     @discardableResult
     func createNow(_ proposal: AlbumProposal) async -> QuickCreateOutcome {
+        // Design W2 H7: current suggestion. Made from the suggestion as the analysis has it now,
+        // found by its id, never from the copy a card or its long press's menu was drawn with;
+        // one that went meanwhile makes nothing and says so (review C of design wave 2, H1).
+        guard let proposal = currentSuggestion(proposal) else { return .notNow }
         let state = QuickCreateState.shared
         // One at a time: a second tap meanwhile is no second album.
         guard state.creating == nil else { return .notNow }

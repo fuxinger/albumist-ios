@@ -11,7 +11,10 @@ import AlbumistEngine
 /// Its own view with plain values from the page above, so the analysis' many changes do not
 /// redraw the cards: it reads the suggestions, the decisions and the purchases. What it keeps
 /// for one visit (`StartVisit`) begins afresh each time the page appears. The shelves run from
-/// edge to edge; everything else keeps the page's margin.
+/// edge to edge; everything else keeps the page's margin. What a card's long press opens
+/// ("Anpassen", the trip workshop, "Keine Reise?") is the page's scroll view's
+/// (`suggestionMenuFlows()` in `OverviewView`), not this tall stack's (review C of design wave
+/// 2, M1).
 struct StartSections: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
@@ -82,8 +85,6 @@ struct StartSections: View {
         .onChange(of: model.quickCreateBanner?.id) { _, _ in
             if let banner = model.quickCreateBanner { visit.announced(banner.proposalID, by: banner.plan.id) }
         }
-        // What a card's long press opens: "Anpassen", the trip workshop, "Keine Reise?" (DS-06a).
-        .suggestionMenuFlows()
     }
 
     /// A new visit (`StartVisit`), which remembers at once what it shows (whatever runs first,
@@ -229,6 +230,9 @@ struct StartSections: View {
     @Environment(\.quickCreateAtOnce) private var quickCreateAtOnce
 
     private func perform(_ action: ProposalCardAction, on proposal: AlbumProposal) {
+        // The suggestion as the analysis has it now: the card's menu stays open while it may
+        // change, or go, which is said then (review C of design wave 2, H1).
+        guard let proposal = model.currentSuggestion(proposal) else { return }
         switch action {
         case .create:
             // 7B: made at once, then the banner "„Name“ angelegt · Widerrufen" (`createNow`).
@@ -370,7 +374,10 @@ struct StartProposalCard: View {
             .accessibilityIdentifier(identifier)
     }
 
-    /// The card with its one button, and the long press's menu and lifted card.
+    /// The card with its one button and the long press's menu, which lifts the card itself: the
+    /// photo it shows, what it hides hidden, in its shape (review C of design wave 2, M2). No
+    /// menu once it is made or while it works; for VoiceOver its items but the card's word, its
+    /// own button.
     private var photoCard: some View {
         PhotoCard(coverIDs: covers, title: Text(verbatim: text.title), subtitle: text.styledSubtitle,
                   hidesPreview: text.hidesPreview, aspectRatio: aspectRatio, style: style,
@@ -378,9 +385,9 @@ struct StartProposalCard: View {
             button
         } menu: {
             menuItems
-        } preview: {
-            menuPreview
         }
+        .menuOffered(SuggestionMenu.isOffered(made: made, working: working, selecting: false))
+        .menuAccessibilityActions(voiceOverItems)
     }
 
     /// Wide on a large card, 3:2 in a row.
@@ -401,11 +408,10 @@ struct StartProposalCard: View {
                             working: working, waits: waits, act: onAction)
     }
 
-    /// What the long press lifts: the suggestion large, as an album's long press shows the album,
-    /// "Vorschau ausgeblendet" where the card hides its photos (the page hands it no covers then).
-    private var menuPreview: SuggestionPreview {
-        SuggestionPreview(covers: covers, hidesPreview: text.hidesPreview, title: text.title, line: text.styledSubtitle,
-                          placeholderSymbol: proposal.kind.area.symbol)
+    /// The same items as actions of the card's body, but the word (review C of design wave 2, L3).
+    private var voiceOverItems: SuggestionMenuItems {
+        SuggestionMenuItems(model: model, openFlow: openFlow, proposal: proposal, card: text, made: made,
+                            working: working, waits: waits, forVoiceOver: true, act: onAction)
     }
 
     @ViewBuilder

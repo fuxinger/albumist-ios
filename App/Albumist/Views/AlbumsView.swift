@@ -359,6 +359,8 @@ struct AlbumScreen: View {
     /// "Zu Album hinzufügen …" from a photo's long press.
     @State private var addingToAlbum: [AssetID]?
     @Namespace private var zoom
+    /// The side a photo's thumbnail is asked for, and its long press lifts that image.
+    private static let photoSide: CGFloat = 110
 
     var body: some View {
         Group {
@@ -438,7 +440,7 @@ struct AlbumScreen: View {
         Button {
             open(photo, ids: ids)
         } label: {
-            AssetThumbnail(id: photo, side: 110)
+            AssetThumbnail(id: photo, side: Self.photoSide)
                 .aspectRatio(1, contentMode: .fill)
                 .matchedTransitionSource(id: photo, in: zoom)
                 .contentShape(Rectangle())
@@ -446,7 +448,7 @@ struct AlbumScreen: View {
         .buttonStyle(.plain)
         .accessibilityLabel(Text(model.creationDates[photo]?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
         .accessibilityIdentifier("album.photo")
-        .photoMenu(photo, place: .album) { action in
+        .photoMenu(photo, place: .album, side: Self.photoSide) { action in
             perform(action, on: photo, ids: ids)
         }
     }

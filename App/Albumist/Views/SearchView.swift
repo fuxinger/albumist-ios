@@ -24,6 +24,8 @@ struct SearchView: View {
     /// Thumbnails shown so far; the count and "Als Album anlegen" always cover every hit.
     @State private var shown = Self.page
     private static let page = 2_000
+    /// The side a photo's thumbnail is asked for, and its long press lifts that image.
+    private static let photoSide: CGFloat = 110
     /// The field is shown and focused when the tab opens; testers did not find a hidden one.
     @State private var searchActive = false
     @Namespace private var zoom
@@ -260,7 +262,7 @@ struct SearchView: View {
         return Button {
             open(id, from: key)
         } label: {
-            AssetThumbnail(id: id, side: 110)
+            AssetThumbnail(id: id, side: Self.photoSide)
                 .aspectRatio(1, contentMode: .fill)
                 .matchedTransitionSource(id: key, in: zoom)
                 .contentShape(Rectangle())
@@ -270,7 +272,7 @@ struct SearchView: View {
         .accessibilityLabel(Text(hit?.asset.creationDate?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
         .accessibilityIdentifier("search.result")
         // The long press (DS-06a): the photo larger, with what a hit offers.
-        .photoMenu(id, place: .search, available: hit != nil) { action in
+        .photoMenu(id, place: .search, side: Self.photoSide, available: hit != nil) { action in
             perform(action, on: id, from: key)
         }
     }

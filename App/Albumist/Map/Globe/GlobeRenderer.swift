@@ -6,6 +6,13 @@ import UIKit
 import AlbumistCore
 import AlbumistMap
 
+// Plan A of the map prototype (wave 0): our own Metal globe, shown beside Apple's globe (Plan B)
+// so that the owner picks one on the iPhone. If Plan A wins, this renderer is split into its
+// loading, its frame encoding and its gestures before release (docs/IMPROVEMENTS.md); if Plan B
+// wins, the file goes. Until that choice its length is accepted (here, at the class and at
+// `encode`):
+// swiftlint:disable file_length
+
 /// Draws our own globe with Metal and turns it with the fingers: the coordinator of
 /// `OwnGlobeView`'s MTKView, its delegate and its gestures' target (concept §7, §9).
 ///
@@ -27,7 +34,7 @@ import AlbumistMap
 /// Earth (from the view's creation), the way back from Apple's map, shader compile, texture load
 /// and mask build, and notes on the texture, the arcs and the drawable.
 @MainActor
-final class GlobeRenderer: NSObject {
+final class GlobeRenderer: NSObject { // swiftlint:disable:this type_body_length
     /// The background of space (sRGB), also shown before the first frame.
     static let spaceColor = Color(red: 0.035, green: 0.045, blue: 0.075)
     static let spaceUIColor = UIColor(red: 0.035, green: 0.045, blue: 0.075, alpha: 1)
@@ -431,7 +438,7 @@ final class GlobeRenderer: NSObject {
         if placed != overlay.pins { overlay.pins = placed }
     }
 
-    private func encode(in view: MTKView, optics: GlobeOptics) {
+    private func encode(in view: MTKView, optics: GlobeOptics) { // swiftlint:disable:this function_body_length
         guard let device, let queue, let pipelines, let earth, let sphere, let stars, let uniforms, let sampler,
               let tint = mask ?? emptyMask, let drawable = view.currentDrawable else { return }
         let texture = drawable.texture

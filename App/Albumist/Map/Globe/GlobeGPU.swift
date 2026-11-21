@@ -82,12 +82,21 @@ enum GlobeGPU {
         case screen
     }
 
+    /// What every pipeline of one load shares: the device, the compiled shaders and the
+    /// multisampling.
+    private struct PipelineSource {
+        let device: any MTLDevice
+        let library: any MTLLibrary
+        let sampleCount: Int
+    }
+
     static func makePipelines(device: any MTLDevice, library: any MTLLibrary, sampleCount: Int) -> Result<GlobePipelines, GlobeLoadError> {
+        let source = PipelineSource(device: device, library: library, sampleCount: sampleCount)
         do {
-            let stars = try pipeline(device, library, vertex: "starVertex", fragment: "starFragment", blend: .add, sampleCount: sampleCount)
-            let earth = try pipeline(device, library, vertex: "earthVertex", fragment: "earthFragment", blend: .opaque, sampleCount: sampleCount)
-            let halo = try pipeline(device, library, vertex: "haloVertex", fragment: "haloFragment", blend: .add, sampleCount: sampleCount)
-            let arcs = try pipeline(device, library, vertex: "arcVertex", fragment: "arcFragment", blend: .screen, sampleCount: sampleCount)
+            let stars = try pipeline(source, vertex: "starVertex", fragment: "starFragment", blend: .add)
+            let earth = try pipeline(source, vertex: "earthVertex", fragment: "earthFragment", blend: .opaque)
+            let halo = try pipeline(source, vertex: "haloVertex", fragment: "haloFragment", blend: .add)
+            let arcs = try pipeline(source, vertex: "arcVertex", fragment: "arcFragment", blend: .screen)
             guard let noDepth = depthState(device, compare: .always, write: false),
                   let solid = depthState(device, compare: .less, write: true),
                   let glowing = depthState(device, compare: .less, write: false) else {
@@ -101,17 +110,17 @@ enum GlobeGPU {
         }
     }
 
-    private static func pipeline(_ device: any MTLDevice, _ library: any MTLLibrary, vertex: String, fragment: String,
-                                 blend: Blend, sampleCount: Int) throws -> any MTLRenderPipelineState {
-        guard let vertexFunction = library.makeFunction(name: vertex),
-              let fragmentFunction = library.makeFunction(name: fragment) else {
+    private static func pipeline(_ source: PipelineSource, vertex: String, fragment: String,
+                                 blend: Blend) throws -> any MTLRenderPipelineState {
+        guard let vertexFunction = source.library.makeFunction(name: vertex),
+              let fragmentFunction = source.library.makeFunction(name: fragment) else {
             throw GlobeLoadError(message: "Shader \(vertex)/\(fragment) fehlt")
         }
         let descriptor = MTLRenderPipelineDescriptor()
         descriptor.label = vertex
         descriptor.vertexFunction = vertexFunction
         descriptor.fragmentFunction = fragmentFunction
-        descriptor.rasterSampleCount = sampleCount
+        descriptor.rasterSampleCount = source.sampleCount
         descriptor.depthAttachmentPixelFormat = depthFormat
         descriptor.colorAttachments[0].pixelFormat = colorFormat
         switch blend {
@@ -126,7 +135,7 @@ enum GlobeGPU {
             descriptor.colorAttachments[0].sourceAlphaBlendFactor = .zero
             descriptor.colorAttachments[0].destinationAlphaBlendFactor = .one
         }
-        return try device.makeRenderPipelineState(descriptor: descriptor)
+        return try source.device.makeRenderPipelineState(descriptor: descriptor)
     }
 
     private static func depthState(_ device: any MTLDevice, compare: MTLCompareFunction, write: Bool) -> (any MTLDepthStencilState)? {

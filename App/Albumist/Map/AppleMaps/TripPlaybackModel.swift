@@ -5,27 +5,13 @@ import UIKit
 import AlbumistCore
 import AlbumistMap
 
-/// How the playback moves Apple's camera (a switch of the prototype, to compare both on the iPhone).
-enum TripPlaybackCameraMode: String, CaseIterable, Sendable {
-    /// A new camera on every frame, without animation.
-    case everyFrame
-    /// Every half second MapKit's own animation (`setCamera(_:animated: true)`) to where the dot is
-    /// half a second later.
-    case steps
-
-    var label: String {
-        switch self {
-        case .everyFrame: "Bild für Bild"
-        case .steps: "Schritte"
-        }
-    }
-}
-
 /// Runs "Reise abspielen" (concept §4.4) over Apple's 3D satellite map: the plan (`PlaybackPlan`)
 /// and the player (`PlaybackPlayer`) are pure values tested on Linux; this class only feeds them
 /// the display link's clock and MapKit's rendering callbacks, moves the camera, draws the route
 /// and the dot, and tells SwiftUI what to show. Every frame reads the camera of the plan at the
-/// player's time, so a pause holds the picture from the next frame on.
+/// player's time, so a pause holds the picture from the next frame on. The camera goes through
+/// `TripPlaybackCameraDriver`, the clock is `TripPlaybackClock` (TripPlaybackSupport.swift), and
+/// what the screen shows is worked out in TripPlaybackModel+Screen.swift.
 ///
 /// Measured: `.tileWait` (a day on the map, how long it waited), `.tileTimeout` and `.tileFailure`
 /// (a day as a slideshow), `.pauseLatency` (from the tap to the first still frame), `.dayJump`
@@ -60,21 +46,18 @@ enum TripPlaybackCameraMode: String, CaseIterable, Sendable {
 
     private let metrics: PrototypeMetrics
     private let onFinished: () -> Void
+    private let cameraDriver: TripPlaybackCameraDriver
+    private let clock: TripPlaybackClock
 
     @ObservationIgnored private var player: PlaybackPlayer
     @ObservationIgnored private var watch = PlaybackTileWatch()
     @ObservationIgnored private weak var container: TripPlaybackMapContainer?
-    @ObservationIgnored private var link: CADisplayLink?
-    @ObservationIgnored private var sampler: DisplayLinkSampler?
     @ObservationIgnored private var visible = false
     @ObservationIgnored private var started = false
-    @ObservationIgnored private var appliedCamera: PlaybackCamera?
-    @ObservationIgnored private var appliedSize: CGSize = .zero
     @ObservationIgnored private var routeStops = -1
     @ObservationIgnored private var pauseTappedAt: Double?
     @ObservationIgnored private var jumpTappedAt: Double?
     @ObservationIgnored private var lastDeviceCheck = -Double.infinity
-    @ObservationIgnored private var lastStep = -Double.infinity
     @ObservationIgnored private var slideshowDays = 0
 
     init(trip: MapTrip, showsPhotos: Bool, metrics: PrototypeMetrics, onFinished: @escaping () -> Void) {
@@ -85,61 +68,8 @@ enum TripPlaybackCameraMode: String, CaseIterable, Sendable {
         self.metrics = metrics
         self.onFinished = onFinished
         self.player = PlaybackPlayer(plan: plan)
-    }
-
-    // MARK: What the screen shows
-
-    var isRunning: Bool { state == .playing || state == .waitingForTiles || state == .slideshowDay }
-
-    /// "Tag 3 von 9 · Skógafoss" (the dragged-to day while the bar is dragged).
-    var title: String {
-        if let previewDay {
-            return PlaybackText.dayTitle(index: previewDay, of: plan.days.count, place: placeName(playbackDay(previewDay)?.placeIndex))
-        }
-        return PlaybackText.dayTitle(index: dayIndex, of: plan.days.count, place: placeName(titlePlaceIndex))
-    }
-
-    /// "Mittwoch, 14. Juni 2023": the day as the clocks where the photos were taken saw it.
-    var dateText: String {
-        guard let shown = playbackDay(previewDay ?? dayIndex) else { return "" }
-        return PlaybackText.date(shown.day)
-    }
-
-    /// The photos beside the dot now.
-    var stack: [AssetID?] { stackIDs(for: stackPlaceIndex) }
-
-    /// "+46": the day's photos beyond those in the stack.
-    var moreText: String? {
-        guard let shown = playbackDay(dayIndex) else { return nil }
-        return PlaybackText.more(dayPhotos: shown.photoCount, shown: Self.stackSize)
-    }
-
-    /// Where each day after the first starts on the bar, 0 to 1.
-    var dayFractions: [Double] {
-        guard plan.duration > 0 else { return [] }
-        return plan.days.dropFirst().map { $0.start / plan.duration }
-    }
-
-    /// "9 Tage · 412 Fotos · ca. 1.000 km vor Ort" for the end card.
-    var summary: String { PlaybackText.summary(of: trip) }
-
-    /// A place's photos (at most three) when photos are shown and it has some, else three quiet
-    /// tiles (`nil`).
-    func stackIDs(for placeIndex: Int?) -> [AssetID?] {
-        if showsPhotos, let placeIndex, trip.geometry.places.indices.contains(placeIndex) {
-            let ids = trip.geometry.places[placeIndex].coverCandidates.prefix(Self.stackSize)
-            if !ids.isEmpty { return ids.map { Optional($0) } }
-        }
-        return Array(repeating: nil, count: Self.stackSize)
-    }
-
-    private func placeName(_ index: Int?) -> String? {
-        guard let index, trip.geometry.places.indices.contains(index) else { return nil }
-        return trip.geometry.places[index].name
-    }
-
-    private func playbackDay(_ index: Int) -> PlaybackDay? {
-        plan.days.indices.contains(index) ? plan.days[index] : nil
+        self.cameraDriver = TripPlaybackCameraDriver()
+        self.clock = TripPlaybackClock(metrics: metrics)
     }
 
     // MARK: Life cycle
@@ -149,7 +79,7 @@ enum TripPlaybackCameraMode: String, CaseIterable, Sendable {
     func attach(_ container: TripPlaybackMapContainer) {
         self.container = container
         container.onLayout = { [weak self] in self?.containerLaidOut() }
-        appliedCamera = nil
+        cameraDriver.forgetCamera()
         routeStops = -1
         setCamera(plan.frame(at: player.time).camera)
         startClock()
@@ -231,8 +161,7 @@ enum TripPlaybackCameraMode: String, CaseIterable, Sendable {
 
     func toggleCameraMode() {
         cameraMode = cameraMode == .everyFrame ? .steps : .everyFrame
-        lastStep = -.infinity
-        appliedCamera = nil
+        cameraDriver.restart()
         metrics.note(.playback, "Kamera", cameraMode.label)
     }
 
@@ -280,7 +209,7 @@ enum TripPlaybackCameraMode: String, CaseIterable, Sendable {
             tiles(verdict, now: now)
         }
         apply(player.tick(now: frameTime))
-        moveCamera(frameTime: frameTime)
+        cameraDriver.move(plan: plan, player: player, mode: cameraMode, frameTime: frameTime, on: container?.mapView)
         let frame = plan.frame(at: player.time)
         updateRoute(frame)
         container?.placeDot(at: frame.position)
@@ -343,39 +272,14 @@ enum TripPlaybackCameraMode: String, CaseIterable, Sendable {
         setCamera(plan.frame(at: plan.startTime(ofDay: day + 1)).camera)
     }
 
-    private func moveCamera(frameTime: Double) {
-        guard player.state == .playing else { return }
-        switch cameraMode {
-        case .everyFrame:
-            setCamera(plan.frame(at: player.time).camera)
-        case .steps:
-            guard frameTime - lastStep >= Self.stepSeconds else { return }
-            lastStep = frameTime
-            let ahead = min(player.time + Self.stepSeconds, player.dayEnd(player.day))
-            setCamera(plan.frame(at: ahead).camera, animated: true)
-        }
-    }
-
-    /// Sets Apple's camera, unless it already stands there (a camera set again would make MapKit
-    /// render again, and the wait for the map would never see it at rest).
-    private func setCamera(_ camera: PlaybackCamera, animated: Bool = false) {
-        guard let mapView = container?.mapView else { return }
-        let size = mapView.bounds.size
-        guard animated || camera != appliedCamera || size != appliedSize else { return }
-        appliedCamera = camera
-        appliedSize = size
-        mapView.setCamera(Self.mapCamera(camera), animated: animated)
-    }
-
-    static func mapCamera(_ camera: PlaybackCamera) -> MKMapCamera {
-        MKMapCamera(lookingAtCenter: AppleMapsBridge.coordinate(camera.center), fromDistance: camera.distanceMeters,
-                    pitch: CGFloat(camera.pitchDegrees), heading: camera.headingDegrees)
+    private func setCamera(_ camera: PlaybackCamera) {
+        cameraDriver.set(camera, on: container?.mapView)
     }
 
     /// The map view got its size (or a new one): MapKit needs the camera again for it.
     private func containerLaidOut() {
-        guard let mapView = container?.mapView, mapView.bounds.size != appliedSize else { return }
-        setCamera(appliedCamera ?? plan.frame(at: player.time).camera)
+        guard let mapView = container?.mapView, mapView.bounds.size != cameraDriver.appliedSize else { return }
+        setCamera(cameraDriver.applied ?? plan.frame(at: player.time).camera)
         if player.state == .waitingForTiles { watch.cameraSet(now: CACurrentMediaTime()) }
         routeStops = -1
     }
@@ -401,25 +305,6 @@ enum TripPlaybackCameraMode: String, CaseIterable, Sendable {
         }
     }
 
-    static func heat(_ state: ProcessInfo.ThermalState) -> PlaybackPlayer.Heat {
-        switch state {
-        case .nominal: return .nominal
-        case .fair: return .fair
-        case .serious: return .serious
-        case .critical: return .critical
-        @unknown default: return .nominal
-        }
-    }
-
-    static func heatName(_ heat: PlaybackPlayer.Heat) -> String {
-        switch heat {
-        case .nominal: "normal"
-        case .fair: "erhöht"
-        case .serious: "ernst"
-        case .critical: "kritisch"
-        }
-    }
-
     private func publish() {
         publish(plan.frame(at: player.time), now: CACurrentMediaTime())
     }
@@ -438,37 +323,11 @@ enum TripPlaybackCameraMode: String, CaseIterable, Sendable {
     }
 
     private func startClock() {
-        guard link == nil, visible, container != nil else { return }
-        let link = CADisplayLink(target: TripPlaybackLinkTarget(model: self), selector: #selector(TripPlaybackLinkTarget.tick(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-        link.add(to: .main, forMode: .common)
-        self.link = link
-        if sampler == nil { sampler = DisplayLinkSampler(source: .playback, metrics: metrics) }
-        sampler?.start()
+        guard visible, container != nil else { return }
+        clock.start(for: self)
     }
 
     private func stopClock() {
-        link?.invalidate()
-        link = nil
-        sampler?.stop()
-    }
-}
-
-/// The display link's target: a display link keeps its target alive, so this small object stands
-/// between it and the model (held weakly) and stops the link once the model is gone.
-@MainActor final class TripPlaybackLinkTarget: NSObject {
-    private weak var model: TripPlaybackModel?
-
-    init(model: TripPlaybackModel) {
-        self.model = model
-        super.init()
-    }
-
-    @objc func tick(_ link: CADisplayLink) {
-        guard let model else {
-            link.invalidate()
-            return
-        }
-        model.tick(link)
+        clock.stop()
     }
 }

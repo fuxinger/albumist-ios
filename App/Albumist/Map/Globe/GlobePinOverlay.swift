@@ -174,6 +174,9 @@ enum GlobePinLabel {
         return german.localizedString(forRegionCode: key) ?? key
     }
 
+    // One exhaustive switch that names each world region: a new region cannot be forgotten, and
+    // splitting it would only hide the list.
+    // swiftlint:disable:next cyclomatic_complexity
     static func regionName(_ region: WorldRegion) -> String {
         switch region {
         case .northernEurope: "Nordeuropa"

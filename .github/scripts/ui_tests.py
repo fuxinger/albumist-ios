@@ -1168,7 +1168,17 @@ def runner_env(base: dict | None = None) -> dict:
     """The environment of xcodebuild for a pass: the job's own plus HOST_HELPER=1."""
     env = dict(os.environ if base is None else base)
     env[HOST_HELPER] = "1"
+    if MTC_DYLIB:
+        env["TEST_RUNNER_ALBUMIST_MTC_DYLIB"] = MTC_DYLIB
+        if MTC_PROBE_ON:
+            env["TEST_RUNNER_ALBUMIST_MTC_PROBE"] = "1"
     return env
+
+
+# Set by run_group (mtc_dylib, the gate's probe): the Main Thread Checker for every app launch.
+MTC_DYLIB = ""
+MTC_PROBE_ON = False
+CONSOLES: list[str] = []
 
 
 def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str, str, float, bool]:
@@ -1231,6 +1241,8 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     stream.terminate()
     if recorder:
         recorder.stop()
+    # Before a repeat erases the simulator: the Main Thread Checker writes only to this file.
+    CONSOLES.append(collect_console(args.udid, args.out, args.name, label))
     print(f"UI_PASS_TIME {args.name} {label} {int(time.time() - started)} s (exit {status})", flush=True)
     with open(log_path, encoding="utf-8", errors="replace") as log:
         text = log.read()
@@ -1334,7 +1346,13 @@ def budget_check(name: str, seconds: float, budget_min: float) -> bool:
 
 
 def run_group(args) -> int:
+    global MTC_DYLIB, MTC_PROBE_ON
     os.makedirs(args.out, exist_ok=True)
+    gate = load_gate()
+    MTC_DYLIB = mtc_dylib()
+    MTC_PROBE_ON = bool(gate["main_thread_checker"].get("probe"))
+    print(f"UI_MTC_DYLIB {MTC_DYLIB or 'not found (the app runs without the Main Thread Checker)'}", flush=True)
+    CONSOLES.clear()
     chosen = selection(args.only, args.skip)
     if args.increase_contrast:
         prepare(args.udid, increase_contrast=True, basics=False)
@@ -1402,8 +1420,11 @@ def run_group(args) -> int:
     # (which ran every test that had not passed in the first one).
     failed = passes[-1][1] != 0
     infra_only = failed and passes[-1][2] in ("retry", "infra") and not stays_red
-    if swiftui_warnings(os.path.join(args.out, f"{args.name}-swiftui.txt")) != 0:
+    system_log_path = os.path.join(args.out, f"{args.name}-swiftui.txt")
+    if swiftui_warnings(system_log_path) != 0:
         failed, infra_only = True, False
+    if quality_gates(args.name, system_log_path, "\n".join(CONSOLES), gate) and not infra_only:
+        failed = True
     if args.video:
         video_to_log(args.video)
     if args.a11y_summary:
@@ -1426,6 +1447,218 @@ def run_group(args) -> int:
     return 1 if failed else 0
 
 
+# --- Hang watch and Main Thread Checker (owner's decision 16.11.2026) -----------------------------
+
+GATE_FILE = ".github/hang-gate.json"
+CONSOLE_FILE = "albumist-console.log"
+MAIN_HANG = re.compile(r"\bUI_MAIN_HANG (\d+) ms (\w+) in \[(.*?)\]: (.*?)\s*$")
+MTC_STATE = re.compile(r"\bUI_FACT main thread checker (active|not active)\b")
+MTC_START = re.compile(r"Main Thread Checker: (.+?)\s*$")
+MTC_FRAME = re.compile(r"^\s*\d+\s+(\S+)\s+0x[0-9a-fA-F]+\s+(.*?)\s*$")
+MTC_PROBE = "MainThreadCheckerProbe"
+OWN_IMAGES = ("Albumist", "Albumist.debug.dylib")
+
+
+def load_gate(path: str = "") -> dict:
+    """The gate settings (GATE_FILE in the checkout this script belongs to, whatever the working
+    directory); a missing or broken file means 'report' for both (never red by accident)."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", GATE_FILE)
+    default = {"hangs": {"mode": "report", "limit_ms": 250, "known": []},
+               "main_thread_checker": {"mode": "report", "probe": True, "known": []}}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as error:
+        print(f"::warning::{path} not readable ({error}): hang watch and Main Thread Checker only report", flush=True)
+        return default
+    for key, value in default.items():
+        data.setdefault(key, value)
+        for field, fallback in value.items():
+            data[key].setdefault(field, fallback)
+    return data
+
+
+def known_entry(known: list[dict], *texts: str) -> dict | None:
+    """The 'known' entry whose place is part of one of the texts."""
+    for entry in known:
+        places = [entry.get(k) for k in ("stack", "api") if entry.get(k)]
+        if places and any(place in text for place in places for text in texts):
+            return entry
+    return None
+
+
+def parse_hangs(text: str, limit_ms: int) -> list[dict]:
+    hangs = []
+    for line in text.splitlines():
+        match = MAIN_HANG.search(line)
+        if match and int(match.group(1)) >= limit_ms:
+            hangs.append({"ms": int(match.group(1)), "kind": match.group(2),
+                          "sections": match.group(3), "stack": match.group(4)})
+    return hangs
+
+
+def hang_report(name: str, log_path: str, gate: dict, summary: str | None = None) -> tuple[int, int]:
+    """The group's hangs of 250 ms or more (UI_MAIN_HANG lines of the app, from the system log of
+    every pass): UI_HANG_COUNT per kind, UI_HANG_APP per place of Albumist's code (count, longest,
+    sections), a table in the job summary. Returns (new app hangs, all app hangs); new = not in
+    the gate's 'known' list."""
+    settings = gate["hangs"]
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            hangs = parse_hangs(f.read(), int(settings["limit_ms"]))
+    except OSError:
+        hangs = []
+    kinds: dict[str, list[int]] = {}
+    for hang in hangs:
+        kinds.setdefault(hang["kind"], []).append(hang["ms"])
+    for kind in ("app", "test", "start", "inactive", "system"):
+        values = kinds.get(kind, [])
+        print(f"UI_HANG_COUNT {name} {kind} {len(values)}" + (f" (longest {max(values)} ms, total {sum(values)} ms)" if values else ""),
+              flush=True)
+    places: dict[str, dict] = {}
+    for hang in hangs:
+        if hang["kind"] != "app":
+            continue
+        place = places.setdefault(hang["stack"], {"count": 0, "longest": 0, "sections": set()})
+        place["count"] += 1
+        place["longest"] = max(place["longest"], hang["ms"])
+        place["sections"].add(hang["sections"])
+    new = 0
+    rows = []
+    for stack, place in sorted(places.items(), key=lambda kv: (-kv[1]["longest"], -kv[1]["count"])):
+        entry = known_entry(settings["known"], stack)
+        if entry is None:
+            new += place["count"]
+        label = f"known: {entry.get('why', '')}" if entry else "new"
+        print(f"UI_HANG_APP {name} {place['count']}x longest {place['longest']} ms ({label}) "
+              f"in [{', '.join(sorted(place['sections']))}]: {stack}", flush=True)
+        rows.append(f"| {place['count']} | {place['longest']} ms | {label} | "
+                    f"{', '.join(sorted(place['sections']))} | `{stack.replace('|', '¦')}` |")
+    total = len(kinds.get("app", []))
+    if total and settings["mode"] == "fail" and new:
+        print(f"::error title=UI {name} hangs::{new} hang(s) of {settings['limit_ms']} ms or more in Albumist's own "
+              "code (UI_HANG_APP lines; .github/hang-gate.json)", flush=True)
+    elif new:
+        print(f"::warning title=UI {name} hangs::{new} hang(s) of {settings['limit_ms']} ms or more in Albumist's own "
+              "code (report only; UI_HANG_APP lines)", flush=True)
+    path = summary if summary is not None else os.environ.get("GITHUB_STEP_SUMMARY")
+    if path:
+        counts = ", ".join(f"{k} {len(kinds.get(k, []))}" for k in ("app", "test", "start", "inactive", "system"))
+        with open(path, "a", encoding="utf-8") as out:
+            out.write(f"\n**Hangs ≥ {settings['limit_ms']} ms ({name}, mode {settings['mode']}):** {counts}\n")
+            if rows:
+                out.write("\n| Count | Longest | Status | Sections | Albumist frames |\n|---|---|---|---|---|\n")
+                out.write("\n".join(rows[:25]) + "\n")
+    return new, total
+
+
+def parse_mtc(text: str) -> list[dict]:
+    """The Main Thread Checker's reports in the app's console file: the API it names and the
+    frames of its backtrace."""
+    reports: list[dict] = []
+    current = None
+    for line in text.splitlines():
+        start = MTC_START.search(line)
+        if start:
+            current = {"api": start.group(1), "frames": []}
+            reports.append(current)
+            continue
+        if current is None:
+            continue
+        frame = MTC_FRAME.match(line)
+        if frame:
+            current["frames"].append(f"{frame.group(1)} {frame.group(2)}")
+        elif current["frames"] and not line.strip().startswith(("PID:", "Backtrace:")):
+            current = None
+    return reports
+
+
+def mtc_place(report: dict) -> str:
+    """Albumist's frames of a report (at most 5), else its first 3 frames."""
+    own = [f for f in report["frames"] if f.split(" ", 1)[0] in OWN_IMAGES][:5]
+    return " | ".join(own or report["frames"][:3])
+
+
+def main_thread_checker_report(name: str, console_text: str, system_log: str, gate: dict,
+                               summary: str | None = None) -> int:
+    """The checker's reports of the group (UI_MTC lines, one per place) and whether it watched:
+    every launch logs 'UI_FACT main thread checker active|not active', and with the probe every
+    launch makes one deliberate report. Returns the number of new reports (not the probe, not
+    'known')."""
+    settings = gate["main_thread_checker"]
+    states = MTC_STATE.findall(system_log)
+    reports = parse_mtc(console_text)
+    probes = [r for r in reports if any(MTC_PROBE in f for f in r["frames"])]
+    real = [r for r in reports if r not in probes]
+    print(f"UI_MTC_STATE {name} launches with the checker {states.count('active')}, without {states.count('not active')}, "
+          f"probe reports {len(probes)}, other reports {len(real)}", flush=True)
+    warnings = []
+    if states.count("not active"):
+        warnings.append(f"{states.count('not active')} launch(es) without the Main Thread Checker")
+    if settings.get("probe") and states.count("active") and not probes:
+        warnings.append("the checker's deliberate probe report never reached the console file: its reports may be lost")
+    places: dict[str, dict] = {}
+    for r in real:
+        place = places.setdefault(f"{r['api']} @ {mtc_place(r)}", {"count": 0, "api": r["api"], "stack": mtc_place(r)})
+        place["count"] += 1
+    new = 0
+    rows = []
+    for key, place in sorted(places.items(), key=lambda kv: -kv[1]["count"]):
+        entry = known_entry(settings["known"], place["api"], place["stack"])
+        if entry is None:
+            new += place["count"]
+        label = f"known: {entry.get('why', '')}" if entry else "new"
+        print(f"UI_MTC {name} {place['count']}x ({label}) {key}", flush=True)
+        rows.append(f"| {place['count']} | {label} | {place['api']} | `{place['stack'].replace('|', '¦')}` |")
+    for warning in warnings:
+        print(f"::warning title=UI {name} Main Thread Checker::{warning}", flush=True)
+    if new:
+        level = "error" if settings["mode"] == "fail" else "warning"
+        print(f"::{level} title=UI {name} Main Thread Checker::{new} report(s) of UI work off the main thread (UI_MTC lines)",
+              flush=True)
+    path = summary if summary is not None else os.environ.get("GITHUB_STEP_SUMMARY")
+    if path:
+        with open(path, "a", encoding="utf-8") as out:
+            out.write(f"\n**Main Thread Checker ({name}, mode {settings['mode']}):** {len(real)} report(s), "
+                      f"{states.count('active')} launch(es) watched, probe {'seen' if probes else 'not seen'}"
+                      + (f"; {'; '.join(warnings)}" if warnings else "") + "\n")
+            if rows:
+                out.write("\n| Count | Status | API | Frames |\n|---|---|---|---|\n" + "\n".join(rows[:25]) + "\n")
+    return new
+
+
+def mtc_dylib(run=sh, exists=os.path.exists) -> str:
+    """The Main Thread Checker library for the simulator on this Mac ('' when there is none)."""
+    status, developer = run(["xcode-select", "-p"], timeout=30, quiet=True)
+    developer = developer.strip().splitlines()[-1] if status == 0 and developer.strip() else ""
+    if not developer:
+        return ""
+    for candidate in (f"{developer}/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libMainThreadChecker.dylib",
+                      f"{developer}/usr/lib/libMainThreadChecker.dylib"):
+        if exists(candidate):
+            return candidate
+    return ""
+
+
+def collect_console(udid: str, out: str, name: str, label: str, run=sh) -> str:
+    """Copies the app's console file (all launches of the pass) next to the logs and empties it
+    for the next pass; returns its text ('' when the app never ran)."""
+    status, container = run(["xcrun", "simctl", "get_app_container", udid, BUNDLE_ID, "data"], timeout=60, quiet=True)
+    container = container.strip().splitlines()[-1] if status == 0 and container.strip() else ""
+    if not container:
+        return ""
+    source = os.path.join(container, "tmp", CONSOLE_FILE)
+    try:
+        with open(source, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+        os.remove(source)
+    except OSError:
+        return ""
+    with open(os.path.join(out, f"{name}-console-{label}.txt"), "w", encoding="utf-8") as copy:
+        copy.write(text)
+    return text
+
+
 def swiftui_warnings(path: str) -> int:
     """Prints the app's unique runtime warnings; 1 when a navigation link leads nowhere."""
     try:
@@ -1435,7 +1668,7 @@ def swiftui_warnings(path: str) -> int:
         return 0
     counts: dict[str, int] = {}
     for line in lines:
-        if re.search(r"^Filtering|^Timestamp|SwiftUI:Scenes|_UIHostingView|renderbox", line):
+        if re.search(r"^Filtering|^Timestamp|SwiftUI:Scenes|_UIHostingView|renderbox|UI_MAIN_HANG|UI_FACT main thread checker", line):
             continue
         key = line[24:]
         counts[key] = counts.get(key, 0) + 1
@@ -1448,6 +1681,26 @@ def swiftui_warnings(path: str) -> int:
         print("::error::SwiftUI navigation warning in the UI run (a link leads nowhere)")
         return 1
     return 0
+
+
+def quality_gates(name: str, system_log_path: str, console: str, gate: dict) -> bool:
+    """Hang watch and Main Thread Checker for the group; True when a gate in mode 'fail' found
+    something new. Never raises: a report that cannot be made is a warning, not a red run."""
+    try:
+        new_hangs, _ = hang_report(name, system_log_path, gate)
+        try:
+            with open(system_log_path, encoding="utf-8", errors="replace") as f:
+                system_log = f.read()
+        except OSError:
+            system_log = ""
+        new_mtc = main_thread_checker_report(name, console, system_log, gate)
+    except Exception as error:  # noqa: BLE001 - a broken report must not hide the test result
+        print(f"::warning title=UI {name}::hang and Main Thread Checker report failed: {error!r}", flush=True)
+        return False
+    red = (gate["hangs"]["mode"] == "fail" and new_hangs > 0) or (gate["main_thread_checker"]["mode"] == "fail" and new_mtc > 0)
+    if red:
+        print(f"UI_QUALITY_GATE {name} red (hangs {new_hangs}, Main Thread Checker {new_mtc})", flush=True)
+    return red
 
 
 def video_to_log(video: str) -> None:

@@ -1,0 +1,245 @@
+"""Hang watch (250 ms) and Main Thread Checker of the UI runs: ui_tests.py hang_report,
+main_thread_checker_report, quality_gates, mtc_dylib, collect_console (owner's decision 16.11.2026).
+Log lines as the app writes them (MainThreadWatch, MainThreadCheckerProbe) and as Xcode's checker
+prints them. Run: python3 -m unittest discover -s .github/scripts/tests -v
+"""
+import contextlib
+import io
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import ui_tests  # noqa: E402
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+PREFIX = "2026-11-21 05:01:02.123 F  Albumist[4321:9876] [app.albumist.ios:uitest] "
+OURS = ("SwiftUICore AG::Graph::UpdateStack::update() | Albumist.debug.dylib closure #1 in "
+        "OverviewView.body.getter | Albumist.debug.dylib AppModel.tick()")
+SYSTEM_LOG = "\n".join([
+    PREFIX + "UI_FACT main thread checker active",
+    PREFIX + f"UI_MAIN_HANG 312 ms app in [overview body]: {OURS}",
+    PREFIX + f"UI_MAIN_HANG 905 ms app in [unmarked]: {OURS}",
+    PREFIX + "UI_MAIN_HANG 410 ms app in [plan review: order]: Albumist.debug.dylib PlanReviewView.order()",
+    PREFIX + "UI_MAIN_HANG 2400 ms test in [unmarked]: XCTAutomationSupport x | Albumist.debug.dylib V.body",
+    PREFIX + "UI_MAIN_HANG 3100 ms start in [unmarked]: libsystem_kernel.dylib mach_msg2_trap",
+    PREFIX + "UI_MAIN_HANG 249 ms app in [unmarked]: Albumist.debug.dylib Tiny.work()",
+    PREFIX + "UI_FACT main thread checker not active",
+])
+# As libMainThreadChecker prints a report to the app's stderr.
+CONSOLE = """=== Albumist launch 4321
+Main Thread Checker: UI API called on a background thread: -[UIView setNeedsLayout]
+PID: 4321, TID: 99, Thread name: (none), Queue name: com.apple.root.default-qos, QoS: 0
+Backtrace:
+4   Albumist.debug.dylib                0x0000000104a1b2c4 $s8Albumist22MainThreadCheckerProbeO18fireFromBackgroundyyFZ + 40
+5   Foundation                          0x0000000180a2b3c4 __NSThread__start__ + 732
+=== Albumist launch 4400
+Main Thread Checker: UI API called on a background thread: -[UIApplication applicationState]
+PID: 4400, TID: 120, Thread name: (none), Queue name: com.apple.root.utility-qos, QoS: 17
+Backtrace:
+4   Albumist.debug.dylib                0x0000000104a1c000 AppModel.backgroundCheck() + 88
+5   Albumist.debug.dylib                0x0000000104a1c100 closure #1 in AppModel.start() + 12
+6   libdispatch.dylib                   0x0000000180a00000 _dispatch_call_block_and_release + 32
+some later line of the app
+"""
+
+
+def gate(hangs="report", mtc="report", known_hangs=(), known_mtc=()):
+    return {"hangs": {"mode": hangs, "limit_ms": 250, "known": list(known_hangs)},
+            "main_thread_checker": {"mode": mtc, "probe": True, "known": list(known_mtc)}}
+
+
+class HangReportTests(unittest.TestCase):
+    def run_report(self, settings):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = os.path.join(tmp, "g-swiftui.txt")
+            summary = os.path.join(tmp, "summary.md")
+            with open(log, "w") as f:
+                f.write(SYSTEM_LOG)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                result = ui_tests.hang_report("g", log, settings, summary=summary)
+            with open(summary) as f:
+                return result, out.getvalue(), f.read()
+
+    def test_counts_by_kind_and_only_app_hangs_count(self):
+        (new, total), out, summary = self.run_report(gate())
+        self.assertEqual((new, total), (3, 3))  # 249 ms is under the limit
+        self.assertIn("UI_HANG_COUNT g app 3 (longest 905 ms, total 1627 ms)", out)
+        self.assertIn("UI_HANG_COUNT g test 1", out)
+        self.assertIn("UI_HANG_COUNT g start 1", out)
+        self.assertIn("UI_HANG_COUNT g system 0", out)
+        self.assertIn("app 3, test 1, start 1, inactive 0, system 0", summary)
+
+    def test_one_line_per_place_longest_first(self):
+        _, out, summary = self.run_report(gate())
+        lines = [l for l in out.splitlines() if l.startswith("UI_HANG_APP")]
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[0].startswith("UI_HANG_APP g 2x longest 905 ms (new) in [overview body, unmarked]"))
+        self.assertIn("PlanReviewView.order()", lines[1])
+        self.assertIn("| 2 | 905 ms | new |", summary)
+
+    def test_report_mode_warns_and_fail_mode_errors(self):
+        _, out, _ = self.run_report(gate())
+        self.assertIn("::warning title=UI g hangs::3 hang(s)", out)
+        _, out, _ = self.run_report(gate(hangs="fail"))
+        self.assertIn("::error title=UI g hangs::3 hang(s)", out)
+
+    def test_known_places_do_not_count_as_new(self):
+        (new, total), out, _ = self.run_report(gate(hangs="fail", known_hangs=[{"stack": "PlanReviewView.order()", "why": "N-09"}]))
+        self.assertEqual((new, total), (2, 3))
+        self.assertIn("(known: N-09)", out)
+
+    def test_no_log_means_nothing_found(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(ui_tests.hang_report("g", "/nonexistent", gate(), summary=""), (0, 0))
+
+
+class MainThreadCheckerTests(unittest.TestCase):
+    def run_report(self, console, system_log=SYSTEM_LOG, settings=None):
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(out):
+            new = ui_tests.main_thread_checker_report("g", console, system_log, settings or gate(),
+                                                      summary=os.path.join(tmp, "s.md"))
+        return new, out.getvalue()
+
+    def test_reports_are_parsed_with_their_frames(self):
+        reports = ui_tests.parse_mtc(CONSOLE)
+        self.assertEqual([r["api"] for r in reports], ["UI API called on a background thread: -[UIView setNeedsLayout]",
+                                                       "UI API called on a background thread: -[UIApplication applicationState]"])
+        self.assertEqual(reports[1]["frames"][0], "Albumist.debug.dylib AppModel.backgroundCheck() + 88")
+        self.assertEqual(len(reports[1]["frames"]), 3)  # the later app line ends the report
+
+    def test_the_probe_never_counts_and_a_real_report_does(self):
+        new, out = self.run_report(CONSOLE)
+        self.assertEqual(new, 1)
+        self.assertIn("probe reports 1, other reports 1", out)
+        self.assertIn("UI_MTC g 1x (new) UI API called on a background thread: -[UIApplication applicationState] @ "
+                      "Albumist.debug.dylib AppModel.backgroundCheck() + 88 | Albumist.debug.dylib closure #1 in AppModel.start() + 12", out)
+        self.assertIn("::warning title=UI g Main Thread Checker::1 report(s)", out)
+        new, out = self.run_report(CONSOLE, settings=gate(mtc="fail"))
+        self.assertIn("::error title=UI g Main Thread Checker::1 report(s)", out)
+
+    def test_a_launch_without_the_checker_or_a_missing_probe_is_said(self):
+        _, out = self.run_report(CONSOLE)
+        self.assertIn("1 launch(es) without the Main Thread Checker", out)
+        new, out = self.run_report("")
+        self.assertEqual(new, 0)
+        self.assertIn("probe report never reached the console file", out)
+
+    def test_known_reports_do_not_count(self):
+        new, out = self.run_report(CONSOLE, settings=gate(mtc="fail", known_mtc=[{"api": "applicationState", "why": "N-10"}]))
+        self.assertEqual(new, 0)
+        self.assertIn("(known: N-10)", out)
+        self.assertNotIn("::error", out)
+
+
+class GateTests(unittest.TestCase):
+    def test_the_shipped_gate_file_is_valid_and_starts_in_report_mode(self):
+        with open(os.path.join(ROOT, ui_tests.GATE_FILE)) as f:
+            data = json.load(f)
+        self.assertEqual(data["hangs"]["limit_ms"], 250)
+        for key in ("hangs", "main_thread_checker"):
+            self.assertIn(data[key]["mode"], ("report", "fail"))
+            for entry in data[key]["known"]:
+                self.assertTrue(entry.get("why"), entry)
+                self.assertTrue(entry.get("stack") or entry.get("api"), entry)
+
+    def test_a_broken_gate_file_only_reports(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            f.write("{ not json")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            loaded = ui_tests.load_gate(f.name)
+        os.unlink(f.name)
+        self.assertEqual(loaded["hangs"]["mode"], "report")
+        self.assertEqual(loaded["main_thread_checker"]["mode"], "report")
+
+    def test_red_only_in_fail_mode_with_something_new(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = os.path.join(tmp, "g-swiftui.txt")
+            with open(log, "w") as f:
+                f.write(SYSTEM_LOG)
+            env = dict(os.environ)
+            os.environ.pop("GITHUB_STEP_SUMMARY", None)
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertFalse(ui_tests.quality_gates("g", log, CONSOLE, gate()))
+                    self.assertTrue(ui_tests.quality_gates("g", log, CONSOLE, gate(hangs="fail")))
+                    self.assertTrue(ui_tests.quality_gates("g", log, CONSOLE, gate(mtc="fail")))
+                    self.assertFalse(ui_tests.quality_gates("g", log, "", gate(mtc="fail")))
+            finally:
+                os.environ.clear()
+                os.environ.update(env)
+
+    def test_a_broken_report_never_hides_the_result(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertFalse(ui_tests.quality_gates("g", "/nonexistent", CONSOLE, {"hangs": {}}))
+        self.assertIn("report failed", out.getvalue())
+
+    def test_the_system_log_does_not_list_our_lines_as_runtime_warnings(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write(SYSTEM_LOG)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ui_tests.swiftui_warnings(f.name)
+        os.unlink(f.name)
+        self.assertNotIn("UI_MAIN_HANG", out.getvalue())
+        self.assertNotIn("main thread checker", out.getvalue())
+
+
+class MacSideTests(unittest.TestCase):
+    def test_the_simulators_library_first(self):
+        run = lambda cmd, **kw: (0, "/Applications/Xcode_27.app/Contents/Developer\n")
+        sim = "/Applications/Xcode_27.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libMainThreadChecker.dylib"
+        mac = "/Applications/Xcode_27.app/Contents/Developer/usr/lib/libMainThreadChecker.dylib"
+        self.assertEqual(ui_tests.mtc_dylib(run, exists=lambda p: p in (sim, mac)), sim)
+        self.assertEqual(ui_tests.mtc_dylib(run, exists=lambda p: p == mac), mac)
+        self.assertEqual(ui_tests.mtc_dylib(run, exists=lambda p: False), "")
+        self.assertEqual(ui_tests.mtc_dylib(lambda cmd, **kw: (127, "no xcode-select"), exists=lambda p: True), "")
+
+    def test_the_runner_hands_the_checker_to_the_tests(self):
+        old = ui_tests.MTC_DYLIB, ui_tests.MTC_PROBE_ON
+        try:
+            ui_tests.MTC_DYLIB, ui_tests.MTC_PROBE_ON = "/x/libMainThreadChecker.dylib", True
+            env = ui_tests.runner_env({})
+            self.assertEqual(env["TEST_RUNNER_ALBUMIST_MTC_DYLIB"], "/x/libMainThreadChecker.dylib")
+            self.assertEqual(env["TEST_RUNNER_ALBUMIST_MTC_PROBE"], "1")
+            ui_tests.MTC_DYLIB = ""
+            self.assertNotIn("TEST_RUNNER_ALBUMIST_MTC_DYLIB", ui_tests.runner_env({}))
+        finally:
+            ui_tests.MTC_DYLIB, ui_tests.MTC_PROBE_ON = old
+
+    def test_the_console_file_is_copied_and_emptied(self):
+        with tempfile.TemporaryDirectory() as container, tempfile.TemporaryDirectory() as out:
+            os.makedirs(os.path.join(container, "tmp"))
+            with open(os.path.join(container, "tmp", ui_tests.CONSOLE_FILE), "w") as f:
+                f.write(CONSOLE)
+            run = lambda cmd, **kw: (0, container + "\n")
+            self.assertEqual(ui_tests.collect_console("U", out, "g", "first", run), CONSOLE)
+            self.assertFalse(os.path.exists(os.path.join(container, "tmp", ui_tests.CONSOLE_FILE)))
+            with open(os.path.join(out, "g-console-first.txt")) as f:
+                self.assertEqual(f.read(), CONSOLE)
+            self.assertEqual(ui_tests.collect_console("U", out, "g", "retry", run), "")
+            self.assertEqual(ui_tests.collect_console("U", out, "g", "x", lambda cmd, **kw: (1, "No such app")), "")
+
+    def test_the_app_and_the_tests_agree_on_names(self):
+        with open(os.path.join(ROOT, "App", "Albumist", "Platform", "UITestSupport.swift"), encoding="utf-8") as f:
+            app = f.read()
+        with open(os.path.join(ROOT, "App", "AlbumistUITests", "UITestAppEnd.swift"), encoding="utf-8") as f:
+            tests = f.read()
+        self.assertIn(f'"{ui_tests.CONSOLE_FILE}"', app)
+        self.assertIn('"UI_MAIN_HANG \\(Int(waited * 1000)) ms \\(kind.rawValue) in [\\(names)]: ', app)
+        self.assertIn("UI_FACT main thread checker \\(active ? \"active\" : \"not active\")", app)
+        self.assertIn("enum " + ui_tests.MTC_PROBE, app)
+        self.assertIn('environment["ALBUMIST_MTC_DYLIB"]', tests)
+        self.assertIn('environment["ALBUMIST_MTC_PROBE"]', tests)
+        self.assertIn("mainThreadChecker(app)", tests)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -39,16 +39,24 @@ enum UITestSupport {
     /// makes a writer wait. The system log (`log stream`, where the workflow reads the app's
     /// lines) is not affected. A phone without a debugger never mirrors the log, so this
     /// never happens to a user.
+    ///
+    /// Every launch of a pass appends to the same file, after a line `=== Albumist launch <pid>`:
+    /// the Main Thread Checker writes its reports to stderr only, and `ui_tests.py`
+    /// (`main_thread_checker_report`) reads the file once after each pass.
     static func moveConsoleToFile() {
         guard isRunning else { return }
-        let path = NSTemporaryDirectory() + "albumist-console.log"
-        // Emptied at each launch: one run's lines only.
-        let file = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        let path = NSTemporaryDirectory() + consoleFileName
+        let file = open(path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
         guard file >= 0 else { return }
         dup2(file, STDERR_FILENO)
         dup2(file, STDOUT_FILENO)
         close(file)
+        FileHandle.standardError.write(Data("=== Albumist launch \(getpid())\n".utf8))
+        MainThreadCheckerProbe.launched()
     }
+
+    /// In the app's tmp folder (`ui_tests.py` CONSOLE_FILE).
+    static let consoleFileName = "albumist-console.log"
 
     /// `-AlbumistUITestSlowAnalysis`: every photo takes a little longer, so a UI test can leave
     /// the app and switch tabs while the analysis is still busy (first device test 15.11.).
@@ -165,6 +173,13 @@ enum ProgressLineLog {
 ///   that took that long (`section(_:_:)`), shorter ones counted per section
 /// - `UI_MAIN_STALL the main thread has not answered for 10.0 s ...`: a hang, again at 20, 40,
 ///   80 s ..., with the section it hangs in and how long that section has been running
+/// - `UI_MAIN_HANG 312 ms <kind> in [<sections>]: <frames>`: every hang of 250 ms or more (Apple's own
+///   limit for a hang, owner's decision 16.11.2026: "Hänger-Wächter 250 ms"), with the main
+///   thread's stack taken 200 ms into it. `<kind>` (`HangKind`): `app` (Albumist's own code on
+///   the stack), `test` (XCTest reading the screen, which runs on the app's main thread),
+///   `start` (before the app was first active), `inactive` (in the background or behind a
+///   system alert), `system` (iOS alone, no frame of Albumist). `ui_tests.py` (`hang_report`)
+///   collects them from the whole pass and applies `.github/hang-gate.json`.
 /// Stall lines end in `(app not active)` when the app was in the background or behind a
 /// system alert during the stall: the system may hold back a main thread then.
 final class MainThreadWatch: @unchecked Sendable {
@@ -215,6 +230,16 @@ final class MainThreadWatch: @unchecked Sendable {
     private let frameBuffer = UnsafeMutablePointer<UInt>.allocate(capacity: MainThreadWatch.maxFrames)
     /// Watch thread only: when the current ping's next stack is taken (seconds waited).
     private var nextStackAt: Double = 2
+    /// The main thread's stack 200 ms into the current ping's wait (symbolized), for the
+    /// `UI_MAIN_HANG` line; set by the watch thread under `lock`.
+    private var hangStack: [String]?
+    /// The app has been foreground-active at least once (a hang before is part of the start).
+    private var wasActive = false
+    /// The watch's tick: a hang of 250 ms is seen within 50 ms (it was 0.2 s before
+    /// the 250-ms watch; a ping costs one main-queue block).
+    static let tick = 0.05
+    /// A stall of this length or more is a hang (Apple's limit, as in Xcode's hang reports).
+    static let hangLimit = 0.25
 
     @MainActor
     func start() {
@@ -277,6 +302,7 @@ final class MainThreadWatch: @unchecked Sendable {
     private func setActive(_ value: Bool) {
         lock.lock()
         active = value
+        if value { wasActive = true }
         if !value { inactiveInStall = true }
         lock.unlock()
     }
@@ -320,11 +346,11 @@ final class MainThreadWatch: @unchecked Sendable {
     private func watch() {
         while true {
             let before = DispatchTime.now().uptimeNanoseconds
-            Thread.sleep(forTimeInterval: 0.2)
+            Thread.sleep(forTimeInterval: Self.tick)
             let now = DispatchTime.now().uptimeNanoseconds
             let slept = Self.seconds(from: before, to: now)
             if slept >= 1.5 {
-                note("UI_PROCESS_STALL the watch slept \(Self.text(slept)) s instead of 0.2 s from \(Self.clock(Date().timeIntervalSince1970 - slept)) UTC (the whole process got no time)")
+                note("UI_PROCESS_STALL the watch slept \(Self.text(slept)) s instead of \(Self.tick) s from \(Self.clock(Date().timeIntervalSince1970 - slept)) UTC (the whole process got no time)")
             }
             lock.lock()
             let pending = askedAt
@@ -337,9 +363,11 @@ final class MainThreadWatch: @unchecked Sendable {
                 stacksInPing = 0
                 workInPing = [:]
                 inactiveInStall = !active
+                hangStack = nil
             }
+            let needsHangStack = pending != nil && hangStack == nil
             let waited = pending.map { Self.seconds(from: $0, to: now) } ?? 0
-            if waited >= 0.5 {
+            if waited >= Self.hangLimit {
                 let path = sections.isEmpty ? "unmarked" : sections.map { $0.name }.joined(separator: ">")
                 if !seenInStall.contains(path) && seenInStall.count < 4 { seenInStall.append(path) }
             }
@@ -350,6 +378,12 @@ final class MainThreadWatch: @unchecked Sendable {
             let current = sections.last.map { "\($0.name) running for \(Self.text(Self.seconds(from: $0.began, to: now))) s" } ?? "no marked section"
             let inactive = inactiveInStall
             lock.unlock()
+            if needsHangStack, waited >= Self.hangLimit - Self.tick, let stack = captureMainStack() {
+                let frames = stack.enumerated().map { Self.symbol($0.element, isReturnAddress: $0.offset > 0) }
+                lock.lock()
+                if askedAt == pending { hangStack = frames }
+                lock.unlock()
+            }
             if pending != nil, waited >= nextStackAt, stacksInPing < Self.maxStacks {
                 nextStackAt = nextStackAt < 5 ? 5 : nextStackAt + 5
                 stacksInPing += 1
@@ -377,8 +411,15 @@ final class MainThreadWatch: @unchecked Sendable {
         if stress, waited > 1 { longestStall = max(longestStall, waited) }
         let longest = longestStall
         let work = workInPing
+        let stack = hangStack ?? []
+        let started = wasActive
+        hangStack = nil
         lock.unlock()
         guard asked != nil else { return }
+        if waited >= Self.hangLimit {
+            let kind = HangKind(frames: stack, inactive: inactive, beforeFirstActive: !started)
+            note("UI_MAIN_HANG \(Int(waited * 1000)) ms \(kind.rawValue) in [\(names)]: \(HangKind.shortStack(stack))")
+        }
         // Written only here, on the main thread.
         if waited > 0.5, let file {
             var lines = String(format: "%.3f %ld\n", Date().timeIntervalSince1970, Int(waited * 1000))
@@ -537,5 +578,31 @@ final class MainThreadWatch: @unchecked Sendable {
         let hours = Int(day / 3600), minutes = Int(day.truncatingRemainder(dividingBy: 3600) / 60)
         let rest = day.truncatingRemainder(dividingBy: 60)
         return String(format: "%02d:%02d:%04.1f", hours, minutes, rest)
+    }
+}
+
+// MARK: Main Thread Checker
+
+/// UI runs only: whether Xcode's Main Thread Checker watches this launch (the tests insert it,
+/// `UITestAppEnd.launch` with ALBUMIST_MTC_DYLIB from `ui_tests.py`; owner's decision
+/// 16.11.2026), as the log line `UI_FACT main thread checker active` or `… not active`. With
+/// ALBUMIST_MTC_PROBE=1 the app also calls one UIKit method from a background thread on
+/// purpose, once per launch, so the run proves that a report reaches `ui_tests.py`; that
+/// report is recognized by this type's name in its stack and never counts as a finding.
+enum MainThreadCheckerProbe {
+    static func launched() {
+        let active = (0..<_dyld_image_count()).contains { index in
+            _dyld_get_image_name(index).map { String(cString: $0).hasSuffix("/libMainThreadChecker.dylib") } ?? false
+        }
+        MainThreadWatch.shared.report("UI_FACT main thread checker \(active ? "active" : "not active")")
+        guard active, ProcessInfo.processInfo.environment["ALBUMIST_MTC_PROBE"] == "1" else { return }
+        Thread.detachNewThread { fireFromBackground() }
+    }
+
+    /// The deliberate report: a UIKit call off the main thread (harmless on a view nobody shows).
+    @inline(never)
+    static func fireFromBackground() {
+        let view = UIView()
+        view.setNeedsLayout()
     }
 }

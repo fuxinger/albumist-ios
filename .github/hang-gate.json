@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "Hang watch and Main Thread Checker of the UI runs (owner's decision 16.11.2026, read by .github/scripts/ui_tests.py: hang_report, main_thread_checker_report).",
+    "hangs: every main-thread hang of limit_ms or more is a UI_MAIN_HANG line of the app (MainThreadWatch, kinds in Sources/AlbumistCore/Diagnostics/HangKind.swift). Only kind 'app' (Albumist's own code on the stack) counts; 'test' (XCTest reading the screen), 'start', 'inactive' and 'system' are reported only.",
+    "main_thread_checker: Xcode's checker is inserted into every app launch of the UI tests; each report ('Main Thread Checker: UI API called on a background thread') with Albumist's frames counts. probe: the app makes one deliberate report per launch (MainThreadCheckerProbe), so a run proves the checker works; a pass without it is a warning.",
+    "mode 'report': numbers, stacks and a job-summary table, never red. mode 'fail': a counted finding not in 'known' makes the group red.",
+    "known: findings accepted for now, each with the place ('stack' for hangs: a part of the UI_MAIN_HANG frames; 'api' or 'stack' for the checker) and why, with the finding's number. The list only gets shorter: a fix removes its entry.",
+    "Started in 'report' (measure first): switch to 'fail' once a full UI run has shown the baseline and its findings are fixed or listed here."
+  ],
+  "hangs": {
+    "mode": "report",
+    "limit_ms": 250,
+    "known": []
+  },
+  "main_thread_checker": {
+    "mode": "report",
+    "probe": true,
+    "known": []
+  }
+}

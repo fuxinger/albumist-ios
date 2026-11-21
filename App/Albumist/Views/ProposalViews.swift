@@ -499,6 +499,9 @@ struct ProposalDetailView: View {
     /// buttons are light on it until it has scrolled away.
     @State private var coverIsPhoto = false
     @State private var pastCover = false
+    /// The calm colour of the cover on screen (DS-11, `PhotoTint`): the page's ground, under the
+    /// header, the photos and the bar. Nil while not known or without one: the grouped background.
+    @State private var tint: PhotoTint? // Design W3 H13: photo tint
     /// The page's title has gone under the bar: the bar shows the name, as Photos does in an album.
     @State private var pastTitle = false
     /// Where the bar ends at the top of the page, in the scroll view's space: the status bar and
@@ -577,6 +580,10 @@ struct ProposalDetailView: View {
         return (cache.days, cache.coverIDs)
     }
 
+    /// The page's ground: the cover's calm colour, else the grouped background; Increase Contrast
+    /// always gets the grouped background (`PhotoTintGround`).
+    private var ground: Color { PhotoTintGround.color(tint) } // Design W3 H13: photo tint
+
     /// Back to where the page was opened from, once.
     private func leave() {
         guard !left else { return }
@@ -644,7 +651,7 @@ struct ProposalDetailView: View {
         }
         // Dragging the page down puts the name field's keyboard away, as in Apple's apps.
         .scrollDismissesKeyboard(.interactively)
-        .background(Theme.background.ignoresSafeArea())
+        .background(ground.ignoresSafeArea()) // Design W3 H13: photo tint
         // The two buttons where the tab bar was, always in reach of the thumb (decision 6B, as
         // the preview's bar, P3-05). While photos are picked, the system bottom bar takes over.
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -775,11 +782,15 @@ struct ProposalDetailView: View {
     private func cover(_ card: ProposalCardText, ids: [AssetID]) -> some View {
         // A plain number for the geometry closure, which runs off the main actor.
         let barBottom = self.barBottom
+        let ratio: CGFloat = typeSize.isAccessibilitySize ? 2 : 1.25
         return CoverPhoto(ids: ids,
-                          aspectRatio: typeSize.isAccessibilitySize ? 2 : 1.25, cornerRadius: 0, hidesPreview: card.hidesPreview,
+                          aspectRatio: ratio, cornerRadius: 0, hidesPreview: card.hidesPreview,
                           placeholderSymbol: proposal.placeholderSymbol) { outcome in
             coverIsPhoto = outcome == .sharp
         }
+        // Its calm colour, once a sharp photo shows: never of "Vorschau ausgeblendet" or the
+        // placeholder.
+        .coverTint(of: ids, aspectRatio: ratio, sharp: coverIsPhoto && !card.hidesPreview, into: $tint) // Design W3 H13: photo tint
         // The status bar and the bar's buttons stay readable on a bright sky; only on a photo.
         .overlay(alignment: .top) {
             if coverIsPhoto {
@@ -1184,9 +1195,9 @@ struct ProposalDetailView: View {
         .frame(maxWidth: .infinity)
         // Down to the screen's edge: no tab bar below it, and no photo shows under the home
         // indicator either. Above it the photos fade out (draft E2) instead of being cut.
-        .background(Theme.background.ignoresSafeArea(edges: .bottom))
+        .background(ground.ignoresSafeArea(edges: .bottom)) // Design W3 H13: photo tint
         .background(alignment: .top) {
-            LinearGradient(colors: [Theme.background.opacity(0), Theme.background], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [ground.opacity(0), ground], startPoint: .top, endPoint: .bottom) // Design W3 H13: photo tint
                 .frame(height: 28)
                 .offset(y: -28)
                 .allowsHitTesting(false)

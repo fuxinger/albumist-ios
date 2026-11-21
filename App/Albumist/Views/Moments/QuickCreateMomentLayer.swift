@@ -12,8 +12,9 @@ import AlbumistCore
 /// - The photo is the very image the card shows: its sharp cover from the device, from the covers'
 ///   store (`ThumbnailCache.cachedCover`). Nothing is loaded for it; no card on screen, a
 ///   placeholder, a personal suggestion or "Vorschau ausgeblendet": nothing flies.
-/// - Only into a tab bar that is open, as far as the cards tell (`QuickCreateMomentSources.barOpen`);
-///   the bar is never held open for it (review E of design wave 2, finding 5).
+/// - Only into a tab bar that is open, as far as the scroll of the screens with cards tells
+///   (`quickCreateMomentScrollTrail`, decided in `QuickCreateMoment.TabWatch`; review E2 of design
+///   wave 2, N1 and N2); the bar is never held open for it (review E, finding 5).
 /// - No landing: the cover is gone as it reaches the bar (`QuickCreateMoment.Flight.opacity`), so a
 ///   few points of the worked-out tab do not show (finding 4).
 /// - Reduce Motion: nothing flies.
@@ -141,16 +142,13 @@ private struct MomentPlacement: ViewModifier, Animatable {
 }
 
 /// Where the suggestions' cards are on screen and on which tab, for the small moment
-/// (`quickCreateMomentSource`), where each tab's bar begins (`QuickCreateMomentBarProbe`), and what
-/// the cards' movement says of the tab bar (`barOpen`). Written while cards move and read once per
-/// banner: not observed, so a scrolling list draws nothing again.
+/// (`quickCreateMomentSource`), where each tab's bar begins (`QuickCreateMomentBarProbe`), and
+/// what the scroll of the screens with cards says of the tab bar (`quickCreateMomentScrollTrail`;
+/// decided in the core, `QuickCreateMoment.TabWatch`). Written while cards move and lists scroll,
+/// read once per banner: not observed, so a scrolling list draws nothing again.
 @MainActor
 final class QuickCreateMomentSources {
     static let shared = QuickCreateMomentSources()
-    /// At most this many tabs' screens are kept (four tabs, and screens made anew): the one noted
-    /// longest ago that does not show goes first, and is noted again when its tab shows (review E
-    /// of design wave 2, finding 14).
-    static let keptPlaces = 8
 
     /// A card on screen.
     struct Source {
@@ -189,78 +187,66 @@ final class QuickCreateMomentSources {
     }
 
     private var sources: [UUID: Source] = [:]
-    /// Each tab's screen, in the order they were noted (the latest last), and the tabs that show,
-    /// the one shown last at the end.
-    private var places: [UUID: Place] = [:]
-    private var placesNoted: [UUID] = []
-    private var shownPlaces: [UUID] = []
-    /// What the cards of the tab that shows say of its bar, the tab it is for, and the card it is
-    /// read from: one at a time, as all cards of a screen move alike while it scrolls.
-    private var trail = QuickCreateMoment.BarTrail()
-    private var trailPlace: UUID?
-    private var anchor: UUID?
+    /// The tabs, the screens with cards that scroll on them, and the tab bar's trail.
+    private var watch = QuickCreateMoment.TabWatch()
 
-    /// The screen of the tab that shows; nil before it was measured.
-    var place: Place? {
-        shownPlaces.last.flatMap { places[$0] }
+    /// The app's clock for the watch, in seconds: a screen that shows within
+    /// `TabWatch.arrivalTime` of its tab came with it, not back from a pop.
+    private static var now: Double {
+        ProcessInfo.processInfo.systemUptime
     }
 
-    /// Whether the tab bar is open, as far as the cards of the tab that shows tell (review E of
-    /// design wave 2, finding 5).
+    /// The screen of the tab that shows; nil before it was measured.
+    var place: QuickCreateMoment.TabPlace? {
+        watch.place
+    }
+
+    /// Whether the tab bar is open, as far as the scroll of the screens with cards tells (review
+    /// E of design wave 2, finding 5; review E2, N1 and N2).
     var barOpen: Bool {
-        trail.isOpen
+        watch.barOpen
     }
 
     func note(_ source: Source, as token: UUID) {
-        let before = sources[token]
         sources[token] = source
-        // How the content of the tab that shows moves, read from one of its cards.
-        guard let shown = shownPlaces.last, source.place == shown else { return }
-        if anchor != token {
-            if let anchor, sources[anchor]?.place == shown { return }
-            anchor = token
-            return
-        }
-        guard let before, before.card.size == source.card.size else { return }
-        trail.moved(by: Double(source.card.minY - before.card.minY))
     }
 
     func forget(_ token: UUID) {
-        guard let gone = sources.removeValue(forKey: token) else { return }
-        if anchor == token { anchor = nil }
-        // No card of the tab is left in sight: its content may scroll unseen.
-        if let place = gone.place, place == trailPlace, !sources.values.contains(where: { $0.place == place }) {
-            trail.lostSight()
-        }
+        sources[token] = nil
     }
 
     func note(_ place: Place, as token: UUID) {
-        places[token] = place
-        placesNoted.removeAll { $0 == token }
-        placesNoted.append(token)
-        while placesNoted.count > Self.keptPlaces, let old = placesNoted.first(where: { !shownPlaces.contains($0) }) {
-            placesNoted.removeAll { $0 == old }
-            places[old] = nil
-        }
+        watch.measured(QuickCreateMoment.TabPlace(barTop: Double(place.barTop), top: Double(place.top)), for: token)
     }
 
-    /// A tab's screen shows (`shown`) or went (switched to another tab, or covered). Another tab
-    /// than before: its bar was open to choose it.
+    /// A tab's screen shows (`shown`) or went (switched to another tab, or covered).
     func show(place token: UUID, _ shown: Bool) {
-        shownPlaces.removeAll { $0 == token }
-        if shown { shownPlaces.append(token) }
-        if let now = shownPlaces.last, now != trailPlace {
-            trail = QuickCreateMoment.BarTrail()
-            trailPlace = now
-            anchor = nil
-        }
+        watch.show(place: token, shown, now: Self.now)
+    }
+
+    /// The next tab is chosen in code (Siri, Spotlight, a route), not on the bar: it may be shrunk.
+    func tabChosenInCode() {
+        watch.tabChosenInCode()
+    }
+
+    /// A screen with cards shows on the tab `place` (`quickCreateMomentScrollTrail`).
+    func appeared(_ screen: UUID, on place: UUID, at spot: QuickCreateMoment.ScrollSpot?, again: Bool) {
+        watch.appeared(screen: screen, on: place, at: spot, again: again, now: Self.now)
+    }
+
+    func scrolled(_ screen: UUID, to spot: QuickCreateMoment.ScrollSpot, _ motion: QuickCreateMoment.ScrollMotion) {
+        watch.scrolled(screen: screen, to: spot, motion)
+    }
+
+    func disappeared(_ screen: UUID) {
+        watch.disappeared(screen: screen)
     }
 
     /// The middle of the symbol of the tab "Alben" on `screen` (`QuickCreateMoment.TabBar`); nil
     /// before the tabs were measured, or while a screen hides the tab bar.
     func albumsTab(on screen: CGRect, rightToLeft: Bool) -> QuickCreateMoment.Point? {
         guard let place else { return nil }
-        return QuickCreateMoment.TabBar.albumsTab(screenWidth: Double(screen.width), barTop: Double(place.barTop),
+        return QuickCreateMoment.TabBar.albumsTab(screenWidth: Double(screen.width), barTop: place.barTop,
                                                   screenBottom: Double(screen.maxY), rightToLeft: rightToLeft)
     }
 
@@ -268,14 +254,14 @@ final class QuickCreateMomentSources {
     /// sharp photo it shows: the first of its cover's candidates kept at the very size the card
     /// asked for it. Never for personal content (its card shows no photo).
     func photo(for id: AlbumistID, on screen: CGRect, model: AppModel) -> Photo? {
-        guard let place, let shown = shownPlaces.last else { return nil }
+        guard let place, let shown = watch.shownPlace else { return nil }
         for source in sources.values where source.proposal.id == id && source.place == shown {
             let proposal = source.proposal
             let card = QuickCreateMoment.Rect(x: Double(source.card.minX), y: Double(source.card.minY),
                                               width: Double(source.card.width), height: Double(source.card.height))
             let cover = QuickCreateMoment.coverFrame(card: card, aspectRatio: Double(source.aspectRatio),
                                                      accessibilitySize: source.accessibilitySize)
-            guard QuickCreateMoment.isOnScreen(cover, top: Double(place.top), bottom: Double(place.barTop),
+            guard QuickCreateMoment.isOnScreen(cover, top: place.top, bottom: place.barTop,
                                                width: Double(screen.maxX)) else { continue }
             let personal = proposal.isSensitive || model.previewHidden(for: proposal)
             let kept = personal ? nil : keptCover(of: proposal, source: source, model: model)
@@ -392,5 +378,65 @@ private struct QuickCreateMomentSource: ViewModifier {
                                                      accessibilitySize: typeSize.isAccessibilitySize, displayScale: displayScale,
                                                      place: place)
         QuickCreateMomentSources.shared.note(source, as: token)
+    }
+}
+
+extension View {
+    /// The scroll of a screen whose cards offer "Anlegen" (the start page and the suggestion
+    /// list), for the small moment after it (draft E6): whether the tab bar is open as the banner
+    /// comes is read from the scroll itself, not from where the cards are (review E2 of design
+    /// wave 2, N1 and N2). On the screen's scroll view; it reads the offset and the phase and
+    /// changes nothing about the screen.
+    func quickCreateMomentScrollTrail() -> some View {
+        modifier(QuickCreateMomentScrollTrail())
+    }
+}
+
+/// Hands a screen's scroll to `QuickCreateMomentSources` (decided in `QuickCreateMoment.TabWatch`):
+/// each reading of the offset with whether the user moves it, and when the screen shows and goes.
+/// Only on a tab's own stack (`quickCreateAtOnce`): a sheet over the tabs has its own stack and its
+/// own scroll. Written in actions only, never read in a body: the screen is not drawn again for it.
+private struct QuickCreateMomentScrollTrail: ViewModifier {
+    /// The tab's screen it is on (`QuickCreateMomentBarProbe`), and whether this is a tab's stack.
+    @Environment(\.quickCreateMomentPlace) private var place
+    @Environment(\.quickCreateAtOnce) private var onTab
+    @State private var token = UUID()
+    /// The last reading, handed over as the screen shows again, and whether it showed before.
+    @State private var spot: QuickCreateMoment.ScrollSpot?
+    @State private var shownBefore = false
+    /// Who moves the content now (`onScrollPhaseChange`).
+    @State private var motion = QuickCreateMoment.ScrollMotion.other
+
+    func body(content: Content) -> some View {
+        content
+            .onScrollPhaseChange { _, phase in
+                motion = Self.motion(phase)
+            }
+            .onScrollGeometryChange(for: QuickCreateMoment.ScrollSpot.self) { geometry in
+                QuickCreateMoment.ScrollSpot(
+                    offset: Double(geometry.contentOffset.y), top: -Double(geometry.contentInsets.top),
+                    end: Double(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height))
+            } action: { _, now in
+                spot = now
+                guard onTab, place != nil else { return }
+                QuickCreateMomentSources.shared.scrolled(token, to: now, motion)
+            }
+            .onAppear {
+                guard onTab, let place else { return }
+                QuickCreateMomentSources.shared.appeared(token, on: place, at: spot, again: shownBefore)
+                shownBefore = true
+            }
+            .onDisappear { QuickCreateMomentSources.shared.disappeared(token) }
+    }
+
+    /// The user's scroll: a finger on the list, or the list slowing down after it. At rest
+    /// (`idle`: something above the cards changed height, a card came or went) or animated by the
+    /// system (`animating`: the end of a refresh, a tap on the status bar) is none, nor is a phase
+    /// a later iOS adds.
+    private static func motion(_ phase: ScrollPhase) -> QuickCreateMoment.ScrollMotion {
+        switch phase {
+        case .tracking, .interacting, .decelerating: .user
+        default: .other
+        }
     }
 }

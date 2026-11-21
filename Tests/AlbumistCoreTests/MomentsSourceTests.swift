@@ -20,9 +20,11 @@ struct MomentsSourceTests {
     static let banner = "App/Albumist/Views/Frame/QuickCreateBar.swift"
     static let start = "App/Albumist/Views/Start/StartSections.swift"
     static let list = "App/Albumist/Views/ProposalViews.swift"
+    static let overview = "App/Albumist/Views/OverviewView.swift"
     static let card = "App/Albumist/DesignSystem/PhotoCard.swift"
     static let cover = "App/Albumist/DesignSystem/CoverPhoto.swift"
     static let mark = "// Design W2 H6: moment source"
+    static let trailMark = "// Design W2 H6: scroll trail"
 
     /// A file without comments, strings kept.
     static func code(_ path: String) throws -> String {
@@ -327,20 +329,64 @@ struct MomentsSourceTests {
         #expect(placement.contains(".opacity(flight.opacity(at: t))"), "\(placement)")
     }
 
-    /// The cover flies only into an open tab bar (review E of design wave 2, finding 5): the cards
-    /// of the tab that shows tell how its content moves (`QuickCreateMoment.BarTrail`), read from
-    /// one card at a time; a new trail as another tab shows, out of sight when no card of the tab
-    /// is left.
+    /// The cover flies only into an open tab bar (review E of design wave 2, finding 5): what the
+    /// bar does is read from the scroll of the screens with cards, the start page and the
+    /// suggestion list, not from where the cards are (review E2, N1 and N2), and decided in the
+    /// core (`QuickCreateMoment.TabWatch`, `QuickCreateMomentBarTests`; N6). Each of the two
+    /// screens marks its scroll view with one line; the modifier hands over the offset, the
+    /// phase and when the screen shows and goes, only on a tab's own stack (a sheet's says no).
     @Test func theCoverFliesOnlyIntoAnOpenTabBar() throws {
+        // One marked line on each screen's scroll view, and no other screen calls it.
+        let chains = [Self.overview: ".navigationTitle(\"Vorschläge\").quickCreateMomentScrollTrail()",
+                      Self.list: "}.quickCreateMomentScrollTrail().background(Theme.background)"]
+        for (path, chain) in chains {
+            let file = try AppSource.read(path)
+            let lines = file.split(separator: "\n").filter { $0.contains(Self.trailMark) }
+            #expect(lines.count == 1, "\(path): \(lines)")
+            let line = try #require(lines.first).trimmingCharacters(in: .whitespaces)
+            #expect(line == ".quickCreateMomentScrollTrail() \(Self.trailMark)", "\(path): \(line)")
+            let view = path == Self.overview ? "struct OverviewView" : "struct ProposalListView"
+            let body = try Self.body([view, "var body: some View"], in: try Self.code(path))
+            let squeezed = String(body.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.map(Character.init))
+            #expect(squeezed.contains(chain), "\(path): not on the scroll view")
+        }
+        for path in AppSource.swiftFiles(under: "App/Albumist") where ![Self.overview, Self.list, Self.layer].contains(path) {
+            let file = try AppSource.read(path)
+            #expect(AppSource.calls(of: "quickCreateMomentScrollTrail(", in: file).isEmpty, "\(path) reads a scroll too")
+        }
         let layer = try Self.code(Self.layer)
+        let trail = try Self.body(["struct QuickCreateMomentScrollTrail", "func body(content: Content)"], in: layer)
+        for part in [".onScrollGeometryChange(for: QuickCreateMoment.ScrollSpot.self)", "offset: Double(geometry.contentOffset.y)",
+                     "top: -Double(geometry.contentInsets.top)",
+                     "end: Double(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height)",
+                     ".onScrollPhaseChange", "QuickCreateMomentSources.shared.scrolled(token, to: now, motion)",
+                     "QuickCreateMomentSources.shared.appeared(token, on: place, at: spot, again: shownBefore)",
+                     ".onDisappear { QuickCreateMomentSources.shared.disappeared(token) }"] {
+            #expect(trail.contains(part), "\(part): \(trail)")
+        }
+        // Only a tab's own stack: a sheet over the tabs has a stack of its own.
+        #expect(Self.count("guard onTab", in: trail) == 2, "\(trail)")
+        #expect(layer.contains("@Environment(\\.quickCreateAtOnce) private var onTab"), "the modifier does not ask for the tab's stack")
+        // The user's scroll only: at rest, laid out anew or animated by the system is none.
+        let motion = try Self.body(["struct QuickCreateMomentScrollTrail", "static func motion("], in: layer)
+        #expect(motion.contains("case .tracking, .interacting, .decelerating: .user"), "\(motion)")
+        #expect(motion.contains("default: .other"), "\(motion)")
+        // The app keeps no trail of its own: the core's watch decides.
+        #expect(!layer.contains("BarTrail(") && !layer.contains("anchor") && !layer.contains("lostSight"), "a trail in the app")
         let note = try Self.body(["final class QuickCreateMomentSources", "func note(_ source: Source"], in: layer)
-        #expect(note.contains("trail.moved(by:") && note.contains("anchor"), "\(note)")
-        let forget = try Self.body(["final class QuickCreateMomentSources", "func forget("], in: layer)
-        #expect(forget.contains("trail.lostSight()"), "\(forget)")
-        let show = try Self.body(["final class QuickCreateMomentSources", "func show(place"], in: layer)
-        #expect(show.contains("trail = QuickCreateMoment.BarTrail()"), "\(show)")
+        #expect(!note.contains("trail") && !note.contains("watch"), "the cards' frames feed the trail again: \(note)")
         let open = try Self.body(["final class QuickCreateMomentSources", "var barOpen: Bool"], in: layer)
-        #expect(open.contains("trail.isOpen"), "\(open)")
+        #expect(open.contains("watch.barOpen"), "\(open)")
+        let show = try Self.body(["final class QuickCreateMomentSources", "func show(place"], in: layer)
+        #expect(show.contains("watch.show(place: token, shown, now: Self.now)"), "\(show)")
+        // A tab chosen in code (Siri, Spotlight, the analysis card) may come with a shrunk bar.
+        let chosen = try Self.body(["final class QuickCreateMomentSources", "func tabChosenInCode()"], in: layer)
+        #expect(chosen.contains("watch.tabChosenInCode()"), "\(chosen)")
+        let tabs = try Self.code(Self.tabs)
+        let route = try #require(AppSource.body(of: [".onChange(of: model.route, initial: true)"], in: tabs), "the route is gone")
+        let mark = try #require(route.range(of: "if tab != .suggestions { QuickCreateMomentSources.shared.tabChosenInCode() }"), "\(route)")
+        let chooses = try #require(route.range(of: "tab = .suggestions"), "\(route)")
+        #expect(mark.upperBound <= chooses.lowerBound, "\(route)")
     }
 
     /// The cover lands on "Alben": the third of three tabs beside the round search button, as
@@ -411,7 +457,8 @@ struct MomentsSourceTests {
         #expect(source.contains(".onAppear"), "a card back on screen is not noted again: \(source)")
         let note = try Self.body(["struct QuickCreateMomentSource:", "func note("], in: layer)
         #expect(note.contains("place: place"), "\(note)")
+        // Pruned in the core (`QuickCreateMomentBarTests.theTabsScreensArePruned`).
         let places = try Self.body(["final class QuickCreateMomentSources", "func note(_ place: Place"], in: layer)
-        #expect(places.contains("keptPlaces"), "the tabs' screens are never pruned: \(places)")
+        #expect(places.contains("watch.measured("), "the tabs' screens are never pruned: \(places)")
     }
 }

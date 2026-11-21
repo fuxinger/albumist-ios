@@ -50,6 +50,13 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Geändert
+- 21.11. (Design-Welle 2, DS-06a, Entwurf E4, noch in keinem Build): Langes Drücken wie in Fotos. Eine Vorschlagskarte hebt sich groß ab
+  (Titelbild, Name, Statuszeile; bei persönlichem Inhalt „Vorschau ausgeblendet“) und bietet ihr eigenes Wort
+  („Anlegen“, „Ergänzen …“, „Benennen …“, „Ansehen …“), „Anpassen“, bei Reisen „Reise teilen oder zusammenlegen“
+  und „Keine Reise, hier bin ich öfter“ und zuletzt „Nicht jetzt“: dieselben Wege wie ihr Knopf und „…“ im
+  Vorschlag. Ein Foto in „Unsortiert“, in Alben, in der Suche und im Vorschlag hebt sich größer ab, mit „Ansehen“,
+  „Zu Album hinzufügen …“ und „Ignorieren“ (im Vorschlag „Aus Vorschlag entfernen“ mit Rückfrage). Beim Auswählen
+  gibt es kein Menü; alle Punkte gibt es auch als VoiceOver-Aktionen.
 - 20.11. (Design-Welle 1, Entwurf für Fuchs, noch in keinem Build): die Bildschirme im fotozentrierten Look.
   - Tabs „Vorschläge · Unsortiert · Alben · Suche“; „Unsortiert“ mit drei Filtern.
   - Startseite: während der ersten Analyse ein Mosaik und die schon gefundenen Reisen, danach „Dein

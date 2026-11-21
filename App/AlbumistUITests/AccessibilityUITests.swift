@@ -19,7 +19,8 @@ import UIKit
 ///   audit only real accessibility elements.
 /// - a visible format placeholder ("%lld", "%@") and, in the English run, German words
 ///   left in the interface (untranslated strings)
-/// - text that runs off the side of the screen
+/// - text that runs off the side of the screen, except in a card that peeks in from the side
+///   of a shelf (`SideShelfCheck`)
 /// - a country row of the atlas at the largest text size taller than its words need (a name
 ///   or year broken mid-word, review P3-11, `checkAtlasRows`), and the folder label in the
 ///   settings cut on one line at any size (P3-17, `checkFullyShown`)
@@ -48,6 +49,9 @@ import UIKit
 ///   cannot attribute (text inside a combined row), which in the UI flow was always a row
 ///   passing under the tab bar
 /// - text cut at the top or bottom edge of the screen (scrolled, not clipped)
+/// - text in a card that peeks in from the side of a shelf (design wave 1: two cards and the
+///   edge of the third, `CardShelf`), and the audit's findings on it, which it measures on the
+///   few points on screen (`SideShelfCheck`, UI run 44852630315)
 /// - `.textClipped` at standard text sizes and on text that already wraps: the audit also
 ///   reports text that only clips once it grows, and wrapped text whose every line is shown
 ///   (checked in the screenshots); the run at the largest size is the real test
@@ -75,6 +79,8 @@ final class AccessibilityUITests: XCTestCase {
     private var framesBeforeAudit: [String: [CGRect]] = [:]
     /// Labelled pictures that contain text (share image preview).
     private var pictureFrames: [CGRect] = []
+    /// Cards that peek in from the side of a shelf, from the tree check, for the audit.
+    private var peekingCards: [CGRect] = []
     /// The elements inside the preview's own bar ("plan.bar": promise, "Jetzt anlegen",
     /// notes) and the suggestion's ("proposal.bar") by label and frame, noted with the chrome
     /// frames: audited like any content, a finding on them fails as before; only what passes
@@ -723,6 +729,8 @@ final class AccessibilityUITests: XCTestCase {
                 reason = "emoji only (a flag is a picture, not text)"
             } else if pictureFrames.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(frame) }) {
                 reason = "inside a labelled picture (share image preview)"
+            } else if frames.contains(where: { SideShelfCheck.inPeekingCard($0, cards: peekingCards, screen: bounds) }) {
+                reason = "in a card peeking in from the side of a shelf (measured on the part on screen)"
             } else if type == .textClipped && !accessibilitySize {
                 reason = "text clipped at a standard size (the audit enlarges text; the largest-size run decides)"
             } else if type == .textClipped && frame.height > Self.wrappedHeight {
@@ -806,13 +814,15 @@ final class AccessibilityUITests: XCTestCase {
         var seen = 0
         framesBeforeAudit = [:]
         pictureFrames = []
+        peekingCards = []
 
         func fail(_ kind: String, _ label: String, _ frame: CGRect) {
             print("A11Y_FAIL \(screen) | \(kind) | label '\(label)' | \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
             screenFailures.append("\(kind) '\(label.prefix(40))'")
         }
 
-        func visit(_ node: any XCUIElementSnapshot) {
+        // `ancestors`: the elements above the node, outermost first (for the side check).
+        func visit(_ node: any XCUIElementSnapshot, ancestors: [SideShelfCheck.Ancestor]) {
             seen += 1
             let frame = node.frame
             let visible = !frame.isEmpty && frame.intersects(bounds)
@@ -851,17 +861,24 @@ final class AccessibilityUITests: XCTestCase {
                     }
                 case .staticText:
                     texts.append((label, frame))
-                    // Wider than the screen or starting off its side: the layout does not fit.
-                    if frame.minX < bounds.minX - 1 || frame.maxX > bounds.maxX + 1 {
-                        fail("text runs off the side of the screen", label, frame)
+                    // Wider than the screen or starting off its side: the layout does not fit,
+                    // unless the text is in a card that peeks in from the side of a shelf.
+                    if SideShelfCheck.runsOffSide(frame, screen: bounds) {
+                        if let card = SideShelfCheck.peekingCard(of: frame, ancestors: ancestors, screen: bounds) {
+                            peekingCards.append(card)
+                            print("A11Y_WARN \(screen) | text in a card peeking in from the side of a shelf | label '\(label)' | \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
+                        } else {
+                            fail("text runs off the side of the screen", label, frame)
+                        }
                     }
                 default:
                     break
                 }
             }
-            for child in node.children { visit(child) }
+            let below = ancestors + [SideShelfCheck.Ancestor(frame: frame, isScrollView: type == .scrollView)]
+            for child in node.children { visit(child, ancestors: below) }
         }
-        visit(root)
+        visit(root, ancestors: [])
 
         // Overlapping texts (reported): two labels drawn over each other.
         for i in texts.indices {

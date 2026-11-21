@@ -186,6 +186,13 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 21.11. (UI-Tests, erster voller UI-Lauf von Design-Welle 1, 44852630315): drei Fehler lagen in den Testhilfen,
+  nicht in der App. Ein Schritt las die Taste „Alle N“ erst nach dem Tippen, als die Liste sie schon verdeckt hatte
+  (fünf Abläufe brachen ab). test6 suchte nur „Alle Jahre“; seit Welle 1 steht auf dem iPhone 18 Pro „Ganze
+  Mediathek dazunehmen“, das Probejahr blieb an, und sechs Tests danach fanden keine Fotos (jetzt beide
+  Formulierungen, und jeder Ablauf beginnt mit der ganzen Mediathek). Die Barrierefreiheit zählte die dritte Karte,
+  die am Rand von „Von Albumist“ hereinschaut, als Text über dem Bildschirmrand; Karten in Regalen dürfen das jetzt,
+  jeder andere Text über den Rand fällt weiter durch.
 - 20.11.: Eine Vorschau zeigt und legt genau an, was für sie gewählt wurde (zweite Prüfung von Welle 1):
   „N Alben anlegen“, „Dein Startpaket“ und „Ergänzen …“ planen nur ihre eigenen Vorschläge. Ein unter
   „Anpassen“ gewählter Vorschlag, der noch nicht angelegt ist, kam vorher in jede solche Vorschau, auch

@@ -444,6 +444,15 @@ final class AlbumistFlowUITests: XCTestCase {
         }
         print(ready ? "UI_STEP_OK prepared" : "UI_STEP_MISSING prepared")
         XCTAssertTrue(ready, "The demo library was not created and analysed")
+        // Every test starts with the whole library: a trial year left on by a test before (test6
+        // takes its year back at its end; when that step failed, every later test of the group
+        // found "Keine Fotos aus 2026" and nothing to sort, UI run 44852630315).
+        let trialNote = UITestScreens.TrialYear.note(app)
+        if trialNote.exists, tap(UITestScreens.TrialYear.allYearsButton(app), "take in all years (prepare)", timeout: 5) {
+            print("UI_FACT a trial year was still on: all years taken in")
+            _ = waitGone(trialNote, timeout: 20)
+            _ = waitStable("analysis idle after all years (prepare)", timeout: 300) { analysisIdle }
+        }
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
     }
 
@@ -2184,7 +2193,8 @@ final class AlbumistFlowUITests: XCTestCase {
             XCTAssertTrue(shown, "The chosen year is not shown on the overview")
             _ = waitStable("analysis idle with trial year", timeout: 300) { analysisIdle }
             shot("66-overview-trial-year")
-            if tap(button("Alle Jahre"), "take in all years") {
+            // "Alle Jahre" beside the note or "Ganze Mediathek dazunehmen" under it, as the line fits.
+            if tap(UITestScreens.TrialYear.allYearsButton(app), "take in all years") {
                 let gone = waitGone(note, timeout: 20)
                 print(gone ? "UI_STEP_OK trial year taken back" : "UI_STEP_MISSING trial year taken back")
                 _ = waitStable("analysis idle after all years", timeout: 300) { analysisIdle }

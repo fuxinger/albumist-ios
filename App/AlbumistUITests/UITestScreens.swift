@@ -336,6 +336,31 @@ enum UITestScreens {
         }
     }
 
+    // MARK: Trial year
+
+    /// The trial year chosen in the settings ("Albumist arbeitet nur mit Fotos aus 2026") and
+    /// the way back to the whole library.
+    @MainActor
+    enum TrialYear {
+        /// The words of the button that takes in every year: "Alle Jahre" beside the overview's
+        /// note where that fits in one line, "Ganze Mediathek dazunehmen" under it where it does
+        /// not (`trialNote`, a `ViewThatFits`), and on the card for an empty trial year
+        /// (`EmptyLibraryCard`). Design wave 1's ring card is narrower: on the iPhone 18 Pro the
+        /// note shows the long words (UI run 44852630315). `UITestHelperSourceTests` keeps the
+        /// list in step with the app.
+        static let allYearsWords = ["Alle Jahre", "Ganze Mediathek dazunehmen"]
+
+        /// The button that takes in every year, in whichever words the screen shows it.
+        static func allYearsButton(_ app: XCUIApplication) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "label IN %@", allYearsWords)).firstMatch
+        }
+
+        /// The overview's note while a trial year is chosen (`analysis.trial`).
+        static func note(_ app: XCUIApplication) -> XCUIElement {
+            app.descendants(matching: .any)["analysis.trial"]
+        }
+    }
+
     // MARK: Start page
 
     @MainActor
@@ -375,8 +400,11 @@ enum UITestScreens {
                 return false
             }
             Cards.reach(all, in: app)
+            // Read before the tap: the pushed list takes the start page out of the tree, and an
+            // element read after it fails the test (UI run 44852630315, `UITestHelperSourceTests`).
+            let identifier = all.identifier
             all.tap()
-            print("UI_STEP_OK \(what): \(all.identifier)")
+            print("UI_STEP_OK \(what): \(identifier)")
             return UITestWait.holds(timeout: 10) { SuggestionList.cards(app).firstMatch.exists }
         }
 

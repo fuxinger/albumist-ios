@@ -326,26 +326,21 @@ struct LongPressSourceTests {
     /// cell shows a photo, no lift counted as a cover), worked out in its own body (M5).
     @Test func thePhotosLongPressLiftsThePhotoAndGivesVoiceOverTheItems() throws {
         let press = try Self.body(["private struct PhotoLongPress", "func body(content: Content)"], in: Self.photoMenu)
-        #expect(press.contains(".contextMenu {"))
-        #expect(press.contains("} preview: {"))
-        #expect(press.contains(".accessibilityActions {"))
-        #expect(press.contains("items(forVoiceOver: true)") && press.contains("items(forVoiceOver: false)"))
-        // Switched off the documented way while the grid selects or the photo cannot open: the
-        // closures return nothing (review C of design wave 2, M4).
+        // With a menu now: the menu, the photo lifted, the same items as the photo's actions.
+        // Without one (the grid selects, the photo cannot open), none of them at all:
+        // `aPhotoWithoutAMenuHasNoContextMenuAtAll` (review C2 of design wave 2, N1).
         let squeezedPress = Self.squeezed(press)
-        #expect(squeezedPress.contains(".contextMenu{ifoffered{items(forVoiceOver:false)}}preview:{"), "\(squeezedPress)")
-        #expect(squeezedPress.contains(".accessibilityActions{ifoffered{items(forVoiceOver:true)}}"), "\(squeezedPress)")
+        #expect(squeezedPress.contains("ifoffered{content.contextMenu{items(forVoiceOver:false)}preview:{PhotoPreview(id:id,side:side)}"
+                                       + ".accessibilityActions{items(forVoiceOver:true)}}"), "\(squeezedPress)")
         let offered = Self.squeezed(try Self.body(["private struct PhotoLongPress", "private var offered: Bool"], in: Self.photoMenu))
         #expect(offered == "{PhotoMenu.isOffered(selecting:selecting,available:available)}", "\(offered)")
         let items = try Self.body(["struct PhotoMenuItems", "var body: some View"], in: Self.photoMenu)
         #expect(items.contains("menu.accessibilityItems"))
         #expect(!(try Self.body(["struct PhotoMenuItems"], in: Self.photoMenu)).contains("@Environment("),
                 "the items read nothing from the environment: the long press hands the model in")
-        #expect(Self.squeezed(press).contains("items(forVoiceOver:true)"))
         let handed = Self.squeezed(try Self.body(["private struct PhotoLongPress", "private func items("], in: Self.photoMenu))
         #expect(handed.contains("PhotoMenuItems(model:model,"), "\(handed)")
         #expect(items.contains("PhotoMenu(place: place"))
-        #expect(squeezedPress.contains("preview:{PhotoPreview(id:id,side:side)}"), "\(squeezedPress)")
         #expect(!(try Self.body(["private struct PhotoLongPress"], in: Self.photoMenu)).contains("factsByID"),
                 "every cell tied to the facts")
         let lifted = try Self.body(["struct PhotoPreview"], in: Self.photoMenu)
@@ -358,6 +353,30 @@ struct LongPressSourceTests {
         // Sharp by the covers' rule, the same 70 % (`ThumbnailRequest.sharpShare`).
         let thumbnails = try Self.code("App/Albumist/Views/AssetThumbnail.swift")
         #expect(thumbnails.contains("static let sharpShare: CGFloat = \(PhotoMenu.sharpShare)"))
+    }
+
+    /// A photo without a menu now (the grid selects, the photo cannot open) gets no context menu
+    /// and no actions at all, not a menu closure that returns nothing beside a preview of its
+    /// own: whether such a menu still lifts the photo is not documented (UIKit shows a preview
+    /// without actions), and a lift would take the press that ticks a photo (review C2 of design
+    /// wave 2, N1). The switch rebuilds the photo's cell, unseen: not animated (the pages toggle
+    /// "Auswählen" in `withAnimation`, which would cross-fade every photo on screen), and the
+    /// rebuilt thumbnail shows its photo at once (`aThumbnailStartsWithTheImageInMemory`).
+    @Test func aPhotoWithoutAMenuHasNoContextMenuAtAll() throws {
+        let press = Self.squeezed(try Self.body(["private struct PhotoLongPress", "func body(content: Content)"], in: Self.photoMenu))
+        // One branch with all of the long press, the other the photo as it is.
+        let withMenu = try #require(press.range(of: "{Group{ifoffered{"), "\(press)")
+        let without = try #require(press.range(of: "}else{content}}"), "\(press)")
+        #expect(withMenu.upperBound <= without.lowerBound, "\(press)")
+        for modifier in [".contextMenu{", ".accessibilityActions{"] {
+            let found = press.ranges(of: modifier)
+            #expect(found.count == 1, "\(modifier) \(found.count) times: \(press)")
+            #expect(found.allSatisfy { withMenu.upperBound <= $0.lowerBound && $0.upperBound <= without.lowerBound },
+                    "\(modifier) outside the branch with a menu: \(press)")
+        }
+        #expect(!press.contains("{ifoffered{items("), "a menu switched off by a closure that returns nothing: \(press)")
+        // Not animated, whichever page toggles it and however it does.
+        #expect(press.hasSuffix("}else{content}}.transaction(value:offered){$0.animation=nil}}"), "\(press)")
     }
 
     /// A thumbnail made anew starts with the image the thumbnails' memory holds for it, so a cell

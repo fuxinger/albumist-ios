@@ -40,6 +40,66 @@ struct VideoViewerSourceTests {
         return true
     }
 
+    // MARK: Videos: only from the iPhone
+
+    /// A video comes only from the iPhone (the owner's promise): one request for its player item,
+    /// with the network off, ended by a time limit, its answer read by the core's rule; no other
+    /// way to a video's data anywhere in the app, and nothing that allows the network.
+    @Test func videosComeOnlyFromTheIPhone() throws {
+        let loader = try Self.file("VideoLoader.swift")
+        #expect(loader.contains("PHVideoRequestOptions()"))
+        #expect(loader.contains("options.isNetworkAccessAllowed = false"))
+        let requests = AppSource.calls(of: "requestPlayerItem(", in: loader)
+        #expect(requests.count == 1)
+        #expect(requests.allSatisfy { $0.contains("options: options") }, "the request without its options")
+        #expect(loader.contains("answer.limit("), "a video Photos never answers for would wait for good")
+        let request = try #require(AppSource.body(of: "private static func request(", in: loader))
+        #expect(request.contains("VideoAvailability.afterRequest(gotItem: item != nil, inCloud: inCloud, errors:"))
+        #expect(request.contains("PHImageResultIsInCloudKey"))
+        #expect(request.contains("PhotoShare.errorChain(of:"))
+        #expect(request.contains("withTaskCancellationHandler"), "a swipe on would leave the request running")
+        // The asset from the thumbnails' own lookup: no second read of the Photos database.
+        let load = try #require(AppSource.body(of: "static func load(", in: loader))
+        #expect(load.contains("ThumbnailCache.shared.assetLookup(for: id)"))
+        for path in AppSource.swiftFiles(under: "App/Albumist") {
+            let code = try Self.code(path)
+            for other in ["requestAVAsset(", "requestExportSession("] {
+                #expect(AppSource.calls(of: other, in: code).isEmpty, "\(path): \(other)")
+            }
+            if !path.hasSuffix("/VideoLoader.swift") {
+                #expect(AppSource.calls(of: "requestPlayerItem(", in: code).isEmpty, "\(path): a second way to a video")
+            }
+            #expect(Self.count(#"isNetworkAccessAllowed\s*=\s*true"#, in: code) == 0, "\(path) loads from iCloud")
+        }
+    }
+
+    // MARK: Videos play as in Photos
+
+    /// A video starts without sound; "Ton an" gives it sound, which stops the user's music and
+    /// plays with the silent switch on, as in Photos; off, and when the photo view closes, the
+    /// app's sound mixes again and the user's music may go on. The audio server is called off the
+    /// main thread, one change after the other, beside H8's `LiveAudio` and never against it.
+    @Test func aVideosSoundIsTheUsersChoice() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let toggle = try #require(AppSource.body(of: "func toggleSound(", in: model))
+        #expect(Self.inOrder(["sound.toggle()", "isMuted = !sound.isOn", "LiveAudio.videoSound(sound.isOn)"], in: toggle))
+        let close = try #require(AppSource.body(of: "func close(", in: model))
+        #expect(Self.inOrder(["stop()", "if sound.isOn", "LiveAudio.videoSound(false)", "sound = VideoSound()"], in: close))
+        let audio = try Self.file("LivePhotoPlayer.swift")
+        let sound = try #require(AppSource.body(of: "static func videoSound(", in: audio))
+        #expect(Self.inOrder(["isReady = false", "Task.detached(", "await previous?.value", "setCategory(.playback",
+                              "setActive(true)", "setCategory(.ambient", "setActive(false, options: .notifyOthersOnDeactivation)",
+                              "await LiveAudio.videoSoundSet("], in: sound), "\(sound)")
+        #expect(Self.squeezed(try #require(AppSource.body(of: "private static func videoSoundSet(", in: audio))).contains("isReady=!on&&done"))
+        // The photo view's own setting when it opens takes its turn too: "Ton an" right after it
+        // is never undone by it.
+        let prepare = try #require(AppSource.body(of: "static func prepare(", in: audio))
+        #expect(Self.inOrder(["let previous = soundChange", "soundChange = Task.detached(", "await previous?.value",
+                              "setCategory(.ambient", "await LiveAudio.finished(done)"], in: prepare), "\(prepare)")
+        // The short motion of a Live Photo waits while the category changes (`isReady`).
+        #expect(Self.count("assumeIsolated", in: audio) == 1)
+    }
+
     // MARK: Thumbnails
 
     /// A thumbnail waits on a soft tinted ground (the covers' family, `ThumbnailGroundTint`),
@@ -135,5 +195,29 @@ struct VideoViewerSourceTests {
         let tiles = try #require(AppSource.body(of: "private func waitingTiles(", in: search))
         #expect(tiles.contains("ThumbnailGround()"))
         #expect(tiles.contains(".accessibilityElement(children: .ignore)"))
+    }
+
+    // MARK: Words
+
+    /// The new words are in the catalog with their English.
+    @Test func theNewWordsAreTranslated() throws {
+        let catalog = try StringCatalogTests.catalog()
+        let english = [
+            "Abspielen": "Play",
+            "Anhalten": "Pause",
+            "Ton an": "Unmute",
+            "Ton aus": "Mute",
+            "Wiedergabeposition": "Playback position",
+            "Video wird geladen": "Loading video",
+            "Dieses Video ist gerade nicht verfügbar.": "This Video Isn\u{2019}t Available Right Now",
+            "Das Video liegt nur in iCloud. Abspielen kannst du es in der Fotos-App.":
+                "The video is only in iCloud. You can play it in the Photos app.",
+            "Dieses Video lässt sich gerade nicht abspielen.": "This video can\u{2019}t be played right now.",
+        ]
+        for (german, wanted) in english {
+            let entry = try #require(catalog[german], "\(german) is not in the catalog")
+            let value = (StringCatalogTests.localization(entry, "en")?["stringUnit"] as? [String: Any])?["value"] as? String
+            #expect(value == wanted, "\(german): \(value ?? "no English")")
+        }
     }
 }

@@ -55,12 +55,12 @@ struct OverviewView: View {
                     if model.access == .limited { LimitedAccessCard() }
                     if let empty {
                         EmptyLibraryCard(state: empty)
-                        RingCardFrame { analysisRows }
+                        RingCardFrame { analysisRows(empty: empty) }
                     } else {
                         RingCardFrame {
                             statusCard
                             RingCardSeparator()
-                            analysisRows
+                            analysisRows(empty: empty)
                         }
                     }
                 }
@@ -320,9 +320,10 @@ struct OverviewView: View {
     }
 
     /// The ring card's lower part: the analysis, then "Bescheid sagen, wenn fertig" while it may
-    /// be asked (3B), then the trial year.
+    /// be asked (3B), then the trial year, unless the card of an empty trial year above already
+    /// says it and offers the whole library (`EmptyLibraryState.offersAllYears`).
     @ViewBuilder
-    private var analysisRows: some View {
+    private func analysisRows(empty: EmptyLibraryState?) -> some View {
         analysisCard
         // Known only once iOS answered (`FinishNotificationAsk.refresh`), a moment after the
         // page appears: the row fades in and the card grows smoothly, not with a jump.
@@ -335,7 +336,7 @@ struct OverviewView: View {
         }
         .clipped()
         .animation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35), value: finishNotice)
-        if case .year(let year) = model.analysisScope {
+        if case .year(let year) = model.analysisScope, empty?.offersAllYears != true {
             RingCardSeparator()
             trialNote(year)
         }

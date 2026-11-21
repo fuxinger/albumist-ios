@@ -447,10 +447,10 @@ final class AlbumistFlowUITests: XCTestCase {
         // Every test starts with the whole library: a trial year left on by a test before (test6
         // takes its year back at its end; when that step failed, every later test of the group
         // found "Keine Fotos aus 2026" and nothing to sort, UI run 44852630315).
-        let trialNote = UITestScreens.TrialYear.note(app)
-        if trialNote.exists, tap(UITestScreens.TrialYear.allYearsButton(app), "take in all years (prepare)", timeout: 5) {
+        let trialYear = UITestScreens.TrialYear.shown(app)
+        if trialYear.exists, tap(UITestScreens.TrialYear.allYearsButton(app), "take in all years (prepare)", timeout: 5) {
             print("UI_FACT a trial year was still on: all years taken in")
-            _ = waitGone(trialNote, timeout: 20)
+            _ = waitGone(trialYear, timeout: 20)
             _ = waitStable("analysis idle after all years (prepare)", timeout: 300) { analysisIdle }
         }
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
@@ -2187,7 +2187,8 @@ final class AlbumistFlowUITests: XCTestCase {
             }
             shot("65-settings-trial-year")
             if app.buttons["Fertig"].exists { app.buttons["Fertig"].tap() }
-            let note = app.descendants(matching: .any)["analysis.trial"]
+            // Its note, or the card of a year without photos (the demo library has none of this year).
+            let note = UITestScreens.TrialYear.shown(app)
             let shown = note.waitForExistence(timeout: 20)
             print(shown ? "UI_STEP_OK trial year on overview" : "UI_STEP_MISSING trial year on overview")
             XCTAssertTrue(shown, "The chosen year is not shown on the overview")

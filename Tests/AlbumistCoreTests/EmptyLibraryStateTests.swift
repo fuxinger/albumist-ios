@@ -73,6 +73,19 @@ struct EmptyLibraryStateTests {
         #expect(state(photos: 4, withPlace: 4, year: 2019) == .fewPhotos(4))
     }
 
+    /// The card of an empty trial year says the year and offers the whole library itself ("Keine
+    /// Fotos aus 2026 … Ganze Mediathek dazunehmen"), so the overview's note under the analysis,
+    /// which says and offers the same, stays away while it shows (screenshots of UI run
+    /// 44852630315: both, one under the other). Every other card keeps the note: it says why so
+    /// few photos count.
+    @Test func onlyTheEmptyTrialYearsCardTakesTheNotesPlace() {
+        #expect(EmptyLibraryState.emptyTrialYear(2026).offersAllYears)
+        let others: [EmptyLibraryState] = [.emptyLibrary, .nothingShared, .fewPhotos(3), .noPlaces(40), .nothingFound(400)]
+        for other in others {
+            #expect(!other.offersAllYears, "\(other)")
+        }
+    }
+
     @Test func minimumFollowsTheDefaultSettings() {
         #expect(EmptyLibraryState.defaultMinimumPhotos == min(PlaceSettings().minPhotos, TripSettings().minPhotos))
         #expect(EmptyLibraryState.needsPlaceCount(proposals: 0))

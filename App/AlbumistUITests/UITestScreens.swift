@@ -355,9 +355,14 @@ enum UITestScreens {
             app.buttons.matching(NSPredicate(format: "label IN %@", allYearsWords)).firstMatch
         }
 
-        /// The overview's note while a trial year is chosen (`analysis.trial`).
-        static func note(_ app: XCUIApplication) -> XCUIElement {
-            app.descendants(matching: .any)["analysis.trial"]
+        /// A trial year is on: the overview's note (`analysis.trial`), or the card of a trial year
+        /// without photos ("Keine Fotos aus 2026"), which says it and offers the whole library
+        /// itself while the note stays away (`EmptyLibraryState.offersAllYears`). The demo library
+        /// has no photos of the current year, so test6 sees the card.
+        static func shown(_ app: XCUIApplication) -> XCUIElement {
+            app.descendants(matching: .any)
+                .matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@", "analysis.trial", "Keine Fotos aus "))
+                .firstMatch
         }
     }
 

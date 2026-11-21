@@ -119,4 +119,25 @@ struct StartPageSourceTests {
         #expect(popover.contains("ViewThatFits(in: .vertical)"))
         #expect(popover.contains("ScrollView"))
     }
+
+    /// An empty trial year: the card says it and offers the whole library, so the note under the
+    /// analysis stays away meanwhile (`EmptyLibraryState.offersAllYears`). The flow tests know a
+    /// trial year by the note or by that card (`UITestScreens.TrialYear.shown`), test6 and
+    /// `prepare` alike.
+    @Test func anEmptyTrialYearSaysItOnce() throws {
+        let overview = AppSource.code(try AppSource.read("App/Albumist/Views/OverviewView.swift"))
+        let rows = try #require(AppSource.body(of: "private func analysisRows(", in: overview), "the analysis rows do not know the card")
+        #expect(rows.contains("if case .year(let year) = model.analysisScope, empty?.offersAllYears != true {"))
+        #expect(overview.contains("analysisRows(empty: empty)"))
+        let screens = try AppSource.read("App/AlbumistUITests/UITestScreens.swift")
+        let trialYear = try #require(AppSource.body(of: "enum TrialYear", in: screens))
+        let shown = try #require(AppSource.body(of: "static func shown(", in: trialYear), "the UI tests know the trial year by its note only")
+        #expect(shown.contains("analysis.trial") && shown.contains("Keine Fotos aus "))
+        let flow = try AppSource.read("App/AlbumistUITests/AlbumistFlowUITests.swift")
+        #expect(!flow.contains(#"["analysis.trial"]"#), "a flow test still looks for the note only")
+        let prepare = try #require(AppSource.body(of: "private func prepare(", in: flow))
+        #expect(prepare.contains("UITestScreens.TrialYear.shown(app)"))
+        let test6 = try #require(AppSource.body(of: "func test6_AnalysisKeepsGoingThroughBackgroundAndTabs(", in: flow))
+        #expect(test6.contains("UITestScreens.TrialYear.shown(app)"))
+    }
 }

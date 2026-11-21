@@ -72,7 +72,7 @@ struct PhotoGrid: View {
                         cell(entry, side: side, columns: columns)
                     }
                 } header: {
-                    PhotoGridHeader(section: section, pinned: pinned)
+                    header(section, pinned: pinned)
                 }
             }
         }
@@ -100,6 +100,20 @@ struct PhotoGrid: View {
                 CubicKeyframe(1.0, duration: 0.3)
             }
         }
+    }
+
+    /// A day's header, and where it is for the gestures: pinned, where it is pinned over the
+    /// photos scrolling under it, which a finger on it does not reach (review L4); kept while it
+    /// is away, as the photos' places are.
+    private func header(_ section: PhotoGridSection, pinned: Bool) -> some View {
+        PhotoGridHeader(section: section, pinned: pinned)
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .named(PhotoGridPlace.space))
+            } action: { frame in
+                gestures.header(section.id, frame)
+            }
+            .onAppear { gestures.headerAppeared(section.id) }
+            .onDisappear { gestures.headerDisappeared(section.id) }
     }
 
     /// One photo: a tap opens it, or ticks it while the grid selects; its long press lifts it

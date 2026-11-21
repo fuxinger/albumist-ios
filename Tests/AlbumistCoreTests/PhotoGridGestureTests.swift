@@ -109,6 +109,23 @@ struct PhotoGridGestureTests {
         #expect(PhotoGridHitTest.position(x: 50, y: 50, in: []) == nil)
     }
 
+    /// A day's header pinned at the top over the photos scrolling under it hides them: a finger
+    /// on it is on no photo, so the drag ticks nothing the user cannot see (review L4); above and
+    /// below it the photos count, and a header that covers nothing changes nothing.
+    @Test func noPhotoUnderAPinnedHeader() {
+        // The second day's header pinned over the first row, from 40 to 90.
+        let pinned = GridRect(x: 0, y: 40, width: 304, height: 50)
+        #expect(PhotoGridHitTest.position(x: 50, y: 60, in: Self.cells, covered: [pinned]) == nil)
+        #expect(PhotoGridHitTest.position(x: 150, y: 90, in: Self.cells, covered: [pinned]) == nil, "its edge")
+        #expect(PhotoGridHitTest.position(x: 150, y: 95, in: Self.cells, covered: [pinned]) == 1, "below it")
+        #expect(PhotoGridHitTest.position(x: 150, y: 20, in: Self.cells, covered: [pinned]) == 1, "above it")
+        #expect(PhotoGridHitTest.position(x: 50, y: 60, in: Self.cells) == 0, "nothing pinned: the photo")
+        // A header in its own place, between the days.
+        let between = GridRect(x: 0, y: 100, width: 304, height: 50)
+        #expect(PhotoGridHitTest.position(x: 50, y: 160, in: Self.cells, covered: [between]) == 3)
+        #expect(PhotoGridHitTest.position(x: 50, y: 50, in: Self.cells, covered: [between]) == 0)
+    }
+
     /// Two fingers always hold a photo, the one whose place the zoom keeps: the one under them,
     /// else the nearest (between rows, on a header, beside the grid); on a tie the earlier one.
     @Test func twoFingersHoldTheNearestPhoto() {

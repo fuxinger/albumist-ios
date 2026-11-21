@@ -73,7 +73,7 @@ struct PhotoGridSourceTests {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
         #expect(view.contains("ForEach(sections){sectioninSection{ForEach(section.entries(below:limit)){entryin"
                               + "cell(entry,side:side,columns:columns)}"
-                              + "}header:{PhotoGridHeader(section:section,pinned:pinned)}}"), "\(view)")
+                              + "}header:{header(section,pinned:pinned)}}"), "\(view)")
         #expect(view.contains("letpinned=pinsHeaders&&!typeSize.isAccessibilitySize"), "\(view)")
         #expect(view.contains("pinnedViews:pinned?[.sectionHeaders]:[]"), "\(view)")
         #expect(view.contains("GridItem(.flexible(),spacing:CGFloat(PhotoGridZoom.spacing))"), "\(view)")
@@ -149,6 +149,24 @@ struct PhotoGridSourceTests {
         let state = try Self.code(Self.state)
         #expect(state.contains("private var photos = PhotoGridOnScreen<AssetID, PhotoGridPlace>()"))
         #expect(!state.contains("places["), "a dictionary of its own that forgets or grows")
+    }
+
+    /// A day's header pinned over the photos scrolling under it hides them: each header reports
+    /// where it is in the grid (pinned: where it is pinned), kept as the photos are, and a finger
+    /// on one is on no photo where a drag begins and where it goes
+    /// (`PhotoGridHitTest.position(…covered:)`), so it ticks nothing the user cannot see (review L4).
+    @Test func aPinnedHeaderHidesThePhotosUnderIt() throws {
+        let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
+        #expect(view.contains("}header:{header(section,pinned:pinned)}"), "\(view)")
+        let header = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func header("], in: Self.grid))
+        #expect(header.contains("PhotoGridHeader(section:section,pinned:pinned).onGeometryChange(for:CGRect.self){proxyin"
+                                + "proxy.frame(in:.named(PhotoGridPlace.space))}action:{frameingestures.header(section.id,frame)}"
+                                + ".onAppear{gestures.headerAppeared(section.id)}.onDisappear{gestures.headerDisappeared(section.id)}"),
+                "\(header)")
+        let state = try Self.code(Self.state)
+        #expect(state.contains("private var headers = PhotoGridOnScreen<Int, CGRect>()"))
+        let hits = state.components(separatedBy: "PhotoGridHitTest.position(").count - 1
+        #expect(hits == 2 && state.components(separatedBy: "covered: covered)").count - 1 == hits, "\(hits)")
     }
 
     /// Drag to select is UIKit's own pan beside the scroll view, only while the page selects: it

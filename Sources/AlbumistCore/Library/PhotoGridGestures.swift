@@ -122,8 +122,12 @@ public enum PhotoGridHitTest {
     /// The position of the photo at (`x`, `y`) among `cells` (position and frame, in one space):
     /// the photo under it; in the gap between two photos of a row the nearer one; beside a row
     /// its first or last photo (a short last row of a day: its last). Nil between rows, on a
-    /// day's header and where no photo is: the drag keeps the photo it has.
-    public static func position(x: Double, y: Double, in cells: [(position: Int, frame: GridRect)]) -> Int? {
+    /// day's header and where no photo is: the drag keeps the photo it has. `covered`: what lies
+    /// over the photos there (a day's header pinned over the photos scrolling under it, review
+    /// L4): a point on it is on no photo, so the drag ticks nothing the user cannot see.
+    public static func position(x: Double, y: Double, in cells: [(position: Int, frame: GridRect)],
+                                covered: [GridRect] = []) -> Int? {
+        if covered.contains(where: { $0.minX <= x && x <= $0.maxX && $0.minY <= y && y <= $0.maxY }) { return nil }
         var best: (position: Int, distance: Double)?
         for cell in cells where cell.frame.minY <= y && y <= cell.frame.maxY {
             let distance = x < cell.frame.minX ? cell.frame.minX - x : (x > cell.frame.maxX ? x - cell.frame.maxX : 0)

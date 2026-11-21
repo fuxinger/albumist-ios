@@ -14,6 +14,9 @@ final class PhotoGridGestureState {
     /// each photo reports them (`PhotoGrid.cell`); kept while a photo is away, so the photos of
     /// a page shown again, which report nothing new, are found (review L1).
     private var photos = PhotoGridOnScreen<AssetID, PhotoGridPlace>()
+    /// The days' headers on screen and their frames in the grid, by day: pinned, one lies over
+    /// the photos scrolling under it, and a finger on it is on none of them (review L4).
+    private var headers = PhotoGridOnScreen<Int, CGRect>()
     private var drag: Drag?
     /// A drag that began where no photo is (on a day's header): it begins at the first photo the
     /// finger reaches.
@@ -84,6 +87,23 @@ final class PhotoGridGestureState {
         photos.disappeared(id)
     }
 
+    func header(_ day: Int, _ frame: CGRect) {
+        headers.report(day, frame)
+    }
+
+    func headerAppeared(_ day: Int) {
+        headers.appeared(day)
+    }
+
+    func headerDisappeared(_ day: Int) {
+        headers.disappeared(day)
+    }
+
+    /// What lies over the photos: the headers on screen (a pinned one over the photos under it).
+    private var covered: [GridRect] {
+        headers.shown.values.map(GridRect.init)
+    }
+
     /// The photos on screen of the grid whose photos are `ids`, in its order, with their frames.
     /// A photo that reports a place in another order (the days changed and it is about to go)
     /// is left out.
@@ -138,8 +158,9 @@ final class PhotoGridGestureState {
     private func start(_ touch: PhotoGridTouch, at points: [CGPoint]) {
         guard let pending = waiting else { return }
         let onScreen = cells(in: pending.ids)
+        let covered = self.covered
         let found = points.lazy.compactMap { point in
-            PhotoGridHitTest.position(x: Double(point.x), y: Double(point.y), in: onScreen)
+            PhotoGridHitTest.position(x: Double(point.x), y: Double(point.y), in: onScreen, covered: covered)
         }.first
         guard let anchor = found else { return }
         let ids = pending.ids
@@ -154,10 +175,11 @@ final class PhotoGridGestureState {
     }
 
     /// The finger is at `point` in the grid: the range runs to the photo under it; between rows
-    /// and on a header it keeps the photo it has.
+    /// and on a header (also one pinned over photos) it keeps the photo it has.
     private func extend(to point: CGPoint) {
         guard var current = drag,
-              let position = PhotoGridHitTest.position(x: Double(point.x), y: Double(point.y), in: cells(in: current.ids))
+              let position = PhotoGridHitTest.position(x: Double(point.x), y: Double(point.y), in: cells(in: current.ids),
+                                                       covered: covered)
         else { return }
         let change = current.range.move(to: position)
         drag = current

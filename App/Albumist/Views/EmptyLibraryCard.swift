@@ -35,7 +35,11 @@ struct EmptyLibraryCard: View {
     }
 
     var body: some View {
+        // Not beside an interrupted plan: its way out ("Rest anlegen") is the page's one filled
+        // button then (design rule 3, filled_button_rule.py), and nothing new runs before it is
+        // settled (`PlanGate`).
         let offersSamples = SampleLibrary.isOffered(photos: model.facts.count, access: model.access, samplesPresent: samples.arePresent)
+            && model.interruptedPlan == nil
         ContentUnavailableView {
             Label(title, systemImage: symbol)
         } description: {

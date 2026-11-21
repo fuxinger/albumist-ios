@@ -117,6 +117,11 @@ TAKE_TURNS = {
          "page's filled button then (StartPageTests.noStarterSetBesideAnInterruptedPlan)",
          [("Sources/AlbumistCore/Domain/StartPage.swift", r"guard input\.analysedOnce, !input\.interruptedPlan"),
           ("App/Albumist/Model/AppModel+Start.swift", r"interruptedPlan: interruptedPlan != nil")]),
+        ({"InterruptedPlanCard.body", "EmptyLibraryCard.body"},
+         "\"Mit Beispielfotos ausprobieren\" is not offered beside an interrupted plan: its way out is "
+         "the page's filled button then, and nothing new runs before it is settled (PlanGate)",
+         [("App/Albumist/Views/EmptyLibraryCard.swift", r"samplesPresent: samples\.arePresent\)\s*&& model\.interruptedPlan == nil"),
+          ("App/Albumist/Views/OverviewView.swift", r"if let interrupted = model\.interruptedPlan \{\s*InterruptedPlanCard\(")]),
         ({"EmptyLibraryCard.body", "StarterSetCard.body"},
          "the card for an empty library shows only when the analysis made no suggestion or saw no "
          "photo, \"Dein Startpaket\" only with three suggestions or more",

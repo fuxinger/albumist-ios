@@ -79,8 +79,9 @@ struct PhotoGrid: View {
                 }
             }
         }
-        // The scroll view finds a photo by its id (`PhotoGridScroller.show`).
-        .scrollTargetLayout()
+        // The scroll view finds a photo by its id while a zoom step lands
+        // (`PhotoGridScroller.show`), and follows none otherwise (review L6).
+        .scrollTargetLayout(isEnabled: scroller?.findsPhotos ?? false)
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.width
         } action: { newWidth in

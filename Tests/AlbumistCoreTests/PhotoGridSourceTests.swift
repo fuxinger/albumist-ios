@@ -78,7 +78,7 @@ struct PhotoGridSourceTests {
         #expect(view.contains("pinnedViews:pinned?[.sectionHeaders]:[]"), "\(view)")
         #expect(view.contains("GridItem(.flexible(),spacing:CGFloat(PhotoGridZoom.spacing))"), "\(view)")
         #expect(view.contains("letcolumns=PhotoGridZoom.columns(stored:storedColumns)"), "\(view)")
-        #expect(view.contains(".scrollTargetLayout()"), "the scroll view finds the photos by id")
+        #expect(view.contains(".scrollTargetLayout(isEnabled:scroller?.findsPhotos??false)"), "the scroll view finds the photos by id")
         let header = try Self.body(["struct PhotoGridHeader", "var body: some View"], in: Self.grid)
         #expect(header.contains("AdaptiveStack(verticalAlignment: .firstTextBaseline"), "\(header)")
         #expect(header.contains(".accessibilityElement(children: .combine)") && header.contains(".accessibilityAddTraits(.isHeader)"))
@@ -308,6 +308,22 @@ struct PhotoGridSourceTests {
         #expect(grid.contains("@AppStorage(PhotoGridMemory.key, store: PhotoGridMemory.defaults) private var storedColumns = PhotoGridZoom.standard"))
         #expect(grid.contains("static let key = \"photoGrid.columns\""))
         #expect(grid.contains("if UITestSupport.isRunning { UserDefaults.standard.removeObject(forKey: key) }"))
+    }
+
+    /// After a zoom step lands the page scrolls plainly again (review L6): the scroll view finds
+    /// the grid's photos by id only while a step is on its way (the scroll target layout is on
+    /// only then, so it follows no photo while the user scrolls), and once the step landed (the
+    /// grid settled) no anchor is left and its position names no photo: a photo that goes leaves
+    /// nothing behind, and the page keeps its top when its size changes, as before the zoom.
+    @Test func afterAZoomStepThePageScrollsPlainlyAgain() throws {
+        let shown = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func show("], in: Self.scrolling))
+        #expect(shown.contains("findsPhotos=trueanchor=pointposition.scrollTo(id:photo,anchor:point)"), "\(shown)")
+        #expect(shown.contains("try?awaitTask.sleep(for:PhotoGridScroller.landing)guardletself,self.steps==stepelse{return}self.land()"),
+                "only the last step lands: \(shown)")
+        let land = Self.squeezed(try Self.body(["final class PhotoGridScroller", "private func land("], in: Self.scrolling))
+        #expect(land == "{anchor=nilfindsPhotos=falseposition=ScrollPosition(idType:AssetID.self)}", "\(land)")
+        let scrolling = try Self.code(Self.scrolling)
+        #expect(scrolling.contains("static let landing: Duration = .milliseconds(350)"), "after the grid settled (0.3 s)")
     }
 
     /// The pinch is there without two fingers: VoiceOver's zoom on a photo, and the photo's

@@ -122,6 +122,87 @@ struct OneAnswerTests {
         #expect(value == "early")
     }
 
+    // MARK: Nothing kept (review D2, N2)
+
+    /// What a request answers, as a Live Photo is: an object.
+    final class Photo: Sendable {}
+
+    /// The answer goes to the caller and is not kept: a Live Photo the page let go of is freed
+    /// at once, not when the request's time limit would have ended (review D2, N2: about fifteen
+    /// Live Photos stayed in memory while the user swiped through a burst).
+    @Test func theAnswerIsNotKeptOnceTheCallerHasIt() async {
+        let answer = OneAnswer<Photo?, Int32>(fallback: nil) { _ in }
+        weak var released: Photo?
+        var held: Photo? = await withCheckedContinuation { continuation in
+            guard answer.begin(continuation) else { return }
+            let photo = Photo()
+            released = photo
+            answer.finish(photo)
+        }
+        #expect(held != nil)
+        #expect(released != nil)
+        held = nil
+        #expect(released == nil, "the answer keeps the photo")
+        withExtendedLifetime(answer) {}
+    }
+
+    /// An answer that comes before the caller waits is kept for it, and only until it has it.
+    @Test func anEarlyAnswerIsKeptOnlyUntilTheCallerHasIt() async {
+        let answer = OneAnswer<Photo?, Int32>(fallback: nil) { _ in }
+        weak var released: Photo?
+        do {
+            let photo = Photo()
+            released = photo
+            answer.finish(photo)
+        }
+        #expect(released != nil, "an early answer must wait for its caller")
+        var held: Photo? = await withCheckedContinuation { continuation in
+            _ = answer.begin(continuation)
+        }
+        #expect(held != nil)
+        held = nil
+        #expect(released == nil, "the answer keeps the photo")
+        withExtendedLifetime(answer) {}
+    }
+
+    /// The time limit ends with the answer: no task sleeps on for a request that is over, and
+    /// none holds the answer object until its time is up.
+    @Test func theTimeLimitEndsWithTheAnswer() async throws {
+        weak var released: OneAnswer<String, Int32>?
+        do {
+            let answer = Self.answer(Stopped())
+            released = answer
+            answer.limit(.seconds(60))
+            let limit = try #require(answer.limitTask)
+            let value = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+                guard answer.begin(continuation) else { return }
+                answer.finish("photo")
+            }
+            #expect(value == "photo")
+            #expect(limit.isCancelled, "the time limit sleeps on")
+            #expect(answer.limitTask == nil)
+            // Ends at once (not after a minute).
+            if limit.isCancelled { await limit.value }
+        }
+        #expect(released == nil, "the time limit keeps the answer alive")
+    }
+
+    /// A caller that goes away ends the time limit too; a limit set after the answer starts none.
+    @Test func aCancelEndsTheTimeLimit() async throws {
+        let answer = Self.answer(Stopped())
+        answer.limit(.seconds(60))
+        let limit = try #require(answer.limitTask)
+        let value = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+            guard answer.begin(continuation) else { return }
+            answer.cancel()
+        }
+        #expect(value == "none")
+        #expect(limit.isCancelled)
+        if limit.isCancelled { await limit.value }
+        answer.limit(.seconds(60))
+        #expect(answer.limitTask == nil, "a limit after the answer")
+    }
+
     /// Answers, cancels and the time limit from many threads at once: the caller is answered
     /// exactly once (a second resume would end the test run).
     @Test func manyAnswersAtOnceAnswerOnce() async {

@@ -112,6 +112,7 @@ struct ProposalListView: View {
                 .padding(.bottom, Theme.Spacing.xl)
             }
         }
+        .quickCreateMomentScrollTrail() // Design W2 H6: scroll trail
         .background(Theme.background)
         .navigationTitle(area?.title ?? "Vorschläge")
         // While ticking, "Alle auswählen" takes the place of Back, as in Photos and Files.

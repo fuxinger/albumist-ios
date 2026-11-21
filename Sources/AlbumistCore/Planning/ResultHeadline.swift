@@ -67,7 +67,9 @@ public struct ResultHeadline: Hashable, Sendable {
         case removesNewAlbums(Int)
         /// "Nimmt die hinzugefügten Fotos wieder aus deinen 3 Alben. Deine Fotos bleiben."
         case takesOutAddedPhotos(albums: Int)
-        /// New albums and albums of the user's: both are taken back.
+        /// New albums and albums of the user's: both are taken back. Only when each album that
+        /// got photos is the user's own; a retry, or an album Albumist made, gets `general`
+        /// (review E2 of design wave 2, N4).
         case removesNewAlbumsAndAddedPhotos
         /// "Legt das Album mit denselben Fotos wieder an." after a removal.
         case bringsBackAlbums(Int)
@@ -103,23 +105,24 @@ public struct ResultHeadline: Hashable, Sendable {
         let photos = receipt.photosAdded
         let deleted = receipt.containersDeleted
         let takenOut = receipt.membershipsRemoved
+        // The albums that got photos: an album counts as extended only with photos the library
+        // confirmed in it.
+        let named = Set(receipt.albums.lazy.filter { $0.change == .extended && $0.added > 0 }.map(\.id))
         switch kind {
         case .created:
             if created > 0 {
                 let detail: Detail? = extended > 0 ? .extendedAndSorted(albums: extended, photos: photos)
                     : photos > 0 ? .withPhotos(photos) : nil
-                self.init(kind: kind, lead: .newAlbums(created), detail: detail, showsWhereNewAlbumsAre: true,
-                          undoNote: extended > 0 ? .removesNewAlbumsAndAddedPhotos : .removesNewAlbums(created))
+                // "… aus deinen Alben" only for the user's own albums, as below (review E2 of
+                // design wave 2, N4).
+                let undo: UndoNote = extended == 0 ? .removesNewAlbums(created)
+                    : Self.yours(named, plan: plan, albumistAlbums: albumistAlbums) ? .removesNewAlbumsAndAddedPhotos : .general
+                self.init(kind: kind, lead: .newAlbums(created), detail: detail, showsWhereNewAlbumsAre: true, undoNote: undo)
             } else if extended > 0 {
-                // The albums the line names: an album counts as extended only with photos the
-                // library confirmed in it. The big number counts their photos, not those of an
+                // The big number counts the photos of the albums the line names, not those of an
                 // album found after an interruption.
-                let named = Set(receipt.albums.lazy.filter { $0.change == .extended && $0.added > 0 }.map(\.id))
                 let added = Self.photos(addedTo: named, in: plan)
-                // "deiner Alben" only when each is the user's own: none Albumist made, and no
-                // retry (it fills the albums of its first run).
-                let albumists = Set(albumistAlbums.map(\.rawValue))
-                if plan.retries == nil && named.isDisjoint(with: albumists) {
+                if Self.yours(named, plan: plan, albumistAlbums: albumistAlbums) {
                     self.init(kind: kind, lead: .addedPhotos(added), detail: .inYourAlbums(named.count),
                               showsWhereNewAlbumsAre: false, undoNote: .takesOutAddedPhotos(albums: named.count))
                 } else {
@@ -155,6 +158,13 @@ public struct ResultHeadline: Hashable, Sendable {
     /// plan's journal.
     public init(plan: ChangePlan, inventory: CollectionInventory = CollectionInventory(), albumistAlbums: Set<CollectionID> = []) {
         self.init(PlanReceipt(plan: plan, inventory: inventory), plan: plan, albumistAlbums: albumistAlbums)
+    }
+
+    /// Whether the albums `named` (receipt ids) are each the user's own, to be called "deiner
+    /// Alben": none of them is one Albumist made, and the plan is no retry (it fills the albums
+    /// of its first run).
+    static func yours(_ named: Set<String>, plan: ChangePlan, albumistAlbums: Set<CollectionID>) -> Bool {
+        plan.retries == nil && named.isDisjoint(with: albumistAlbums.lazy.map(\.rawValue))
     }
 
     /// Distinct photos the library confirmed `plan` put into the albums `albums` (receipt ids,

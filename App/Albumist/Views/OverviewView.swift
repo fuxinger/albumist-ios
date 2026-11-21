@@ -88,6 +88,7 @@ struct OverviewView: View {
         .suggestionMenuFlows(menuFlows)
         .background(Theme.background)
         .navigationTitle("Vorschläge")
+        .quickCreateMomentScrollTrail() // Design W2 H6: scroll trail
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

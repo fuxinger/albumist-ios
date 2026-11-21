@@ -146,6 +146,23 @@ public struct ResultCoverStack: Hashable, Sendable {
         return Array(shown.prefix(ResultCoverFan.count(shown.count)))
     }
 
+    /// Which photo each card shows as the result appears (card id → photo): the one kept for it
+    /// while the plan ran (`held`: the result's own, so a covers' store emptied meanwhile, by a
+    /// memory warning or a moment in the background, does not lose it; review E2 of design wave
+    /// 2, N3), else the first of its candidates the covers' store still keeps (`stored`). A kept
+    /// photo that is no candidate of its card (a step the library did not confirm) is passed over.
+    public func sharpPhotos(held: [String: AssetID], stored: (AssetID) -> Bool) -> [String: AssetID] {
+        var sharp: [String: AssetID] = [:]
+        for card in cards {
+            if let photo = held[card.id], card.candidates.contains(photo) {
+                sharp[card.id] = photo
+            } else if let photo = card.candidates.first(where: stored) {
+                sharp[card.id] = photo
+            }
+        }
+        return sharp
+    }
+
     /// The suggestions of `plan` whose albums and photos stay off the stack (`personalSources`):
     /// the personal ones (`personal`: sensitive, or their card hides its preview) and every one
     /// the analysis does not know (`known`). A step keeps the suggestion it came from, also in
@@ -293,8 +310,11 @@ public enum ResultCoverFan {
     }
 
     /// The scale that fits the fan into `width` × `height`: never larger than drawn, never below
-    /// `minimumScale`.
-    public static func scale(count covers: Int, width: Double, height: Double) -> Double {
+    /// `minimumScale`. `height` nil: the room is not measured yet, and the fan is laid out at
+    /// `minimumScale`, so once the room is known it can only grow and what stands below it never
+    /// jumps up as the result comes (review E2 of design wave 2, N7).
+    public static func scale(count covers: Int, width: Double, height: Double?) -> Double {
+        guard let height else { return minimumScale }
         let size = size(covers)
         guard size.width > 0, size.height > 0 else { return 1 }
         return max(minimumScale, min(1, width / size.width, height / size.height))

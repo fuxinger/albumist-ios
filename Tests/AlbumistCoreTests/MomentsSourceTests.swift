@@ -20,9 +20,11 @@ struct MomentsSourceTests {
     static let banner = "App/Albumist/Views/Frame/QuickCreateBar.swift"
     static let start = "App/Albumist/Views/Start/StartSections.swift"
     static let list = "App/Albumist/Views/ProposalViews.swift"
+    static let overview = "App/Albumist/Views/OverviewView.swift"
     static let card = "App/Albumist/DesignSystem/PhotoCard.swift"
     static let cover = "App/Albumist/DesignSystem/CoverPhoto.swift"
     static let mark = "// Design W2 H6: moment source"
+    static let trailMark = "// Design W2 H6: scroll trail"
 
     /// A file without comments, strings kept.
     static func code(_ path: String) throws -> String {
@@ -61,7 +63,7 @@ struct MomentsSourceTests {
         #expect(view.contains(".onChange(of: plan.id, initial: true) { make() }"), "\(view)")
         let make = try Self.body(["struct ResultCoverMoment", "func make()"], in: covers)
         for part in ["guard madeFor != plan.id else { return }", "model.resultCoverStack(for: plan, taken: sources)",
-                     "ResultMomentLoader.kept(stack, scale: displayScale)", "madeFor = plan.id"] {
+                     "ResultMomentLoader.kept(stack, held: held, plan: plan.id, scale: displayScale)", "madeFor = plan.id"] {
             #expect(make.contains(part), "\(part): \(make)")
         }
         let kept = try Self.body(["struct ResultCard", "func essentials("], in: file)
@@ -76,6 +78,11 @@ struct MomentsSourceTests {
         #expect(body[..<below.lowerBound].contains("more(undoNote"), "\"Alle Änderungen\" and \"Rückgängig machen\" are not measured")
         let room = try Self.body(["struct ResultCard", "var stackRoom: CGFloat?"], in: file)
         #expect(room.contains("2 * screenPadding") && room.contains("belowHeight"), "\(room)")
+        // Not measured yet is nil, until both the screen and everything below the stack are
+        // measured: the fan is laid out at its smallest size meanwhile and can only grow (review
+        // E2 of design wave 2, N7).
+        #expect(room.contains("guard let room, let belowHeight else { return nil }"), "\(room)")
+        #expect(card.contains("@State private var belowHeight: CGFloat?"), "the block below the stack counts as measured before it is")
         let screen = try Self.body(["struct ResultCard", "var screenHeight: some View"], in: file)
         #expect(screen.contains(/\.containerRelativeFrame\(\s*\.vertical\s*\)/), "\(screen)")
         // The screen hands the result the padding it puts around it, as it does to the show.
@@ -108,6 +115,9 @@ struct MomentsSourceTests {
         #expect(limit.contains("typeSize.isAccessibilitySize ? ResultCoverStack.limitAtLargestText : ResultCoverStack.limit"))
         let scale = try Self.body(["struct ResultCoverMoment", "func fanScale("], in: file)
         #expect(scale.contains("ResultCoverFan.scale(count:") && scale.contains("room"), "\(scale)")
+        // An unmeasured room is the smallest scale (the core's), never the full size (review E2
+        // of design wave 2, N7: the count jumped up as the fan shrank in the first frames).
+        #expect(scale.contains("height: room.map { Double($0) }") && !scale.contains(".infinity"), "\(scale)")
         // No room held for covers that may come: the fan is as high as what it shows (finding 9).
         #expect(!file.contains("heldHeight") && !file.contains("expected"), "the stack still holds room while it loads")
         // No glow, no confetti: a white edge and a soft shadow.
@@ -126,14 +136,28 @@ struct MomentsSourceTests {
             }
         }
         let stack = try Self.code(Self.stack)
+        // Side by side, as the core decides (review E2 of design wave 2, N3): a few cards at once
+        // in the stack's order, a card Photos did not answer for comes back later, and the
+        // loading stops once the stack is decided, cancelled or out of patience.
         let load = try Self.body(["enum ResultMomentLoader", "static func prefetch("], in: stack)
-        #expect(load.contains("CoverLoader.Request(ids: card.candidates, pixels: pixels)"), "\(load)")
-        #expect(load.contains("await CoverLoader.load(request)"), "\(load)")
-        #expect(load.contains("!Task.isCancelled"), "\(load)")
-        #expect(stack.contains("static func kept(_ stack: ResultCoverStack, scale: CGFloat) -> [ResultMomentCover] {"),
-                "the result's covers are not taken from the store at once")
+        for part in ["withTaskGroup(of: ResultCoverPrefetch.Arrival.self)", "ResultCoverPrefetch(cards: stack.cards.map(\\.id))",
+                     "while let start = loading.next()", "loading.record(arrival)", "!loading.isDecided", "!Task.isCancelled",
+                     "prefetchPatience", "group.cancelAll()", "CoverLoader.Request(ids: candidates[start.card] ?? [], pixels: pixels)",
+                     "await ThumbnailCache.shared.lookUp("] {
+            #expect(load.contains(part), "\(part): \(load)")
+        }
+        let fetch = try Self.body(["enum ResultMomentLoader", "static func fetch("], in: stack)
+        for part in ["await CoverLoader.load(request)", "Task.isCancelled", "try? await Task.sleep(for: retryDelay)",
+                     "held.keep(ResultMomentCover(", "ThumbnailCache.shared.cachedCover(for: $0, pixels: request.pixels)"] {
+            #expect(fetch.contains(part), "\(part): \(fetch)")
+        }
+        // Kept as they arrive in the result's own state, not observed (nothing is drawn again).
+        #expect(stack.contains("@MainActor\nfinal class ResultMomentCovers {"), "the kept covers are observed, or not a class")
+        #expect(stack.contains("static func kept(_ stack: ResultCoverStack, held: ResultMomentCovers?, plan: AlbumistID, scale: CGFloat) -> [ResultMomentCover] {"),
+                "the result's covers are not taken from what was kept at once")
         let fromStore = try Self.body(["enum ResultMomentLoader", "static func kept("], in: stack)
-        #expect(fromStore.contains("ThumbnailCache.shared.cachedCover(for: photo, pixels: pixels)"), "\(fromStore)")
+        #expect(fromStore.contains("stack.sharpPhotos(held: ahead)"), "\(fromStore)")
+        #expect(fromStore.contains("ThumbnailCache.shared.cachedCover(for: $0, pixels: pixels)"), "\(fromStore)")
         #expect(!fromStore.contains("await"), "\(fromStore)")
         // The view itself never asks Photos: its only waits are the covers lying down.
         let view = try Self.body(["struct ResultCoverMoment"], in: stack)
@@ -177,6 +201,12 @@ struct MomentsSourceTests {
         #expect(photo.contains("personal ? nil : keptCover("), "\(photo)")
         // The card's own suggestion, whether or not the analysis still has it as the banner comes.
         #expect(photo.contains("let proposal = source.proposal") && !photo.contains("model.proposals"), "\(photo)")
+        // As the card shows it now: a suggestion the analysis updates in place while its card
+        // rests is noted anew, so the flying photo is never an older cover (review E2 of design
+        // wave 2, N5).
+        let source = try Self.body(["struct QuickCreateMomentSource:", "func body(content: Content)"], in: layer)
+        let changed = try #require(AppSource.body(of: ".onChange(of: proposal)", in: source), "\(source)")
+        #expect(changed.contains("if let frame { note(frame) }"), "\(changed)")
     }
 
     /// One success tap per run, as before: it waits for the show's end and then for the main
@@ -191,9 +221,17 @@ struct MomentsSourceTests {
         let begin = try Self.body(["struct PlanReviewView", "func beginMoment("], in: file)
         for part in ["momentPending = true", "model.resultCoverSources(for: plan)",
                      "model.resultCoverStack(for: plan, taken: sources, expected: true)", "prefetch?.cancel()",
-                     "prefetch = Task { await ResultMomentLoader.prefetch(stack, scale: scale) }"] {
+                     "covers.start(id)",
+                     "prefetch = Task { await ResultMomentLoader.prefetch(stack, plan: id, scale: scale, keepingIn: covers) }"] {
             #expect(begin.contains(part), "\(part): \(begin)")
         }
+        // The covers that arrive are the screen's own, kept while the result shows (review E2 of
+        // design wave 2, N3).
+        #expect(file.contains("@State private var momentCovers = ResultMomentCovers()"))
+        let handed = try Self.body(["struct PlanReviewView", "func resultCard("], in: file)
+        #expect(handed.contains("held: momentCovers"), "\(handed)")
+        let moment = try Self.body(["struct ResultCard", "func moment("], in: file)
+        #expect(moment.contains("held: held"), "\(moment)")
         let end = try Self.body(["struct PlanReviewView", "func endMoment()"], in: file)
         for part in ["momentPending = false", "prefetch?.cancel()", "prefetch = nil"] {
             #expect(end.contains(part), "\(part): \(end)")
@@ -291,20 +329,64 @@ struct MomentsSourceTests {
         #expect(placement.contains(".opacity(flight.opacity(at: t))"), "\(placement)")
     }
 
-    /// The cover flies only into an open tab bar (review E of design wave 2, finding 5): the cards
-    /// of the tab that shows tell how its content moves (`QuickCreateMoment.BarTrail`), read from
-    /// one card at a time; a new trail as another tab shows, out of sight when no card of the tab
-    /// is left.
+    /// The cover flies only into an open tab bar (review E of design wave 2, finding 5): what the
+    /// bar does is read from the scroll of the screens with cards, the start page and the
+    /// suggestion list, not from where the cards are (review E2, N1 and N2), and decided in the
+    /// core (`QuickCreateMoment.TabWatch`, `QuickCreateMomentBarTests`; N6). Each of the two
+    /// screens marks its scroll view with one line; the modifier hands over the offset, the
+    /// phase and when the screen shows and goes, only on a tab's own stack (a sheet's says no).
     @Test func theCoverFliesOnlyIntoAnOpenTabBar() throws {
+        // One marked line on each screen's scroll view, and no other screen calls it.
+        let chains = [Self.overview: ".navigationTitle(\"Vorschläge\").quickCreateMomentScrollTrail()",
+                      Self.list: "}.quickCreateMomentScrollTrail().background(Theme.background)"]
+        for (path, chain) in chains {
+            let file = try AppSource.read(path)
+            let lines = file.split(separator: "\n").filter { $0.contains(Self.trailMark) }
+            #expect(lines.count == 1, "\(path): \(lines)")
+            let line = try #require(lines.first).trimmingCharacters(in: .whitespaces)
+            #expect(line == ".quickCreateMomentScrollTrail() \(Self.trailMark)", "\(path): \(line)")
+            let view = path == Self.overview ? "struct OverviewView" : "struct ProposalListView"
+            let body = try Self.body([view, "var body: some View"], in: try Self.code(path))
+            let squeezed = String(body.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.map(Character.init))
+            #expect(squeezed.contains(chain), "\(path): not on the scroll view")
+        }
+        for path in AppSource.swiftFiles(under: "App/Albumist") where ![Self.overview, Self.list, Self.layer].contains(path) {
+            let file = try AppSource.read(path)
+            #expect(AppSource.calls(of: "quickCreateMomentScrollTrail(", in: file).isEmpty, "\(path) reads a scroll too")
+        }
         let layer = try Self.code(Self.layer)
+        let trail = try Self.body(["struct QuickCreateMomentScrollTrail", "func body(content: Content)"], in: layer)
+        for part in [".onScrollGeometryChange(for: QuickCreateMoment.ScrollSpot.self)", "offset: Double(geometry.contentOffset.y)",
+                     "top: -Double(geometry.contentInsets.top)",
+                     "end: Double(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height)",
+                     ".onScrollPhaseChange", "QuickCreateMomentSources.shared.scrolled(token, to: now, motion)",
+                     "QuickCreateMomentSources.shared.appeared(token, on: place, at: spot, again: shownBefore)",
+                     ".onDisappear { QuickCreateMomentSources.shared.disappeared(token) }"] {
+            #expect(trail.contains(part), "\(part): \(trail)")
+        }
+        // Only a tab's own stack: a sheet over the tabs has a stack of its own.
+        #expect(Self.count("guard onTab", in: trail) == 2, "\(trail)")
+        #expect(layer.contains("@Environment(\\.quickCreateAtOnce) private var onTab"), "the modifier does not ask for the tab's stack")
+        // The user's scroll only: at rest, laid out anew or animated by the system is none.
+        let motion = try Self.body(["struct QuickCreateMomentScrollTrail", "static func motion("], in: layer)
+        #expect(motion.contains("case .tracking, .interacting, .decelerating: .user"), "\(motion)")
+        #expect(motion.contains("default: .other"), "\(motion)")
+        // The app keeps no trail of its own: the core's watch decides.
+        #expect(!layer.contains("BarTrail(") && !layer.contains("anchor") && !layer.contains("lostSight"), "a trail in the app")
         let note = try Self.body(["final class QuickCreateMomentSources", "func note(_ source: Source"], in: layer)
-        #expect(note.contains("trail.moved(by:") && note.contains("anchor"), "\(note)")
-        let forget = try Self.body(["final class QuickCreateMomentSources", "func forget("], in: layer)
-        #expect(forget.contains("trail.lostSight()"), "\(forget)")
-        let show = try Self.body(["final class QuickCreateMomentSources", "func show(place"], in: layer)
-        #expect(show.contains("trail = QuickCreateMoment.BarTrail()"), "\(show)")
+        #expect(!note.contains("trail") && !note.contains("watch"), "the cards' frames feed the trail again: \(note)")
         let open = try Self.body(["final class QuickCreateMomentSources", "var barOpen: Bool"], in: layer)
-        #expect(open.contains("trail.isOpen"), "\(open)")
+        #expect(open.contains("watch.barOpen"), "\(open)")
+        let show = try Self.body(["final class QuickCreateMomentSources", "func show(place"], in: layer)
+        #expect(show.contains("watch.show(place: token, shown, now: Self.now)"), "\(show)")
+        // A tab chosen in code (Siri, Spotlight, the analysis card) may come with a shrunk bar.
+        let chosen = try Self.body(["final class QuickCreateMomentSources", "func tabChosenInCode()"], in: layer)
+        #expect(chosen.contains("watch.tabChosenInCode()"), "\(chosen)")
+        let tabs = try Self.code(Self.tabs)
+        let route = try #require(AppSource.body(of: [".onChange(of: model.route, initial: true)"], in: tabs), "the route is gone")
+        let mark = try #require(route.range(of: "if tab != .suggestions { QuickCreateMomentSources.shared.tabChosenInCode() }"), "\(route)")
+        let chooses = try #require(route.range(of: "tab = .suggestions"), "\(route)")
+        #expect(mark.upperBound <= chooses.lowerBound, "\(route)")
     }
 
     /// The cover lands on "Alben": the third of three tabs beside the round search button, as
@@ -375,7 +457,8 @@ struct MomentsSourceTests {
         #expect(source.contains(".onAppear"), "a card back on screen is not noted again: \(source)")
         let note = try Self.body(["struct QuickCreateMomentSource:", "func note("], in: layer)
         #expect(note.contains("place: place"), "\(note)")
+        // Pruned in the core (`QuickCreateMomentBarTests.theTabsScreensArePruned`).
         let places = try Self.body(["final class QuickCreateMomentSources", "func note(_ place: Place"], in: layer)
-        #expect(places.contains("keptPlaces"), "the tabs' screens are never pruned: \(places)")
+        #expect(places.contains("watch.measured("), "the tabs' screens are never pruned: \(places)")
     }
 }

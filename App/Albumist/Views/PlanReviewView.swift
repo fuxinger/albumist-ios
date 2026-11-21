@@ -43,6 +43,9 @@ struct PlanReviewView: View {
     /// The covers of the result's stack loading while the plan runs (`beginMoment`); cancelled as
     /// the result shows, which takes only what is kept by then, or when the run has no result.
     @State private var prefetch: Task<Void, Never>?
+    /// The covers that loaded, kept here as they arrive: the covers' store may be emptied
+    /// meanwhile (review E2 of design wave 2, N3). Not observed: nothing is drawn again for them.
+    @State private var momentCovers = ResultMomentCovers()
     /// What the result's stack of covers knows of the suggestions the plan came from, taken as
     /// it starts (`AppModel.resultCoverSources`).
     @State private var coverSources: ResultCoverSources?
@@ -467,16 +470,19 @@ struct PlanReviewView: View {
 
     /// The result's moment (draft E3) as the plan starts: the success tap waits for it, what
     /// the stack must know of the suggestions is taken now (the analysis may make them anew
-    /// before the result shows), and the covers load while the plan runs, so they are there
-    /// with the result (`ResultMomentLoader.prefetch`).
+    /// before the result shows), and the covers load while the plan runs, side by side, kept
+    /// here as they arrive, so they are there with the result (`ResultMomentLoader.prefetch`).
     private func beginMoment(_ plan: ChangePlan) {
         let sources = model.resultCoverSources(for: plan)
         coverSources = sources
         momentPending = true
         let stack = model.resultCoverStack(for: plan, taken: sources, expected: true)
         let scale = displayScale
+        let id = plan.id
+        let covers = momentCovers
         prefetch?.cancel()
-        prefetch = Task { await ResultMomentLoader.prefetch(stack, scale: scale) }
+        covers.start(id)
+        prefetch = Task { await ResultMomentLoader.prefetch(stack, plan: id, scale: scale, keepingIn: covers) }
     }
 
     /// The moment is over, or there is none: the success tap may come, and no cover loads any more.
@@ -507,7 +513,7 @@ struct PlanReviewView: View {
     /// The result of the plan that ran, with its moment (draft E3): the success tap comes as
     /// the main cover lies down, or as the symbol shows.
     private func resultCard(_ result: ChangePlan) -> some View {
-        ResultCard(plan: result, sources: coverSources, screenPadding: Self.contentPadding) {
+        ResultCard(plan: result, sources: coverSources, held: momentCovers, screenPadding: Self.contentPadding) {
             endMoment()
         }
     }
@@ -686,6 +692,8 @@ struct ResultCard: View {
     /// What the stack knows of the suggestions the plan came from, taken as it started (nil:
     /// taken now, `AppModel.resultCoverStack`).
     var sources: ResultCoverSources? = nil
+    /// The covers the screen kept as they loaded while the plan ran (nil: none).
+    var held: ResultMomentCovers? = nil
     /// The padding the screen puts around the result (above and below it): kept free when the
     /// stack fits itself to the screen.
     var screenPadding: CGFloat = 0
@@ -704,16 +712,17 @@ struct ResultCard: View {
     @State private var room: CGFloat?
     /// The height of everything below the stack: the count, the way to the new albums,
     /// "Fotos-App öffnen", "Alle Änderungen ansehen" and "Rückgängig machen" with its note
-    /// (review E of design wave 2, finding 8).
-    @State private var belowHeight: CGFloat = 0
+    /// (review E of design wave 2, finding 8). Nil until measured.
+    @State private var belowHeight: CGFloat?
     @Environment(\.openURL) private var openURL
 
     private static let spacing = Theme.Spacing.l
 
     /// The height the stack may take: what the screen shows, less its padding above and below
-    /// and everything below the stack. Nil until measured.
+    /// and everything below the stack. Nil until both are measured: the fan is laid out at its
+    /// smallest meanwhile and can only grow (review E2 of design wave 2, N7).
     private var stackRoom: CGFloat? {
-        guard let room else { return nil }
+        guard let room, let belowHeight else { return nil }
         return room - 2 * screenPadding - belowHeight - Self.spacing
     }
 
@@ -766,7 +775,8 @@ struct ResultCard: View {
         let symbol = failed > 0 ? "exclamationmark.circle.fill"
             : headline.kind == .undone ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill"
         let tint = failed == 0 ? Theme.accent : Theme.tint(for: .documents)
-        return ResultCoverMoment(plan: plan, sources: sources, symbol: symbol, tint: tint, room: stackRoom, onSettled: onMoment)
+        return ResultCoverMoment(plan: plan, sources: sources, held: held, symbol: symbol, tint: tint, room: stackRoom,
+                                 onSettled: onMoment)
     }
 
     /// What stays in view below the stack: the count with its line, what did not happen, where

@@ -180,6 +180,35 @@ struct ResultHeadlineTests {
         #expect(headline.undoNote == .removesNewAlbumsAndAddedPhotos)
     }
 
+    /// A run that makes an album and adds photos to one Albumist made, or a retry ("Fehlendes
+    /// erneut versuchen" makes the album its first run could not and fills the one it made), says
+    /// the general sentence under "Rückgängig machen": "… aus deinen Alben" would call Albumist's
+    /// album the user's own (review E2 of design wave 2, N4). The count and the line stay.
+    @Test func aMixedRunCallsOnlyTheUsersAlbumsTheirs() async throws {
+        let mine = CollectionSnapshot(id: "mine", title: "Italien", assetIDs: ["own"])
+        let library = InMemoryPhotoLibrary(assets: Self.assets, collections: [mine])
+        let made = try await Self.make([ConfirmedProposal(proposal: Self.kyoto, decision: Self.new),
+                                        ConfirmedProposal(proposal: Self.rom, decision: .extendExisting("mine"))], in: library)
+        let after = try await library.currentInventory()
+        #expect(ResultHeadline(plan: made, inventory: after).undoNote == .removesNewAlbumsAndAddedPhotos)
+
+        // The album that got photos is one Albumist made.
+        let albumists = ResultHeadline(plan: made, inventory: after, albumistAlbums: ["mine"])
+        #expect(albumists.lead == .newAlbums(1))
+        #expect(albumists.detail == .extendedAndSorted(albums: 1, photos: 5))
+        #expect(albumists.showsWhereNewAlbumsAre)
+        #expect(albumists.undoNote == .general)
+        // An album of Albumist's that got nothing is not named: the user's album keeps the words.
+        #expect(ResultHeadline(plan: made, inventory: after, albumistAlbums: ["elsewhere"]).undoNote == .removesNewAlbumsAndAddedPhotos)
+
+        // A retry fills the albums its first run made.
+        var retry = made
+        retry.retries = AlbumistID("first run")
+        let retried = ResultHeadline(plan: retry, inventory: after)
+        #expect(retried.lead == .newAlbums(1))
+        #expect(retried.undoNote == .general)
+    }
+
     // MARK: Whose albums (review E of design wave 2, finding 12)
 
     /// The key of the new album named `title` in `plan`.

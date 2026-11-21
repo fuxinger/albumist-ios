@@ -4,9 +4,9 @@ import Testing
 
 /// The small moment after "Anlegen" on a card (draft E6, design wave 2): a small copy of the
 /// card's cover flies towards the tab "Alben" and fades into the tab bar as it reaches it. When it
-/// flies, where the tab is, the path and what the cards say of the tab bar are decided here
-/// (`QuickCreateMoment`); the app draws it. The album's one haptic is the success tap with its
-/// banner, as before the moment (`MomentsSourceTests.theSmallMomentFliesOverTheTabsOnly`).
+/// flies, where the tab is and the path are decided here (`QuickCreateMoment`; whether the tab
+/// bar is open: `QuickCreateMomentBarTests`); the app draws it. The album's one haptic is the
+/// success tap with its banner, as before the moment (`MomentsSourceTests.theSmallMomentFliesOverTheTabsOnly`).
 @Suite("Quick create moment")
 struct QuickCreateMomentTests {
     typealias Moment = QuickCreateMoment
@@ -30,56 +30,6 @@ struct QuickCreateMomentTests {
     @Test func reduceMotionShowsNothing() {
         #expect(Moment.kind(reduceMotion: true, sourceOnScreen: true, hasSharpCover: true, barOpen: true) == .none)
         #expect(Moment.kind(reduceMotion: true, sourceOnScreen: true, hasSharpCover: true, barOpen: false) == .none)
-    }
-
-    // MARK: The tab bar
-
-    /// The bar is open on a tab just chosen; content scrolled down shrinks it to one round button,
-    /// content scrolled back up opens it again (`.tabBarMinimizeBehavior(.onScrollDown)`). No view
-    /// of the system says which, so the movement of the cards does (review E of design wave 2,
-    /// finding 5), and only a clear scroll back up counts as open again.
-    @Test func theCardsTellWhetherTheBarIsOpen() {
-        var trail = Moment.BarTrail()
-        #expect(trail.isOpen, "the bar was open to choose the tab")
-        trail.moved(by: -5)
-        #expect(trail.isOpen, "a few points are no scroll")
-        trail.moved(by: -5)
-        #expect(!trail.isOpen, "scrolled down: the bar may have shrunk")
-        trail.moved(by: 20)
-        #expect(!trail.isOpen, "a little back up is not enough")
-        trail.moved(by: 15)
-        #expect(trail.isOpen, "scrolled back up: open again")
-        trail.moved(by: -30)
-        #expect(!trail.isOpen)
-        // A turn of a few points starts the count anew.
-        trail.moved(by: 30)
-        trail.moved(by: -1)
-        trail.moved(by: 30)
-        #expect(!trail.isOpen, "\(trail)")
-        trail.moved(by: 2)
-        #expect(trail.isOpen)
-    }
-
-    /// A list laid out anew moves its cards in one step (a card came or went, such as the card kept
-    /// after "Anlegen" leaving with its banner): no scroll, either way.
-    @Test func aListLaidOutAnewIsNoScroll() {
-        var trail = Moment.BarTrail()
-        trail.moved(by: -260)
-        #expect(trail.isOpen)
-        trail.moved(by: -40)
-        #expect(!trail.isOpen)
-        trail.moved(by: 260)
-        #expect(!trail.isOpen)
-    }
-
-    /// While no card of the tab is in sight (a screen pushed over them), its content may scroll
-    /// unseen: the bar counts as shrunk until the cards scroll back up or the tab is chosen again.
-    @Test func cardsOutOfSightMayHideAScroll() {
-        var trail = Moment.BarTrail()
-        trail.lostSight()
-        #expect(!trail.isOpen)
-        trail.moved(by: Moment.BarTrail.opensAfter)
-        #expect(trail.isOpen)
     }
 
     // MARK: Where

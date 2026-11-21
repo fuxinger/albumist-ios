@@ -18,6 +18,13 @@ public struct VideoDuration: Equatable, Sendable {
         seconds = max(1, Int(min(duration, Self.longest).rounded(.toNearestOrAwayFromZero)))
     }
 
+    private init(exactly seconds: Int) {
+        self.seconds = seconds
+    }
+
+    /// What a video counts as while its length is not known yet: the shortest one.
+    public static let oneSecond = VideoDuration(exactly: 1)
+
     /// "0:15", "2:05", "59:59", "1:00:00": minutes and seconds, hours from an hour on. The same in
     /// German and English.
     public var text: String { VideoClock.text(seconds, withHours: seconds >= 3600) }

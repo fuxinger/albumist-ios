@@ -39,6 +39,9 @@ struct VideoPlaybackTests {
         }
         #expect(VideoDuration(seconds: 1e300) != nil)
         #expect(VideoDuration(seconds: 1e300)?.text.isEmpty == false)
+        // While a video's length is not known yet it counts as the shortest.
+        #expect(VideoDuration.oneSecond == VideoDuration(seconds: 1))
+        #expect(VideoDuration.oneSecond.text == "0:01")
     }
 
     /// The figures read the same in German and English; what VoiceOver says does not.

@@ -24,6 +24,7 @@ struct LongPressSourceTests {
     static let overview = "App/Albumist/Views/OverviewView.swift"
     static let photoQuestion = "App/Albumist/Views/Menus/PhotoRemovalQuestion.swift"
     static let photoCard = "App/Albumist/DesignSystem/PhotoCard.swift"
+    static let thumbnails = "App/Albumist/Views/AssetThumbnail.swift"
 
     /// The code of `path` (comments blanked, strings kept).
     static func code(_ path: String) throws -> String {
@@ -38,6 +39,31 @@ struct LongPressSourceTests {
     /// `text` without any white space, so a check does not depend on how a line is broken.
     static func squeezed(_ text: String) -> String {
         String(text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.map(Character.init))
+    }
+
+    /// The labels of a call's arguments, read at the call's own level ("id: id, side: 80" →
+    /// ["id", "side"]; "_" for an argument without one).
+    static func labels(_ arguments: String) -> [String] {
+        var parts: [String] = []
+        var part = ""
+        var depth = 0
+        for character in arguments {
+            if "([{".contains(character) { depth += 1 }
+            if ")]}".contains(character) { depth -= 1 }
+            if character == ",", depth == 0 {
+                parts.append(part)
+                part = ""
+            } else {
+                part.append(character)
+            }
+        }
+        parts.append(part)
+        return parts.map { part in
+            let trimmed = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let colon = trimmed.firstIndex(of: ":") else { return "_" }
+            let label = trimmed[..<colon]
+            return !label.isEmpty && label.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" } ? String(label) : "_"
+        }
     }
 
     // MARK: Suggestion cards
@@ -332,6 +358,39 @@ struct LongPressSourceTests {
         // Sharp by the covers' rule, the same 70 % (`ThumbnailRequest.sharpShare`).
         let thumbnails = try Self.code("App/Albumist/Views/AssetThumbnail.swift")
         #expect(thumbnails.contains("static let sharpShare: CGFloat = \(PhotoMenu.sharpShare)"))
+    }
+
+    /// A thumbnail made anew starts with the image the thumbnails' memory holds for it, so a cell
+    /// that is rebuilt (a photo's long press is switched on or off as "Auswählen" toggles; review
+    /// C2 of design wave 2, N1) shows its photo from its first frame, not its grey ground until
+    /// its task has read the memory again. Only from memory: its initializer asks Photos nothing
+    /// (the task asks, as before), and every caller keeps the labels it has.
+    @Test func aThumbnailStartsWithTheImageInMemory() throws {
+        let made = try Self.body(["struct AssetThumbnail", "init(id: AssetID, side: CGFloat = 80, anchor: Alignment = .center)"],
+                                 in: Self.thumbnails)
+        let seeded = Self.squeezed(made)
+        #expect(seeded.contains("letkept=ThumbnailCache.shared.cachedThumbnail(for:id,side:side)"), "\(seeded)")
+        #expect(seeded.contains("_image=State(initialValue:kept)"), "\(seeded)")
+        #expect(seeded.contains("_loadedID=State(initialValue:kept==nil?nil:id)"), "\(seeded)")
+        for request in ["image(for:", "await", "Task", "requestImage(", "lookUp", "cover(for:", "largeImage(", "asset("] {
+            #expect(!made.contains(request), "the initializer asks Photos: \(request)")
+        }
+        // What is not in memory the task asks for, as before; the shown image is the photo's own.
+        let shown = try Self.body(["struct AssetThumbnail", "var body: some View"], in: Self.thumbnails)
+        #expect(shown.contains(".task(id: id) {") && shown.contains("await ThumbnailCache.shared.image(for: id, side: side)"))
+        #expect(shown.contains("if let image, loadedID == id {"))
+        // Every caller keeps working: `id:`, then `side:` and `anchor:` where it gives them.
+        var callers = 0
+        for path in AppSource.swiftFiles(under: "App/Albumist") {
+            for arguments in AppSource.calls(of: "AssetThumbnail(", in: try AppSource.read(path)) {
+                callers += 1
+                let labels = Self.labels(arguments)
+                let order = labels.compactMap { ["id", "side", "anchor"].firstIndex(of: $0) }
+                #expect(labels.first == "id" && order.count == labels.count && order == order.sorted() && Set(order).count == order.count,
+                        "\(path): AssetThumbnail(\(arguments))")
+            }
+        }
+        #expect(callers >= 10, "\(callers) callers")
     }
 
     /// Each photo item goes the place's way: "Ansehen" as the tap opens it, "Zu Album

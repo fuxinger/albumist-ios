@@ -211,7 +211,7 @@ struct VideoViewerSourceTests {
     @Test func theAutomaticStartGivesWayToWhatCameAfterIt() throws {
         let model = try Self.file("ViewerVideo.swift")
         let open = try #require(AppSource.body(of: "func open(", in: model))
-        #expect(Self.inOrder(["guard start.byItself else { return }", "startsByItself = true", "Task.sleep(for: .milliseconds(350))",
+        #expect(Self.inOrder(["guard start.byItself, startsByItself else { return }", "Task.sleep(for: .milliseconds(350))",
                               "await LiveAudio.settled()", "guard !Task.isCancelled, self.id == id, startsByItself else { return }",
                               "startsByItself = false", "guard sound.isOn || LiveAudio.isReady else { return }", "play()"], in: open),
                 "\(open)")
@@ -224,6 +224,22 @@ struct VideoViewerSourceTests {
         #expect(try #require(AppSource.body(of: "func close(", in: model)).contains("stop()"))
         let viewer = try Self.code(Self.viewerPath)
         #expect(Self.inOrder(["video.pause()", "dismiss()"], in: try #require(AppSource.body(of: "private func closeNow(", in: viewer))))
+    }
+
+    /// A pause that comes while the video is still asked for, before Photos handed it over, is
+    /// remembered too (review X5): the automatic start is planned before the loader is asked, so a
+    /// close (the button, the pull, VoiceOver's escape) or "Anhalten" in that moment cancels it,
+    /// and nothing plans it anew once the item came. Before, it was planned only after the
+    /// answer: a video swiped to and closed at once could start during the slide away, with the
+    /// sound on from an earlier video. A video only in iCloud plans nothing.
+    @Test func aPauseBeforeTheVideoCameIsRemembered() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let open = try #require(AppSource.body(of: "func open(", in: model))
+        #expect(Self.inOrder(["stop()", "if onlyInICloud.contains(id) {", "return", "startsByItself = start.byItself",
+                              "let answer = await VideoLoader.load(id)", "guard !Task.isCancelled, self.id == id else { return }",
+                              "case .item(let item):", "make(item.value)", "guard start.byItself, startsByItself else { return }",
+                              "Task.sleep(for: .milliseconds(350))"], in: open), "\(open)")
+        #expect(!open.contains("startsByItself = true"), "planned anew after the answer, a pause meanwhile is forgotten: \(open)")
     }
 
     /// A video its player cannot play (a file it cannot decode) says so calmly, as one Photos

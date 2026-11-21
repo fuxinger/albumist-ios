@@ -40,7 +40,9 @@ struct SearchStartingPointTile: View {
 
     var body: some View {
         let suggestion = point.suggestion
-        Button(action: action) {
+        Button {
+            action()
+        } label: {
             VStack(alignment: .leading, spacing: 7) {
                 // Sharp from the device or a calm placeholder with the chip's symbol, never a big
                 // blurry image (`CoverPhoto`); the candidates are never sensitive.

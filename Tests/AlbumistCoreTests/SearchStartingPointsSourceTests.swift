@@ -67,6 +67,11 @@ struct SearchStartingPointsSourceTests {
     /// a wide strip at the accessibility sizes; the count in the note grey; no text on the photo.
     @Test func aTileIsOneButtonWithNameCountAndASharpPicture() throws {
         let tile = Self.squeezed(try Self.body(["struct SearchStartingPointTile", "var body"], in: Self.tiles))
+        // The tile's action is main-actor isolated: the button calls it from its own closure (as
+        // `AlbumUndoMenuItem` does), which compiles however SwiftUI types the button's action;
+        // handed over as the action itself it would rely on that type.
+        #expect(tile.contains("Button{action()}label:{"))
+        #expect(!tile.contains("Button(action:action)"))
         #expect(tile.contains("CoverPhoto(ids:point.coverIDs,aspectRatio:typeSize.isAccessibilitySize?3:1,cornerRadius:Theme.Radius.photoTile,placeholderSymbol:SearchView.symbol(suggestion.kind))"))
         #expect(!tile.contains("hidesPreview"), "a starting point never needs \"Vorschau ausgeblendet\": its pictures may all be shown")
         #expect(!tile.contains(".overlay"), "no text on the photo")

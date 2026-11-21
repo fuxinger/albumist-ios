@@ -586,9 +586,12 @@ private struct ZoomablePhoto: View {
         Color.clear
             .overlay {
                 if let preview = ThumbnailCache.shared.thumbnailInMemory(for: id) {
+                    // Pulled down to close or pinched, it follows the finger as the photo will.
                     Image(uiImage: preview)
                         .resizable()
                         .scaledToFit()
+                        .scaleEffect(scale * (1 - min(pull / 2000, 0.15)))
+                        .offset(x: offset.width, y: offset.height + pull)
                 }
             }
             .frame(width: size.width, height: size.height)

@@ -225,6 +225,9 @@ struct VideoViewerSourceTests {
         let waiting = try #require(AppSource.body(of: "private func waiting(in size: CGSize)", in: photo))
         #expect(waiting.contains("ThumbnailCache.shared.thumbnailInMemory(for: id)"))
         #expect(waiting.contains(".scaledToFit()"), "the preview not fitted as the photo will be")
+        // It follows the finger as the photo does: a pull down to close, a pinch.
+        #expect(waiting.contains(".scaleEffect(scale * (1 - min(pull / 2000, 0.15)))")
+                && waiting.contains(".offset(x: offset.width, y: offset.height + pull)"), "the preview stands still under a pull")
         #expect(waiting.contains("Text(\"Foto wird geladen\")") && waiting.contains("Text(\"Video wird geladen\")"))
         let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: photo))
         #expect(Self.inOrder(["if let image {", "} else if unavailable {", "} else {", "waiting(in: size)"], in: shown))

@@ -17,6 +17,7 @@ struct StartSections: View {
     @Environment(Purchases.self) private var purchases
     @Environment(Navigator.self) private var navigator: Navigator?
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.scenePhase) private var scenePhase
     /// The card for an empty library is shown above: it explains the empty page itself.
     var libraryHint: Bool
     /// The first analysis went through once (`AppModel.analysedOnce`).
@@ -31,12 +32,16 @@ struct StartSections: View {
     @State private var visit = StartVisit()
     /// The suggestion whose preview ("Ergänzen …") is being made.
     @State private var previewing: SortlyID?
+    /// The app went to the background since: its return begins a new visit.
+    @State private var wasInBackground = false
 
     /// At the accessibility text sizes a row is one column of whole cards (draft E7): three of
     /// them, "Alle 41" shows the rest.
     private static let rowLimitAtLargestText = 3
 
     var body: some View {
+        // How often the page is drawn, for the main thread's stall lines in UI runs.
+        let _ = MainThreadWatch.shared.count("start page body")
         let page = makePage(for: visit)
         let byID = Dictionary(model.proposals.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
@@ -45,16 +50,46 @@ struct StartSections: View {
             }
         }
         .onAppear {
-            // A new visit, which remembers at once what it shows (whatever runs first on
-            // appearing, this or a change of the page).
-            var fresh = StartVisit(lastMade: model.lastAlbumsMade)
-            fresh.saw(makePage(for: fresh))
-            visit = fresh
+            // A new visit, but not under a swipe back that has not ended: the page appears when
+            // the swipe begins, while the screen above is still on the path and a preview's
+            // picks are still chosen; the visit would have no "Dein Startpaket" until the swipe
+            // ends (review A of design wave 1).
+            if navigator?.path.isEmpty != false { beginVisit() }
+        }
+        // Back on top: the swipe back ended (the preview's picks are given back by then), Back,
+        // or the tab tapped again.
+        .onChange(of: navigator?.path.isEmpty ?? true) { _, onTop in
+            if onTop { beginVisit() }
+        }
+        // The app opened again from the background is a new visit too.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                wasInBackground = true
+            case .active where wasInBackground:
+                wasInBackground = false
+                if navigator?.path.isEmpty != false { beginVisit() }
+            default:
+                break
+            }
         }
         .onChange(of: page) { _, shown in visit.saw(shown) }
         // "Widerrufen" on the banner, or the history, took back a plan a card made here: the
         // card says "Anlegen" again.
         .onChange(of: model.undonePlans) { _, plans in visit.undone(plans) }
+        // The banner "„Name“ angelegt" for a card tapped here says "Angelegt" on it, also when
+        // the album was made only after the purchase sheet (`continueQuickCreate`).
+        .onChange(of: model.quickCreateBanner?.id) { _, _ in
+            if let banner = model.quickCreateBanner { visit.announced(banner.proposalID, by: banner.plan.id) }
+        }
+    }
+
+    /// A new visit (`StartVisit`), which remembers at once what it shows (whatever runs first,
+    /// this or a change of the page).
+    private func beginVisit() {
+        var fresh = StartVisit(lastMade: model.lastAlbumsMade)
+        fresh.saw(makePage(for: fresh))
+        visit = fresh
     }
 
     /// How many albums "Dein Startpaket" may hold now (`StartPage.starterSetLimit`).
@@ -64,9 +99,10 @@ struct StartSections: View {
     }
 
     private func makePage(for visit: StartVisit) -> StartPage {
-        model.startPage(visit: visit, libraryHint: libraryHint, starterSet: model.starterSet(limit: starterSetLimit),
-                        analysedOnce: analysedOnce, showsMosaic: showsMosaic, rebuilding: rebuilding,
-                        analysing: analysing)
+        let limit = starterSetLimit
+        return model.startPage(visit: visit, libraryHint: libraryHint, starterSet: model.starterSet(limit: limit),
+                               starterSetLimit: limit, analysedOnce: analysedOnce, showsMosaic: showsMosaic,
+                               rebuilding: rebuilding, analysing: analysing)
     }
 
     /// "Dein Startpaket": the preview of the set, each album picked for the preview only.
@@ -223,9 +259,11 @@ struct StartSections: View {
         let selection = model.selectForPreview([(proposal, pick)])
         guard let plan = await model.singlePlan(for: proposal) else {
             // Nothing to change after all (the album holds every photo by now): its page says
-            // what there is.
+            // what there is, if this page is still the one on top (review A of design wave 1).
             model.endPreview(selection)
-            if model.message == nil { open(proposal) }
+            if model.message == nil {
+                Navigator.push(.proposal(ProposalRef(proposal)), on: navigator, ifStill: request.mark)
+            }
             return
         }
         switch request.verdict(model: model, navigator: navigator) {
@@ -311,39 +349,12 @@ struct StartProposalCard: View {
     var onAction: () -> Void
 
     var body: some View {
-        PhotoCard(coverIDs: covers, title: Text(verbatim: text.title), subtitle: subtitle,
+        PhotoCard(coverIDs: covers, title: Text(verbatim: text.title), subtitle: text.styledSubtitle,
                   hidesPreview: text.hidesPreview, aspectRatio: style == .large ? 2 : 3.0 / 2.0, style: style,
                   placeholderSymbol: proposal.kind.area.symbol, onOpen: onOpen) {
             button
         }
         .accessibilityIdentifier("suggestion.card.\(made ? "made" : text.action.kind)")
-    }
-
-    /// The line under the name (Punkt 3), with the parts the drafts mark: "Name fehlt" in the
-    /// warning colour, the lock before "Persönlicher Inhalt".
-    private var subtitle: Text? {
-        let parts = text.subtitleParts
-        guard let first = parts.first else { return nil }
-        switch text.status {
-        case .nameMissing:
-            let missing = Text(verbatim: first).foregroundStyle(Theme.tint(for: .documents))
-            return joined(missing, parts.dropFirst())
-        case .personal:
-            guard parts.count == 2 else { return Text(verbatim: parts.joined(separator: " · ")) }
-            let lock = Image(systemName: "lock.fill")
-            let personal = Text(verbatim: parts[1])
-            let marked = Text("\(lock) \(personal)")
-            let count = Text(verbatim: first)
-            return Text("\(count) · \(marked)")
-        default:
-            return Text(verbatim: parts.joined(separator: " · "))
-        }
-    }
-
-    private func joined(_ head: Text, _ rest: ArraySlice<String>) -> Text {
-        guard !rest.isEmpty else { return head }
-        let tail = Text(verbatim: rest.joined(separator: " · "))
-        return Text("\(head) · \(tail)")
     }
 
     @ViewBuilder
@@ -370,9 +381,18 @@ struct StartProposalCard: View {
             .buttonStyle(CardActionButtonStyle())
             .disabled(working || waits)
             // The suggestion list's words („Toskana“ ergänzen names the album that gets the
-            // photos), so a card says the same on both screens.
-            .accessibilityLabel(text.spokenAction)
+            // photos), so a card says the same on both screens; while it works, what runs.
+            .accessibilityLabel(working ? workingLabel : text.spokenAction)
             .accessibilityInputLabels(text.actionInputLabels)
+        }
+    }
+
+    /// While the album is made ("Anlegen") or the preview prepared ("Ergänzen …"): the words
+    /// the suggestion list says then (review A of design wave 1).
+    private var workingLabel: Text {
+        switch text.action {
+        case .create: Text("Album wird angelegt")
+        case .add, .name, .look: Text("Wird vorbereitet")
         }
     }
 

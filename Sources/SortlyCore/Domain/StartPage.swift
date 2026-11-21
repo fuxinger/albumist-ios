@@ -116,6 +116,9 @@ public struct StartPage: Equatable, Sendable {
         /// The albums "Dein Startpaket" would hold now, best first (`AppModel.starterSet(limit:)`,
         /// with `StartPage.starterSetLimit`).
         public var starterSet: [SortlyID]
+        /// How many albums "Dein Startpaket" may hold now (`StartPage.starterSetLimit`): the free
+        /// albums left, so the set kept for the visit never offers more than are free.
+        public var starterSetLimit: Int
         /// No album made and none chosen yet.
         public var nothingMadeYet: Bool
         /// The card for an empty library is shown: it explains the empty page itself.
@@ -133,7 +136,8 @@ public struct StartPage: Equatable, Sendable {
         public var visit: StartVisit
 
         public init(proposals: [AlbumProposal], open: Set<SortlyID>, areas: [OrganizationArea], analysedOnce: Bool,
-                    showsMosaic: Bool = false, starterSet: [SortlyID] = [], nothingMadeYet: Bool = true,
+                    showsMosaic: Bool = false, starterSet: [SortlyID] = [], starterSetLimit: Int = StartPage.starterSetMaximum,
+                    nothingMadeYet: Bool = true,
                     libraryHint: Bool = false, rebuilding: Bool = false, analysing: Bool = false,
                     interruptedPlan: Bool = false, inYourAlbums: Int = 0, visit: StartVisit = StartVisit()) {
             self.proposals = proposals
@@ -142,6 +146,7 @@ public struct StartPage: Equatable, Sendable {
             self.analysedOnce = analysedOnce
             self.showsMosaic = showsMosaic
             self.starterSet = starterSet
+            self.starterSetLimit = starterSetLimit
             self.nothingMadeYet = nothingMadeYet
             self.libraryHint = libraryHint
             self.rebuilding = rebuilding
@@ -291,15 +296,18 @@ public struct StartPage: Equatable, Sendable {
     /// "Dein Startpaket": once shown in this visit, the same with what of it is still open
     /// (an album of it made from its card leaves it; nothing joins); otherwise, after the first
     /// analysis and before anything was made or chosen, the model's with at least
-    /// `starterSetMinimum` albums. Never beside an interrupted plan: its "Rest anlegen" is the
-    /// page's one filled button then.
+    /// `starterSetMinimum` albums. Never more than are free now (`Input.starterSetLimit`, best
+    /// first: an album made from another card uses one, review A of design wave 1), and never
+    /// beside an interrupted plan: its "Rest anlegen" is the page's one filled button then.
     static func starterSet(_ input: Input, made: Set<SortlyID>) -> [SortlyID] {
         guard input.analysedOnce, !input.interruptedPlan else { return [] }
+        let limit = max(0, input.starterSetLimit)
         if let shown = input.visit.shownStarterSet {
-            return shown.filter { input.open.contains($0) && !made.contains($0) }
+            return Array(shown.filter { input.open.contains($0) && !made.contains($0) }.prefix(limit))
         }
-        guard input.nothingMadeYet, input.starterSet.count >= starterSetMinimum else { return [] }
-        return input.starterSet
+        let offered = Array(input.starterSet.prefix(limit))
+        guard input.nothingMadeYet, offered.count >= starterSetMinimum else { return [] }
+        return offered
     }
 
     /// The big cards: those shown big before first (in their order, while they are still
@@ -315,7 +323,8 @@ public struct StartPage: Equatable, Sendable {
 }
 
 /// What the start page keeps while it is on screen, so nothing moves under the user's finger:
-/// begun afresh each time the page appears (back from a list, another tab, the app opened again).
+/// begun afresh each time the page is back on top (back from a list once the swipe has ended,
+/// another tab, the app opened again from the background).
 public struct StartVisit: Equatable, Sendable {
     /// When the last album was made before this visit; nil while none was made. "Neue Reisen"
     /// are the trips that ended after it.
@@ -356,6 +365,15 @@ public struct StartVisit: Equatable, Sendable {
         create(id)
         awaitingDone.insert(id)
         madeBy[id] = plan
+    }
+
+    /// The banner "„Name“ angelegt" for suggestion `id`, made by `plan`: a card whose "Anlegen"
+    /// was tapped in this visit says "Angelegt", also when its album was made only after the
+    /// purchase sheet (`AppModel.continueQuickCreate`, review A of design wave 1). A banner for a
+    /// suggestion made elsewhere changes nothing.
+    public mutating func announced(_ id: SortlyID, by plan: SortlyID) {
+        guard created.contains(id) else { return }
+        made(id, by: plan)
     }
 
     /// Plans taken back ("Widerrufen", the history): their cards say "Anlegen" again.

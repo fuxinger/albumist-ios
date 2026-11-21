@@ -173,12 +173,13 @@ struct PhotoPreview: View {
         }
     }
 
-    /// The sharpest image of the photo kept in memory (`PhotoGridZoom.sharpestKept`): its cell's,
-    /// one of a zooming grid's other sizes, or the one a grid showed last.
+    /// The image of the photo to lift, from memory only. In a zooming grid the sharpest kept
+    /// (`PhotoGridZoom.sharpestKept`): its cell's, one of the grid's other sizes, or the one a
+    /// grid showed last. Elsewhere (album, search) its cell's own, as before.
     private var sharpestInMemory: UIImage? {
         let cache = ThumbnailCache.shared
-        var sides = [side]
-        if let gridWidth { sides += PhotoGridZoom.sides(width: Double(gridWidth)).map { CGFloat($0) } }
+        guard let gridWidth else { return cache.cachedThumbnail(for: id, side: side) }
+        let sides: [CGFloat] = [side] + PhotoGridZoom.sides(width: Double(gridWidth)).map { CGFloat($0) }
         var images = sides.compactMap { cache.cachedThumbnail(for: id, side: $0) }
         if let last = cache.thumbnailInMemory(for: id) { images.append(last) }
         let pixels = images.map { (width: Double($0.size.width * $0.scale), height: Double($0.size.height * $0.scale)) }

@@ -456,10 +456,13 @@ struct LongPressSourceTests {
         #expect(!(try Self.body(["private struct PhotoLongPress"], in: Self.photoMenu)).contains("factsByID"),
                 "every cell tied to the facts")
         let lifted = try Self.body(["struct PhotoPreview"], in: Self.photoMenu)
-        // The sharpest image kept in memory: the cell's, one of a zooming grid's other sizes, or
-        // the one a grid showed last; at least as large as at three in a row (review L9).
+        // In a zooming grid the sharpest image kept in memory: the cell's, one of the grid's other
+        // sizes, or the one a grid showed last; at least as large as at three in a row (review
+        // L9). Album and search lift their cell's own thumbnail, as before.
         let sharpest = Self.squeezed(try Self.body(["struct PhotoPreview", "private var sharpestInMemory"], in: Self.photoMenu))
-        #expect(sharpest.contains("varsides=[side]ifletgridWidth{sides+=PhotoGridZoom.sides(width:Double(gridWidth)).map{CGFloat($0)}}"),
+        #expect(sharpest.contains("guardletgridWidthelse{returncache.cachedThumbnail(for:id,side:side)}"),
+                "album and search as before: \(sharpest)")
+        #expect(sharpest.contains("letsides:[CGFloat]=[side]+PhotoGridZoom.sides(width:Double(gridWidth)).map{CGFloat($0)}"),
                 "\(sharpest)")
         #expect(sharpest.contains("varimages=sides.compactMap{cache.cachedThumbnail(for:id,side:$0)}"
                                   + "ifletlast=cache.thumbnailInMemory(for:id){images.append(last)}"), "\(sharpest)")

@@ -320,24 +320,41 @@ final class MapPrototypeUITests: XCTestCase {
 // The camera probe's step, here and not in the class body, which keeps within SwiftLint's
 // type_body_length; an extension in the same file sees the class's private helpers.
 extension MapPrototypeUITests {
-    /// 3b. The camera probe over Apple's map: each of its six cameras, what MapKit made of it and
-    /// when the map was ready, and a screenshot. Map tiles may not come to a CI simulator, so the
-    /// map's readiness is reported only; the probe's own plate and buttons must be there.
+    /// 3b. The camera probe over Apple's map: its flight in real time and what it measured, then
+    /// its seventeen steps, five of the still cameras with what MapKit made of them and when the
+    /// map was ready, each with a screenshot. Map tiles may not come to a CI simulator, so the
+    /// map's readiness and the flight's numbers are reported only; the probe's own plate and
+    /// buttons must be there.
     private func cameraProbe() {
         guard tap(page("proto.cameraProbe"), "open camera probe") else { return }
         guard UITestWait.appears(page("probe.title"), "camera probe plate", timeout: 15) else { return }
-        for number in 1...6 {
-            UITestWait.until("camera probe shows camera \(number)", timeout: 10) { text("probe.title").hasPrefix("\(number) von 6") }
+        let count = 17
+        // 1: the flight, in real time (10.4 s) once its first map stands or the wait is over.
+        UITestWait.until("camera probe shows the flight", timeout: 10) { text("probe.title").hasPrefix("1 von \(count)") }
+        soft("camera probe flight: flying", timeout: 20) { text("probe.got").hasPrefix("Flug:") || page("probe.fly").exists }
+        shot("p3b-probe-flight")
+        soft("camera probe flight: landed and measured", timeout: 45) { page("probe.fly").exists }
+        probeFacts(1)
+        // The still cameras: a low hold, the middle of the flight, the highest, the steepest tilt
+        // at 160 km and Rome from 300 m are waited for and shown; the others are passed.
+        for number in 2...count {
+            tap(page("probe.next"), "camera probe next")
+            UITestWait.until("camera probe shows camera \(number)", timeout: 10) { text("probe.title").hasPrefix("\(number) von \(count)") }
+            guard [2, 7, 10, 15, 16].contains(number) else { continue }
             soft("camera probe \(number): map rendered or the wait over", timeout: 20) { !text("probe.state").hasPrefix("Karte lädt") }
-            let facts = [text("probe.title"), text("probe.asked"), text("probe.got"), text("probe.state")]
-            print("UI_FACT map prototype camera probe \(number): " + facts.joined(separator: " | "))
-            shot("p3b-probe-\(number)")
-            if number < 6 { tap(page("probe.next"), "camera probe next") }
+            probeFacts(number)
         }
         tap(page("probe.copy"), "copy camera probe")
         UITestWait.until("camera probe copied", timeout: 10) { page("probe.copy").label == "Kopiert" }
         tap(page("probe.close"), "close camera probe")
         UITestWait.disappears(page("probe.title"), "camera probe closed", timeout: 15)
         UITestWait.appears(page("proto.cameraProbe"), "playback tab after the probe", timeout: 15)
+    }
+
+    /// The probe's plate as a `UI_FACT` line, and a screenshot.
+    private func probeFacts(_ number: Int) {
+        let facts = [text("probe.title"), text("probe.asked"), text("probe.got"), text("probe.state")]
+        print("UI_FACT map prototype camera probe \(number): " + facts.joined(separator: " | "))
+        shot("p3b-probe-\(number)")
     }
 }

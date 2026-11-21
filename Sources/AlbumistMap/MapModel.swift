@@ -264,12 +264,13 @@ public struct TripGeometry: Hashable, Sendable, Codable, Identifiable {
     /// photos is at home: that centre may be home, so it is then 0, 0 (not `isPlausible`).
     public var destinationIndex: Int?
     public var destination: GeoCoordinate
-    /// Photos on the map per country key (ISO code or "disputed-<id>"): none in flight, at home or
-    /// without a location.
+    /// Photos on the map per country key (ISO code or "disputed-<id>"): none in flight or maybe in
+    /// flight, at home or without a location.
     public var countryPhotos: [String: Int]
     /// The country key with the most photos (ties: the smaller key).
     public var mainCountryKey: String?
-    /// Photos of the trip left out as taken in flight (`AirborneFilter`).
+    /// Photos of the trip left out as taken in flight (`AirborneFilter`). Those maybe taken in
+    /// flight (`FlightJudgement`) are left out as well, without being counted here.
     public var airborneCount: Int
 
     public init(id: AlbumistID, start: Date, end: Date, timeZoneIdentifier: String?, firstDay: LocalDay, lastDay: LocalDay, photoCount: Int,

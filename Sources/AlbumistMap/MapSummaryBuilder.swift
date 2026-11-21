@@ -52,8 +52,10 @@ extension MapSummary {
         let zone = input.calendar.timeZone
         // A photo listed twice counts once, everywhere: one photo three times would make a place.
         let facts = uniqueFacts(input.facts)
-        // Photos taken in flight count for nothing: no place, no country, no record.
-        let airborne = AirborneFilter.airborne(facts.map(\.asset), altitudes: input.altitudes)
+        // Only photos on the ground count: none taken in flight or maybe taken in flight makes a
+        // place, a country, a town or a record (`FlightJudgement`).
+        let flights = AirborneFilter.judge(facts.map(\.asset), altitudes: input.altitudes)
+        let airborne = flights.airborne, maybeInFlight = flights.maybeInFlight
 
         // Today's home exactly, in memory only: a trip's photo nearer to it than the house's
         // rounding is drawn as little as one taken at home (a visit to the flat before moving in
@@ -78,8 +80,9 @@ extension MapSummary {
             // A trip stored twice is shown once; one whose photos are all gone (deleted since the
             // analysis) or none of whose photos is drawn (`isDrawn`) has nowhere to be shown.
             guard seen.insert(trip.id).inserted, let members = membersByTrip[trip.id],
-                  members.contains(where: { isDrawn($0, airborne: airborne) }) else { continue }
-            let geometry = TripGeometry.build(trip: trip, facts: members, airborne: airborne, altitudes: input.altitudes, timeZone: zone)
+                  members.contains(where: { isDrawn($0, airborne: airborne, maybeInFlight: maybeInFlight) }) else { continue }
+            let geometry = TripGeometry.build(trip: trip, facts: members, airborne: airborne, maybeInFlight: maybeInFlight,
+                                              altitudes: input.altitudes, timeZone: zone)
             let home = homes[trip.id]
             let title = input.tripTitles[trip.id] ?? geometry.destinationName ?? geometry.mainCountryKey ?? ""
             trips.append(MapTrip(geometry: geometry, title: title, stats: TripStats.compute(geometry, home: home), home: home))
@@ -89,12 +92,13 @@ extension MapSummary {
         // A country lists only the trips the map shows: a photo of a trip that is not stored (or
         // has nothing to draw) still counts for the country, but "Neues Land" and the country's
         // pin never point to a trip that is not there.
-        let countries = MapCountries.compute(facts: facts, airborne: airborne, tripStarts: tripStarts, timeZone: zone).map { country in
+        let countries = MapCountries.compute(facts: facts, airborne: airborne, maybeInFlight: maybeInFlight, tripStarts: tripStarts,
+                                             timeZone: zone).map { country in
             var country = country
             country.tripIDs = country.tripIDs.filter { tripStarts[$0] != nil }
             return country
         }
-        let cities = MapCountries.cityCount(facts: facts, airborne: airborne)
+        let cities = MapCountries.cityCount(facts: facts, airborne: airborne, maybeInFlight: maybeInFlight)
         var numbers = WorldNumbers.compute(trips: trips, countries: countries, cities: cities, timeZone: zone, now: input.now,
                                            analysisRunning: input.analysisRunning)
         if input.analysisRunning { numbers = numbers.holdingHighs(over: previous?.numbers, trips: trips, countries: countries) }
@@ -113,13 +117,14 @@ extension MapSummary {
     }
 
     /// A photo the map draws (as `TripGeometry.build` takes them): a usable location and a date,
-    /// not taken in flight, no screenshot, and not taken at home (`AssetFacts.atHome`: the map
-    /// shows trips, and a trip's photos at home would put a place on the exact home; `build`
-    /// also marks so a trip's photos within `MapHome.maximumRoundingMeters` of today's home). A
-    /// trip without one has no place on the map, even before its places are named.
-    static func isDrawn(_ fact: AssetFacts, airborne: Set<AssetID>) -> Bool {
+    /// on the ground (`FlightJudgement`), no screenshot, and not taken at home
+    /// (`AssetFacts.atHome`: the map shows trips, and a trip's photos at home would put a place on
+    /// the exact home; `build` also marks so a trip's photos within `MapHome.maximumRoundingMeters`
+    /// of today's home). A trip without one has no place on the map, even before its places are
+    /// named.
+    static func isDrawn(_ fact: AssetFacts, airborne: Set<AssetID>, maybeInFlight: Set<AssetID> = []) -> Bool {
         fact.asset.usableLocation != nil && fact.asset.creationDate != nil && !fact.asset.isScreenshotLike && !fact.atHome
-            && !airborne.contains(fact.id)
+            && !airborne.contains(fact.id) && !maybeInFlight.contains(fact.id)
     }
 
     /// Today's home exactly, as the house is worked out before rounding (`MapHome.current`): the

@@ -6,10 +6,11 @@ extension TripGeometry {
     /// distinct places with their names, the route between them (at most `maxRoutePoints`), the
     /// legs "ohne Fotos", the place its arc points to, its countries and its photos per day.
     ///
-    /// Only photos with a usable location and a date, not taken in flight, no screenshot and not
-    /// at home (`AssetFacts.atHome`, concept §8: everyday photos at home never appear on the map,
-    /// not even one the trip detection put in a trip) are drawn on the map: day places, places,
-    /// route, destination, covers, countries and photos per day come from them alone. Their place
+    /// Only photos with a usable location and a date, on the ground (`FlightJudgement`), no
+    /// screenshot and not at home (`AssetFacts.atHome`, concept §8: everyday photos at home never
+    /// appear on the map, not even one the trip detection put in a trip) are drawn on the map: day
+    /// places, places, route, destination, covers, countries and photos per day come from them
+    /// alone, and so every record (concept §5: "Flugzeugfotos zählen nicht"). Their place
     /// is their GPS place (`AssetFacts.gpsPlace`), never one guessed from the content. Every photo
     /// counts in `photoCount` and every dated one in the trip's days (`start` to `end`, `firstDay`
     /// to `lastDay`), as its album shows them.
@@ -20,15 +21,18 @@ extension TripGeometry {
     ///     (`eachPhotoOnce`).
     ///   - airborne: photos taken in flight (`AirborneFilter.airborne`): left out of places,
     ///     route and countries, counted in `airborneCount`.
+    ///   - maybeInFlight: photos maybe taken in flight (`FlightJudgement`): left out as well, not
+    ///     counted in `airborneCount`.
     ///   - altitudes: metres above sea level by photo, where the iPhone stored one (`TripPlace.altitude`).
     ///   - timeZone: the device's time zone, for a trip none of whose photos has a known one.
     ///
     /// A photo's day is the day on the clock where it was taken, as the app's albums count it
     /// (`AssetFacts.timeZone`, review P1-15; decision 19.11.2026), else in its place's zone, else
     /// in the trip's zone (the most common zone of its photos on the map).
-    public static func build(trip: Trip, facts: [AssetFacts], airborne: Set<AssetID>, altitudes: [AssetID: Double] = [:],
-                             timeZone: TimeZone) -> TripGeometry {
-        TripGeometryBuilder.build(trip: trip, facts: facts, airborne: airborne, altitudes: altitudes, deviceTimeZone: timeZone)
+    public static func build(trip: Trip, facts: [AssetFacts], airborne: Set<AssetID>, maybeInFlight: Set<AssetID> = [],
+                             altitudes: [AssetID: Double] = [:], timeZone: TimeZone) -> TripGeometry {
+        TripGeometryBuilder.build(trip: trip, facts: facts, airborne: airborne, maybeInFlight: maybeInFlight, altitudes: altitudes,
+                                  deviceTimeZone: timeZone)
     }
 }
 
@@ -40,8 +44,8 @@ extension TripGeometry {
 /// step is about linear in the photos, so one trip holding all of them costs what the trips of a
 /// library do.
 enum TripGeometryBuilder {
-    /// A photo the geometry is drawn from: a usable location and a date, not taken in flight, no
-    /// screenshot, not at home.
+    /// A photo the geometry is drawn from: a usable location and a date, on the ground
+    /// (`FlightJudgement`), no screenshot, not at home.
     struct Photo {
         /// Into the photos' `Source`s, which keep the order the facts came in.
         var source: Int
@@ -123,7 +127,7 @@ enum TripGeometryBuilder {
     /// with no photo on the map whose centre may be home (`build`).
     static let nowhere = GeoCoordinate(latitude: 0, longitude: 0)
 
-    static func build(trip: Trip, facts: [AssetFacts], airborne: Set<AssetID>, altitudes: [AssetID: Double],
+    static func build(trip: Trip, facts: [AssetFacts], airborne: Set<AssetID>, maybeInFlight: Set<AssetID> = [], altitudes: [AssetID: Double],
                       deviceTimeZone: TimeZone) -> TripGeometry {
         let facts = eachPhotoOnce(facts)
         // Every dated photo with the zone of its clock, for its day; the photos on the map with
@@ -142,6 +146,7 @@ enum TripGeometryBuilder {
         for (index, fact) in facts.enumerated() {
             let inFlight = !airborne.isEmpty && airborne.contains(fact.id)
             if inFlight { airborneCount += 1 }
+            let notOnTheGround = inFlight || (!maybeInFlight.isEmpty && maybeInFlight.contains(fact.id))
             if fact.atHome { someAtHome = true }
             guard let date = fact.asset.creationDate else { continue }
             if dated.isEmpty || date < start { start = date }
@@ -151,7 +156,7 @@ enum TripGeometryBuilder {
             // The clock where it was taken, as the app counts its days and months
             // (`AssetFacts.timeZone`, review P1-15), else its place's zone.
             if let identifier = fact.timeZone?.identifier ?? place?.timeZoneIdentifier { zone = zones.number(identifier) }
-            guard !inFlight, !fact.atHome, !fact.asset.isScreenshotLike, let coordinate = fact.asset.usableLocation else {
+            guard !notOnTheGround, !fact.atHome, !fact.asset.isScreenshotLike, let coordinate = fact.asset.usableLocation else {
                 dated.append((date, zone, -1))
                 continue
             }

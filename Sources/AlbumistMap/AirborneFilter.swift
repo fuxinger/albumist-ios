@@ -3,7 +3,10 @@ import AlbumistCore
 
 /// Photos taken in flight (concept §5, "Flugzeugfotos zählen nicht"): they make no place, no
 /// country and no record. Without this, three window photos over France on the way to Lisbon
-/// would make France a visited country and a place in the clouds.
+/// would make France a visited country and a place in the clouds. The map counts only photos on
+/// the ground (`FlightJudgement`, `judge`): besides those the rules below find, none maybe taken
+/// in flight (one flown leg and no stay), so the window photos the rules miss (listed below)
+/// count for nothing either.
 ///
 /// Until the analysis stores altitudes, the photos' places and times decide: nothing on the ground
 /// moves faster than `maximumGroundSpeed`, and a plane flies straight on. A photo's two **legs** go
@@ -214,6 +217,13 @@ public enum AirborneFilter {
     /// an airport that high may pass it on the runway; its photos are harmless.)
     static let aloftAltitude = 3_000.0
     static let aloftBurstSpeed = 300.0 / 3.6
+    /// Next to a single flown leg (`FlightJudgement`), a row of photos shows a stay only when it
+    /// moved on slower than this. An airliner leaves the runway at 250 to 300 km/h and flies its
+    /// last minutes before landing at 250 to 350 km/h, slower than `maximumGroundSpeed`, so a
+    /// series of window photos there looks like a stay by that measure. On the ground only trains
+    /// run faster than this, and a train's photos have no flown leg. 200 km/h, in metres per
+    /// second.
+    static let stayMovingSpeed = 200.0 / 3.6
 
     /// The photos of `photos` taken in flight.
     /// - Parameters:
@@ -224,15 +234,77 @@ public enum AirborneFilter {
     ///   - altitudes: metres above sea level the iPhone stored, by photo, where known.
     public static func airborne(_ photos: [AssetSnapshot], altitudes: [AssetID: Double] = [:]) -> Set<AssetID> {
         let track = FlightTrack(photos)
+        let (high, aloft) = levels(of: track, altitudes)
+        return track.ids(where: track.inFlight(high: high, aloft: aloft))
+    }
+
+    /// The photos of `photos` taken in flight and those maybe taken in flight: what the map does
+    /// not count (`FlightJudgement`). Parameters as `airborne`.
+    public static func judge(_ photos: [AssetSnapshot], altitudes: [AssetID: Double] = [:]) -> FlightJudgement {
+        let track = FlightTrack(photos)
+        let (high, aloft) = levels(of: track, altitudes)
+        let judged = track.judge(high: high, aloft: aloft, maybe: true)
+        let airborne = track.ids(where: judged.inFlight)
+        // A library holding one id twice may have it judged both ways: in flight wins.
+        return FlightJudgement(airborne: airborne, maybeInFlight: track.ids(where: judged.maybe).subtracting(airborne))
+    }
+
+    /// Per photo of `track`, whether its stored altitude is above `maximumAltitude` (rule 1) and
+    /// whether above `aloftAltitude` (rule 3).
+    static func levels(of track: FlightTrack, _ altitudes: [AssetID: Double]) -> (high: [Bool], aloft: [Bool]) {
         let stored: [Double?] = altitudes.isEmpty ? [] : track.ids.map { altitudes[$0] }
         func above(_ level: Double) -> [Bool] {
             stored.isEmpty ? [Bool](repeating: false, count: track.ids.count) : stored.map { $0.map { $0 > level } ?? false }
         }
-        let flags = track.inFlight(high: above(maximumAltitude), aloft: above(aloftAltitude))
-        var result = Set<AssetID>()
-        for i in track.ids.indices where flags[i] { result.insert(track.ids[i]) }
-        return result
+        return (above(maximumAltitude), above(aloftAltitude))
     }
+}
+
+/// What the map makes of where and when the photos were taken: which were taken in flight and
+/// which maybe were. All others are **on the ground**, and only those count: for a country, a
+/// town, a trip's places, route and countries, and so for every record (concept §5:
+/// "Flugzeugfotos zählen nicht"). This is the one definition the map counts by
+/// (`MapCountries.compute`, `MapCountries.cityCount`, `TripGeometry.build`, `MapSummary.build`).
+///
+/// A judged photo (`AirborneFilter.airborne`: a usable location, a date, no screenshot) is on the
+/// ground unless
+/// - it was **taken in flight** (`airborne`): rules 1 to 4 of `AirborneFilter`; or
+/// - it was **maybe taken in flight** (`maybeInFlight`): exactly one of its legs was flown (and is
+///   no short leg to a stay, as in rule 2), and rule 2's conditions hold with that one leg: it
+///   lies on the way where it has two legs, it shows no stay, the run does not turn back and the
+///   location does not come back to it. Next to the flown leg, a row of photos shows a stay only
+///   when it moved on slower than `AirborneFilter.stayMovingSpeed` (a plane in its first and last
+///   minutes is slower than `maximumGroundSpeed`). With both legs flown, rule 2 has judged it:
+///   a layover's stay is on the ground, as a zig-zag of two people's photos is.
+/// A photo the filter does not judge (no location, no date) never counts for a place anyway.
+///
+/// Why "maybe" counts for nothing: the rules miss window photos (listed in `AirborneFilter`),
+/// most of them with one flown leg: a flight's first or last window photos when the gate photo
+/// was taken hours before, a pair of photos on a short flight, a series that does not head on.
+/// One such photo costs at most its town; but a country needs three photos in the whole library,
+/// not per flight, so two missed window photos on the way out and one on the way back made
+/// France a visited country. Seen from its legs, a photo with one flown leg and no stay may as
+/// well be a window photo as one at the gate, so it proves nothing. What does: a stay (photos in
+/// a row that did not move on, as a layover's photos minutes apart), or legs no faster than
+/// ground transport (a road trip, a walk over a border, a fast train).
+///
+/// The price: a single photo at an airport next to a flown leg (a gate photo before a flight
+/// without window photos, an arrival photo after one) counts for no town where it is that town's
+/// only photo. Window photos with no flown leg (no photo within `maximumLongLegDuration` on one
+/// side, a slow leg on the other) still count: a town each, a country only with three of them.
+public struct FlightJudgement: Sendable, Equatable {
+    /// Taken in flight: rules 1 to 4 of `AirborneFilter`.
+    public var airborne: Set<AssetID>
+    /// Maybe taken in flight; none of them is in `airborne`.
+    public var maybeInFlight: Set<AssetID>
+
+    public init(airborne: Set<AssetID> = [], maybeInFlight: Set<AssetID> = []) {
+        self.airborne = airborne
+        self.maybeInFlight = maybeInFlight
+    }
+
+    /// Whether the photo counts: neither taken in flight nor maybe.
+    public func isOnTheGround(_ id: AssetID) -> Bool { !airborne.contains(id) && !maybeInFlight.contains(id) }
 }
 
 /// The judged photos of a library in time order, with the rules of `AirborneFilter` on them. Kept
@@ -365,6 +437,13 @@ struct FlightTrack: Sendable {
 
     // MARK: Distances and legs
 
+    /// The ids of the photos whose flag is set.
+    func ids(where flags: [Bool]) -> Set<AssetID> {
+        var result = Set<AssetID>()
+        for i in flags.indices where flags[i] { result.insert(ids[i]) }
+        return result
+    }
+
     /// The distance between two photos, always measured from the earlier one.
     func meters(_ a: Int, _ b: Int) -> Double {
         a <= b ? GeoMath.distance(coordinates[a], coordinates[b]) : GeoMath.distance(coordinates[b], coordinates[a])
@@ -391,9 +470,15 @@ struct FlightTrack: Sendable {
     /// Per photo, whether it was taken in flight: `high` (rule 1, by altitude) or rules 2 to 4;
     /// `aloft`: whether its stored altitude is above `AirborneFilter.aloftAltitude` (rule 3).
     func inFlight(high: [Bool], aloft: [Bool]) -> [Bool] {
+        judge(high: high, aloft: aloft, maybe: false).inFlight
+    }
+
+    /// As `inFlight`, and with `maybe`, per photo not taken in flight whether it maybe was
+    /// (`FlightJudgement`; empty without).
+    func judge(high: [Bool], aloft: [Bool], maybe withMaybe: Bool) -> (inFlight: [Bool], maybe: [Bool]) {
         // Plain local arrays in the loops: a debug build reads a property far slower.
         let times = self.times, earliest = self.earliest, latest = self.latest, count = times.count
-        guard count > 0 else { return [] }
+        guard count > 0 else { return ([], []) }
         var neighbours = Neighbours(count: count)
 
         var onRun = [Bool](repeating: false, count: count)
@@ -433,7 +518,14 @@ struct FlightTrack: Sendable {
         for i in 0..<count where !confirmed[i] && near[i] {
             flags[i] = endsRun(i, neighbours: &neighbours, confirmed: confirmed, onRun: onRun, bursts: bursts)
         }
-        return flags
+        guard withMaybe else { return (flags, []) }
+
+        // Maybe in flight: a photo with a leg faster than ground transport on one side at least.
+        var maybe = [Bool](repeating: false, count: count)
+        for i in 0..<count where !flags[i] && (earliest[i] < i || latest[i] > i) {
+            maybe[i] = mayBeInFlight(i, neighbours: &neighbours)
+        }
+        return (flags, maybe)
     }
 
     /// Rule 2: both legs flown, on the way, no stay, no turn back.
@@ -453,6 +545,36 @@ struct FlightTrack: Sendable {
         if previous >= 0, !onTheWay(previous, before, i) { return false }
         let next = neighbours.fastAfter(after, in: self)
         if next >= 0, !onTheWay(i, after, next) { return false }
+        return !comesBack(i)
+    }
+
+    /// Whether the photo at `i`, not taken in flight, maybe was (`FlightJudgement`): exactly one
+    /// of its legs was flown, no short one to a stay, and rule 2's conditions hold with that leg:
+    /// on the way, no stay (one moving on slower than `AirborneFilter.stayMovingSpeed`), no turn
+    /// back, no coming back.
+    func mayBeInFlight(_ i: Int, neighbours: inout Neighbours) -> Bool {
+        var before = neighbours.runBefore(i, in: self), after = neighbours.runAfter(i, in: self)
+        if before == Neighbours.staying || after == Neighbours.staying { return false }
+        let short = AirborneFilter.runEndLongDuration
+        let flownBefore = before >= 0 && flown(before, i) && !(times[i] - times[before] <= short && staysAt(before, step: -1))
+        let flownAfter = after >= 0 && flown(i, after) && !(times[after] - times[i] <= short && staysAt(after, step: 1))
+        // Both legs flown: rule 2 has judged it.
+        guard flownBefore != flownAfter else { return false }
+        // The other leg's neighbour wherever it is (the bounded search stops where no leg to one
+        // can be faster than ground transport).
+        if before < 0 { before = neighbour(of: i, step: -1, limit: 0, staying: true) }
+        if after < 0 { after = neighbour(of: i, step: 1, limit: times.count - 1, staying: true) }
+        if before == Neighbours.staying || after == Neighbours.staying { return false }
+        if before >= 0, after >= 0, !onTheWay(before, i, after) { return false }
+        if stays(i, before: before, after: after, movingSpeed: AirborneFilter.stayMovingSpeed) { return false }
+        if before >= 0 {
+            let previous = neighbours.fastBefore(before, in: self)
+            if previous >= 0, !onTheWay(previous, before, i) { return false }
+        }
+        if after >= 0 {
+            let next = neighbours.fastAfter(after, in: self)
+            if next >= 0, !onTheWay(i, after, next) { return false }
+        }
         return !comesBack(i)
     }
 
@@ -483,12 +605,13 @@ struct FlightTrack: Sendable {
     /// `minimumLegMeters` (between its neighbours `before` and `after`, or as far as
     /// `maximumLongLegDuration` where it has none), when they last at least
     /// `AirborneFilter.shortestStay`, did not move on along its legs (away from the photo before,
-    /// towards the photo after; without either, apart) faster than `maximumGroundSpeed` over their
-    /// time, nor further than the stated accuracy of the first and last of them. In a plane such
-    /// photos lie under a minute apart and move on at its speed; on the ground they stay within the
-    /// 6 km the row can span, however long it lasts. A single photo shows nothing, nor do photos
-    /// within `AirborneFilter.shortestStay`, whose fixes may lag a second's flight behind them.
-    func stays(_ i: Int, before: Int, after: Int) -> Bool {
+    /// towards the photo after; without either, apart) faster than `movingSpeed` over their time
+    /// (`maximumGroundSpeed`; `AirborneFilter.stayMovingSpeed` next to a single flown leg), nor
+    /// further than the stated accuracy of the first and last of them. In a plane such photos lie
+    /// under a minute apart and move on at its speed; on the ground they stay within the 6 km the
+    /// row can span, however long it lasts. A single photo shows nothing, nor do photos within
+    /// `AirborneFilter.shortestStay`, whose fixes may lag a second's flight behind them.
+    func stays(_ i: Int, before: Int, after: Int, movingSpeed: Double = AirborneFilter.maximumGroundSpeed) -> Bool {
         let first = before >= 0 ? before + 1 : windowStart[i], last = after >= 0 ? after - 1 : windowEnd[i]
         guard first < last else { return false }
         let span = times[last] - times[first]
@@ -497,7 +620,7 @@ struct FlightTrack: Sendable {
         if before >= 0 { progress = min(progress, meters(before, last) - meters(before, first)) }
         if after >= 0 { progress = min(progress, meters(first, after) - meters(last, after)) }
         if before < 0 && after < 0 { progress = meters(first, last) }
-        let movedOn = max(AirborneFilter.maximumGroundSpeed * span, accuracies[first] + accuracies[last])
+        let movedOn = max(movingSpeed * span, accuracies[first] + accuracies[last])
         return progress < movedOn + Self.roundingMarginMeters
     }
 

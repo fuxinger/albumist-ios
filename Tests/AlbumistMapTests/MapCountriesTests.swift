@@ -219,6 +219,59 @@ struct MapCountriesTests {
         #expect(MapCountries.cityCount(facts: one, airborne: [AssetID("one")]) == 0)
     }
 
+    // MARK: Photos maybe taken in flight count for nothing
+
+    /// Finding 2.4 of the third review: the airborne filter's misses were said to cost "at most a
+    /// town" each, but a country needs three photos in the whole library, not per flight. A round
+    /// trip Munich → Lisbon in April 2022 with two window photos over France on the way out (the
+    /// gate photo 2 h 45 min before, rule 3 needs three photos) and one on the way back (no photo
+    /// within 20 hours before it, the next at home the day after) made France a country, first
+    /// visit 2022; so did single window photos on three flights in two years. Each photo out has
+    /// one flown leg, to the arrival photo in Lisbon, and no stay: maybe in flight, it counts for
+    /// nothing (`FlightJudgement`). The photo back has no flown leg and counts: one photo makes no
+    /// country.
+    @Test func missedWindowPhotosOfSeveralFlightsMakeNoCountry() {
+        typealias A = AirborneFilterTests
+        /// A round trip Munich → Lisbon → Munich in April of `year`: window photos over France `out`
+        /// seconds after 09:15 on the way out (the gate photo 2 h 45 min before) and `back` seconds
+        /// after 17:00 four days later (the last photo in Lisbon the day before).
+        func roundTrip(_ year: Int, out: [Double], back: [Double]) -> (facts: [AssetFacts], trip: Trip) {
+            let trip = AlbumistID("lisbon-\(year)"), overFrance = MapFixture.date("\(year)-04-02 09:15")
+            let wayBack = MapFixture.date("\(year)-04-06 17:00")
+            let speed = 830_000.0 / 3_600, way = GeoMath.distance(A.munichAirport, A.lisbonAirport)
+            var photos = [MapFixture.photo("gate-\(year)", at: overFrance.addingTimeInterval(-9_900), A.munichAirport, country: "DE", town: "Freising")]
+            for (k, s) in out.enumerated() {
+                photos.append(MapFixture.photo("out-\(year)-\(k)", at: overFrance.addingTimeInterval(s),
+                                               A.along(A.munichAirport, A.lisbonAirport, 0.4 + s * speed / way), country: "FR", town: "Clermont-Ferrand"))
+            }
+            photos.append(MapFixture.photo("landing-\(year)", at: overFrance.addingTimeInterval(0.6 * way / speed + 1_500), A.lisbonAirport,
+                                           country: "PT", town: "Lissabon"))
+            for day in 3...5 {
+                photos += MapFixture.burst("lis-\(year)-\(day)", count: 8, at: Places.lisbon, day: "\(year)-04-0\(day)", country: "PT", town: "Lissabon")
+            }
+            for (k, s) in back.enumerated() {
+                photos.append(MapFixture.photo("back-\(year)-\(k)", at: wayBack.addingTimeInterval(s),
+                                               A.along(A.lisbonAirport, A.munichAirport, 0.55 + s * speed / way), country: "FR", town: "Limoges"))
+            }
+            let members = MapFixture.members(photos, of: trip)
+            return (members, MapFixture.trip(trip, members))
+        }
+        let everyday = MapFixture.everyday("home", from: "2022-01-01", to: "2022-03-30", at: Places.regensburg, country: "DE", everyNthDay: 3)
+            + MapFixture.everyday("home-2022", from: "2022-04-07", to: "2022-04-30", at: Places.regensburg, country: "DE")
+            + MapFixture.everyday("home-2023", from: "2023-04-07", to: "2023-04-30", at: Places.regensburg, country: "DE")
+        for (name, trips) in [("one round trip, two photos out and one back", [roundTrip(2022, out: [0, 2], back: [0])]),
+                              ("two round trips, one photo each way and one more", [roundTrip(2022, out: [0], back: [0]), roundTrip(2023, out: [0], back: [])])] {
+            let facts = everyday + trips.flatMap(\.facts)
+            // The filter misses them all: without the counting of `FlightJudgement`, France is a country.
+            #expect(MapCountries.compute(facts: facts, airborne: AirborneFilter.airborne(facts.map(\.asset)), tripStarts: [:]).contains { $0.code == "FR" })
+            let summary = MapSummary.build(MapInput(facts: facts, trips: trips.map(\.trip),
+                                                    detectedHome: DetectedHome(center: Places.regensburg, since: nil, photoDays: 400),
+                                                    calendar: MapFixture.calendar, now: MapFixture.date("2025-07-01")))
+            let france = summary.countries.filter { $0.code == "FR" }.map { "\($0.photoCount) photos, first visit \($0.firstVisitYear)" }
+            #expect(france.isEmpty, "\(name): France \(france)")
+        }
+    }
+
     // MARK: Short visits on the ground count
 
     /// `photos` as one stored trip in a library with everyday photos at home in the Regensburg

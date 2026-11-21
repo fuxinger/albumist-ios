@@ -378,6 +378,12 @@ private struct QuickCreateMomentSource: ViewModifier {
             .onAppear {
                 if let frame { note(frame) }
             }
+            // A suggestion the analysis updates in place while its card rests (a new cover, now
+            // personal): noted as the card shows it now, so the flying photo is never an older
+            // cover (review E2 of design wave 2, N5).
+            .onChange(of: proposal) {
+                if let frame { note(frame) }
+            }
             .onDisappear { QuickCreateMomentSources.shared.forget(token) }
     }
 

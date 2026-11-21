@@ -199,6 +199,12 @@ struct MomentsSourceTests {
         #expect(photo.contains("personal ? nil : keptCover("), "\(photo)")
         // The card's own suggestion, whether or not the analysis still has it as the banner comes.
         #expect(photo.contains("let proposal = source.proposal") && !photo.contains("model.proposals"), "\(photo)")
+        // As the card shows it now: a suggestion the analysis updates in place while its card
+        // rests is noted anew, so the flying photo is never an older cover (review E2 of design
+        // wave 2, N5).
+        let source = try Self.body(["struct QuickCreateMomentSource:", "func body(content: Content)"], in: layer)
+        let changed = try #require(AppSource.body(of: ".onChange(of: proposal)", in: source), "\(source)")
+        #expect(changed.contains("if let frame { note(frame) }"), "\(changed)")
     }
 
     /// One success tap per run, as before: it waits for the show's end and then for the main

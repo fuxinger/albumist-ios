@@ -1,15 +1,18 @@
 import SwiftUI
+import UIKit
 import AlbumistCore
 
 extension View {
     /// The long press on a photo of a grid (design wave 2, DS-06a; draft E4 "lang drücken"): the
     /// photo lifted larger, and what this place offers for it (`PhotoMenu`), also as VoiceOver's
-    /// actions of the photo. `perform` runs "Ansehen", "Zu Album hinzufügen …" and "Aus
-    /// Vorschlag entfernen" the place's way; "Ignorieren" and "Nicht mehr ignorieren" are the
-    /// model's, the same everywhere, with "Widerrufen" on the screen (`IgnoreUndoBar`).
-    func photoMenu(_ id: AssetID, place: PhotoMenu.Place, selecting: Bool = false, available: Bool = true,
+    /// actions of the photo. `side`: the side the cell's thumbnail is asked for
+    /// (`AssetThumbnail`), whose image is lifted. `perform` runs "Ansehen", "Zu Album hinzufügen
+    /// …" and "Aus Vorschlag entfernen" the place's way; "Ignorieren" and "Nicht mehr ignorieren"
+    /// are the model's, the same everywhere, with "Widerrufen" on the screen (`IgnoreUndoBar`).
+    func photoMenu(_ id: AssetID, place: PhotoMenu.Place, side: CGFloat, selecting: Bool = false, available: Bool = true,
                    perform: @escaping @MainActor (PhotoMenu.Item) -> Void) -> some View {
-        modifier(PhotoLongPress(id: id, place: place, selecting: selecting, available: available, perform: perform))
+        modifier(PhotoLongPress(id: id, place: place, side: side, selecting: selecting, available: available,
+                                perform: perform))
     }
 }
 
@@ -19,6 +22,7 @@ private struct PhotoLongPress: ViewModifier {
     @Environment(AppModel.self) private var model
     var id: AssetID
     var place: PhotoMenu.Place
+    var side: CGFloat
     var selecting: Bool
     var available: Bool
     var perform: @MainActor (PhotoMenu.Item) -> Void
@@ -28,7 +32,7 @@ private struct PhotoLongPress: ViewModifier {
             .contextMenu {
                 if offered { items(forVoiceOver: false) }
             } preview: {
-                liftedPhoto
+                PhotoPreview(id: id, side: side)
             }
             .accessibilityActions {
                 if offered { items(forVoiceOver: true) }
@@ -45,14 +49,6 @@ private struct PhotoLongPress: ViewModifier {
     private func items(forVoiceOver: Bool) -> PhotoMenuItems {
         PhotoMenuItems(model: model, id: id, place: place, selecting: selecting, available: available,
                        forVoiceOver: forVoiceOver, perform: perform)
-    }
-
-    /// The lifted photo, its size read here from its facts: the system draws it apart from the
-    /// screen, so it gets everything handed in.
-    private var liftedPhoto: PhotoPreview {
-        let asset = model.factsByID[id]?.asset
-        return PhotoPreview(id: id, size: PhotoMenu.previewSize(pixelWidth: asset?.pixelWidth ?? 0,
-                                                                pixelHeight: asset?.pixelHeight ?? 0))
     }
 }
 
@@ -114,16 +110,35 @@ struct PhotoMenuItems: View {
     }
 }
 
-/// A photo larger, as the long press lifts it out of its grid: whole, in its own proportions
-/// (`PhotoMenu.previewSize`), only what is on the device, sharp or the calm placeholder, never a
-/// big blurry picture (`CoverPhoto`; Albumist never loads from iCloud). Decorative: the menu
-/// says what can be done with it.
+/// A photo larger, as the long press lifts it out of its grid (review C of design wave 2, M2):
+/// the image its cell shows, from the thumbnails' memory, at once, whole, in its own
+/// proportions, as large as it is sharp (`PhotoMenu.liftSize`: never smaller than the cell, at
+/// most 320 × 427 pt). So never an empty surface where the cell shows a photo, never a blurry
+/// enlargement, nothing loaded from iCloud, and no lift counted as a cover (`CoverStats` counts
+/// the cards' covers). Gone from memory (a memory warning) while its cell still shows it: as
+/// large as its cell, asked for again as the cell asks. Worked out in its own body, when the
+/// long press shows it; gets everything handed in (the system draws it apart from the screen).
+/// Decorative: the menu says what can be done with it.
 struct PhotoPreview: View {
     var id: AssetID
-    var size: PhotoMenu.PreviewSize
+    /// The side its cell's thumbnail is asked for (`AssetThumbnail.side`), in points.
+    var side: CGFloat
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        CoverPhoto(ids: [id], aspectRatio: CGFloat(size.aspectRatio), cornerRadius: 0, placeholderSymbol: "photo")
-            .frame(width: CGFloat(size.width), height: CGFloat(size.height))
+        if let image = ThumbnailCache.shared.cachedThumbnail(for: id, side: side) {
+            let size = PhotoMenu.liftSize(imageWidth: Double(image.size.width * image.scale),
+                                          imageHeight: Double(image.size.height * image.scale),
+                                          scale: Double(displayScale), cellSide: Double(side))
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: CGFloat(size.width), height: CGFloat(size.height))
+                .clipped()
+                .accessibilityHidden(true)
+        } else {
+            AssetThumbnail(id: id, side: side)
+                .frame(width: side, height: side)
+        }
     }
 }

@@ -373,8 +373,10 @@ struct StartProposalCard: View {
             .accessibilityIdentifier(identifier)
     }
 
-    /// The card with its one button, and the long press's menu and lifted card: none once it is
-    /// made or while it works; for VoiceOver its items but the card's word, its own button.
+    /// The card with its one button and the long press's menu, which lifts the card itself: the
+    /// photo it shows, what it hides hidden, in its shape (review C of design wave 2, M2). No
+    /// menu once it is made or while it works; for VoiceOver its items but the card's word, its
+    /// own button.
     private var photoCard: some View {
         PhotoCard(coverIDs: covers, title: Text(verbatim: text.title), subtitle: text.styledSubtitle,
                   hidesPreview: text.hidesPreview, aspectRatio: aspectRatio, style: style,
@@ -382,8 +384,6 @@ struct StartProposalCard: View {
             button
         } menu: {
             menuItems
-        } preview: {
-            menuPreview
         }
         .menuOffered(SuggestionMenu.isOffered(made: made, working: working, selecting: false))
         .menuAccessibilityActions(voiceOverItems)
@@ -411,13 +411,6 @@ struct StartProposalCard: View {
     private var voiceOverItems: SuggestionMenuItems {
         SuggestionMenuItems(model: model, openFlow: openFlow, proposal: proposal, card: text, made: made,
                             working: working, waits: waits, forVoiceOver: true, act: onAction)
-    }
-
-    /// What the long press lifts: the suggestion large, as an album's long press shows the album,
-    /// "Vorschau ausgeblendet" where the card hides its photos (the page hands it no covers then).
-    private var menuPreview: SuggestionPreview {
-        SuggestionPreview(covers: covers, hidesPreview: text.hidesPreview, title: text.title, line: text.styledSubtitle,
-                          placeholderSymbol: proposal.kind.area.symbol)
     }
 
     @ViewBuilder

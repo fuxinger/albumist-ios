@@ -17,7 +17,6 @@ struct LongPressSourceTests {
     static let search = "App/Albumist/Views/SearchView.swift"
     static let albums = "App/Albumist/Views/AlbumsView.swift"
     static let suggestionItems = "App/Albumist/Views/Menus/SuggestionMenuItems.swift"
-    static let suggestionPreview = "App/Albumist/Views/Menus/SuggestionPreview.swift"
     static let flows = "App/Albumist/Views/Menus/SuggestionMenuFlows.swift"
     static let photoMenu = "App/Albumist/Views/Menus/PhotoMenuItems.swift"
     static let model = "App/Albumist/Model/AppModel+LongPress.swift"
@@ -43,20 +42,20 @@ struct LongPressSourceTests {
 
     // MARK: Suggestion cards
 
-    /// The start page's cards: `PhotoCard`'s own long press (`menu:`, `preview:`), no second
-    /// mechanism, each part a typed property of its own (Xcode gave up on long expressions with
-    /// several trailing closures, CI 44847306162).
+    /// The start page's cards: `PhotoCard`'s own long press (`menu:`), which lifts the card
+    /// itself (review C of design wave 2, M2), no second mechanism, each part a typed property of
+    /// its own (Xcode gave up on long expressions with several trailing closures, CI 44847306162).
     @Test func startCardsHaveTheMenuAndTheLiftedCard() throws {
         let card = try Self.body(["struct StartProposalCard"], in: Self.start)
         let body = Self.squeezed(try Self.body(["struct StartProposalCard", "var body: some View"], in: Self.start))
         #expect(body == "{photoCard.accessibilityIdentifier(identifier)}", "the body is short: \(body)")
         let shown = Self.squeezed(try Self.body(["struct StartProposalCard", "private var photoCard: some View"], in: Self.start))
-        #expect(shown.contains("}menu:{menuItems}preview:{menuPreview}"), "\(shown)")
+        #expect(shown.contains("}menu:{menuItems}.menuOffered("), "\(shown)")
+        #expect(!shown.contains("preview:"), "a second card lifted: \(shown)")
         #expect(shown.contains("aspectRatio:aspectRatio,") && !shown.contains("?"), "no condition in the card's call: \(shown)")
         #expect(card.contains("private var aspectRatio: CGFloat"))
         #expect(card.contains("private var identifier: String"))
         #expect(card.contains("private var menuItems: SuggestionMenuItems"))
-        #expect(card.contains("private var menuPreview: SuggestionPreview"))
         // No menu at all once it is made or while it works (an empty menu closure, M4), and for
         // VoiceOver the items without the card's word (its own button, L3).
         #expect(shown.contains(".menuOffered(SuggestionMenu.isOffered(made:made,working:working,selecting:false))"), "\(shown)")
@@ -69,9 +68,6 @@ struct LongPressSourceTests {
         #expect(items.contains("act:onAction"), "\(items)")
         #expect(items.contains("model:model,openFlow:openFlow"), "handed in by the card: \(items)")
         #expect(items.contains("made:made") && items.contains("working:working") && items.contains("waits:waits"))
-        let preview = Self.squeezed(try Self.body(["struct StartProposalCard", "private var menuPreview"], in: Self.start))
-        #expect(preview.contains("covers:covers") && preview.contains("hidesPreview:text.hidesPreview"), "\(preview)")
-        #expect(preview.contains("line:text.styledSubtitle"), "the card's own status line")
         // The page gives its cards no covers while their photos are hidden.
         let page = Self.squeezed(try Self.body(["private func card("], in: Self.start))
         #expect(page.contains("covers:text.hidesPreview?[]:model.proposalCoverIDs(for:proposal)"), "\(page)")
@@ -101,9 +97,9 @@ struct LongPressSourceTests {
     @Test func listCardsHaveTheMenuAndTheLiftedCard() throws {
         let card = try Self.body(["private struct ProposalListCard"], in: Self.suggestions)
         let shown = Self.squeezed(try Self.body(["private struct ProposalListCard", "private var photoCard"], in: Self.suggestions))
-        #expect(shown.contains("}menu:{menuItems}preview:{menuPreview}"), "\(shown)")
+        #expect(shown.contains("}menu:{menuItems}.selected("), "\(shown)")
+        #expect(!shown.contains("preview:"), "a second card lifted: \(shown)")
         #expect(card.contains("private var menuItems: SuggestionMenuItems"))
-        #expect(card.contains("private var menuPreview: SuggestionPreview"))
         let items = Self.squeezed(try Self.body(["private struct ProposalListCard", "private var menuItems"], in: Self.suggestions))
         #expect(items.contains("act:{act(card.action)}"), "the card's own action: \(items)")
         #expect(items.contains("model:model,openFlow:openFlow"), "handed in by the card: \(items)")
@@ -113,8 +109,6 @@ struct LongPressSourceTests {
         #expect(shown.contains(".menuAccessibilityActions(voiceOverItems)"), "\(shown)")
         let spoken = Self.squeezed(try Self.body(["private struct ProposalListCard", "private var voiceOverItems: SuggestionMenuItems"], in: Self.suggestions))
         #expect(spoken.contains("forVoiceOver:true") && spoken.contains("act:{act(card.action)}"), "\(spoken)")
-        let preview = Self.squeezed(try Self.body(["private struct ProposalListCard", "private var menuPreview"], in: Self.suggestions))
-        #expect(preview.contains("hidesPreview:card.hidesPreview") && preview.contains("line:card.styledSubtitle"), "\(preview)")
         let list = try Self.body(["struct ProposalListView", "var body: some View"], in: Self.suggestions)
         #expect(list.contains(".suggestionMenuFlows()"))
     }
@@ -235,17 +229,18 @@ struct LongPressSourceTests {
         #expect(sections.contains("model.decisions[proposal.id]==.reject||model.quickCreateKeepsNotNow(proposal.id)"), "\(sections)")
     }
 
-    /// The lifted card hides what the card hides ("Vorschau ausgeblendet"), and at the
-    /// accessibility text sizes the cover is a strip and the name wraps, never cut.
-    @Test func theLiftedCardHidesWhatTheCardHidesAndKeepsTheWholeName() throws {
-        let preview = try Self.body(["struct SuggestionPreview"], in: Self.suggestionPreview)
-        #expect(preview.contains("hidesPreview ? [] : covers"), "no photo handed to a hidden cover")
-        #expect(preview.contains("hidesPreview: hidesPreview"))
-        #expect(preview.contains("typeSize.isAccessibilitySize ? 3 : 1.28"))
-        #expect(preview.contains(".fixedSize(horizontal: false, vertical: true)"))
-        #expect(!preview.contains("lineLimit"), "a name cut at the accessibility sizes")
-        #expect(preview.contains(".foregroundStyle(.noteText)"))
-        #expect(!preview.contains("@Environment(AppModel"), "the system draws the lifted card apart: everything handed in")
+    /// A long press lifts the card itself, in its own shape (review C of design wave 2, M2, L5):
+    /// the photo the card shows, never another of its cover candidates or the calm placeholder
+    /// where the card shows a photo, no second cover counted, "Vorschau ausgeblendet" where the
+    /// card says it, and at the largest text sizes the card as it is, which the system fits
+    /// beside the menu.
+    @Test func aCardLiftsItselfInItsOwnShape() throws {
+        for path in AppSource.swiftFiles(under: "App/Albumist") {
+            #expect(!(try Self.code(path)).contains("SuggestionPreview"), "\(path): a second card lifted")
+        }
+        let card = try Self.body(["struct PhotoCard<", "private var card: some View"], in: Self.photoCard)
+        #expect(card.contains(".contentShape(.contextMenuPreview, shape)"))
+        #expect(try Self.code(Self.photoCard).contains("extension PhotoCard where MenuPreview == EmptyView {"))
     }
 
     /// A card's long press is switched off the documented way: its menu closure returns nothing
@@ -270,28 +265,39 @@ struct LongPressSourceTests {
     }
 
     // MARK: Photos
-    // MARK: Photos
 
     /// Every grid of photos has the long press, at its place, off while it selects; the
     /// country's photos (the map's) are not touched here.
     @Test func everyPhotoGridHasTheLongPress() throws {
-        let grids: [(path: String, declaration: [String], call: String)] = [
-            (Self.library, ["struct LibraryView", "private func cell("], ".photoMenu(id, place: .unsorted, selecting: selecting)"),
+        let grids: [(path: String, declaration: [String], call: String, side: Int, photo: String)] = [
+            (Self.library, ["struct LibraryView", "private func cell("],
+             ".photoMenu(id, place: .unsorted, side: Self.photoSide, selecting: selecting)", 110, "id"),
             (Self.suggestions, ["struct ProposalPhotosView", "private func tile("],
-             ".photoMenu(id, place: .suggestion, selecting: selecting, available: !disabled)"),
-            (Self.albums, ["struct AlbumScreen", "private func tile("], ".photoMenu(photo, place: .album)"),
-            (Self.search, ["struct SearchView", "private func thumbnail("], ".photoMenu(id, place: .search, available: hit != nil)"),
+             ".photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled)", 140, "id"),
+            (Self.albums, ["struct AlbumScreen", "private func tile("], ".photoMenu(photo, place: .album, side: Self.photoSide)", 110,
+             "photo"),
+            (Self.search, ["struct SearchView", "private func thumbnail("],
+             ".photoMenu(id, place: .search, side: Self.photoSide, available: hit != nil)", 110, "id"),
         ]
         for grid in grids {
             let cell = try Self.body(grid.declaration, in: grid.path)
             #expect(cell.contains(grid.call), "\(grid.path): \(cell)")
+            // The lifted photo is the image the cell asked for: the same side (review C of design
+            // wave 2, M2).
+            let type = try Self.body([grid.declaration[0]], in: grid.path)
+            #expect(type.contains("private static let photoSide: CGFloat = \(grid.side)"), "\(grid.path)")
+            #expect(type.contains("AssetThumbnail(id: \(grid.photo), side: Self.photoSide)"), "\(grid.path)")
+            #expect(!type.contains("AssetThumbnail(id: \(grid.photo), side: \(grid.side))"), "\(grid.path): a second side")
         }
         let country = try Self.code("App/Albumist/Views/CountryPhotosView.swift")
         #expect(!country.contains(".photoMenu("), "the map's files are not this strand's")
     }
 
     /// One mechanism for every photo: Apple's long press with the photo lifted larger, the same
-    /// items as VoiceOver's actions of the photo, "Ansehen" left out there (the photo's own).
+    /// items as VoiceOver's actions of the photo, "Ansehen" left out there (the photo's own). The
+    /// lifted photo is the image its cell shows, at once, as large as it is sharp (review C of
+    /// design wave 2, M2): from the thumbnails' memory, never a cover (no placeholder where the
+    /// cell shows a photo, no lift counted as a cover), worked out in its own body (M5).
     @Test func thePhotosLongPressLiftsThePhotoAndGivesVoiceOverTheItems() throws {
         let press = try Self.body(["private struct PhotoLongPress", "func body(content: Content)"], in: Self.photoMenu)
         #expect(press.contains(".contextMenu {"))
@@ -313,12 +319,19 @@ struct LongPressSourceTests {
         let handed = Self.squeezed(try Self.body(["private struct PhotoLongPress", "private func items("], in: Self.photoMenu))
         #expect(handed.contains("PhotoMenuItems(model:model,"), "\(handed)")
         #expect(items.contains("PhotoMenu(place: place"))
+        #expect(squeezedPress.contains("preview:{PhotoPreview(id:id,side:side)}"), "\(squeezedPress)")
+        #expect(!(try Self.body(["private struct PhotoLongPress"], in: Self.photoMenu)).contains("factsByID"),
+                "every cell tied to the facts")
         let lifted = try Self.body(["struct PhotoPreview"], in: Self.photoMenu)
-        #expect(lifted.contains("CoverPhoto(ids: [id]"), "only from the device, sharp or calm")
-        #expect(!lifted.contains("AssetThumbnail"), "a small preview stretched large")
+        #expect(lifted.contains("ThumbnailCache.shared.cachedThumbnail(for: id, side: side)"), "the image the cell shows")
+        #expect(lifted.contains("PhotoMenu.liftSize(imageWidth:"))
+        #expect(lifted.contains("@Environment(\\.displayScale)"))
+        #expect(lifted.contains("AssetThumbnail(id: id, side: side)"), "gone from memory: as large as its cell, asked for again")
+        #expect(!lifted.contains("CoverPhoto"), "a placeholder where the cell shows a photo, a lift counted as a cover")
         #expect(!lifted.contains("@Environment(AppModel"), "the system draws the lifted photo apart: everything handed in")
-        let size = Self.squeezed(try Self.body(["private struct PhotoLongPress", "private var liftedPhoto"], in: Self.photoMenu))
-        #expect(size.contains("PhotoMenu.previewSize(pixelWidth:"), "\(size)")
+        // Sharp by the covers' rule, the same 70 % (`ThumbnailRequest.sharpShare`).
+        let thumbnails = try Self.code("App/Albumist/Views/AssetThumbnail.swift")
+        #expect(thumbnails.contains("static let sharpShare: CGFloat = \(PhotoMenu.sharpShare)"))
     }
 
     /// Each photo item goes the place's way: "Ansehen" as the tap opens it, "Zu Album

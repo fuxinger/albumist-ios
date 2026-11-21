@@ -126,14 +126,4 @@ public struct PhotoMenu: Equatable, Sendable {
         height = min(height, previewBounds.height, previewBounds.width / ratio)
         return PreviewSize(width: height * ratio, height: height)
     }
-
-    /// The lifted photo whole, in its own proportions, as large as fits in `previewBounds`; 4:3
-    /// when its size is not known.
-    public static func previewSize(pixelWidth: Int, pixelHeight: Int) -> PreviewSize {
-        let known = pixelWidth > 0 && pixelHeight > 0
-        let raw = known ? Double(pixelWidth) / Double(pixelHeight) : 4.0 / 3.0
-        let ratio = min(max(raw, previewAspectRange.lowerBound), previewAspectRange.upperBound)
-        let width = min(previewBounds.width, previewBounds.height * ratio)
-        return PreviewSize(width: width, height: width / ratio)
-    }
 }

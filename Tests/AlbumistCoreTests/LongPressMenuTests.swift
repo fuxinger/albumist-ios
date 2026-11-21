@@ -470,37 +470,4 @@ struct PhotoMenuTests {
         #expect(Self.close(tower.aspectRatio, 0.25))
         #expect(Self.close(tower.height, 426.67))
     }
-
-    /// The photo larger and whole, in its own proportions, as large as fits in 320 × 427 pt
-    /// (the width of an album's lifted preview; a photo taken upright, 3:4, fills it).
-    @Test func theLiftedPhotoIsWholeInItsOwnProportions() {
-        let across = PhotoMenu.previewSize(pixelWidth: 4032, pixelHeight: 3024)
-        #expect(Self.close(across.width, 320) && Self.close(across.height, 240))
-        #expect(Self.close(across.aspectRatio, 4.0 / 3.0))
-        let upright = PhotoMenu.previewSize(pixelWidth: 3024, pixelHeight: 4032)
-        #expect(Self.close(upright.width, 320) && Self.close(upright.height, 426.67))
-        // A screenshot is narrower: its height is what limits it, nothing is cut.
-        let screenshot = PhotoMenu.previewSize(pixelWidth: 1179, pixelHeight: 2556)
-        #expect(Self.close(screenshot.height, 426.67))
-        #expect(Self.close(screenshot.width, 426.67 * 1179 / 2556))
-        // A panorama keeps its width and is low.
-        let panorama = PhotoMenu.previewSize(pixelWidth: 12_000, pixelHeight: 3_000)
-        #expect(Self.close(panorama.width, 320) && Self.close(panorama.height, 80))
-        let square = PhotoMenu.previewSize(pixelWidth: 2_000, pixelHeight: 2_000)
-        #expect(Self.close(square.width, 320) && Self.close(square.height, 320))
-    }
-
-    /// Without its size (not read yet, a broken record), 4:3; far beyond any camera (a strip of
-    /// a few pixels), held at 6:1 or 1:4 so the preview is never a line.
-    @Test func anUnknownOrExtremeSizeStaysAPhoto() {
-        for (w, h) in [(0, 0), (0, 3_000), (4_000, 0), (-1, 10)] {
-            let size = PhotoMenu.previewSize(pixelWidth: w, pixelHeight: h)
-            #expect(Self.close(size.width, 320) && Self.close(size.height, 240), "\(w)×\(h)")
-        }
-        let strip = PhotoMenu.previewSize(pixelWidth: 10_000, pixelHeight: 10)
-        #expect(Self.close(strip.aspectRatio, 6))
-        let tower = PhotoMenu.previewSize(pixelWidth: 10, pixelHeight: 10_000)
-        #expect(Self.close(tower.aspectRatio, 0.25))
-        #expect(Self.close(tower.height, 426.67))
-    }
 }

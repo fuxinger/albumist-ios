@@ -294,7 +294,9 @@ private struct ProposalListCard: View {
             .disabled(selecting && !selectable)
     }
 
-    /// The photo card, ticked while the list selects and the card is chosen.
+    /// The photo card, ticked while the list selects and the card is chosen. Its long press lifts
+    /// the card itself: the photo it shows, what it hides hidden, in its shape (review C of
+    /// design wave 2, M2).
     private var photoCard: some View {
         PhotoCard(coverIDs: covers, title: Text(verbatim: card.title),
                   subtitle: card.styledSubtitle, hidesPreview: card.hidesPreview,
@@ -302,8 +304,6 @@ private struct ProposalListCard: View {
             cardAction
         } menu: {
             menuItems
-        } preview: {
-            menuPreview
         }
         .selected(selecting && isSelected)
         .menuOffered(SuggestionMenu.isOffered(made: made, working: model.quickCreating == proposal.id, selecting: selecting))
@@ -331,12 +331,6 @@ private struct ProposalListCard: View {
                             working: model.quickCreating == proposal.id,
                             waits: model.quickCreating != nil && model.quickCreating != proposal.id,
                             selecting: selecting, forVoiceOver: true, act: { act(card.action) })
-    }
-
-    /// What the long press lifts: the suggestion large, as an album's long press shows the album.
-    private var menuPreview: SuggestionPreview {
-        SuggestionPreview(covers: covers, hidesPreview: card.hidesPreview, title: card.title, line: card.styledSubtitle,
-                          placeholderSymbol: proposal.placeholderSymbol)
     }
 
     /// The card's body opens the suggestion, or ticks it while the list selects (`onOpen`: its
@@ -1705,6 +1699,8 @@ struct ProposalPhotosView: View {
     @Namespace private var zoom
     /// Three in a row from the narrowest iPhone (375 pt) to the widest (440 pt); more on an iPad.
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 2)]
+    /// The side a photo's thumbnail is asked for, and its long press lifts that image.
+    private static let photoSide: CGFloat = 140
 
     var body: some View {
         Group {
@@ -1783,7 +1779,7 @@ struct ProposalPhotosView: View {
             }
             if isSelected { selected.remove(id) } else { selected.insert(id) }
         } label: {
-            AssetThumbnail(id: id, side: 140)
+            AssetThumbnail(id: id, side: Self.photoSide)
                 .aspectRatio(1, contentMode: .fill)
                 .clipped()
                 .matchedTransitionSource(id: id, in: zoom)
@@ -1806,7 +1802,7 @@ struct ProposalPhotosView: View {
         .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
         .accessibilityIdentifier("proposalPhotos.photo")
         // The long press (DS-06a): the photo larger, "Ansehen" and "Aus Vorschlag entfernen".
-        .photoMenu(id, place: .suggestion, selecting: selecting, available: !disabled) { item in
+        .photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled) { item in
             perform(item, on: id)
         }
     }

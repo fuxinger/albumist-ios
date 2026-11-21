@@ -31,6 +31,25 @@ enum UITestLifecycle {
         return "UI_FACT app lifecycle \(parts[2]) at \(clock(seconds)) UTC"
     }
 
+    /// When the app last entered the background at or after `since` (seconds since 1970), from the
+    /// watch file's `text`; nil when it has not, or came back to the foreground since. In UI run
+    /// 44880878362 (device test03) the first Home press reached the app (background 1.1 s after
+    /// it) while XCTest still read the app in the foreground 8 s later: the app's own line is the
+    /// earlier and surer answer (`UITestWait.toBackground`).
+    static func inBackground(_ text: String, since: Double) -> Double? {
+        var entered: Double?
+        for line in text.split(separator: "\n") {
+            let parts = line.split(separator: " ")
+            guard parts.count == 3, parts[0] == "^", let seconds = Double(parts[1]), seconds >= since - 0.05 else { continue }
+            switch parts[2] {
+            case "background": entered = seconds
+            case "foreground", "active": entered = nil
+            default: break
+            }
+        }
+        return entered
+    }
+
     /// "HH:MM:SS.s" (UTC) of seconds since 1970, the clock of `UITestOnboarding.clock`.
     static func clock(_ seconds: Double) -> String {
         let day = seconds.truncatingRemainder(dividingBy: 86_400)

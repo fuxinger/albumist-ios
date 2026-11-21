@@ -27,6 +27,30 @@ struct UITestLifecycleTests {
         }
     }
 
+    /// UI run 44880878362, device test03: Home press at 08:53:15.1, the app resigned active at
+    /// 15.5 and was in the background at 16.2, while XCTest still read state 4 eight seconds later
+    /// and pressed Home a second time. The app's own line answers the question first.
+    @Test func theAppsBackgroundLineAfterThePressCounts() throws {
+        let press = 1_795_251_195.1 // 08:53:15.1
+        let file = UITestLifecycle.line("foreground", at: press - 28) + UITestLifecycle.line("active", at: press - 22)
+            + "1795251190.000 2600\n" + UITestLifecycle.line("resign-active", at: press + 0.4)
+            + UITestLifecycle.line("background", at: press + 1.1)
+        let since = try #require(UITestLifecycle.inBackground(file, since: press))
+        #expect(UITestLifecycle.clock(since) == "08:53:16.2")
+    }
+
+    @Test func noBackgroundLineAfterThePressMeansNotYet() {
+        let press = 1_795_251_195.1
+        // Only a resign-active (a gesture iOS cancelled), or a background from before the press.
+        #expect(UITestLifecycle.inBackground(UITestLifecycle.line("resign-active", at: press + 0.4), since: press) == nil)
+        #expect(UITestLifecycle.inBackground(UITestLifecycle.line("background", at: press - 30)
+            + UITestLifecycle.line("foreground", at: press - 20), since: press) == nil)
+        // Back in the foreground after the background: not in the background now.
+        #expect(UITestLifecycle.inBackground(UITestLifecycle.line("background", at: press + 1)
+            + UITestLifecycle.line("foreground", at: press + 3), since: press) == nil)
+        #expect(UITestLifecycle.inBackground("", since: press) == nil)
+    }
+
     @Test func theClockIsTheOneOfTheTestsClockLines() {
         #expect(UITestLifecycle.clock(seconds) == "03:43:07.4")
         #expect(UITestLifecycle.clock(86_400 * 3 + 5) == "00:00:05.0")

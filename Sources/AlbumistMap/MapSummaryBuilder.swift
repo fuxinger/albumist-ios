@@ -182,19 +182,26 @@ extension MapSummary {
         if a.atHome != b.atHome { return a.atHome }
         let (showA, showB) = (showingOrder(PreviewRank(a)), showingOrder(PreviewRank(b)))
         if showA != showB { return showA < showB }
-        // In two parts: the standard library compares tuples of up to six elements.
-        func when(_ fact: AssetFacts) -> (String, Double, Double, Double) {
-            let location = fact.asset.usableLocation
-            return (fact.tripID?.rawValue ?? "", fact.asset.creationDate?.timeIntervalSinceReferenceDate ?? .infinity,
-                    location?.latitude ?? .infinity, location?.longitude ?? .infinity)
+        // Pair by pair, in order: the first value that differs decides, as in one comparison of
+        // all of them.
+        func when(_ fact: AssetFacts) -> (String, Double) {
+            (fact.tripID?.rawValue ?? "", fact.asset.creationDate?.timeIntervalSinceReferenceDate ?? .infinity)
         }
-        func what(_ fact: AssetFacts) -> (String, String, String) {
-            (fact.place?.isoCountryCode ?? "", fact.place?.locality ?? "", fact.timeZone?.identifier ?? "")
+        func whereTaken(_ fact: AssetFacts) -> (Double, Double) {
+            let location = fact.asset.usableLocation
+            return (location?.latitude ?? .infinity, location?.longitude ?? .infinity)
+        }
+        func what(_ fact: AssetFacts) -> (String, String) {
+            (fact.place?.isoCountryCode ?? "", fact.place?.locality ?? "")
         }
         let (whenA, whenB) = (when(a), when(b))
         if whenA != whenB { return whenA < whenB }
+        let (whereA, whereB) = (whereTaken(a), whereTaken(b))
+        if whereA != whereB { return whereA < whereB }
         let (whatA, whatB) = (what(a), what(b))
         if whatA != whatB { return whatA < whatB }
+        let (clockA, clockB) = (a.timeZone?.identifier ?? "", b.timeZone?.identifier ?? "")
+        if clockA != clockB { return clockA < clockB }
         let (keyA, keyB) = (TripGeometryBuilder.duplicateKey(a), TripGeometryBuilder.duplicateKey(b))
         if keyA != keyB { return keyA.lexicographicallyPrecedes(keyB) }
         func rest(_ fact: AssetFacts) -> (Double, String) {

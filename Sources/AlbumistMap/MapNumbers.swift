@@ -54,7 +54,7 @@ extension WorldNumbers {
     ///
     /// The result is `isPreliminary` while the analysis runs; `holdingHighs(over:)` then keeps
     /// every number from going down.
-    public static func compute(trips: [MapTrip], countries: [MapCountry], cities: Int, timeZone: TimeZone, now: Date,
+    public static func compute(trips: [MapTrip], countries: [MapCountry], cities: Int, timeZone: TimeZone = .current, now: Date,
                                analysisRunning: Bool) -> WorldNumbers {
         let trips = MapYears.chronological(trips)
         let countries = MapCountries.inFirstVisitOrder(countries)
@@ -150,7 +150,7 @@ extension WorldNumbers {
     /// photos; a tie goes to the earlier day, then to the smaller trip id. Named after the place
     /// of most of that day's photos, if it has a name. `nil` when no trip has a day with photos.
     static func mostPhotosInADay(of trips: [MapTrip]) -> DayRecord? {
-        var best: (photos: Int, day: LocalDay, tripID: String, trip: Int, index: Int)?
+        var best: BestDay?
         for t in trips.indices {
             let tripID = trips[t].id.rawValue
             let dayCounts = trips[t].geometry.dayCounts
@@ -160,7 +160,7 @@ extension WorldNumbers {
                 if let current = best, photos < current.photos || (photos == current.photos && (day, tripID) >= (current.day, current.tripID)) {
                     continue
                 }
-                best = (photos, day, tripID, t, d)
+                best = BestDay(photos: photos, day: day, tripID: tripID, trip: t, index: d)
             }
         }
         return best.map { best in
@@ -321,13 +321,6 @@ extension WorldNumbers {
 extension WorldNumbers {
     /// The best place per record kind while the places are walked.
     fileprivate struct RecordBoard {
-        struct Best {
-            var value: Double
-            /// Index into the trips, which are in chronological order (start, then id).
-            var trip: Int
-            var place: Int
-        }
-
         var farthest, northernmost, southernmost, easternmost, westernmost, highest: Best?
 
         func best(_ kind: MapRecord.Kind) -> Best? {
@@ -360,6 +353,27 @@ extension WorldNumbers {
             }
             best = Best(value: value, trip: trip, place: place)
         }
+    }
+
+    /// The day with the most photos so far while the trips' days are walked (`mostPhotosInADay`):
+    /// its photos, day and trip id, which rank it, and where it is (`trip`, and `index` into that
+    /// trip's `dayCounts`).
+    fileprivate struct BestDay {
+        var photos: Int
+        var day: LocalDay
+        var tripID: String
+        var trip: Int
+        var index: Int
+    }
+}
+
+extension WorldNumbers.RecordBoard {
+    /// A kind's best place so far.
+    struct Best {
+        var value: Double
+        /// Index into the trips, which are in chronological order (start, then id).
+        var trip: Int
+        var place: Int
     }
 }
 

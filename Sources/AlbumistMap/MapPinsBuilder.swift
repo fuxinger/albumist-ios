@@ -36,19 +36,9 @@ extension MapPins {
         }
 
         let visited = PinBuilding.onceEach(countries)
-        let codes = Set(visited.map(\.code))
         // The best trip place per visited country, and the best one with a photo for the pin.
-        var best: [String: PinAnchor] = [:]
-        var bestWithCover: [String: PinAnchor] = [:]
-        for trip in trips {
-            for (index, place) in trip.geometry.places.enumerated() {
-                guard let code = place.countryKey, codes.contains(code), (trip.geometry.countryPhotos[code] ?? 0) > 0,
-                      place.coordinate.isPlausible else { continue }
-                let anchor = PinAnchor(trip: trip, index: index, place: place)
-                if best[code].map(anchor.ranks(before:)) ?? true { best[code] = anchor }
-                if anchor.cover != nil, bestWithCover[code].map(anchor.ranks(before:)) ?? true { bestWithCover[code] = anchor }
-            }
-        }
+        let anchors = PinBuilding.countryAnchors(trips, codes: Set(visited.map(\.code)))
+        let best = anchors.best, bestWithCover = anchors.withCover
         func years(of countries: [MapCountry]) -> [Int] {
             Array(Set(countries.flatMap { $0.tripIDs.compactMap { startYears[$0.rawValue] } })).sorted()
         }
@@ -68,16 +58,7 @@ extension MapPins {
             pins.append(MapPin(id: "region:\(region.rawValue)", level: .worldRegion, coordinate: anchor.coordinate, region: region,
                                count: members.count, cover: cover, years: years(of: members)))
         }
-        // Level, then `count` descending, then id. Sorted on small keys rather than whole pins:
-        // tens of thousands of places.
-        return pins.indices
-            .map { (level: pins[$0].level, count: pins[$0].count, id: pins[$0].id, index: $0) }
-            .sorted { a, b in
-                if a.level != b.level { return a.level < b.level }
-                if a.count != b.count { return a.count > b.count }
-                return a.id < b.id
-            }
-            .map { pins[$0.index] }
+        return PinBuilding.ordered(pins)
     }
 }
 
@@ -155,5 +136,35 @@ private enum PinBuilding {
 
     static func first(_ anchors: [PinAnchor]) -> PinAnchor? {
         anchors.min { $0.ranks(before: $1) }
+    }
+
+    /// Per visited country (`codes`), the best place of a trip with photos there, and the best
+    /// such place with a photo for the pin (`PinAnchor.ranks(before:)`).
+    static func countryAnchors(_ trips: [MapTrip], codes: Set<String>) -> (best: [String: PinAnchor], withCover: [String: PinAnchor]) {
+        var best: [String: PinAnchor] = [:]
+        var bestWithCover: [String: PinAnchor] = [:]
+        for trip in trips {
+            for (index, place) in trip.geometry.places.enumerated() {
+                guard let code = place.countryKey, codes.contains(code), (trip.geometry.countryPhotos[code] ?? 0) > 0,
+                      place.coordinate.isPlausible else { continue }
+                let anchor = PinAnchor(trip: trip, index: index, place: place)
+                if best[code].map(anchor.ranks(before:)) ?? true { best[code] = anchor }
+                if anchor.cover != nil, bestWithCover[code].map(anchor.ranks(before:)) ?? true { bestWithCover[code] = anchor }
+            }
+        }
+        return (best, bestWithCover)
+    }
+
+    /// `pins` by level, then `count` descending, then id. Sorted on small keys rather than whole
+    /// pins: tens of thousands of places.
+    static func ordered(_ pins: [MapPin]) -> [MapPin] {
+        pins.indices
+            .map { (level: pins[$0].level, count: pins[$0].count, id: pins[$0].id, index: $0) }
+            .sorted { a, b in
+                if a.level != b.level { return a.level < b.level }
+                if a.count != b.count { return a.count > b.count }
+                return a.id < b.id
+            }
+            .map { pins[$0.index] }
     }
 }

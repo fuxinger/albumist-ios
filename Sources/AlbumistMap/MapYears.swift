@@ -119,9 +119,24 @@ public enum MapYears {
 
     /// How long `trip` was not looked at, as a sort key: never first (by the trip's start), then
     /// the oldest look, then the older trip, then the smaller id.
-    private static func staleness(_ trip: MapTrip, _ lastViewed: [AlbumistID: Date]) -> (Int, Date, Date, String) {
-        if let viewed = lastViewed[trip.id] { return (1, viewed, trip.geometry.start, trip.id.rawValue) }
-        return (0, .distantPast, trip.geometry.start, trip.id.rawValue)
+    private static func staleness(_ trip: MapTrip, _ lastViewed: [AlbumistID: Date]) -> Staleness {
+        if let viewed = lastViewed[trip.id] { return Staleness(looked: 1, viewed: viewed, start: trip.geometry.start, id: trip.id.rawValue) }
+        return Staleness(looked: 0, viewed: .distantPast, start: trip.geometry.start, id: trip.id.rawValue)
+    }
+
+    /// The sort key of `staleness`, compared field by field in this order.
+    private struct Staleness: Comparable {
+        /// 0 for a trip never looked at, 1 for one looked at.
+        var looked: Int
+        var viewed: Date
+        var start: Date
+        var id: String
+
+        static func < (a: Self, b: Self) -> Bool {
+            // Two pairs, compared as one row of four would be: the first that differs decides.
+            if (a.looked, a.viewed) != (b.looked, b.viewed) { return (a.looked, a.viewed) < (b.looked, b.viewed) }
+            return (a.start, a.id) < (b.start, b.id)
+        }
     }
 
     /// SplitMix64 (Steele, Lea, Flood 2014): one well-mixed number per seed, the same on every

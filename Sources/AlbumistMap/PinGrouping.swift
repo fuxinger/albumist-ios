@@ -244,7 +244,7 @@ struct AzimuthalEquidistantProjection: Sendable {
     /// Metres east (`x`) and north (`y`) of the centre on the projection, and the great-circle
     /// angle from the centre in radians (more than π/2: the far side of the globe). The point
     /// opposite the centre has no direction; it is put due north.
-    func project(_ coordinate: GeoCoordinate) -> (x: Double, y: Double, angle: Double) {
+    func project(_ coordinate: GeoCoordinate) -> Projected {
         let latitude = coordinate.latitude * .pi / 180
         let dLongitude = coordinate.longitude * .pi / 180 - longitude
         let sinLat = sin(latitude), cosLat = cos(latitude)
@@ -254,8 +254,16 @@ struct AzimuthalEquidistantProjection: Sendable {
         let across = (east * east + north * north).squareRoot()
         let angle = atan2(across, along)
         let meters = angle * GeoMath.earthRadiusMeters
-        guard across > 0 else { return (0, angle > .pi / 2 ? meters : 0, angle) }
-        return (east / across * meters, north / across * meters, angle)
+        guard across > 0 else { return Projected(x: 0, y: angle > .pi / 2 ? meters : 0, angle: angle) }
+        return Projected(x: east / across * meters, y: north / across * meters, angle: angle)
+    }
+
+    /// A point as `project` puts it: metres east (`x`) and north (`y`) of the centre, and its
+    /// great-circle angle from the centre in radians.
+    struct Projected: Sendable {
+        var x: Double
+        var y: Double
+        var angle: Double
     }
 
     /// The point `x` metres east and `y` metres north of the centre on the projection. The

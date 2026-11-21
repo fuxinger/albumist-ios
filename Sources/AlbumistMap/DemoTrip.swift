@@ -25,8 +25,8 @@ public enum DemoTrip {
         let start = dates.min() ?? Date(timeIntervalSince1970: 0)
         let farthest = coordinates.reduce(0) { max($0, GeoMath.distance(home.coordinate, $1)) }
         let trip = Trip.make(id: id, start: start, end: dates.max() ?? start, geotaggedAssetIDs: facts.map(\.id),
-                             centroid: GeoMath.centroid(coordinates) ?? stops[0].coordinate, maxDistanceFromHomeMeters: farthest,
-                             distinctStops: 8, kind: .roadTrip)
+                             profile: Trip.Profile(centroid: GeoMath.centroid(coordinates) ?? stops[0].coordinate,
+                                                   maxDistanceFromHomeMeters: farthest, distinctStops: 8, kind: .roadTrip))
         let geometry = TripGeometry.build(trip: trip, facts: facts, airborne: [], timeZone: zone)
         return MapTrip(geometry: geometry, title: title, stats: TripStats.compute(geometry, home: home), home: home)
     }

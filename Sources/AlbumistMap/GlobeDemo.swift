@@ -55,16 +55,22 @@ extension GlobeScene {
             pins.append(MapPin(id: "region:\(region.rawValue)", level: .worldRegion, coordinate: anchor, region: region, count: countries.count))
         }
 
+        let countries = demoCountries(tripsByCountry: tripsByCountry, firstYear: firstYear)
+        return GlobeScene(arcs: arcs, pins: pins, countries: countries, trips: [],
+                          home: RoundedHome(coordinate: homes[0].home, countryCode: "DE"), focus: nil)
+    }
+
+    /// The demo's visited countries for the tint, from the trips to each country and the year of
+    /// its first one: 40 photos a trip, first visited that many years after 1 January 2016.
+    private static func demoCountries(tripsByCountry: [String: [AlbumistID]], firstYear: [String: Int]) -> [MapCountry] {
         let start = Date(timeIntervalSince1970: 1_451_606_400)  // 1 January 2016, UTC
-        let countries = tripsByCountry.keys.sorted().map { code -> MapCountry in
+        return tripsByCountry.keys.sorted().map { code -> MapCountry in
             let year = firstYear[code] ?? 2016
             let firstVisit = start.addingTimeInterval(Double(year - 2016) * 365.25 * 86_400)
             return MapCountry(code: code, firstVisit: firstVisit, firstVisitYear: year, photoCount: 40 * (tripsByCountry[code]?.count ?? 1),
                               tripIDs: tripsByCountry[code] ?? [], isState: WorldStates.isState(code),
                               continent: Continent.forCountryCode(code), region: WorldRegion.of(countryCode: code))
         }
-        return GlobeScene(arcs: arcs, pins: pins, countries: countries, trips: [],
-                          home: RoundedHome(coordinate: homes[0].home, countryCode: "DE"), focus: nil)
     }
 }
 

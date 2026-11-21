@@ -9,8 +9,8 @@ struct TripMakingTests {
     @Test func madeIsTheStoredTrip() throws {
         let start = Date(timeIntervalSince1970: 1_686_700_000)
         let made = Trip.make(id: AlbumistID("demo-iceland"), start: start, end: start.addingTimeInterval(8 * 86_400),
-                             geotaggedAssetIDs: ["a", "b"], centroid: GeoCoordinate(latitude: 64.1, longitude: -19.5),
-                             maxDistanceFromHomeMeters: 2_600_000, distinctStops: 8, kind: .roadTrip)
+                             geotaggedAssetIDs: ["a", "b"], profile: .init(centroid: GeoCoordinate(latitude: 64.1, longitude: -19.5),
+                                                                           maxDistanceFromHomeMeters: 2_600_000, distinctStops: 8, kind: .roadTrip))
         let stored = Trip(id: AlbumistID("demo-iceland"), start: start, end: start.addingTimeInterval(8 * 86_400),
                           geotaggedAssetIDs: ["a", "b"], inferredAssetIDs: [], centroid: GeoCoordinate(latitude: 64.1, longitude: -19.5),
                           maxDistanceFromHomeMeters: 2_600_000, distinctStops: 8, kind: .roadTrip)

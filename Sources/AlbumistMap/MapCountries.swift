@@ -30,34 +30,6 @@ public enum MapCountries {
     ///   by their start in `tripStarts`, then id; a trip missing from `tripStarts` comes last.
     public static func compute(facts: [AssetFacts], airborne: Set<AssetID>, maybeInFlight: Set<AssetID> = [], tripStarts: [AlbumistID: Date],
                                minimumPhotos: Int = MapSummary.minimumPhotosPerCountry, timeZone: TimeZone = .current) -> [MapCountry] {
-        struct Tally {
-            var photos = Set<AssetID>()
-            var firstVisit: Date?
-            /// The clock of the first visit's photo (`clock(of:)`); "": `timeZone`.
-            var firstVisitZone = ""
-            var trips = Set<AlbumistID>()
-            /// The trip last inserted: photos of a trip come mostly in a run.
-            var lastTrip: AlbumistID?
-
-            mutating func add(_ fact: AssetFacts) {
-                photos.insert(fact.id)
-                // A later photo changes nothing, whatever its clock: naming the clock only when
-                // it may decide keeps it out of the loop over every photo.
-                if let date = fact.asset.creationDate, firstVisit.map({ date <= $0 }) ?? true {
-                    // The earlier photo, or of two at the same moment the one whose clock comes
-                    // first by name, so the order of the facts never changes the year.
-                    let zone = MapCountries.clock(of: fact)
-                    if firstVisit.map({ (date, zone) < ($0, firstVisitZone) }) ?? true {
-                        firstVisit = date
-                        firstVisitZone = zone
-                    }
-                }
-                if let trip = fact.tripID, trip != lastTrip {
-                    trips.insert(trip)
-                    lastTrip = trip
-                }
-            }
-        }
         // The tallies by code; photos come mostly in runs in one country, so the last one's tally
         // is at hand without a look-up.
         var tallies: [Tally] = [], codes: [String] = [], index: [String: Int] = [:]
@@ -91,6 +63,36 @@ public enum MapCountries {
                               region: WorldRegion.of(countryCode: code))
         }
         return inFirstVisitOrder(countries)
+    }
+
+    /// One country's photos, first visit and trips, as `compute` counts them.
+    private struct Tally {
+        var photos = Set<AssetID>()
+        var firstVisit: Date?
+        /// The clock of the first visit's photo (`clock(of:)`); "": `timeZone`.
+        var firstVisitZone = ""
+        var trips = Set<AlbumistID>()
+        /// The trip last inserted: photos of a trip come mostly in a run.
+        var lastTrip: AlbumistID?
+
+        mutating func add(_ fact: AssetFacts) {
+            photos.insert(fact.id)
+            // A later photo changes nothing, whatever its clock: naming the clock only when
+            // it may decide keeps it out of the loop over every photo.
+            if let date = fact.asset.creationDate, firstVisit.map({ date <= $0 }) ?? true {
+                // The earlier photo, or of two at the same moment the one whose clock comes
+                // first by name, so the order of the facts never changes the year.
+                let zone = MapCountries.clock(of: fact)
+                if firstVisit.map({ (date, zone) < ($0, firstVisitZone) }) ?? true {
+                    firstVisit = date
+                    firstVisitZone = zone
+                }
+            }
+            if let trip = fact.tripID, trip != lastTrip {
+                trips.insert(trip)
+                lastTrip = trip
+            }
+        }
     }
 
     /// The identifier of the clock a photo was taken on: its own (`AssetFacts.timeZone`), else

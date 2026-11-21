@@ -128,9 +128,11 @@ struct AlbumsView: View {
                 .foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
             if let url = URL(string: UIApplication.openSettingsURLString) {
-                Button("Alle Fotos erlauben") { openURL(url) }
-                    .font(.subheadline.weight(.semibold))
-                    .minimumHitTarget()
+                // The 44 pt tap area on the label, where the button takes the tap.
+                Button { openURL(url) } label: {
+                    Text("Alle Fotos erlauben").minimumHitTarget()
+                }
+                .font(.subheadline.weight(.semibold))
             }
         }
         .padding(.horizontal, Theme.Spacing.l)

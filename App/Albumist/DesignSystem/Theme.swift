@@ -312,7 +312,10 @@ extension View {
         modifier(CompactLineLimit(limit: limit))
     }
 
-    /// At least 44 × 44 pt to tap (HIG), without changing how the control looks.
+    /// At least 44 × 44 pt to tap (HIG), without changing how the control looks. Put it on the
+    /// label of a Button, Menu, Link, ShareLink, NavigationLink, Toggle or `PushLink`: the
+    /// control takes the tap on its label, so around the control the frame only grows the
+    /// layout (`HitTargetSourceTests`).
     func minimumHitTarget() -> some View {
         frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
     }

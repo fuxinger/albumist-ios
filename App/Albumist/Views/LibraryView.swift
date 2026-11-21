@@ -391,10 +391,12 @@ struct IgnoreUndoBar: View {
                 }
                 .font(.subheadline.weight(.medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Widerrufen") { model.unignore(undo.assets) }
-                    .font(.subheadline.weight(.semibold))
-                    .minimumHitTarget()
-                    .accessibilityIdentifier("ignore.undo")
+                // The 44 pt tap area on the label, where the button takes the tap.
+                Button { model.unignore(undo.assets) } label: {
+                    Text("Widerrufen").minimumHitTarget()
+                }
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("ignore.undo")
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.vertical, Theme.Spacing.xs)

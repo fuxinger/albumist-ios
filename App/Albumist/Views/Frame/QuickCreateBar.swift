@@ -35,11 +35,11 @@ struct QuickCreateBar: View {
                 Button {
                     Task { await model.undoQuickCreate() }
                 } label: {
-                    Text("Widerrufen").checkingBeside(!banner.canUndo)
+                    // The 44 pt tap area on the label, where the button takes the tap.
+                    Text("Widerrufen").checkingBeside(!banner.canUndo).minimumHitTarget()
                 }
                 .font(.subheadline.weight(.semibold))
                 .disabled(!banner.canUndo)
-                .minimumHitTarget()
                 .accessibilityIdentifier("quickCreate.undo")
             }
             if case .undoing(deletesAlbum: true) = banner.phase {

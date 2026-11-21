@@ -61,12 +61,13 @@
   „+16 Fotos“; das „+“ bleibt für Fotos, die in ein schon vorhandenes Album kamen (Schliff nach den
   Bildschirmfotos von UI-Lauf 44852630315).
 - 21.11. (Design-Welle 2, DS-10, noch in keinem Build): Foto-Ansicht wie in Fotos. Oben stehen Ort, Tag und Uhrzeit
-  in der Ortszeit („Heute“, „Gestern“, Wochentag; bei noch nicht analysierten Fotos das Datum aus Fotos; auf
-  schmalen iPhones kurz, die Uhrzeit bleibt) statt „1 von 176“. „Teilen“ gibt das Foto vom iPhone weiter (nie aus
-  iCloud; liegt nur eine Vorschau da, sagt der Knopf, warum er aus ist; die Datei wird nach dem Teilen gelöscht,
-  spätestens beim nächsten Start). Tippen blendet Leisten, Statusleiste und Home-Balken aus und wieder ein,
-  Hineinzoomen ebenso, mit VoiceOver bleiben sie. Live Photos bewegen sich kurz beim Ansehen und ganz bei langem
-  Drücken, ohne die Musik anzuhalten.
+  in der Ortszeit („Heute“, „Gestern“, Wochentag; bei noch nicht analysierten Fotos das Datum aus Fotos, schon auf der
+  Uhr, die es nach der Analyse behält; auf schmalen iPhones kürzt jede Zeile für sich, die Uhrzeit bleibt) statt
+  „1 von 176“. „Teilen“ gibt das Foto vom iPhone weiter (nie aus iCloud; liegt nur eine Vorschau da, sagt der Knopf,
+  warum er aus ist; klappt das Vorbereiten nicht, sagt es die Foto-Ansicht selbst; die Datei wird nach dem Teilen
+  gelöscht, spätestens beim nächsten Start). Tippen blendet Leisten, Statusleiste und Home-Balken aus und wieder ein,
+  Hineinzoomen ebenso, mit VoiceOver bleiben sie; unter dem Titel steht nie das Foto. Live Photos bewegen sich kurz
+  beim Ansehen und ganz bei langem Drücken, ohne die Musik anzuhalten; solange sie spielen, bleibt die Seite stehen.
 - 21.11. (Design-Welle 2, DS-06a, Entwurf E4, noch in keinem Build): Langes Drücken wie in Fotos. Eine Vorschlagskarte
   hebt sich ab, wie sie ist (dasselbe Titelbild; bei persönlichem Inhalt „Vorschau ausgeblendet“), und bietet ihr
   eigenes Wort („Anlegen“, „Ergänzen …“, „Benennen …“, „Ansehen …“), „Anpassen“, bei Reisen „Reise teilen oder

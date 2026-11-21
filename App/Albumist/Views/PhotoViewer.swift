@@ -176,10 +176,10 @@ struct PhotoViewer: View {
     }
 
     /// Shares the photo from the iPhone (`PhotoShare`); off, with the reason, where only a
-    /// preview of it is here. Not for videos: they come with wave 3 (DS-16).
+    /// preview of it is here. Only for still images: videos come with wave 3 (DS-16).
     @ViewBuilder
     private var shareButton: some View {
-        if !isVideo {
+        if isImage {
             Button { share() } label: { Label("Teilen", systemImage: "square.and.arrow.up") }
                 .disabled(!shareState.canShare || preparingShare)
                 .accessibilityHint(shareHint)
@@ -209,7 +209,7 @@ struct PhotoViewer: View {
     private var notes: some View {
         if chrome.isShown {
             VStack(spacing: 0) {
-                if shareState == .onlyInICloud && !isVideo {
+                if shareState == .onlyInICloud && isImage {
                     ShareInICloudNote()
                         .transition(.opacity)
                 }
@@ -241,7 +241,13 @@ struct PhotoViewer: View {
 
     private var assistive: Bool { voiceOver || switchControl }
     private var shareState: ShareAvailability { sharing[current] ?? .unknown }
-    private var isVideo: Bool { model.factsByID[current]?.asset.kind == .video }
+
+    /// A still image, the only kind that is shared: as Photos says once it is known (`basics`),
+    /// before that as Albumist's facts say (review D, L4: a video without facts was offered).
+    private var isImage: Bool {
+        if let known = basics[current] { return known.isImage }
+        return model.factsByID[current].map { $0.asset.kind == .image } ?? true
+    }
 
     /// A tap on the photo: the bars, the status bar and the home indicator go or come back, a
     /// plain fade with Reduce Motion; with VoiceOver or Switch Control they stay.
@@ -262,18 +268,21 @@ struct PhotoViewer: View {
     }
 
     /// Whether the photo shown can be shared: asked once it has been on screen a moment (not for
-    /// every photo swiped past), and once per photo.
+    /// every photo swiped past), and once per photo. Only an answer is kept: when Photos did not
+    /// answer, the next look asks again (review D, M6).
     private func checkSharing(_ id: AssetID) async {
-        guard sharing[id] == nil, !isVideo else { return }
+        guard sharing[id] == nil, isImage else { return }
         try? await Task.sleep(for: .milliseconds(600))
         guard !Task.isCancelled else { return }
         let found = await PhotoShare.availability(of: id)
-        guard found != .unknown else { return }
+        guard found != .unknown, !Task.isCancelled else { return }
         withAnimation(.easeInOut(duration: 0.2)) { sharing[id] = found }
     }
 
     /// The share sheet with the photo shown, once its file is ready (a moment for a large one).
-    /// A photo found only in iCloud turns the button off with its reason.
+    /// A photo found only in iCloud turns the button off with its reason; when Photos did not
+    /// answer or the file could not be written, the app says so as everywhere and the button
+    /// stays on for another try (review D, M6).
     private func share() {
         let id = current
         preparingShare = true
@@ -286,6 +295,9 @@ struct PhotoViewer: View {
             case .file(let file):
                 // Swiped on or closed meanwhile: not the photo on screen.
                 PhotoShare.remove(file.deletingLastPathComponent())
+            case .unavailable(.unknown):
+                guard !Task.isCancelled else { return }
+                model.message = .failure(String(localized: "Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal."))
             case .unavailable(let reason):
                 withAnimation(.easeInOut(duration: 0.2)) { sharing[id] = reason }
             }

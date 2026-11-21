@@ -40,7 +40,7 @@ struct PhotoViewerSourceTests {
             let off = Self.count(#"\.isNetworkAccessAllowed\s*=\s*false\b"#, in: code)
             #expect(allowed == off, "\(path): network access is set to something other than false")
             #expect(off >= options, "\(path): \(options) request options, only \(off) without network")
-            for function in ["requestImage(", "requestImageDataAndOrientation(", "requestLivePhoto(", "requestData("] {
+            for function in ["requestImage(", "requestImageDataAndOrientation(", "requestLivePhoto(", "requestData(", "writeData("] {
                 for arguments in AppSource.calls(of: function, in: code) {
                     requests += 1
                     #expect(arguments.contains("options: options"), "\(path): \(function) without its options")
@@ -49,9 +49,13 @@ struct PhotoViewerSourceTests {
         }
         let live = try Self.code("\(Self.folder)/LivePhotoPlayer.swift")
         #expect(AppSource.calls(of: "requestLivePhoto(", in: live).count == 1)
+        // The share asks for the first bytes of the photo's file and copies it file to file;
+        // it no longer reads the whole photo into memory to learn where it is (review D, M3).
         let share = try Self.code("\(Self.folder)/PhotoShare.swift")
-        #expect(AppSource.calls(of: "requestImageDataAndOrientation(", in: share).count == 1)
-        #expect(requests >= 3)
+        #expect(AppSource.calls(of: "requestImageDataAndOrientation(", in: share).isEmpty)
+        #expect(AppSource.calls(of: "requestData(", in: share).count == 1)
+        #expect(AppSource.calls(of: "writeData(", in: share).count == 1)
+        #expect(requests >= 4)
     }
 
     // MARK: Date and place as the title
@@ -183,27 +187,61 @@ struct PhotoViewerSourceTests {
 
     // MARK: Sharing
 
-    /// The share button shares the photo's data as Photos hands it out, from a temporary file
-    /// with the photo's own name that goes when the share sheet closes; "Bild sichern" would copy
-    /// the photo into the library and is not offered. Off with a reason where only a preview is
-    /// on the iPhone.
+    /// The share button shares the photo's file as Photos hands it out (the edited one, else the
+    /// original), from a temporary file with the photo's own name that goes when the share sheet
+    /// closes; "Bild sichern" and "Zu geteiltem Album hinzufügen" would copy the photo into the
+    /// library or into iCloud and are not offered. Off with a reason where only a preview is on
+    /// the iPhone; no answer from Photos is no verdict (review D: M3, M5, M6, L4, L8, L9).
     @Test func sharingUsesOnlyWhatIsOnTheIPhone() throws {
         let share = AppSource.code(try Self.file("PhotoShare.swift"))
         #expect(share.contains("UIActivityViewController("))
-        #expect(share.contains("excludedActivityTypes = [.saveToCameraRoll]"))
+        #expect(share.contains("excludedActivityTypes = [.saveToCameraRoll, UIActivity.ActivityType(rawValue:"))
+        #expect(AppSource.code(try Self.file("PhotoShare.swift"), keepStrings: true)
+            .contains("\"com.apple.mobileslideshow.StreamShareService\""))
         let done = try #require(share.range(of: "completionWithItemsHandler"))
         #expect(share[done.lowerBound...].prefix(120).contains("remove("), "the shared file stays behind")
         #expect(share.contains("temporaryDirectory"))
         #expect(share.contains("SharedPhotoFile.name("))
-        #expect(share.contains("PHImageResultIsInCloudKey"))
-        #expect(share.contains(".completeFileProtection"))
-        #expect(share.contains("version = .current"))
+        // The file Photos would hand out, and only for a still image.
+        #expect(share.contains("$0.type == .fullSizePhoto"))
+        #expect(share.contains("$0.type == .photo"))
+        #expect(share.contains("mediaType == .image"))
+        // Its first bytes say whether it is on the iPhone, and the reading stops there.
+        let check = try #require(AppSource.body(of: "private static func firstBytes(", in: share))
+        #expect(check.contains("requestData("))
+        #expect(check.contains("finish(.onDevice, stop: true)"))
+        #expect(try Self.file("PhotoKitAnswer.swift").contains("cancelDataRequest("))
+        // The share checks first, then Photos copies the file, readable only while it is open.
+        let write = try #require(AppSource.body(of: "private static func write(", in: share))
+        #expect(write.contains("firstBytes("), "shared without knowing it is on the iPhone")
+        #expect(write.contains("FileProtectionType.completeUnlessOpen"))
+        // No answer from Photos is no verdict.
+        let prepare = try #require(AppSource.body(of: "static func prepare(", in: share))
+        #expect(prepare.contains("case .noAnswer: return .unavailable(.unknown)"))
+        let thumbnails = AppSource.code(try AppSource.read("App/Albumist/Views/AssetThumbnail.swift"))
+        #expect(thumbnails.contains("func assetLookup(for id: AssetID) async -> AssetLookup"))
+        // Leftovers go at launch too, and never the folder of the sheet on screen.
+        let app = AppSource.code(try AppSource.read("App/Albumist/App/AlbumistApp.swift"))
+        #expect(try #require(AppSource.body(of: "init()", in: app)).contains("PhotoShare.removeLeftovers()"))
+        #expect(try #require(AppSource.body(of: "static func removeLeftovers(", in: share)).contains("onScreen"))
+        #expect(try #require(AppSource.body(of: "static func present(", in: share)).contains("onScreen = folder"))
+
         let viewer = AppSource.code(try Self.viewer(), keepStrings: true)
         #expect(viewer.contains("Label(\"Teilen\", systemImage: \"square.and.arrow.up\")"))
         #expect(viewer.contains("\"viewer.share\""))
         #expect(viewer.contains(".disabled(!shareState.canShare"))
         #expect(viewer.contains(".accessibilityHint("))
         #expect(viewer.contains("Das ganze Foto liegt nur in iCloud. Teilen kannst du es in der Fotos-App."))
+        // Only still images, by Photos' own kind once known.
+        #expect(try #require(AppSource.body(of: "private var shareButton", in: viewer)).contains("if isImage"))
+        #expect(try #require(AppSource.body(of: "private var isImage", in: viewer)).contains("basics[current]"))
+        // A failed share is said, not remembered; a file not shown is removed.
+        let sharing = try #require(AppSource.body(of: "private func share(", in: viewer))
+        #expect(sharing.contains("case .unavailable(.unknown):"))
+        #expect(sharing.contains("model.message = .failure("))
+        #expect(sharing.contains("Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal."))
+        #expect(sharing.contains("PhotoShare.remove(file.deletingLastPathComponent())"))
+        #expect(try #require(AppSource.body(of: "private func checkSharing(", in: viewer)).contains("found != .unknown"))
         let appear = try #require(AppSource.body(of: ".onAppear", in: viewer))
         let disappear = try #require(AppSource.body(of: ".onDisappear", in: viewer))
         #expect(appear.contains("PhotoShare.removeLeftovers()"))
@@ -256,6 +294,8 @@ struct PhotoViewerSourceTests {
             "Das ganze Foto liegt nur in iCloud. Teilen kannst du es in der Fotos-App.":
                 "The full photo is only in iCloud. You can share it from the Photos app.",
             "Teilen": "Share",
+            "Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal.":
+                "The photo could not be prepared for sharing. Please try again in a moment.",
         ]
         for (german, wanted) in english {
             let entry = try #require(catalog[german], "\(german) is not in the catalog")

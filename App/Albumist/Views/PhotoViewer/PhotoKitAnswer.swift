@@ -18,4 +18,10 @@ enum PhotoKitAnswer {
     static func resource<Value: Sendable>(fallback: Value) -> OneAnswer<Value, PHAssetResourceDataRequestID> {
         OneAnswer(fallback: fallback) { PHAssetResourceManager.default().cancelDataRequest($0) }
     }
+
+    /// For `PHAssetResourceManager.writeData`, which has no id and cannot be stopped: the answer
+    /// only ends the wait.
+    static func write<Value: Sendable>(fallback: Value) -> OneAnswer<Value, Never> {
+        OneAnswer(fallback: fallback) { _ in }
+    }
 }

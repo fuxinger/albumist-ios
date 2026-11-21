@@ -50,6 +50,11 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Geändert
+- 21.11. (Design-Welle 2, DS-10, noch in keinem Build): Foto-Ansicht wie in Fotos. Oben stehen Ort, Tag und Uhrzeit
+  in der Ortszeit („Heute“, „Gestern“, Wochentag) statt „1 von 176“. „Teilen“ gibt das Foto vom iPhone weiter (nie
+  aus iCloud; liegt nur eine Vorschau da, sagt der Knopf, warum er aus ist). Tippen blendet Leisten, Statusleiste
+  und Home-Balken aus und wieder ein, mit VoiceOver bleiben sie. Live Photos bewegen sich kurz beim Ansehen und ganz
+  bei langem Drücken.
 - 21.11. (Design-Welle 2, DS-06a, Entwurf E4, noch in keinem Build): Langes Drücken wie in Fotos. Eine Vorschlagskarte hebt sich groß ab
   (Titelbild, Name, Statuszeile; bei persönlichem Inhalt „Vorschau ausgeblendet“) und bietet ihr eigenes Wort
   („Anlegen“, „Ergänzen …“, „Benennen …“, „Ansehen …“), „Anpassen“, bei Reisen „Reise teilen oder zusammenlegen“

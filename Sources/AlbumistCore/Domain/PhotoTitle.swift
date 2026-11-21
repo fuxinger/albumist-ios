@@ -83,13 +83,18 @@ public struct PhotoTitle: Equatable, Sendable {
     }
 
     /// The title of a photo by what is known of it. Without facts (Albumist has not analysed it
-    /// yet) the date Photos keeps for it (`photoDate`) counts, on the iPhone's clock (review D,
-    /// M7: such a photo said only "Foto"); with neither: "Foto", as the photo itself is called.
-    public init(facts: AssetFacts?, photoDate: Date? = nil, now: Date, currentZone: TimeZone,
-                words: ProposalWords = .german, clock: Clock? = nil) {
+    /// yet) the date Photos keeps for it (`photoDate`) counts (review D, M7: such a photo said
+    /// only "Foto"), on the clock its facts will have (`zoneWithoutFacts`); with neither: "Foto",
+    /// as the photo itself is called.
+    /// - Parameters:
+    ///   - photoLocated: Photos knows where the photo was taken (its location).
+    ///   - homeZone: The clock the analysis tells photos without a place on (P1-15), once known.
+    public init(facts: AssetFacts?, photoDate: Date? = nil, photoLocated: Bool = false, homeZone: TimeZone? = nil,
+                now: Date, currentZone: TimeZone, words: ProposalWords = .german, clock: Clock? = nil) {
         guard let facts else {
             if let photoDate {
-                self.init(date: photoDate, zone: nil, place: nil, now: now, currentZone: currentZone, words: words, clock: clock)
+                let zone = Self.zoneWithoutFacts(located: photoLocated, homeZone: homeZone, currentZone: currentZone)
+                self.init(date: photoDate, zone: zone, place: nil, now: now, currentZone: currentZone, words: words, clock: clock)
                 return
             }
             let photo = words.t("Foto", "Photo")
@@ -98,6 +103,16 @@ public struct PhotoTitle: Equatable, Sendable {
         }
         self.init(date: facts.asset.creationDate, zone: facts.timeZone, place: facts.gpsPlace, now: now,
                   currentZone: currentZone, words: words, clock: clock)
+    }
+
+    /// The clock of a photo Albumist has no facts of yet: the one its facts will have, so its
+    /// title does not change clock once it is analysed (review D2, N10). Without a location the
+    /// analysis tells it on the home clock, as every photo without a place (P1-15): `homeZone`
+    /// once the analysis has one, before that the iPhone's, which the first analysis keeps as
+    /// the home clock. With a location it gets its place's clock, and a photo not analysed yet
+    /// was mostly taken a moment ago, where the iPhone is: the iPhone's clock.
+    public static func zoneWithoutFacts(located: Bool, homeZone: TimeZone?, currentZone: TimeZone) -> TimeZone {
+        located ? currentZone : homeZone ?? currentZone
     }
 
     /// Title and line as one sentence for VoiceOver ("München, 12. Oktober 2024, 14:32"); a

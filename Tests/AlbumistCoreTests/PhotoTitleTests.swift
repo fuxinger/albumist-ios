@@ -229,8 +229,9 @@ struct PhotoTitleTests {
     }
 
     /// Without facts (Albumist has not analysed the photo yet, as right after an import) the
-    /// date Photos keeps for it counts, on the iPhone's clock: the day as the title and the time
-    /// below, never just "Foto" while a date exists (review D, M7). Facts win where there are some.
+    /// date Photos keeps for it counts, here on the iPhone's clock (no home clock known yet, see
+    /// `aPhotoWithoutFactsKeepsItsClockOnceAnalysed`): the day as the title and the time below,
+    /// never just "Foto" while a date exists (review D, M7). Facts win where there are some.
     @Test func withoutFactsPhotosOwnDateCounts() {
         let instant = Self.date(2024, 10, 12, 14, 32, in: Self.berlin)
         let fromPhotos = PhotoTitle(facts: nil, photoDate: instant, now: Self.now, currentZone: Self.berlin)
@@ -252,6 +253,50 @@ struct PhotoTitleTests {
         #expect(known.subtitle == "12. Oktober 2024 · 14:32")
         // Neither facts nor a date: "Foto".
         #expect(PhotoTitle(facts: nil, photoDate: nil, now: Self.now, currentZone: Self.berlin).title == "Foto")
+    }
+
+    /// A photo Albumist has no facts of yet is told on the clock its facts will have, so its
+    /// title does not change clock once it is analysed (review D2, N10). Home Berlin, iPhone in
+    /// New York at 20:00: a screenshot taken at 19:59 has no location, and the analysis tells
+    /// every photo without a place on the home clock (P1-15): "Heute · 01:59" before and after.
+    /// A photo with a location gets its place's clock from the analysis; for a photo just taken
+    /// that is the iPhone's, so it says 19:59 before and after. Before the first analysis no
+    /// home clock is known: the iPhone's, which the first analysis keeps as the home clock.
+    @Test func aPhotoWithoutFactsKeepsItsClockOnceAnalysed() {
+        let now = Self.date(2026, 11, 21, 20, 0, in: Self.newYork)
+        let instant = Self.date(2026, 11, 21, 19, 59, in: Self.newYork)
+        let screenshot = PhotoTitle(facts: nil, photoDate: instant, photoLocated: false, homeZone: Self.berlin,
+                                    now: now, currentZone: Self.newYork)
+        #expect(screenshot.title == "Heute")
+        #expect(screenshot.subtitle == "01:59")
+        let analysed = AssetFacts(asset: AssetSnapshot(id: AssetID("s"), creationDate: instant), timeZone: Self.berlin)
+        #expect(screenshot == PhotoTitle(facts: analysed, now: now, currentZone: Self.newYork))
+
+        let located = PhotoTitle(facts: nil, photoDate: instant, photoLocated: true, homeZone: Self.berlin,
+                                 now: now, currentZone: Self.newYork)
+        #expect(located.title == "Heute")
+        #expect(located.subtitle == "19:59")
+        let place = PlaceComponents(isoCountryCode: "US", country: "Vereinigte Staaten", locality: "New York",
+                                    timeZoneIdentifier: "America/New_York")
+        let placed = AssetFacts(asset: AssetSnapshot(id: AssetID("p"), creationDate: instant), place: place,
+                                placeSource: .gpsReverseGeocoded, timeZone: Self.newYork)
+        #expect(PhotoTitle(facts: placed, now: now, currentZone: Self.newYork).subtitle == "Heute · 19:59")
+
+        let beforeTheFirstAnalysis = PhotoTitle(facts: nil, photoDate: instant, photoLocated: false, homeZone: nil,
+                                                now: now, currentZone: Self.newYork)
+        #expect(beforeTheFirstAnalysis.subtitle == "19:59")
+        // Facts win over all of it.
+        #expect(PhotoTitle(facts: placed, photoDate: instant, photoLocated: false, homeZone: Self.berlin,
+                           now: now, currentZone: Self.newYork).title == "New York")
+    }
+
+    /// The clock of a photo without facts, by itself: the home clock without a location, the
+    /// iPhone's with one, the iPhone's while no home clock is known.
+    @Test func theClockWithoutFacts() {
+        #expect(PhotoTitle.zoneWithoutFacts(located: false, homeZone: Self.berlin, currentZone: Self.newYork) == Self.berlin)
+        #expect(PhotoTitle.zoneWithoutFacts(located: true, homeZone: Self.berlin, currentZone: Self.newYork) == Self.newYork)
+        #expect(PhotoTitle.zoneWithoutFacts(located: false, homeZone: nil, currentZone: Self.newYork) == Self.newYork)
+        #expect(PhotoTitle.zoneWithoutFacts(located: true, homeZone: nil, currentZone: Self.tokyo) == Self.tokyo)
     }
 
     @Test func theWordsAreTheCatalogs() throws {

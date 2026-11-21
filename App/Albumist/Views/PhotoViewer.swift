@@ -60,6 +60,10 @@ struct PhotoViewer: View {
     @State private var basics: [AssetID: PhotoBasics] = [:]
     /// 12 or 24 hours as the iPhone is set; read again when its settings change.
     @State private var clock = AppModel.deviceClock()
+    /// The clock the analysis tells photos without a place on, asked once before the first date
+    /// shows: a photo not analysed yet is told on it (review D2, N10).
+    @State private var homeZone: TimeZone?
+    @State private var homeZoneAsked = false
 
     init(ids: [AssetID], current: AssetID, showsInfo: Bool = false) {
         self.ids = ids
@@ -148,9 +152,9 @@ struct PhotoViewer: View {
     }
 
     /// The title of a photo: what Albumist knows of it, else the date Photos keeps for it, on
-    /// the clock the iPhone is set to.
+    /// the clock its facts will have (`PhotoTitle.zoneWithoutFacts`).
     private func title(of id: AssetID) -> PhotoTitle {
-        model.photoTitle(for: id, photoDate: basics[id]?.date, clock: clock)
+        model.photoTitle(for: id, photo: basics[id], homeZone: homeZone, clock: clock)
     }
 
     /// What VoiceOver says for a photo: where and when it was taken, as its title says it.
@@ -290,9 +294,14 @@ struct PhotoViewer: View {
     }
 
     /// The photo on screen: what Photos says of it (its date and kind, once per photo), then
-    /// whether it can be shared.
+    /// whether it can be shared. The home clock first, once, so a date never shows on another
+    /// clock before (review D2, N10).
     private func lookAtCurrent() async {
         let id = current
+        if !homeZoneAsked {
+            homeZone = await model.homeTimeZone()
+            homeZoneAsked = true
+        }
         if basics[id] == nil, let found = await PhotoBasics.of(id), !Task.isCancelled {
             basics[id] = found
         }

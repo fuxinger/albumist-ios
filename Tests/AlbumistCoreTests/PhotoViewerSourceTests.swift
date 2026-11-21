@@ -72,17 +72,32 @@ struct PhotoViewerSourceTests {
         #expect(viewer.contains(" von \\("), "the position is gone for VoiceOver too")
         let model = AppSource.code(try AppSource.read("App/Albumist/Model/AppModel+PhotoViewer.swift"))
         let title = try #require(AppSource.body(of: "func photoTitle(", in: model))
-        #expect(title.contains("PhotoTitle(facts: factsByID[id], photoDate: photoDate"))
+        #expect(title.contains("PhotoTitle(facts: factsByID[id], photoDate: photo?.date, photoLocated: photo?.isLocated ?? false, homeZone: homeZone,"))
         #expect(title.contains("words: proposalWords"))
         #expect(title.contains("currentZone: .current"))
         #expect(title.contains("clock: clock"))
-        // Without facts, the date Photos keeps for the photo (review D, M7).
+        // Without facts, the date Photos keeps for the photo (review D, M7), on the clock its
+        // facts will have: the home clock without a location (review D2, N10).
         let calls = AppSource.calls(of: "model.photoTitle(", in: viewer)
         #expect(calls.count == 1)
-        #expect(calls.allSatisfy { $0.contains("photoDate: basics[id]?.date") && $0.contains("clock: clock") })
+        #expect(calls.allSatisfy { $0.contains("photo: basics[id], homeZone: homeZone, clock: clock") })
         let basics = AppSource.code(try Self.file("PhotoBasics.swift"))
         #expect(basics.contains("creationDate"))
+        #expect(basics.contains("isLocated: asset.value.location != nil"))
         #expect(basics.contains("ThumbnailCache.shared.asset(for:"))
+        // The home clock as the analysis keeps it, under the analysis' own key.
+        let home = try #require(AppSource.body(of: "func homeTimeZone(", in: model))
+        #expect(home.contains("store.value(String.self, forKey: Self.homeTimeZoneKey)"))
+        let keys = AppSource.code(try AppSource.read("App/Albumist/Model/AppModel+PhotoViewer.swift"), keepStrings: true)
+        let engine = AppSource.code(try AppSource.read("Sources/AlbumistEngine/AnalysisPipeline.swift"), keepStrings: true)
+        #expect(engine.contains("static let homeTimeZone = \"user.homeTimeZone\""), "the analysis keeps the home clock elsewhere")
+        #expect(keys.contains("nonisolated static let homeTimeZoneKey = \"user.homeTimeZone\""))
+        // Asked once, before the first date is shown, so no title changes clock while it shows.
+        let look = try #require(AppSource.body(of: "private func lookAtCurrent(", in: viewer))
+        let asked = try #require(look.range(of: "homeZone = await model.homeTimeZone()"))
+        let dated = try #require(look.range(of: "await PhotoBasics.of(id)"))
+        #expect(asked.lowerBound < dated.lowerBound, "the date shows before the home clock is known")
+        #expect(look.contains("if !homeZoneAsked {"))
         // 12 or 24 hours from the hour cycle, read again when the iPhone's settings change (L2).
         let clock = try #require(AppSource.body(of: "static func deviceClock(", in: model))
         #expect(clock.contains("PhotoTitle.Clock(hourCycle:"))

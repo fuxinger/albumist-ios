@@ -622,8 +622,10 @@ struct AssetThumbnail: View {
             .accessibilityHidden(spokenLength == nil)
     }
 
-    /// The photo, and how long it is when it is a video; it fades in when it took a moment.
+    /// The photo, and how long it is when it is a video; it fades in when it took a moment. A
+    /// request at another side (a grid zoomed) that brought nothing keeps the photo shown.
     private func show(_ loaded: UIImage?, seeded: Bool, since asked: ContinuousClock.Instant) {
+        if loaded == nil, image != nil, loadedID == id { return }
         let fade = ThumbnailAppearance.fade(seeded: seeded, waited: (ContinuousClock.now - asked) / .seconds(1))
         withAnimation(fade.map { Animation.easeOut(duration: $0) }) {
             image = loaded

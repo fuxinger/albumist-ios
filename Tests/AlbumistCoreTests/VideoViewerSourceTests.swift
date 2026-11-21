@@ -441,6 +441,11 @@ struct VideoViewerSourceTests {
         #expect(shown.contains("let seeded = image != nil && loadedID == id"))
         let slot = try #require(AppSource.body(of: ["struct AssetThumbnail", "private struct Slot"], in: thumbnails))
         #expect(Self.squeezed(slot) == "{varid:AssetIDvarside:CGFloat}")
+        // A request at the new side that brings nothing keeps the photo the cell shows: the
+        // ground would stand where the photo was (review F, note on `show`).
+        let show = try #require(AppSource.body(of: ["struct AssetThumbnail", "private func show("], in: thumbnails))
+        #expect(Self.inOrder(["if loaded == nil, image != nil, loadedID == id { return }", "withAnimation(", "image = loaded"], in: show),
+                "\(show)")
     }
 
     /// A video's thumbnail says how long it is, "0:15" on a small solid light ground in its

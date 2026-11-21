@@ -28,15 +28,24 @@
   Reise-Werkstatt liest sich in der Zeit: „Reise davor“, die Tage, „Reise danach“; der Hinweis zum Warten steht
   einmal und gleich beim Öffnen, die Tage zu einer Nachbarreise erst, wenn sie zu genau dieser gehören.
 - 21.11. Sortier-Show, ruhige Farben und die ersten 100 % (Design-Welle 3, DS-17, DS-11 und DS-08, mit der
-  Zweitprüfung K, noch in keinem Build): In der Sortier-Show fliegen größere Fotos vom Stapel in ihr Album, das als
-  sein echtes Titelbild wartet (grau, bis es gefüllt ist, dann farbig, der Haken auf einem Ring); der Stapel zeigt
-  seine Fotos auch mit „Bewegung reduzieren“, VoiceOver und im Stromsparmodus, auf niedrigen iPhones rückt zuerst
-  der Stapel zusammen, die Show hält nur die Fotos, die sie zeigt, und ein zweiter Tipp auf „Anlegen“ startet
-  nichts. Die Seite eines Vorschlags nimmt die ruhige Farbe ihres Titelbilds als Grund (hell blass, dunkel tief,
-  wie Musik mit dem Albumcover, Texte gut lesbar); eine bekannte Farbe steht sofort da, und sie geht mit dem
-  Titelbild. Wird die erste ganze Analyse fertig, während Albumist offen ist, zeigt der Ring einmal „100 %“; war
-  die erste Analyse zu schnell dafür, kommt der Moment beim nächsten gefeierten Ende. In Einstellungen › Über
-  steht das Glass-Stack-Symbol mit dem Namen der App. Neue Mac-Tests für alle vier.
+  Zweitprüfung K, noch in keinem Build): In der Sortier-Show fliegen größere Fotos vom Stapel in ihr Album,
+  das als sein echtes Titelbild wartet (grau, bis es gefüllt ist, dann farbig, der Haken auf einem Ring); der
+  Stapel zeigt seine Fotos auch mit „Bewegung reduzieren“, VoiceOver und im Stromsparmodus, auf niedrigen
+  iPhones rückt zuerst der Stapel zusammen, die Show hält nur die Fotos, die sie zeigt, und ein zweiter Tipp
+  auf „Anlegen“ startet nichts. Die Seite eines Vorschlags nimmt die ruhige Farbe ihres Titelbilds als Grund
+  (hell blass, dunkel tief, wie Musik mit dem Albumcover, Texte gut lesbar); eine bekannte Farbe steht sofort
+  da, und sie geht mit dem Titelbild. Wird die erste ganze Analyse fertig, während Albumist offen ist, zeigt
+  der Ring einmal „100 %“; war die erste Analyse zu schnell dafür, kommt der Moment noch sieben Tage lang mit
+  einer Analyse der ganzen Mediathek. In Einstellungen › Über steht das Glass-Stack-Symbol mit dem Namen der
+  App. Neue Mac-Tests für alle vier.
+- 21.11. Nachprüfung der Sortier-Show, der ruhigen Farben und der ersten 100 % (Design-Welle 3, H13, noch in
+  keinem Build): Eine wieder geöffnete Vorschlagsseite steht vom ersten Bild an in ihrer Farbe. War die erste
+  Analyse zu schnell für „Analyse fertig“, kommen die ersten 100 % noch sieben Tage lang mit einer Analyse der
+  ganzen Mediathek (auch mit dem ersten Lauf nach „Zugriff auf alle Fotos“), nie mit der Suche nach neuen
+  Fotos. Ersetzt ein neuer Lauf die Karte, während die 100 % noch spielen, kommen sie danach noch einmal.
+  „Anlegen“ rechnet nichts Großes mehr auf dem Hauptthread. Die Mac-Tests sind strenger: die zweite volle
+  Analyse wird gefeiert, die Show sagt genau „0“ und „2 Fotos einsortiert“, die Seite ist hell blass und
+  dunkel tief, und die Zeile in Einstellungen › Über hat ihr Symbol.
 - 21.11. Videos nach der Zweitprüfung (Design-Welle 3, Review F, noch in keinem Build): „Ton aus“ hält ein Video
   nicht mehr an; die Musik darf beim Schließen der Foto-Ansicht weiterlaufen. Ein Video startet von selbst erst, wenn
   der App-Ton mit der Musik mischt, und hält sie so nie an. Die Knöpfe unter dem Video lassen sich auf 44 pt treffen,

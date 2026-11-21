@@ -295,4 +295,22 @@ struct SortingShowStageTests {
         #expect(albums.map(\.flying) == [[AssetID("a")]])
         #expect(albums.map(\.hidesPreview) == [false])
     }
+
+    // MARK: Words
+
+    /// The photos under the show's count and in its VoiceOver value, grouped as the language
+    /// writes them (verification review V8: the two photos of the UI test cannot show it). The
+    /// sentences around the number are the App's catalog (`SortingShowSourceTests`).
+    @Test func theCountIsGroupedAsTheLanguageWritesIt() {
+        let german = Locale(identifier: "de_DE"), english = Locale(identifier: "en_US")
+        #expect(SortingShowWords.number(1_234, locale: german) == "1.234")
+        #expect(SortingShowWords.number(1_234, locale: english) == "1,234")
+        #expect(SortingShowWords.number(12_345, locale: german) == "12.345")
+        #expect(SortingShowWords.number(120_000, locale: english) == "120,000")
+        // Below a thousand the digits alone, as the UI test reads them.
+        for small in [0, 2, 999] {
+            #expect(SortingShowWords.number(small, locale: german) == "\(small)")
+            #expect(SortingShowWords.number(small, locale: english) == "\(small)")
+        }
+    }
 }

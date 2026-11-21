@@ -55,7 +55,9 @@ struct FirstAnalysisMomentSourceTests {
         }
         #expect(model.components(separatedBy: "firstAnalysisRunEnded(").count - 1 == 1, "told from another place too")
         #expect(model.components(separatedBy: "FirstAnalysisMomentStore.shared.").count - 1 == 2, "told from another place too")
-        #expect(raw.components(separatedBy: Self.mark).count - 1 == 3, "the marked lines of DS-08 in AppModel.swift changed")
+        #expect(raw.components(separatedBy: "\(Self.mark): the first 100 %").count - 1 == 3, "the marked lines of DS-08 in AppModel.swift changed")
+        // And one of the sorting show's "Anlegen" (verification review V13), nothing else of H13.
+        #expect(raw.components(separatedBy: Self.mark).count - 1 == 4, "the marked lines of H13 in AppModel.swift changed")
     }
 
     /// "On screen" as a run ends means not in the background (second review, K7 b): Control
@@ -92,6 +94,39 @@ struct FirstAnalysisMomentSourceTests {
         #expect(!store.contains("cameToFront"), "coming to the front spends it by the marker")
     }
 
+    /// After a quick first analysis the store waits seven days for a run of the whole library
+    /// (verification review V6): the end of a run says whether it was one, from the marker before
+    /// this run's end sets it (no analysis completed since `AnalysisMarker.reset`: the first
+    /// analysis, "Analyse neu aufbauen", another part of the library), so `AppModel.swift` passes
+    /// nothing new. When the first completion was is kept next to the moment, and a wait that is
+    /// over spends it at launch.
+    @Test func aQuickFirstAnalysisWaitsAWeekForTheWholeLibrary() throws {
+        let store = try Self.code(Self.store)
+        let tell = try Self.body(["extension AppModel", "func firstAnalysisRunEnded("], in: store)
+        #expect(tell.contains("wholeLibrary: !AnalysisMarker.completedOnce"), "\(tell)")
+        // Every photo readable as the run ends: after a quick first analysis of only the shared
+        // photos, the first such run analyses the rest of the library (K7's case).
+        #expect(tell.contains("fullAccess: access == .full"), "\(tell)")
+        let ended = try Self.body(["final class FirstAnalysisMomentStore", "func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, fullAccess: Bool, onScreen: Bool)"], in: store)
+        #expect(ended.contains("guard finished else { return }"), "\(ended)")
+        #expect(ended.contains("moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, fullAccess: fullAccess, onScreen: onScreen, at: Date())"), "\(ended)")
+        let type = try Self.body(["final class FirstAnalysisMomentStore"], in: store)
+        #expect(type.contains("private static let firstCompletedKey = \"analysis.firstFinishMoment.firstCompleted\""), "\(type)")
+        let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
+        #expect(initializer.contains("let since = fresh ? nil : UserDefaults.standard.object(forKey: Self.firstCompletedKey) as? Date"), "\(initializer)")
+        let lapse = try #require(initializer.range(of: "moment.lapse(at: Date())"), "the wait is not looked at, at launch: \(initializer)")
+        let kept = try #require(initializer.range(of: "keep()"), "\(initializer)")
+        #expect(lapse.upperBound < kept.lowerBound, "\(initializer)")
+        let keep = try Self.body(["final class FirstAnalysisMomentStore", "private func keep()"], in: store)
+        #expect(keep.contains("UserDefaults.standard.set(since, forKey: Self.firstCompletedKey)"), "\(keep)")
+        #expect(keep.contains("UserDefaults.standard.removeObject(forKey: Self.firstCompletedKey)"), "\(keep)")
+        // Whether that quick first analysis saw only the shared photos, kept beside it.
+        #expect(type.contains("private static let sharedOnlyKey = \"analysis.firstFinishMoment.sharedOnly\""), "\(type)")
+        #expect(initializer.contains("let sharedOnly = !fresh && UserDefaults.standard.bool(forKey: Self.sharedOnlyKey)"), "\(initializer)")
+        #expect(keep.contains("UserDefaults.standard.set(true, forKey: Self.sharedOnlyKey)"), "\(keep)")
+        #expect(keep.contains("UserDefaults.standard.removeObject(forKey: Self.sharedOnlyKey)"), "\(keep)")
+    }
+
     /// The observers are written `any NSObjectProtocol`, as every existential of the App
     /// (`ExistentialAny` is on, App/project.yml; second review, K3).
     @Test func everyNSObjectProtocolIsWrittenAsAnExistential() throws {
@@ -119,7 +154,9 @@ struct FirstAnalysisMomentSourceTests {
         #expect(type.contains("private static let key = \"analysis.firstFinishMoment\""))
         #expect(type.contains("UserDefaults.standard.set(moment.kept.rawValue, forKey: Self.key)"))
         let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
-        #expect(initializer.contains("FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce)"), "\(initializer)")
+        #expect(initializer.contains("FirstAnalysisMoment(kept: kept, completedBefore: !fresh && AnalysisMarker.completedOnce,"),
+                "\(initializer)")
+        #expect(initializer.contains("firstCompleted: since, sharedOnly: sharedOnly)"), "\(initializer)")
         #expect(initializer.contains("UIApplication.didEnterBackgroundNotification") && initializer.contains("self?.leftScreen()"))
         let launched = try Self.body(["final class FirstAnalysisMomentStore", "func launched()"], in: store)
         #expect(launched.trimmingCharacters(in: .whitespacesAndNewlines) == "{}", "\(launched)")
@@ -140,6 +177,8 @@ struct FirstAnalysisMomentSourceTests {
         let moment = try #require(card.range(of: "if case .finished = state { FirstAnalysisMomentHeader() }"), "\(card)")
         let finished = try #require(card.range(of: "AnalysisProgressCard(state: state) { showAnalysis = true }"))
         #expect(moment.upperBound < finished.lowerBound, "the moment is not above the card")
+        // Besides, only a moment cut short, above the done line (verification review V12).
+        #expect(card.components(separatedBy: "FirstAnalysisMomentHeader(").count - 1 == 2, "\(card)")
         let raw = try AppSource.read(Self.overview)
         #expect(raw.contains("if case .finished = state { FirstAnalysisMomentHeader() } \(Self.mark): the first 100 %"))
         for path in AppSource.swiftFiles(under: "App/Albumist") where !path.hasSuffix("OverviewView.swift") && !path.hasSuffix("Start/RingCard.swift") {
@@ -177,7 +216,7 @@ struct FirstAnalysisMomentSourceTests {
         #expect(claim.upperBound < claimed.lowerBound && claimed.upperBound < said.lowerBound, "said before it was claimed")
         #expect(ring.components(separatedBy: "AccessibilityNotification.Announcement(").count - 1 == 1, "said more than once")
         let view = try Self.body(["struct FirstAnalysisMomentHeader", "var body: some View"], in: ring)
-        #expect(view.contains(".onDisappear {") && view.contains("store.ended()"), "\(view)")
+        #expect(view.contains(".onDisappear {") && view.contains("store.cardWent()"), "\(view)")
         // Shown only while it plays: no gap above "Analyse fertig" while it waits for the screen.
         #expect(view.contains("if store.moment.playing {"), "\(view)")
         // The wide figures; decoration for VoiceOver, found by the UI runs.
@@ -185,6 +224,41 @@ struct FirstAnalysisMomentSourceTests {
         #expect(header.contains(".accessibilityIdentifier(\"analysis.firstFinish\")"))
         #expect(header.contains(".accessibilityHidden(!UITestSupport.isRunning)"))
         #expect(bar.contains("FirstAnalysisMoment.segments(shares: shares, width: Double(rect.width), joined: joined)"))
+    }
+
+    /// Its card going while it plays does not lose it (verification review V12): the header tells
+    /// the store that its card went (`cardWent`), which the rule answers by the time it showed and
+    /// whether VoiceOver said it (`claim` hears that from `UIAccessibility.isVoiceOverRunning`, as
+    /// the header says it right after the claim). Only the fold after its hold ends it.
+    @Test func aCardThatGoesWhileItPlaysDoesNotLoseIt() throws {
+        let ring = try Self.code(Self.ringCard)
+        let view = try Self.body(["struct FirstAnalysisMomentHeader", "var body: some View"], in: ring)
+        let gone = try #require(view.range(of: ".onDisappear {"), "\(view)")
+        let after = view[gone.upperBound...]
+        // Only the header that plays it tells (two places may show it, one goes as the other comes).
+        let own = try #require(after.range(of: "guard let run else { return }"), "\(view)")
+        let told = try #require(after.range(of: "store.cardWent()"), "the card's going ends the moment: \(view)")
+        #expect(own.upperBound < told.lowerBound, "\(view)")
+        #expect(!view.contains("store.ended()"), "the card's going ends the moment: \(view)")
+        // A run that replaced its card leaves the start page on its done line once it ended: the
+        // moment cut short plays there (only then, never one due for the first time).
+        let overview = try Self.code(Self.overview)
+        let done = try #require(overview.range(of: "FirstAnalysisMomentHeader(again: true)"), "the done line cannot play it")
+        let row = try #require(overview[done.upperBound...].range(of: "doneRow"), "not above the done line")
+        #expect(overview[done.upperBound..<row.lowerBound].count < 80, "not right above the done line")
+        let raw = try AppSource.read(Self.overview)
+        #expect(raw.contains("FirstAnalysisMomentHeader(again: true) \(Self.mark)"), "unmarked")
+        let start = try Self.body(["struct FirstAnalysisMomentHeader", "private func start()"], in: ring)
+        let only = try #require(start.range(of: "if again, !store.moment.cutShort { return }"), "\(start)")
+        let claims = try #require(start.range(of: "store.claim(onScreen: model.isOnScreen)"), "\(start)")
+        #expect(only.upperBound < claims.lowerBound, "\(start)")
+        let play = try Self.body(["struct FirstAnalysisMomentHeader", "private func play() async"], in: ring)
+        #expect(play.contains("store.ended()"), "\(play)")
+        let store = try Self.code(Self.store)
+        let claim = try Self.body(["final class FirstAnalysisMomentStore", "func claim(onScreen: Bool)"], in: store)
+        #expect(claim.contains("moment.claim(at: Date(), onScreen: onScreen, announced: UIAccessibility.isVoiceOverRunning)"), "\(claim)")
+        let went = try Self.body(["final class FirstAnalysisMomentStore", "func cardWent()"], in: store)
+        #expect(went.contains("moment.cardWent(at: Date())"), "\(went)")
     }
 
     /// UI runs show it only when a test asks for it (`-AlbumistUITestFirstFinishMoment`), held
@@ -209,6 +283,28 @@ struct FirstAnalysisMomentSourceTests {
                       "\"-AlbumistUITestRebuildDatabase\"", "\"analysis.firstFinish\""] {
             #expect(test.contains(asked), "the UI test does not use \(asked)")
         }
+    }
+
+    /// UI test 1's "not again" half has teeth (verification review V7): both full analyses run
+    /// slowed (`-AlbumistUITestSlowAnalysis`, 150 ms more per photo, one lane: the demo library's
+    /// 241 photos take more than the 30 s "Analyse fertig" needs, on any Mac), and the test asserts
+    /// that the second finish was celebrated before it asserts that no moment came. The switch is
+    /// inert outside UI runs.
+    @Test func theUITestsSecondFullAnalysisIsCelebrated() throws {
+        let test = AppSource.code(try AppSource.read(Self.uiTest), keepStrings: true)
+        let body = try Self.body(["final class ShowAndHandwritingUITests", "func test1_FirstFullAnalysisShowsItsHundredPercentOnce()"], in: test)
+        let launches = body.components(separatedBy: "launch([").dropFirst().map { $0.prefix(while: { $0 != "]" }) }
+        #expect(launches.count == 2, "\(launches)")
+        for launch in launches {
+            #expect(launch.contains("\"-AlbumistUITestSlowAnalysis\""), "a full analysis that may end before 30 s: \(launch)")
+        }
+        let celebrated = try #require(body.range(of: "XCTAssertTrue(next.celebrated"), "the second finish may go uncelebrated: \(body)")
+        let noMoment = try #require(body.range(of: "XCTAssertFalse(next.moment"), "\(body)")
+        #expect(celebrated.upperBound < noMoment.lowerBound, "\(body)")
+        let support = try Self.code("App/Albumist/Platform/UITestSupport.swift")
+        #expect(support.contains("static let slowsAnalysis: Bool = isRunning && ProcessInfo.processInfo.arguments.contains(\"-AlbumistUITestSlowAnalysis\")"))
+        let demo = try Self.code("App/Albumist/Platform/DemoLibrary.swift")
+        #expect(demo.contains("+ 45 + 12 + Self.screenshots.count + Self.documents.count + 1"), "the demo library changed size")
     }
 
     /// The switches of DS-08 live with the other UI-test switches (`UITestSwitches.swift`), read

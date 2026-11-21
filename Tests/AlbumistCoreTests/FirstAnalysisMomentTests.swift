@@ -6,8 +6,8 @@ import Testing
 /// once per installation: not again after a relaunch, a later full re-analysis ("Analyse neu
 /// aufbauen", another part of the library), a restored backup or an undo, and never when the
 /// analysis ended while Albumist was in the background (the notification "Analyse fertig" says it
-/// then, as before). A first analysis too quick for "Analyse fertig" leaves it for the first
-/// finish that is celebrated (second review, K7).
+/// then, as before). A first analysis too quick for "Analyse fertig" leaves it for seven days, for
+/// the first celebrated run of the whole library (second review, K7; verification review, V6).
 @Suite("First analysis moment (DS-08)")
 struct FirstAnalysisMomentTests {
     static let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
@@ -18,10 +18,12 @@ struct FirstAnalysisMomentTests {
     }
 
     /// The end of a run in the app, by default the first full analysis finishing on screen
-    /// after a wait (`AnalysisCardState.celebratesFinish`).
+    /// after a wait (`AnalysisCardState.celebratesFinish`). `wholeLibrary`: a run of the whole
+    /// library (no analysis completed since `AnalysisMarker.reset`), not a check for new photos.
     static func end(_ moment: inout FirstAnalysisMoment, finished: Bool = true, celebrates: Bool = true,
-                    onScreen: Bool = true, after seconds: TimeInterval = 0) {
-        moment.runEnded(finished: finished, celebrates: celebrates, onScreen: onScreen, at: start.addingTimeInterval(seconds))
+                    wholeLibrary: Bool = true, fullAccess: Bool = true, onScreen: Bool = true, after seconds: TimeInterval = 0) {
+        moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, fullAccess: fullAccess,
+                        onScreen: onScreen, at: start.addingTimeInterval(seconds))
     }
 
     static func at(_ seconds: TimeInterval) -> Date { start.addingTimeInterval(seconds) }
@@ -217,19 +219,76 @@ struct FirstAnalysisMomentTests {
     }
 
     /// The card went before the moment played (a run started meanwhile, off screen): it stays
-    /// due, and the next "Analyse fertig" within the window brings it. Once it played, a card
-    /// that goes ends it.
+    /// due, and the next "Analyse fertig" within the window brings it. Once it played to its end
+    /// and folded away, a card that goes changes nothing.
     @Test func aCardThatGoesBeforeItPlaysLeavesItDue() {
         var moment = Self.fresh()
         Self.end(&moment)
-        moment.ended()
+        moment.cardWent(at: Self.at(30))
         #expect(moment.isDue(at: Self.at(60)))
         let plays = moment.claim(at: Self.at(90), onScreen: true)
         #expect(plays)
         moment.ended()
+        moment.cardWent(at: Self.at(91))
         #expect(!moment.playing && !moment.shows(at: Self.at(91)))
         let again = moment.claim(at: Self.at(92), onScreen: true)
         #expect(!again)
+    }
+
+    /// Its card went while it played, before its hold (a run that starts within the 3.2 s puts
+    /// its own card there, another tab): not lost, the next card within the window plays it from
+    /// the start (verification review V12). Once it was on screen for its hold, or VoiceOver said
+    /// it, a card that goes ends it: it never shows twice.
+    @Test func aCardThatGoesWhileItPlaysBeforeItsHoldLeavesItDue() {
+        typealias T = FirstAnalysisMoment.Timing
+        var cut = Self.fresh()
+        Self.end(&cut)
+        let plays = cut.claim(at: Self.at(1), onScreen: true)
+        #expect(plays)
+        #expect(!cut.cutShort)
+        cut.cardWent(at: Self.at(1 + T.hold - 0.5))
+        #expect(!cut.playing)
+        #expect(cut.isDue(at: Self.at(10)))
+        // Cut short: the done line of the start page may play it too, once that run ended.
+        #expect(cut.cutShort)
+        let again = cut.claim(at: Self.at(20), onScreen: true)
+        #expect(again)
+        #expect(!cut.cutShort)
+        // This time on screen for its hold: over, whatever card comes.
+        cut.cardWent(at: Self.at(20 + T.hold))
+        #expect(!cut.shows(at: Self.at(30)))
+        let third = cut.claim(at: Self.at(31), onScreen: true)
+        #expect(!third)
+        #expect(cut.kept == .spent)
+        // Said by VoiceOver as it came: heard, over when its card goes, however soon.
+        var heard = Self.fresh()
+        Self.end(&heard)
+        let said = heard.claim(at: Self.at(1), onScreen: true, announced: true)
+        #expect(said)
+        heard.cardWent(at: Self.at(1.5))
+        #expect(!heard.shows(at: Self.at(2)))
+        let replayed = heard.claim(at: Self.at(3), onScreen: true)
+        #expect(!replayed)
+        // Cut short at the end of its window: the window counts from the run's end, gone.
+        var late = Self.fresh()
+        Self.end(&late)
+        let started = late.claim(at: Self.at(FirstAnalysisMoment.window - 1), onScreen: true)
+        #expect(started)
+        late.cardWent(at: Self.at(FirstAnalysisMoment.window))
+        let tooLate = late.claim(at: Self.at(FirstAnalysisMoment.window + 1), onScreen: true)
+        #expect(!tooLate)
+        // Cut short by leaving for the background: over, as before.
+        var away = Self.fresh()
+        Self.end(&away)
+        let shown = away.claim(at: Self.at(1), onScreen: true)
+        #expect(shown)
+        away.leftScreen()
+        away.cardWent(at: Self.at(2))
+        #expect(!away.isDue(at: Self.at(3)) && !away.cutShort)
+        // A moment due for the first time is not "cut short": only "Analyse fertig" plays it.
+        var due = Self.fresh()
+        Self.end(&due)
+        #expect(due.isDue(at: Self.at(1)) && !due.cutShort)
     }
 
     // MARK: What finishes the first analysis
@@ -253,15 +312,16 @@ struct FirstAnalysisMomentTests {
 
     /// A first analysis too quick for "Analyse fertig" (a small part of the library, a few photos
     /// shared) does not take the moment away (second review, K7 a): it waits for the first finish
-    /// that is celebrated, such as the whole library's long analysis later. On screen it shows
-    /// then; ended in the background, it is spent as every celebrated finish off screen.
+    /// of the whole library that is celebrated, such as the whole library's long analysis once it
+    /// is taken in. On screen it shows then; ended in the background, it is spent as every
+    /// celebrated finish off screen.
     @Test func aQuickFirstAnalysisLeavesItForTheFirstCelebratedFinish() {
         var moment = Self.fresh()
         Self.end(&moment, celebrates: false)
         #expect(moment.kept == .owed)
         #expect(!moment.isDue(at: Self.at(1)))
         // Relaunched in between: still owed, though the quick analysis completed the analysis.
-        var relaunched = FirstAnalysisMoment(kept: moment.kept, completedBefore: true)
+        var relaunched = FirstAnalysisMoment(kept: moment.kept, completedBefore: true, firstCompleted: moment.firstCompleted)
         #expect(relaunched.kept == .owed)
         // The long analysis ends on screen: now, once.
         Self.end(&relaunched, after: 3600)
@@ -275,6 +335,110 @@ struct FirstAnalysisMomentTests {
         #expect(!away.isDue(at: Self.at(61)))
     }
 
+    // MARK: After a quick first analysis (verification review V6)
+
+    static let week = FirstAnalysisMoment.owedAfterQuickFinish
+
+    /// After a first analysis too quick for "Analyse fertig" only a run that analyses the library
+    /// as a whole brings the 100 % ("Analyse neu aufbauen", another part of the library taken in:
+    /// no analysis completed since `AnalysisMarker.reset`), never a check for new photos or a
+    /// catch-up of new imports, however long it ran (the lead's decision on V6). The wait counts
+    /// from the first completion; nothing moves it.
+    @Test func afterAQuickFirstAnalysisOnlyTheWholeLibraryBringsIt() {
+        var moment = Self.fresh()
+        Self.end(&moment, celebrates: false)
+        #expect(moment.kept == .owed)
+        #expect(moment.firstCompleted == Self.start)
+        // "Sucht neue Fotos", a catch-up of 3,000 new photos: long enough for "Analyse fertig",
+        // but not the whole library.
+        Self.end(&moment, wholeLibrary: false, after: 3600)
+        #expect(!moment.isDue(at: Self.at(3601)))
+        #expect(moment.kept == .owed)
+        #expect(moment.firstCompleted == Self.start, "a check moved the wait")
+        // Another quick run of the whole library does not move it either.
+        Self.end(&moment, celebrates: false, after: 7200)
+        #expect(moment.firstCompleted == Self.start, "a quick run moved the wait")
+        // "Analyse neu aufbauen", celebrated on screen: now, once.
+        Self.end(&moment, after: 10_800)
+        #expect(moment.isDue(at: Self.at(10_801)))
+        #expect(moment.kept == .spent && moment.firstCompleted == nil)
+        // A check in the background does not spend it either: it was not the whole library.
+        var checked = Self.fresh()
+        Self.end(&checked, celebrates: false)
+        Self.end(&checked, wholeLibrary: false, onScreen: false, after: 60)
+        #expect(checked.kept == .owed)
+    }
+
+    /// A quick first analysis of only the photos shared with Albumist ("Ausgewählte Fotos", K7's
+    /// case): the first run to end once Albumist may read every photo analyses the rest of the
+    /// library, the library as a whole, and brings it when celebrated (the lead's "first full
+    /// analysis after more photos were allowed"). A check among the shared photos before it does
+    /// not; once that first run with every photo ended, the checks after it do not either.
+    @Test func afterAQuickAnalysisOfSharedPhotosEveryPhotoBringsIt() {
+        var moment = Self.fresh()
+        Self.end(&moment, celebrates: false, fullAccess: false)
+        #expect(moment.kept == .owed && moment.sharedOnly)
+        // "Sucht neue Fotos" among the shared photos, long enough for "Analyse fertig": not yet.
+        Self.end(&moment, wholeLibrary: false, fullAccess: false, after: 600)
+        #expect(!moment.isDue(at: Self.at(601)))
+        #expect(moment.kept == .owed && moment.sharedOnly)
+        // Every photo allowed: the run that analyses the rest of the library, celebrated on screen.
+        Self.end(&moment, wholeLibrary: false, fullAccess: true, after: 3600)
+        #expect(moment.isDue(at: Self.at(3601)))
+        #expect(moment.kept == .spent && moment.firstCompleted == nil && !moment.sharedOnly)
+        // That first run with every photo too quick for "Analyse fertig": a check after it never brings it.
+        var quick = Self.fresh()
+        Self.end(&quick, celebrates: false, fullAccess: false)
+        Self.end(&quick, celebrates: false, wholeLibrary: false, fullAccess: true, after: 600)
+        #expect(quick.kept == .owed && !quick.sharedOnly)
+        Self.end(&quick, wholeLibrary: false, fullAccess: true, after: 3600)
+        #expect(!quick.isDue(at: Self.at(3601)) && quick.kept == .owed)
+        // A quick first analysis with every photo readable leaves nothing of the kind.
+        var full = Self.fresh()
+        Self.end(&full, celebrates: false)
+        #expect(!full.sharedOnly)
+        Self.end(&full, wholeLibrary: false, after: 600)
+        #expect(!full.isDue(at: Self.at(601)))
+        // Kept across launches with the wait, and gone with it.
+        let kept = FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: Self.start, sharedOnly: true)
+        #expect(kept.sharedOnly)
+        #expect(!FirstAnalysisMoment(kept: .spent, completedBefore: true, firstCompleted: Self.start, sharedOnly: true).sharedOnly)
+        #expect(!FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: nil, sharedOnly: true).sharedOnly)
+        var lapsed = kept
+        lapsed.lapse(at: Self.at(Self.week + 1))
+        #expect(lapsed.kept == .spent && !lapsed.sharedOnly)
+        var away = kept
+        away.completedAway(first: true)
+        #expect(away.kept == .spent && !away.sharedOnly)
+    }
+
+    /// Seven days from that first completion: a run of the whole library just inside brings it,
+    /// just after it the moment is spent, also when the wait ends between two launches. A clock
+    /// set back does not end the wait early.
+    @Test func afterAQuickFirstAnalysisItWaitsSevenDays() {
+        #expect(Self.week == 7 * 24 * 60 * 60)
+        var inside = Self.fresh()
+        Self.end(&inside, celebrates: false)
+        Self.end(&inside, after: Self.week - 1)
+        #expect(inside.isDue(at: Self.at(Self.week)))
+        var after = Self.fresh()
+        Self.end(&after, celebrates: false)
+        Self.end(&after, after: Self.week + 1)
+        #expect(!after.isDue(at: Self.at(Self.week + 2)))
+        #expect(after.kept == .spent && after.firstCompleted == nil)
+        // At launch: what was kept, and the wait over or not.
+        var launched = FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: Self.start)
+        launched.lapse(at: Self.at(Self.week - 1))
+        #expect(launched.kept == .owed && launched.firstCompleted == Self.start)
+        launched.lapse(at: Self.at(Self.week + 1))
+        #expect(launched.kept == .spent && launched.firstCompleted == nil)
+        var back = FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: Self.start)
+        back.lapse(at: Self.at(-3600))
+        #expect(back.kept == .owed)
+        // Nothing to wait for once spent, and none before a first completion.
+        #expect(FirstAnalysisMoment(kept: .spent, completedBefore: true, firstCompleted: Self.start).firstCompleted == nil)
+        #expect(Self.fresh().firstCompleted == nil)
+    }
 
     // MARK: Updates and backups
 
@@ -323,6 +487,7 @@ struct FirstAnalysisMomentTests {
         }
         for first in [true, false] { moment.completedAway(first: first) }
         moment.leftScreen()
+        moment.cardWent(at: Self.at(2))
         moment.ended()
         #expect(moment.kept == .spent && !moment.shows(at: Self.at(2)))
     }

@@ -140,4 +140,32 @@ struct PhotoTintTests {
         let pixels = Self.image([(Self.colourful[4].1, 12), (Self.colourful[9].1, 8)])
         #expect(PhotoTint.from(rgba: pixels, width: 10, height: 20) == PhotoTint.from(rgba: pixels, width: 10, height: 20))
     }
+
+    /// Pale in light mode, deep in dark mode, as UI test 3 reads the page's ground from its
+    /// screenshot (verification review V9): each channel at least 215 of 255 in light mode and at
+    /// most 80 in dark mode. Every tint keeps well inside, whatever its hue and strength (about
+    /// 228 and 27 at the extremes), so the UI test fails only on a ground that is not one.
+    @Test func everyTintIsPaleInLightAndDeepInDark() {
+        var made = 0
+        for degrees in stride(from: 0.0, to: 360.0, by: 5.0) {
+            let angle = degrees * .pi / 180
+            let hue = OKLab(lightness: 0.5, a: cos(angle) * 0.1, b: sin(angle) * 0.1)
+            for strength in [PhotoTint.minimumStrength, 0.03, 0.06, 0.1, 0.2, 0.4] {
+                guard let tint = PhotoTint.calm(hue, strength: strength) else { continue }
+                made += 1
+                for channel in [tint.light.red, tint.light.green, tint.light.blue] {
+                    #expect(channel * 255 >= 215, "\(degrees)° at \(strength): light \(tint.light)")
+                }
+                for channel in [tint.dark.red, tint.dark.green, tint.dark.blue] {
+                    #expect(channel * 255 <= 80, "\(degrees)° at \(strength): dark \(tint.dark)")
+                }
+            }
+        }
+        #expect(made >= 72 * 5, "\(made) tints made")
+        for (name, color) in Self.colourful {
+            guard let tint = PhotoTint.from(rgba: Self.image(color), width: 8, height: 8) else { continue }
+            #expect([tint.light.red, tint.light.green, tint.light.blue].allSatisfy { $0 * 255 >= 215 }, "\(name): \(tint.light)")
+            #expect([tint.dark.red, tint.dark.green, tint.dark.blue].allSatisfy { $0 * 255 <= 80 }, "\(name): \(tint.dark)")
+        }
+    }
 }

@@ -173,15 +173,19 @@ final class ShowAndHandwritingUITests: XCTestCase {
     /// "Analyse fertig" once (`analysis.firstFinish`, VoiceOver's "Analyse fertig: 100 %"), and
     /// never again, not after the next full analysis either. The group's simulator is not fresh,
     /// so the first launch starts the moment afresh (`-AlbumistUITestFirstFinishOwed`) and
-    /// rebuilds the database: its analysis at launch is the first full one, and the demo
-    /// library's takes long enough to be celebrated. The relaunch rebuilds the database again
-    /// without starting afresh: the same full analysis, and the moment must stay away. Both
-    /// launches let it show (`-AlbumistUITestFirstFinishMoment`, held 15 s instead of 3.2 s).
+    /// rebuilds the database: its analysis at launch is the first full one. The relaunch rebuilds
+    /// the database again without starting afresh: the same full analysis, and the moment must
+    /// stay away. Both launches let it show (`-AlbumistUITestFirstFinishMoment`, held 15 s instead
+    /// of 3.2 s) and slow the analysis (`-AlbumistUITestSlowAnalysis`: 150 ms more per photo, one
+    /// lane), so each full analysis of the demo library's 241 photos runs well over the 30 s that
+    /// "Analyse fertig" needs, on any Mac: the second finish is celebrated, and the check that
+    /// the moment stays away has teeth (verification review V7).
     func test1_FirstFullAnalysisShowsItsHundredPercentOnce() {
         continueAfterFailure = true
         prepare("first 100 %")
 
-        launch(["-AlbumistUITestRebuildDatabase", "-AlbumistUITestFirstFinishMoment", "-AlbumistUITestFirstFinishOwed"])
+        launch(["-AlbumistUITestRebuildDatabase", "-AlbumistUITestFirstFinishMoment", "-AlbumistUITestFirstFinishOwed",
+                "-AlbumistUITestSlowAnalysis"])
         UITestWait.appears(app.tabBars.firstMatch, "first 100 %: start page after the rebuild", timeout: 60)
         let first = watchAnalysis("first 100 %: first full analysis")
         let moment = firstFinish
@@ -204,13 +208,14 @@ final class ShowAndHandwritingUITests: XCTestCase {
         UITestWait.disappears(moment, "first 100 %: folded away", timeout: 40)
         audit("start page after the first 100 %")
 
-        launch(["-AlbumistUITestRebuildDatabase", "-AlbumistUITestFirstFinishMoment"])
+        launch(["-AlbumistUITestRebuildDatabase", "-AlbumistUITestFirstFinishMoment", "-AlbumistUITestSlowAnalysis"])
         UITestWait.appears(app.tabBars.firstMatch, "first 100 %: start page after the second rebuild", timeout: 60)
         let next = watchAnalysis("first 100 %: next full analysis")
+        // Only a celebrated finish could show it: the check below has teeth only then.
+        print("UI_FACT first 100 %: the next finish \(next.celebrated ? "was" : "was not") celebrated (\(next.seconds) s)")
+        XCTAssertTrue(next.celebrated, "The next full analysis ended without \"Analyse fertig\" (\(next.seconds) s): no moment could have shown, so its absence says nothing")
         XCTAssertFalse(next.moment, "The 100 % came again after the next full analysis")
         UITestWait.never("first 100 %: not again after the next full analysis", for: 20) { firstFinish.exists }
-        // Only a celebrated finish could show it: the check has teeth only then.
-        print("UI_FACT first 100 %: the next finish was \(next.celebrated ? "celebrated (\"Analyse fertig\"), where an owed moment would have shown" : "not celebrated, so it says less") (\(next.seconds) s)")
         shot("09y-no-second-100")
     }
 
@@ -233,23 +238,20 @@ final class ShowAndHandwritingUITests: XCTestCase {
         return (skip, value)
     }
 
-    /// The photos at the end of the show's value, with grouped digits: "0 von 1 Album fertig, 0
-    /// Fotos einsortiert", "3 von 12 Alben fertig, 1.234 Fotos einsortiert"; nil when the value
-    /// does not end so.
-    private static func sortedPhotos(_ value: String) -> Int? {
-        guard let match = value.firstMatch(of: #/(?:^|[^0-9.])([0-9]{1,3}(?:\.[0-9]{3})*) Fotos einsortiert$/#) else { return nil }
-        return Int(match.1.filter(\.isNumber))
-    }
-
     /// DS-17: while a plan's sorting show runs, "Animation überspringen" (`show.skip`) is there
-    /// and the show's one VoiceOver element ("Fotos werden einsortiert") says how far it is,
-    /// its photos with grouped digits at the end. The plan is one new album of two photos made
-    /// by hand, with the slow plan (`-AlbumistUITestSlowPlan`: every change after a launch's
-    /// first waits 30 s), so the show stays on screen while its album waits, long enough to be
-    /// read and pictured on a slow Mac; the album lands once its photos are in.
+    /// and the show's one VoiceOver element ("Fotos werden einsortiert") says how far it is, its
+    /// photos at the end: "…, 0 Fotos einsortiert" while its album waits, "…, 2 Fotos
+    /// einsortiert" once it landed with its two photos (verification review V8; the grouping of
+    /// bigger numbers, which two photos cannot show, is a unit test of the words:
+    /// `SortingShowSourceTests.theCountReadsAsTheCatalogWritesIt`). The plan is one new album of
+    /// two photos made by hand, with the slow plan (`-AlbumistUITestSlowPlan`: every change after
+    /// a launch's first waits 30 s), so the show stays on screen while its album waits, long
+    /// enough to be read and pictured on a slow Mac. The album lands once its photos are in, and
+    /// the show then holds its end 15 s (`-AlbumistUITestShowHold`) instead of half a second, so
+    /// a look sees it landed: a test whose looks all miss it fails.
     func test2_SortingShowCountsThePhotosItSorts() {
         continueAfterFailure = true
-        prepare("show", ["-AlbumistUITestSlowPlan"])
+        prepare("show", ["-AlbumistUITestSlowPlan", "-AlbumistUITestShowHold"])
         guard tap(tab("Unsortiert"), "show: tab Unsortiert"),
               UITestScreens.Unsorted.planNewAlbum(app, titled: "Testalbum Show", "show") else {
             XCTFail("show: no plan of a new album could be opened")
@@ -264,17 +266,18 @@ final class ShowAndHandwritingUITests: XCTestCase {
         if running, let value = state?.value {
             shot("10x-show")
             print("UI_FACT show: '\(value)'")
-            let counted = Self.sortedPhotos(value)
-            print(counted != nil ? "UI_STEP_OK show: its value ends in grouped \"Fotos einsortiert\""
-                                 : "UI_STEP_MISSING show: its value ends in grouped \"Fotos einsortiert\" ('\(value)')")
-            XCTAssertNotNil(counted, "The show says '\(value)', not \"… N Fotos einsortiert\" with grouped digits")
+            let waiting = value.hasSuffix(", 0 Fotos einsortiert")
+            print(waiting ? "UI_STEP_OK show: its value ends in \", 0 Fotos einsortiert\" while its album waits"
+                          : "UI_STEP_MISSING show: its value ends in \", 0 Fotos einsortiert\" while its album waits ('\(value)')")
+            XCTAssertTrue(value.hasSuffix(", 0 Fotos einsortiert"), "The show says '\(value)' while its album waits, not \"…, 0 Fotos einsortiert\"")
         }
-        // The album lands once its photos are in: the count runs up while the show is still on.
+        // The album lands once its photos are in: the count changes while the show is still on,
+        // and the show holds its end for this look.
         var landed: String?
         let ended = UITestWait.until("show: the album landed or the show ended", timeout: 120) {
             guard let now = showState() else { return false }
             if now.value == nil && !now.skip { return true }
-            if let value = now.value, (Self.sortedPhotos(value) ?? 0) > 0 {
+            if let value = now.value, !value.hasSuffix(", 0 Fotos einsortiert") {
                 landed = value
                 return true
             }
@@ -283,9 +286,13 @@ final class ShowAndHandwritingUITests: XCTestCase {
         if ended, let landed {
             shot("10y-show-landed")
             print("UI_FACT show: '\(landed)'")
-            XCTAssertTrue(landed.hasSuffix("Fotos einsortiert"), "The show says '\(landed)' once its album landed")
+            let two = landed.hasSuffix(", 2 Fotos einsortiert")
+            print(two ? "UI_STEP_OK show: its value ends in \", 2 Fotos einsortiert\" once its album landed"
+                      : "UI_STEP_MISSING show: its value ends in \", 2 Fotos einsortiert\" once its album landed ('\(landed)')")
+            XCTAssertTrue(landed.hasSuffix(", 2 Fotos einsortiert"), "The show says '\(landed)' once its album landed, not \"…, 2 Fotos einsortiert\" for its two photos")
         } else if ended {
-            print("UI_FACT show: it ended before a look saw its album land")
+            print("UI_STEP_MISSING show: a look saw its album land")
+            XCTFail("The show ended before a look saw its album land, though it holds its end 15 s in this run")
         }
         let result = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Rückgängig machen")).firstMatch
         let finished = UITestWait.appears(result, "show: the plan's result after the show", timeout: 300)
@@ -298,6 +305,14 @@ final class ShowAndHandwritingUITests: XCTestCase {
     /// #F2F2F7 in light mode, black in dark mode.
     private static func neutralGround(dark: Bool) -> [Int] {
         dark ? [0, 0, 0] : [242, 242, 247]
+    }
+
+    /// The page's colour as the core makes it (verification review V9): pale in light mode, each
+    /// channel at least 215, and deep in dark mode, each at most 80 (every tint keeps well inside,
+    /// about 228 and 27 at the extremes: `PhotoTintTests.everyTintIsPaleInLightAndDeepInDark`).
+    /// The pale tint shown in dark mode is not.
+    private static func isCalmGround(_ colour: [Int], dark: Bool) -> Bool {
+        dark ? colour.allSatisfy { $0 <= 80 } : colour.allSatisfy { $0 >= 215 }
     }
 
     /// The colour of the screen at `point` (in points), in sRGB 0–255, the mean of 3 × 3 pixels
@@ -333,13 +348,15 @@ final class ShowAndHandwritingUITests: XCTestCase {
     /// The open suggestion page's ground took its cover's colour: it differs from the grouped
     /// background (by at least 4 in the three channels together; a pale tint differs by 5 or
     /// more, a picture of the plain background by at most 3) and holds still from one look to
-    /// the next (the 0.45 s cross-fade has ended). Not a failure by itself: a cover without a
-    /// colour of its own has no tint. The last colour seen, for the report.
+    /// the next (the 0.45 s cross-fade has ended), within 25 s (the reader alone waits up to 6 s
+    /// for the cover, and a busy Mac takes longer; verification review V9). Not a failure by
+    /// itself: a cover without a colour of its own has no tint. The last colour seen, which the
+    /// caller checks for pale or deep (`isCalmGround`).
     private func waitForTint(_ what: String, dark: Bool) -> (tinted: Bool, ground: [Int]?) {
         let neutral = Self.neutralGround(dark: dark)
         var last: [Int]?
         let start = Date()
-        let tinted = UITestWait.holds(timeout: 12) {
+        let tinted = UITestWait.holds(timeout: 25) {
             guard let now = pageGround() else {
                 last = nil
                 return false
@@ -383,6 +400,11 @@ final class ShowAndHandwritingUITests: XCTestCase {
             let colour = ground.map { "rgb(\($0.map(String.init).joined(separator: ", ")))" } ?? "not read"
             if tinted {
                 print("UI_STEP_OK \(what): the page of '\(name)' takes its cover's colour, \(colour) (grouped background \(Self.neutralGround(dark: dark)))")
+                // Pale in light mode, deep in dark mode: not only away from the plain ground.
+                let calm = ground.map { Self.isCalmGround($0, dark: dark) } == true
+                let kind = dark ? "deep (each channel at most 80)" : "pale (each channel at least 215)"
+                print(calm ? "UI_STEP_OK \(what): \(colour) is \(kind)" : "UI_STEP_MISSING \(what): \(colour) is \(kind)")
+                XCTAssertTrue(calm, "\(what): the page of '\(name)' is \(colour), not \(kind)")
                 return name
             }
             print("UI_FACT \(what): the page of '\(name)' kept \(colour), no colour of its own")
@@ -399,7 +421,9 @@ final class ShowAndHandwritingUITests: XCTestCase {
     /// DS-11: a suggestion's page takes its cover's calm colour as its ground, pale in light
     /// mode and deep in dark mode (`PhotoTintGround`), and stays readable: screenshots and the
     /// accessibility audit of the page in both (dark mode as the other tests force it,
-    /// `-AlbumistUITestDark`). The colour is read from the screenshot beside the facts line.
+    /// `-AlbumistUITestDark`). The colour is read from the screenshot beside the facts line: away
+    /// from the grouped background, and pale in light mode (each channel at least 215), deep in
+    /// dark mode (each at most 80).
     func test3_SuggestionPageTakesItsCoversCalmColour() {
         continueAfterFailure = true
         prepare("tint light")
@@ -416,8 +440,11 @@ final class ShowAndHandwritingUITests: XCTestCase {
     // MARK: Settings › Über
 
     /// Settings › "Über" starts with the app's icon (the Glass Stack, DS-11: where the app
-    /// speaks of itself) and its name, one element for VoiceOver: "Albumist" between the
-    /// section's title and "Version".
+    /// speaks of itself) and its name, one element for VoiceOver ("Albumist"; the icon is
+    /// decorative): the row `settings.about.app`, between the section's title and "Version",
+    /// found by its identifier whatever type XCTest gives the combined element, and at least
+    /// 48 pt high, the icon's side (verification review V10): without the icon it is a line of
+    /// text, lower than that. Only the combined row can carry both the name and the icon's height.
     func test4_SettingsAboutShowsTheAppsIconAndName() {
         continueAfterFailure = true
         prepare("about")
@@ -430,26 +457,32 @@ final class ShowAndHandwritingUITests: XCTestCase {
             swipes += 1
         }
         UITestWait.screenAtRest(app, "about: settings at rest at \"Über\"")
-        // One snapshot: the section's title, the name and "Version", top to bottom.
+        // One snapshot: the section's title, the app's row and "Version", top to bottom.
         var title: CGRect?, versionRow: CGRect?
-        var names: [(type: XCUIElement.ElementType, frame: CGRect)] = []
+        var found: (label: String, frame: CGRect)?
         if let root = try? app.snapshot() {
             var stack: [any XCUIElementSnapshot] = [root]
             while let node = stack.popLast() {
                 if node.label.caseInsensitiveCompare("Über") == .orderedSame, title == nil { title = node.frame }
                 if node.label == "Version", versionRow == nil { versionRow = node.frame }
-                if node.label == "Albumist", node.elementType != .button { names.append((node.elementType, node.frame)) }
+                if node.identifier == "settings.about.app", found == nil { found = (node.label, node.frame) }
                 stack.append(contentsOf: node.children)
             }
         }
-        let inAbout = names.filter { name in
-            (title.map { name.frame.minY >= $0.maxY - 1 } ?? false) && (versionRow.map { name.frame.maxY <= $0.minY + 1 } ?? false)
-        }
-        print("UI_FACT about: title \(title.map { "\($0)" } ?? "missing"), Version \(versionRow.map { "\($0)" } ?? "missing"), \"Albumist\" \(names.map { "\($0.type.rawValue) \($0.frame)" })")
+        print("UI_FACT about: title \(title.map { "\($0)" } ?? "missing"), Version \(versionRow.map { "\($0)" } ?? "missing"), the app's row \(found.map { "'\($0.label)' \($0.frame)" } ?? "missing")")
         shot("80x-settings-about")
-        let text = inAbout.contains { $0.type == .staticText }
-        print(text ? "UI_STEP_OK about: \"Albumist\" in \"Über\"" : "UI_STEP_MISSING about: \"Albumist\" in \"Über\"")
-        XCTAssertTrue(text, "Settings › Über has no text \"Albumist\" between its title and \"Version\"")
+        if let row = found {
+            let placed = (title.map { row.frame.minY >= $0.maxY - 1 } ?? false) && (versionRow.map { row.frame.maxY <= $0.minY + 1 } ?? false)
+            let icon = row.frame.height >= 48
+            print(placed && icon && row.label == "Albumist" ? "UI_STEP_OK about: the app's icon and name in \"Über\""
+                                                           : "UI_STEP_MISSING about: the app's icon and name in \"Über\"")
+            XCTAssertTrue(placed, "The app's row \(row.frame) is not between the title \"Über\" and \"Version\"")
+            XCTAssertEqual(row.label, "Albumist", "The app's row says '\(row.label)', not the app's name alone")
+            XCTAssertGreaterThanOrEqual(row.frame.height, 48, "The app's row is \(row.frame.height) pt high: no icon of 48 pt beside the name")
+        } else {
+            print("UI_STEP_MISSING about: the app's row (settings.about.app)")
+            XCTFail("Settings › Über has no row settings.about.app")
+        }
         tap(app.buttons["Fertig"], "about: close settings", timeout: 5)
     }
 }

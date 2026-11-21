@@ -123,10 +123,17 @@ private struct SampledImage: @unchecked Sendable {
 /// photo's tint is known, in a slow cross-fade when it was just worked out
 /// (`PhotoTintGround.arrival`). The page's own ground again (in the cross-fade) when the cover
 /// stops being a sharp photo or its preview becomes hidden (second review, K5 and K8).
+///
+/// A colour known for the cover kept at this size is there from the page's first frame: taken as
+/// the page is measured for the first time, before the cover tells that it shows a photo, never
+/// for a hidden preview (`seed`; verification review V5).
 struct CoverTintReader: ViewModifier {
     let ids: [AssetID]
     let aspectRatio: CGFloat
+    /// The cover tells that it shows a sharp photo (`CoverPhoto`'s outcome).
     let sharp: Bool
+    /// "Vorschau ausgeblendet": no colour, not even one known before.
+    let hidden: Bool
     @Binding var tint: PhotoTint?
     @Environment(\.displayScale) private var displayScale
     @State private var width: CGFloat = 0
@@ -142,27 +149,48 @@ struct CoverTintReader: ViewModifier {
     /// As long as a cover asks Photos again when it did not answer (`CoverLoader.retryDelays`).
     private static let coverWaits = 24
 
-    /// The pixels `CoverPhoto` asks for and keeps its cover at: its width in whole points, the
-    /// height from the aspect ratio, times the screen's scale.
-    private var pixels: CGSize {
+    /// The pixels `CoverPhoto` asks for and keeps its cover at.
+    private var pixels: CGSize { pixels(at: width) }
+
+    /// The pixels of the cover `width` points wide, as `CoverPhoto` asks for and keeps it: the
+    /// width in whole points, the height from the aspect ratio, times the screen's scale.
+    private func pixels(at width: CGFloat) -> CGSize {
         let ratio = max(aspectRatio, 0.1)
         return CGSize(width: width.rounded(.up) * displayScale, height: (width / ratio).rounded(.up) * displayScale)
     }
 
     func body(content: Content) -> some View {
-        let key = Key(ids: CoverPhoto.candidates(ids), pixels: pixels, sharp: sharp)
+        let key = Key(ids: CoverPhoto.candidates(ids), pixels: pixels, sharp: sharp && !hidden)
         return content
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { new in
+                // Measured for the first time: a colour known for this cover is there at once.
+                if width < 1 { seed(width: new) }
+                width = new
+            }
             .task(id: key) {
-                // Not a sharp photo any more (the placeholder, "Vorschau ausgeblendet", its photos
-                // taken out): the page's own ground again.
+                guard !Task.isCancelled, key.pixels.width >= 1 else { return }
+                // Not a sharp photo: a colour taken for the cover kept at this size stays while
+                // the cover is still to tell (`seed`); otherwise (the placeholder, "Vorschau
+                // ausgeblendet", its photos taken out) the page's own ground again.
                 guard key.sharp else {
-                    if tint != nil { withAnimation(PhotoTintGround.arrival) { tint = nil } }
+                    if tint != nil, hidden || PhotoTints.shared.known(for: key.ids, pixels: key.pixels) != .tint(tint) {
+                        withAnimation(PhotoTintGround.arrival) { tint = nil }
+                    }
                     return
                 }
-                guard width >= 1 else { return }
                 await follow(key)
             }
+    }
+
+    /// The page is measured for the first time (`width` points): the colour known for the cover
+    /// kept at that size, the one `CoverPhoto` is about to show, at once, without the fade, so a
+    /// page opened again starts in it instead of switching to it a few frames later, once the
+    /// cover told (verification review V5). Nothing for a hidden preview or a cover not kept yet.
+    private func seed(width: CGFloat) {
+        guard !hidden, tint == nil, width >= 1 else { return }
+        if case .tint(let known?) = PhotoTints.shared.known(for: CoverPhoto.candidates(ids), pixels: pixels(at: width)) {
+            tint = known
+        }
     }
 
     /// The colour of the cover on screen: one worked out before at once, with its cover (a page
@@ -192,7 +220,8 @@ struct CoverTintReader: ViewModifier {
 
 extension View {
     /// The calm colour of the cover this view draws (DS-11), into `tint`; see `CoverTintReader`.
-    func coverTint(of ids: [AssetID], aspectRatio: CGFloat, sharp: Bool, into tint: Binding<PhotoTint?>) -> some View {
-        modifier(CoverTintReader(ids: ids, aspectRatio: aspectRatio, sharp: sharp, tint: tint))
+    /// `sharp`: the cover told that it shows a sharp photo; `hidden`: its preview is hidden.
+    func coverTint(of ids: [AssetID], aspectRatio: CGFloat, sharp: Bool, hidden: Bool, into tint: Binding<PhotoTint?>) -> some View {
+        modifier(CoverTintReader(ids: ids, aspectRatio: aspectRatio, sharp: sharp, hidden: hidden, tint: tint))
     }
 }

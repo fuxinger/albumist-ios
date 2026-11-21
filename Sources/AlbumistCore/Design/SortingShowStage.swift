@@ -212,3 +212,15 @@ public struct SortingShowAlbum: Hashable, Sendable, Identifiable {
         }
     }
 }
+
+/// What the sorting show writes of its photos (DS-17), in the line under its count and in its
+/// VoiceOver value: their number, grouped as the screen's language writes it ("1.234" in German,
+/// "1,234" in English). The sentences around it are the App's catalog ("%lld %@ Fotos
+/// einsortiert"): the bare count picks the plural form, this number is what it shows
+/// (`SortingShowSourceTests.theCountReadsAsTheCatalogWritesIt`).
+public enum SortingShowWords {
+    /// `count` grouped as `locale` writes it: "1.234" / "1,234"; below a thousand the digits.
+    public static func number(_ count: Int, locale: Locale) -> String {
+        count.formatted(.number.locale(locale))
+    }
+}

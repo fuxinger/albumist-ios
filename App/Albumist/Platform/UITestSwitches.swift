@@ -47,6 +47,12 @@ extension UITestSupport {
     /// `-AlbumistUITestRebuildDatabase` the analysis at launch is then the first full one.
     static let startsFirstFinishOwed = flag("-AlbumistUITestFirstFinishOwed")
 
+    /// `-AlbumistUITestShowHold`: the sorting show (DS-17) stays 15 s on its end, its last album
+    /// landed, before it hands over to the result, so a test reads what it says then
+    /// (`ShowAndHandwritingUITests` test 2). Its own end lasts half a second, and XCTest's reads
+    /// took 5 to 7 s each in busy runs.
+    static let holdsShowEnd = flag("-AlbumistUITestShowHold")
+
     // MARK: Device
 
     /// `-AlbumistUITestPace normal:40,gentle:40,hot:6,normal`: the device's state as a script,

@@ -406,6 +406,22 @@ final class AppModel {
         return ranks
     }
 
+    /// "Anlegen" (the sorting show, the result's stack): the capture dates and the preview ranks
+    /// where they are not kept (before the first refresh, the dates after a memory warning), made
+    /// off the main thread first, so the tap never makes them here (verification review V13 of H13).
+    func makeDatesAndRanksOffMain() async { // Design W3 H13: "Anlegen" never makes the two tables on the main actor
+        guard datesCache == nil || previewRanksCache == nil else { return }
+        let facts = self.facts
+        let needsDates = datesCache == nil, needsRanks = previewRanksCache == nil
+        let made = await Task.detached(priority: .userInitiated) {
+            (dates: needsDates ? DerivedLibrary.creationDates(of: facts) : nil, ranks: needsRanks ? PreviewRank.ranks(of: facts) : nil)
+        }.value
+        // Refreshed meanwhile: the new facts came with their own.
+        guard DerivedLibrary.sameFacts(facts, self.facts) else { return }
+        if datesCache == nil, let dates = made.dates { datesCache = dates }
+        if previewRanksCache == nil, let ranks = made.ranks { previewRanksCache = ranks }
+    }
+
     /// iOS warned that memory runs low (review 18.11., P4-06): every registered cache is emptied
     /// (`MemoryPressure`), and the warning is written for the diagnostic report at once, so the
     /// report has it even when iOS ends the app right after.

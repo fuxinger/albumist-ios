@@ -797,7 +797,7 @@ struct ProposalDetailView: View {
         }
         // Its calm colour, once a sharp photo shows: never of "Vorschau ausgeblendet" or the
         // placeholder.
-        .coverTint(of: ids, aspectRatio: ratio, sharp: coverIsPhoto && !card.hidesPreview, into: $tint) // Design W3 H13: photo tint
+        .coverTint(of: ids, aspectRatio: ratio, sharp: coverIsPhoto, hidden: card.hidesPreview, into: $tint) // Design W3 H13: photo tint
         // The status bar and the bar's buttons stay readable on a bright sky; only on a photo.
         .overlay(alignment: .top) {
             if coverIsPhoto {

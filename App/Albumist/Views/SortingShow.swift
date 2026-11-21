@@ -63,6 +63,8 @@ struct SortingShow: View {
     /// From xxLarge on, the album's name gets more room under its cover (`SortingShowLayout`).
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.displayScale) private var displayScale
+    /// The photos' number is grouped as the screen's language writes it ("1.234", "1,234").
+    @Environment(\.locale) private var locale
     @State private var current = 0
     @State private var landed: Set<Int> = []
     /// Distinct photos sorted so far (a photo in two albums counts once, like the result card).
@@ -231,10 +233,10 @@ struct SortingShow: View {
             ZStack {
                 // The widest the line gets, kept hidden: the header keeps its height while the
                 // count runs up (a line that wrapped mid-show would shrink the scene at once).
-                Text("\(totalPhotos) \(totalPhotos.formatted()) Fotos einsortiert")
+                Text("\(totalPhotos) \(SortingShowWords.number(totalPhotos, locale: locale)) Fotos einsortiert")
                     .hidden()
                     .accessibilityHidden(true)
-                Text("\(counted) \(counted.formatted()) Fotos einsortiert")
+                Text("\(counted) \(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert")
                     .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(counted)))
             }
             .font(.subheadline)
@@ -249,7 +251,7 @@ struct SortingShow: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Fotos werden einsortiert"))
-        .accessibilityValue(Text("\(landed.count) von \(albums.count) Alben fertig, \(counted) \(counted.formatted()) Fotos einsortiert"))
+        .accessibilityValue(Text("\(landed.count) von \(albums.count) Alben fertig, \(counted) \(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert"))
         .accessibilityAddTraits(.updatesFrequently)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
     }
@@ -374,7 +376,8 @@ struct SortingShow: View {
             let applied = finished.confirmedAddedMedia
             if applied != sorted { withAnimation(.snappy(duration: 0.3)) { sorted = applied } }
         }
-        try? await Task.sleep(for: .seconds(0.5))
+        // A UI test may hold the end to read it (`-AlbumistUITestShowHold`, verification review V8).
+        try? await Task.sleep(for: .seconds(UITestSupport.holdsShowEnd ? 15 : 0.5))
         guard !Task.isCancelled else { return }
         onFinish()
     }

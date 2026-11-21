@@ -170,6 +170,9 @@ extension SortedRing where Inside == EmptyView {
 /// - VoiceOver: said once ("Analyse fertig: 100 %"). The moment is decoration and hidden; "Analyse
 ///   fertig" below stays the element to read and to tap.
 struct FirstAnalysisMomentHeader: View {
+    /// Above the start page's done line: plays only a moment cut short, after a run replaced its
+    /// "Analyse fertig" (`FirstAnalysisMoment.cutShort`; verification review V12).
+    var again = false
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var store = FirstAnalysisMomentStore.shared
@@ -194,10 +197,14 @@ struct FirstAnalysisMomentHeader: View {
         // The card came while Albumist was not on screen: it plays once Albumist is back, unless
         // it left for the background meanwhile (`FirstAnalysisMoment.leftScreen`).
         .onChange(of: model.isOnScreen) { _, onScreen in if onScreen { start() } }
+        // Its card went while this header played (another tab, a new run's card): cut short, the
+        // next card plays it again. Only the header that plays it tells: the done line's goes as
+        // "Analyse fertig" comes.
         .onDisappear {
-            run?.cancel()
-            run = nil
-            store.ended()
+            guard let run else { return }
+            run.cancel()
+            self.run = nil
+            store.cardWent()
         }
     }
 
@@ -233,6 +240,7 @@ struct FirstAnalysisMomentHeader: View {
     private func start() {
         typealias T = FirstAnalysisMoment.Timing
         guard run == nil, model.isOnScreen else { return }
+        if again, !store.moment.cutShort { return }
         let claimed = withAnimation(calm ? .easeInOut(duration: T.fade) : .smooth(duration: T.fade)) {
             store.claim(onScreen: model.isOnScreen)
         }

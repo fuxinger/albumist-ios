@@ -245,32 +245,8 @@ struct Raster: Sendable {
 
     /// The spans inside the rings, even-odd over all of them.
     func spans(of rings: [[GeoCoordinate]], work: inout CountryMask.Work) -> Spans {
-        var edges: [Edge] = []
-        var wrapped: [[GeoCoordinate]] = []
-        for ring in rings where ring.count >= 3 {
-            guard ring.allSatisfy({ $0.latitude.isFinite && $0.longitude.isFinite }) else { continue }
-            var jumps = false
-            var previous = ring[ring.count - 1]
-            for point in ring {
-                if abs(point.longitude - previous.longitude) > 180 { jumps = true }
-                previous = point
-            }
-            if jumps {
-                wrapped.append(Self.unwrapped(ring))
-            } else {
-                appendEdges(of: ring, to: &edges)
-            }
-        }
-        work.edges += edges.count
-        // The edge table: edges by their first row.
-        edges.sort { $0.firstRow < $1.firstRow }
-        var wrappedEdges: [[Edge]] = []
-        for ring in wrapped {
-            var ringEdges: [Edge] = []
-            appendEdges(of: ring, to: &ringEdges)
-            work.edges += ringEdges.count
-            wrappedEdges.append(ringEdges)
-        }
+        let table = edgeTable(of: rings, work: &work)
+        let edges = table.edges, wrappedEdges = table.wrapped
         var firstRow = Int.max, lastRow = Int.min
         for edge in edges {
             firstRow = min(firstRow, edge.firstRow)
@@ -301,35 +277,79 @@ struct Raster: Sendable {
             }
             work.crossings += active.count
             for ringEdges in wrappedEdges {
-                var crossings: [Double] = []
-                for edge in ringEdges where edge.firstRow <= row && row <= edge.lastRow {
-                    crossings.append(edge.longitude(at: phi))
-                }
-                work.crossings += crossings.count
-                crossings.sort()
-                var i = 0
-                while i + 1 < crossings.count {
-                    addWrapped(boundary(crossings[i]), boundary(crossings[i + 1]), to: &toggles)
-                    i += 2
-                }
+                addCrossings(of: ringEdges, row: row, to: &toggles, work: &work)
             }
             toggles.sort()
-            var spans: [Range<Int>] = []
-            var i = 0
-            while i + 1 < toggles.count {
-                if toggles[i] < toggles[i + 1] {
-                    // Touching spans merge into one.
-                    if let last = spans.last, last.upperBound == toggles[i] {
-                        spans[spans.count - 1] = last.lowerBound..<toggles[i + 1]
-                    } else {
-                        spans.append(toggles[i]..<toggles[i + 1])
-                    }
-                }
-                i += 2
-            }
-            rows.append(spans)
+            rows.append(Self.spans(between: toggles))
         }
         return Spans(firstRow: firstRow, rows: rows)
+    }
+
+    /// The edges of the rings: those of a ring across the antimeridian unwrapped (`unwrapped`),
+    /// one list per ring; all others in one table, by their first row.
+    private func edgeTable(of rings: [[GeoCoordinate]], work: inout CountryMask.Work) -> (edges: [Edge], wrapped: [[Edge]]) {
+        var edges: [Edge] = []
+        var wrapped: [[GeoCoordinate]] = []
+        for ring in rings where ring.count >= 3 {
+            guard ring.allSatisfy({ $0.latitude.isFinite && $0.longitude.isFinite }) else { continue }
+            var jumps = false
+            var previous = ring[ring.count - 1]
+            for point in ring {
+                if abs(point.longitude - previous.longitude) > 180 { jumps = true }
+                previous = point
+            }
+            if jumps {
+                wrapped.append(Self.unwrapped(ring))
+            } else {
+                appendEdges(of: ring, to: &edges)
+            }
+        }
+        work.edges += edges.count
+        // The edge table: edges by their first row.
+        edges.sort { $0.firstRow < $1.firstRow }
+        var wrappedEdges: [[Edge]] = []
+        for ring in wrapped {
+            var ringEdges: [Edge] = []
+            appendEdges(of: ring, to: &ringEdges)
+            work.edges += ringEdges.count
+            wrappedEdges.append(ringEdges)
+        }
+        return (edges, wrappedEdges)
+    }
+
+    /// The toggles of one unwrapped ring's edges in `row`: its crossings of the row's centre in
+    /// pairs, each pair wrapped onto the raster (`addWrapped`).
+    private func addCrossings(of ringEdges: [Edge], row: Int, to toggles: inout [Int], work: inout CountryMask.Work) {
+        let phi = latitude(row)
+        var crossings: [Double] = []
+        for edge in ringEdges where edge.firstRow <= row && row <= edge.lastRow {
+            crossings.append(edge.longitude(at: phi))
+        }
+        work.crossings += crossings.count
+        crossings.sort()
+        var i = 0
+        while i + 1 < crossings.count {
+            addWrapped(boundary(crossings[i]), boundary(crossings[i + 1]), to: &toggles)
+            i += 2
+        }
+    }
+
+    /// The spans between sorted toggles, taken in pairs; an empty pair adds none.
+    private static func spans(between toggles: [Int]) -> [Range<Int>] {
+        var spans: [Range<Int>] = []
+        var i = 0
+        while i + 1 < toggles.count {
+            if toggles[i] < toggles[i + 1] {
+                // Touching spans merge into one.
+                if let last = spans.last, last.upperBound == toggles[i] {
+                    spans[spans.count - 1] = last.lowerBound..<toggles[i + 1]
+                } else {
+                    spans.append(toggles[i]..<toggles[i + 1])
+                }
+            }
+            i += 2
+        }
+        return spans
     }
 
     /// The edges of a ring that cross a row centre, `a` the point and `b` the one before it.

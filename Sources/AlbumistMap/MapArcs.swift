@@ -155,20 +155,6 @@ extension MapArcs {
     /// `radiusMeters` along the Earth are closer than that in a straight line, so their cubes are
     /// at most one apart on each axis.
     struct Clusters: Sendable {
-        struct Assignment: Sendable {
-            /// Into `leaders`.
-            var leader: Int
-            /// The point leads a new cluster.
-            var isNew: Bool
-        }
-
-        private struct Cube: Hashable, Sendable {
-            var space: Int
-            var x: Int
-            var y: Int
-            var z: Int
-        }
-
         let radiusMeters: Double
         /// The first point of each cluster, in the order they came.
         private(set) var leaders: [GeoCoordinate] = []
@@ -219,5 +205,23 @@ extension MapArcs {
             func index(_ value: Double) -> Int { Int((value / side).rounded(.down)) }
             return Cube(space: space, x: index(cos(latitude) * cos(longitude)), y: index(cos(latitude) * sin(longitude)), z: index(sin(latitude)))
         }
+    }
+}
+
+extension MapArcs.Clusters {
+    /// Where `assign` put a point.
+    struct Assignment: Sendable {
+        /// Into `leaders`.
+        var leader: Int
+        /// The point leads a new cluster.
+        var isNew: Bool
+    }
+
+    /// A cube of `radiusMeters` in one space, where leaders are kept (`cube(_:space:)`).
+    private struct Cube: Hashable, Sendable {
+        var space: Int
+        var x: Int
+        var y: Int
+        var z: Int
     }
 }

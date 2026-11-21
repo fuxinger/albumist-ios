@@ -133,6 +133,23 @@ public enum PhotoGridHitTest {
         }
         return best?.position
     }
+
+    /// The position of the photo two fingers hold at (`x`, `y`), whose place a zoom keeps: the
+    /// photo under them (`position(x:y:in:)`), else the nearest one (between rows, on a header,
+    /// beside or past the grid); on a tie the earlier one. Nil when no photo is on screen.
+    public static func nearest(x: Double, y: Double, in cells: [(position: Int, frame: GridRect)]) -> Int? {
+        if let under = position(x: x, y: y, in: cells) { return under }
+        var best: (position: Int, distance: Double)?
+        for cell in cells {
+            let dx = x < cell.frame.minX ? cell.frame.minX - x : (x > cell.frame.maxX ? x - cell.frame.maxX : 0)
+            let dy = y < cell.frame.minY ? cell.frame.minY - y : (y > cell.frame.maxY ? y - cell.frame.maxY : 0)
+            let distance = dx * dx + dy * dy
+            if best == nil || distance < best!.distance || (distance == best!.distance && cell.position < best!.position) {
+                best = (cell.position, distance)
+            }
+        }
+        return best?.position
+    }
 }
 
 /// The grid scrolling by itself while a finger selects near its top or bottom edge (DS-06b:

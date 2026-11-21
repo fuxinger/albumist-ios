@@ -109,6 +109,19 @@ struct PhotoGridGestureTests {
         #expect(PhotoGridHitTest.position(x: 50, y: 50, in: []) == nil)
     }
 
+    /// Two fingers always hold a photo, the one whose place the zoom keeps: the one under them,
+    /// else the nearest (between rows, on a header, beside the grid); on a tie the earlier one.
+    @Test func twoFingersHoldTheNearestPhoto() {
+        #expect(PhotoGridHitTest.nearest(x: 150, y: 50, in: Self.cells) == 1, "under the fingers")
+        #expect(PhotoGridHitTest.nearest(x: 150, y: 110, in: Self.cells) == 1, "just below a row: its photo")
+        #expect(PhotoGridHitTest.nearest(x: 150, y: 140, in: Self.cells) == 4, "on the header, near the next day")
+        #expect(PhotoGridHitTest.nearest(x: 150, y: 125, in: Self.cells) == 1, "halfway: the earlier one")
+        #expect(PhotoGridHitTest.nearest(x: 280, y: 200, in: Self.cells) == 4, "beside a short row: its last photo")
+        #expect(PhotoGridHitTest.nearest(x: 280, y: 400, in: Self.cells) == 4, "below the grid: its nearest photo")
+        #expect(PhotoGridHitTest.nearest(x: 50, y: -60, in: Self.cells) == 0, "above the grid")
+        #expect(PhotoGridHitTest.nearest(x: 50, y: 50, in: []) == nil, "no photo on screen")
+    }
+
     // MARK: Scrolling by itself
 
     /// Near the top or bottom edge of what is visible the grid scrolls by itself, faster the

@@ -7,7 +7,9 @@ import AlbumistEngine
 /// typing; the chips show how the query was understood, with a photo count per term.
 struct SearchView: View {
     @Environment(AppModel.self) private var model
-    @State private var query = ""
+    /// What is typed, held by the tabs (design wave 3, DS-12a): the field sits on the tab view as
+    /// Apple's search tab, or on this page as until wave 3 (`MainTabs.searchField`).
+    let input: SearchInput
     @State private var result = SearchResult()
     /// The text `result` belongs to; the field runs ahead while a search is pending.
     @State private var resultQuery = ""
@@ -28,8 +30,6 @@ struct SearchView: View {
     private static let page = 2_000
     /// The side a photo's thumbnail is asked for, and its long press lifts that image.
     private static let photoSide: CGFloat = 110
-    /// The field is shown and focused when the tab opens; testers did not find a hidden one.
-    @State private var searchActive = false
     @Namespace private var zoom
     /// The column of a suggestion's symbol grows with the text size: a fixed 24 pt let the
     /// symbol run over the word at the largest size (review P3-12 / G3-07).
@@ -40,7 +40,19 @@ struct SearchView: View {
     /// both languages, see `SearchExampleTests`.
     private let examples: [LocalizedStringResource] = ["Strand 2024", "Italien", "Rechnungen", "Videos", "Unsortiert", "Screenshots Bestellung"]
 
+    /// The field's text: the starting points and the completions set it, the search follows it.
+    private var query: String {
+        get { input.text }
+        nonmutating set { input.text = newValue }
+    }
+
     private var isEmptyQuery: Bool { query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// The field's prompt, wherever the field sits: an example the search understands, a whole
+    /// sentence when Apple Intelligence can turn it into terms (`SmartAssistant`).
+    static var prompt: Text {
+        SmartAssistant.isAvailable ? Text("z. B. Grillen bei Oma letzten Sommer") : Text("z. B. Hunde Italien 2023")
+    }
 
     var body: some View {
         ScrollView {
@@ -90,9 +102,9 @@ struct SearchView: View {
         // "Widerrufen" after ignoring a photo from its detail (design review D4).
         .safeAreaInset(edge: .bottom) { IgnoreUndoBar() }
         .animation(.snappy, value: model.lastIgnored)
-        .searchable(text: $query, isPresented: $searchActive,
-                    prompt: SmartAssistant.isAvailable ? Text("z. B. Grillen bei Oma letzten Sommer") : Text("z. B. Hunde Italien 2023"))
-        .onAppear { if query.isEmpty { searchActive = true } }
+        // The field here only when the switch keeps it on the page (`MainTabs.searchField`);
+        // otherwise it sits on the tab view and this page reads what is typed there.
+        .searchField(input, on: .page)
         // Starting points follow every change of the facts (a finished analysis brings places and
         // topics, the pictures of photos it has looked at since), also one of a photo's rank
         // alone: the text step finds a sensitive document without changing a count, and its
@@ -354,6 +366,55 @@ struct SearchView: View {
         case .trip: "airplane"
         case .favorite: "heart"
         case .ignored: "questionmark.circle"
+        }
+    }
+}
+
+/// What is typed in the search field and whether the field is active (design wave 3, DS-12a).
+/// The tabs hold it (`MainTabs`), so the field can sit on the tab view as Apple's search tab; the
+/// search page reads and sets the text. No other field binds it: "Album suchen" and "Ort suchen"
+/// search a text of their own view, so typing there never starts a search.
+@MainActor @Observable
+final class SearchInput {
+    var text = ""
+    var isPresented = false
+
+    /// Where the field sits: on the tab view, Apple's search tab, a round button of its own at
+    /// the end of the tab bar (`.tabView`), or on the search page's own stack, as until wave 3
+    /// (`.page`). `MainTabs.searchField` chooses one.
+    enum Host {
+        case tabView
+        case page
+    }
+}
+
+extension View {
+    /// The search field of `input` on this view when `MainTabs.searchField` puts it on `host`,
+    /// otherwise the view as it is: the tab view and the search page both ask, one gets it.
+    func searchField(_ input: SearchInput, on host: SearchInput.Host) -> some View {
+        modifier(SearchFieldModifier(input: input, host: host))
+    }
+}
+
+/// The field itself (`searchField(_:on:)`), with the prompt the page always had.
+private struct SearchFieldModifier: ViewModifier {
+    @Bindable var input: SearchInput
+    var host: SearchInput.Host
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if host != MainTabs.searchField {
+            content
+        } else if host == .tabView {
+            // The tab's selection and the field's activation go together (`.searchTabSelection`):
+            // the keyboard comes as the search tab opens, as the page did by hand.
+            content
+                .searchable(text: $input.text, isPresented: $input.isPresented, prompt: SearchView.prompt)
+                .tabViewSearchActivation(.searchTabSelection)
+        } else {
+            // The field is shown and focused when the tab opens; testers did not find a hidden one.
+            content
+                .searchable(text: $input.text, isPresented: $input.isPresented, prompt: SearchView.prompt)
+                .onAppear { if input.text.isEmpty { input.isPresented = true } }
         }
     }
 }

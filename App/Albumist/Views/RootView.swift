@@ -79,8 +79,17 @@ struct MainTabs: View {
     @State private var tab: MainTab = .suggestions
     /// The stack of the tab "Vorschläge", also for Siri, Shortcuts and Spotlight (`AppScreen`).
     @State private var suggestionsNavigator = Navigator()
+    /// What is typed in the search field; the search page reads it (`SearchView`).
+    @State private var search = SearchInput()
 
     enum MainTab: Hashable { case suggestions, unsorted, albums, search }
+
+    /// Where the search field sits (design wave 3, DS-12a, draft E1). `.tabView`: Apple's search
+    /// tab, the field on the tab view, so iOS shows the search as a round button of its own at
+    /// the end of the tab bar and opens the field as the tab is chosen. `.page`: the field on
+    /// the search page's own stack, as until wave 3. One line to switch back, should the
+    /// screenshots on iOS 27.2 show the round button worse than the tab in the row.
+    static let searchField: SearchInput.Host = .tabView
 
     /// Two cards for "Vorschläge", as in the draft: never sparkles, which stand for AI at Apple.
     /// The fanned portrait cards came with iOS 17; should iOS not have them, the fanned cards
@@ -111,11 +120,15 @@ struct MainTabs: View {
                 NavigationRoot(quickCreate: true) { AlbumsView() }
                     .showsQuickCreateBanner()
             }
+            // The search role, never `.prominent` (one role per tab): with the field on the tab
+            // view it makes this tab the round button at the bar's end.
             Tab(value: MainTab.search, role: .search) {
-                NavigationRoot(quickCreate: true) { SearchView() }
+                NavigationRoot(quickCreate: true) { SearchView(input: search) }
                     .showsQuickCreateBanner()
             }
         }
+        // The search field on the tab view, as Apple shows a search tab (`searchField` above).
+        .searchField(search, on: .tabView)
         // iPad: tabs become a sidebar; iPhone: the Liquid Glass tab bar shrinks while scrolling.
         .tabViewStyle(.sidebarAdaptable)
         // UI tests tap every tab by name; a shrunken bar hides all but the current one.

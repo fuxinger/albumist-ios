@@ -42,9 +42,9 @@ struct PhotoGridSourceTests {
     /// draws no photos of its own.
     @Test func bothPagesShareTheGrid() throws {
         let library = Self.squeezed(try Self.body(["struct LibraryView"], in: Self.library))
-        #expect(library.contains("PhotoGrid(sections:days,place:.unsorted,selecting:selecting,selection:$selection,pinsHeaders:true,"
-                                 + "zoom:zoom,identifier:\"library.photo\"){idinopen(id,in:days)}perform:{item,idin"
-                                 + "perform(item,on:id,in:days)}"), "\(library)")
+        #expect(library.contains("PhotoGrid(sections:days,limit:limit,place:.unsorted,selecting:selecting,selection:$selection,"
+                                 + "pinsHeaders:true,zoom:zoom,identifier:\"library.photo\"){idinopen(id,in:days,limit:limit)}"
+                                 + "perform:{item,idinperform(item,on:id,in:days,limit:limit)}"), "\(library)")
         let suggestion = Self.squeezed(try Self.body(["struct ProposalPhotosView"], in: Self.suggestions))
         #expect(suggestion.contains("PhotoGrid(sections:sections[...],place:.suggestion,selecting:selecting,selection:$selected,"
                                     + "available:!disabled&&isCurrent,disabled:disabled,zoom:zoom,"
@@ -55,9 +55,9 @@ struct PhotoGridSourceTests {
                 #expect(!code.contains(own), "\(page) draws its photos itself: \(own)")
             }
         }
-        // The pages' photo view opens on the photos in the grid's order.
+        // The pages' photo view opens on the photos shown, in the grid's order (one page at most).
         let open = Self.squeezed(try Self.body(["struct LibraryView", "private func open("], in: Self.library))
-        #expect(open.contains("viewing=PhotoViewer.Start(id:id,ids:days.flatMap{$0.entries.map(\\.id)})"), "\(open)")
+        #expect(open.contains("viewing=PhotoViewer.Start(id:id,ids:PhotoGridSection.ids(of:days,below:limit))"), "\(open)")
         // A suggestion's days with each photo's time on its own clock, made again only when they change.
         let sections = Self.squeezed(try Self.body(["struct ProposalPhotosView", "private var sections:"], in: Self.suggestions))
         #expect(sections.contains("grid.sections(for:days)"), "\(sections)")
@@ -71,7 +71,8 @@ struct PhotoGridSourceTests {
     /// photo; otherwise it has no ground of its own (a suggestion's page is tinted by its photo).
     @Test func theGridShowsTheDaysAsPhotosDoes() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
-        #expect(view.contains("ForEach(sections){sectioninSection{ForEach(section.entries){entryincell(entry,side:side,columns:columns)}"
+        #expect(view.contains("ForEach(sections){sectioninSection{ForEach(section.entries(below:limit)){entryin"
+                              + "cell(entry,side:side,columns:columns)}"
                               + "}header:{PhotoGridHeader(section:section,pinned:pinned)}}"), "\(view)")
         #expect(view.contains("letpinned=pinsHeaders&&!typeSize.isAccessibilitySize"), "\(view)")
         #expect(view.contains("pinnedViews:pinned?[.sectionHeaders]:[]"), "\(view)")
@@ -284,8 +285,9 @@ struct PhotoGridSourceTests {
 
     /// The days are made off the main thread (`AppModel.inboxDays`, as the areas themselves),
     /// not in a body; they are made again only when the area itself changes (the same array, not
-    /// equal contents), and the work is given up when a newer area comes. The grid shows whole
-    /// days, page by page.
+    /// equal contents), and the work is given up when a newer area comes. The grid shows a page
+    /// of photos from the top, the last day cut where the page ends (`InboxDays.shown`), so one
+    /// page never holds more, whatever one day holds (review L2).
     @Test func theDaysAreMadeOffTheMainThread() throws {
         let made = try Self.body(["func inboxDays("], in: Self.model)
         for part in ["await homeTimeZone()", "Task.detached(priority: .userInitiated)", "InboxDays.make(items, facts: facts, homeZone: homeZone",
@@ -300,7 +302,8 @@ struct PhotoGridSourceTests {
         let key = Self.squeezed(try Self.body(["struct LibraryView", "private static func same<"], in: Self.library))
         #expect(key.contains("pa.baseAddress==pb.baseAddress"), "the same array, not equal contents: \(key)")
         let content = Self.squeezed(try Self.body(["struct LibraryView", "private func content("], in: Self.library))
-        #expect(content.contains("letshownDays=days.shownDays(forPhotos:shown)grid(days.sections.prefix(shownDays))"), "\(content)")
+        #expect(content.contains("letpage=days.shown(forPhotos:shown)grid(days.sections.prefix(page.days),limit:page.photos)"
+                                 + "ifpage.photos<days.photoCount{moreComing(after:page.photos)}"), "\(content)")
         #expect(content.contains("}elseifdaysBucket==bucket,!days.sections.isEmpty{"),
                 "another area's days under this filter, or none while it has photos: \(content)")
     }

@@ -537,7 +537,7 @@ struct LongPressSourceTests {
         }
         // The tap and "Ansehen" open the photo the same way; "Zu Album hinzufügen …" the sheet.
         let places: [(path: String, type: String, perform: String, tap: String)] = [
-            (Self.library, "struct LibraryView", "private func perform(", "open(id, in: days)"),
+            (Self.library, "struct LibraryView", "private func perform(", "open(id, in: days, limit: limit)"),
             (Self.search, "struct SearchView", "private func perform(", "open(id, from: key)"),
             (Self.albums, "struct AlbumScreen", "private func perform(", "open(photo, ids: ids)"),
         ]

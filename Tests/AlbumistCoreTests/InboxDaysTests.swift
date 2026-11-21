@@ -5,8 +5,8 @@ import AlbumistTestSupport
 
 /// Design wave 3, DS-21 "Unsortiert nach Tagen wie in Fotos": the tab's photos under day
 /// headers, each on the day of the clock where it was taken, read as the photo view reads it;
-/// the newest day first, a day's photos in the order they were taken, "Ohne Datum" last; whole
-/// days page by page.
+/// the newest day first, a day's photos in the order they were taken, "Ohne Datum" last; page by
+/// page from the top, a day larger than a page cut where the page ends.
 @Suite("Unsorted by day")
 struct InboxDaysTests {
     static let berlin = TimeZone(identifier: "Europe/Berlin")!
@@ -80,7 +80,7 @@ struct InboxDaysTests {
     @Test func nothingToShow() throws {
         let days = try Self.days([], FactsByID())
         #expect(days.sections.isEmpty && days.photoCount == 0)
-        #expect(days.shownDays(forPhotos: 3_000) == 0)
+        #expect(days.shown(forPhotos: 3_000).days == 0 && days.shown(forPhotos: 3_000).photos == 0)
         #expect(InboxDays() == days)
     }
 
@@ -162,8 +162,10 @@ struct InboxDaysTests {
 
     // MARK: Paging
 
-    /// Whole days page by page: a day's header never counts photos the grid does not show yet.
-    @Test func pagesHoldWholeDays() throws {
+    /// Page by page from the top: the days up to the one that holds the last photo asked for,
+    /// that one cut there (its header still counts the whole day), so a page never shows more
+    /// photos than asked for, whatever one day holds (review L2). At least one photo.
+    @Test func aPageShowsTheFirstPhotosAskedFor() throws {
         let photos: [(String, String?)] = [
             ("a1", "2026-11-21 07:00"), ("a2", "2026-11-21 08:00"), ("a3", "2026-11-21 09:00"),
             ("b1", "2026-11-20 07:00"), ("b2", "2026-11-20 08:00"),
@@ -173,26 +175,66 @@ struct InboxDaysTests {
         let library = Self.inBerlin(photos)
         let days = try Self.days(library.items, library.facts)
         #expect(days.sections.map(\.entries.count) == [3, 2, 4, 1])
-        let expected = [0: 1, 1: 1, 3: 1, 4: 2, 5: 2, 6: 3, 9: 3, 10: 4, 3_000: 4]
+        let expected = [0: [1, 1], 1: [1, 1], 3: [1, 3], 4: [2, 4], 5: [2, 5], 6: [3, 6], 7: [3, 7], 9: [3, 9], 10: [4, 10],
+                        3_000: [4, 10]]
         for (asked, shown) in expected {
-            #expect(days.shownDays(forPhotos: asked) == shown, "\(asked) photos")
+            let page = days.shown(forPhotos: asked)
+            #expect([page.days, page.photos] == shown, "\(asked) photos")
         }
-        #expect([0, 1, 2, 3, 4, 5].map(days.photos(inFirst:)) == [0, 3, 5, 9, 10, 10])
-        // The days shown hold the first positions, without a gap.
-        for shown in 0...4 {
-            let positions = days.sections.prefix(shown).flatMap(\.entries).map(\.position)
-            #expect(positions == Array(0..<days.photos(inFirst: shown)), "\(shown) days")
+        // The photos shown are the first positions, without a gap, the last day cut.
+        for asked in 0...11 {
+            let page = days.shown(forPhotos: asked)
+            let positions = days.sections.prefix(page.days).flatMap { $0.entries(below: page.photos) }.map(\.position)
+            #expect(positions == Array(0..<page.photos), "\(asked) photos")
         }
+        // A cut day: two of its four photos, its header counts all four.
+        let page = days.shown(forPhotos: 7)
+        let cut = days.sections[page.days - 1]
+        #expect(cut.countText == "4 Fotos" && cut.entries(below: page.photos).map(\.id.rawValue) == ["c1", "c2"])
+        #expect(PhotoGridSection.ids(of: days.sections.prefix(page.days), below: page.photos).map(\.rawValue)
+                == ["a1", "a2", "a3", "b1", "b2", "c1", "c2"])
+        #expect(PhotoGridSection.ids(of: days.sections).count == 10, "without a limit, all")
+        #expect(InboxDays().shown(forPhotos: 3_000).days == 0 && InboxDays().shown(forPhotos: 3_000).photos == 0)
     }
 
-    /// One day larger than a page is shown whole.
-    @Test func aLargeDayIsShownWhole() throws {
+    /// One day larger than a page is cut where the page ends; the next page shows more of it,
+    /// and its header counts the whole day from the first page on.
+    @Test func aDayLargerThanAPageIsCut() throws {
         let photos = (0..<50).map { ("p\($0)", "2026-11-21 0\($0 % 9):\(10 + $0)") as (String, String?) }
         let library = Self.inBerlin(photos)
         let days = try Self.days(library.items, library.facts)
         #expect(days.sections.count == 1)
-        #expect(days.shownDays(forPhotos: 10) == 1)
-        #expect(days.photos(inFirst: 1) == 50)
+        let first = days.shown(forPhotos: 10)
+        #expect(first.days == 1 && first.photos == 10)
+        #expect(days.sections[0].entries(below: first.photos).count == 10)
+        #expect(days.sections[0].countText == "50 Fotos")
+        #expect(days.shown(forPhotos: 20).photos == 20)
+        #expect(days.shown(forPhotos: 60).photos == 50)
+    }
+
+    /// 40,000 photos of one day (an import with one wrong camera date) and 40,000 without any
+    /// date: one header counting all of them, the photos 3,000 a page, page after page.
+    @Test func fortyThousandPhotosOfOneDayComePageByPage() throws {
+        for dated in [true, false] {
+            let date = dated ? Fixture.date("2000-01-01 12:00") : nil
+            let items = (0..<40_000).map { LibraryBuckets.Item(id: AssetID("p\($0)"), date: date) }
+            let days = try #require(InboxDays.make(items, facts: FactsByID(), homeZone: Self.berlin, now: Self.now,
+                                                   currentZone: Self.berlin))
+            #expect(days.sections.count == 1)
+            #expect(days.sections[0].title == (dated ? "Samstag, 1. Januar 2000" : "Ohne Datum"))
+            #expect(days.sections[0].countText == "40.000 Fotos")
+            var asked = 3_000
+            let first = days.shown(forPhotos: asked)
+            #expect(first.days == 1 && first.photos == 3_000, "dated: \(dated)")
+            #expect(days.sections[0].entries(below: first.photos).count == 3_000)
+            #expect(PhotoGridSection.ids(of: days.sections.prefix(first.days), below: first.photos).count == 3_000)
+            var pages = 1
+            while days.shown(forPhotos: asked).photos < days.photoCount {
+                asked += 3_000
+                pages += 1
+            }
+            #expect(pages == 14, "dated: \(dated)")
+        }
     }
 
     // MARK: Scale

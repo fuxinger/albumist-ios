@@ -21,8 +21,9 @@ struct LibraryView: View {
     @State private var addingToAlbum: [AssetID]?
     /// "Einstellungen öffnen" in an empty list when no main area counts (as on the overview).
     @State private var showSettings = false
-    /// Photos asked for so far: the grid shows whole days up to this many, more on request, so
-    /// large libraries stay smooth and every photo can still be reached.
+    /// Photos asked for so far: the grid shows this many from the top, more on request, so large
+    /// libraries stay smooth and every photo can still be reached; a day larger than that is cut
+    /// where the page ends (`InboxDays.shown`).
     @State private var shown = Self.page
     /// The shown area's photos by day, made off the main thread (`AppModel.inboxDays`), and the
     /// area they are of: while an area's days are made anew its days before stay.
@@ -122,11 +123,12 @@ struct LibraryView: View {
             }
             .padding(.horizontal, Theme.Spacing.l)
         } else if daysBucket == bucket, !days.sections.isEmpty {
-            // Whole days, so a day's header never counts photos that are not shown yet.
-            let shownDays = days.shownDays(forPhotos: shown)
-            grid(days.sections.prefix(shownDays))
-            if shownDays < days.sections.count {
-                moreComing(after: days.photos(inFirst: shownDays))
+            // A page of photos from the top: the last day is cut where the page ends (its header
+            // still counts the whole day), so one page never holds more, whatever a day holds.
+            let page = days.shown(forPhotos: shown)
+            grid(days.sections.prefix(page.days), limit: page.photos)
+            if page.photos < days.photoCount {
+                moreComing(after: page.photos)
             }
         } else {
             // Another area's days, or the days of the area while it was empty, are being made
@@ -135,12 +137,13 @@ struct LibraryView: View {
         }
     }
 
-    private func grid(_ days: ArraySlice<PhotoGridSection>) -> some View {
-        PhotoGrid(sections: days, place: .unsorted, selecting: selecting, selection: $selection, pinsHeaders: true,
-                  zoom: zoom, identifier: "library.photo") { id in
-            open(id, in: days)
+    /// The days shown, their photos below position `limit` (the last day may be cut there).
+    private func grid(_ days: ArraySlice<PhotoGridSection>, limit: Int) -> some View {
+        PhotoGrid(sections: days, limit: limit, place: .unsorted, selecting: selecting, selection: $selection,
+                  pinsHeaders: true, zoom: zoom, identifier: "library.photo") { id in
+            open(id, in: days, limit: limit)
         } perform: { item, id in
-            perform(item, on: id, in: days)
+            perform(item, on: id, in: days, limit: limit)
         }
     }
 
@@ -155,8 +158,9 @@ struct LibraryView: View {
             .accessibilityIdentifier("library.preparing")
     }
 
-    /// Below the days shown so far (`photos` photos): the next days come by themselves when this
-    /// line comes into view (design review N10: a button every 3,000 photos).
+    /// Below the photos shown so far (`photos`): the next page comes by itself when this line
+    /// comes into view (design review N10: a button every 3,000 photos), the rest of a cut day
+    /// first.
     private func moreComing(after photos: Int) -> some View {
         Text("Weitere Fotos werden geladen")
             .font(.footnote)
@@ -170,16 +174,17 @@ struct LibraryView: View {
             .accessibilityIdentifier("library.loadingMore")
     }
 
-    /// The photo large, the photos shown so far in the grid's order to swipe through.
-    private func open(_ id: AssetID, in days: ArraySlice<PhotoGridSection>) {
-        viewing = PhotoViewer.Start(id: id, ids: days.flatMap { $0.entries.map(\.id) })
+    /// The photo large, the photos the grid shows, in its order, to swipe through (a cut day's
+    /// shown ones: never all 40,000 photos of one day at once).
+    private func open(_ id: AssetID, in days: ArraySlice<PhotoGridSection>, limit: Int) {
+        viewing = PhotoViewer.Start(id: id, ids: PhotoGridSection.ids(of: days, below: limit))
     }
 
     /// An item of the photo's long press, the way "Unsortiert" goes it: "Ansehen" as a tap,
     /// "Zu Album hinzufügen …" the sheet the selection opens (then the preview).
-    private func perform(_ action: PhotoMenu.Item, on id: AssetID, in days: ArraySlice<PhotoGridSection>) {
+    private func perform(_ action: PhotoMenu.Item, on id: AssetID, in days: ArraySlice<PhotoGridSection>, limit: Int) {
         switch action {
-        case .view: open(id, in: days)
+        case .view: open(id, in: days, limit: limit)
         case .addToAlbum: addingToAlbum = [id]
         // Ignoring is the model's, the same everywhere (`PhotoMenuItems`); a suggestion's own.
         case .ignore, .stopIgnoring, .removeFromSuggestion: break

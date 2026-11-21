@@ -28,6 +28,9 @@ struct PhotoGrid: View {
     @Environment(\.photoGridScroller) private var scroller
     /// The days shown, in the grid's order, each photo with its place in it.
     var sections: ArraySlice<PhotoGridSection>
+    /// The photos shown are the ones at positions below it: a page of "Unsortiert" may end
+    /// inside a day (`InboxDays.shown`), whose header still counts the whole day.
+    var limit = Int.max
     /// Where the photos are, for their long press (`PhotoMenu`).
     var place: PhotoMenu.Place
     var selecting: Bool
@@ -65,7 +68,7 @@ struct PhotoGrid: View {
                   pinnedViews: pinned ? [.sectionHeaders] : []) {
             ForEach(sections) { section in
                 Section {
-                    ForEach(section.entries) { entry in
+                    ForEach(section.entries(below: limit)) { entry in
                         cell(entry, side: side, columns: columns)
                     }
                 } header: {
@@ -187,7 +190,7 @@ struct PhotoGrid: View {
     private func dragged(_ touch: PhotoGridTouch) {
         switch touch.phase {
         case .began:
-            gestures.beginDrag(touch, ids: sections.flatMap { $0.entries.map(\.id) }, selection: $selection, scroller: scroller)
+            gestures.beginDrag(touch, ids: PhotoGridSection.ids(of: sections, below: limit), selection: $selection, scroller: scroller)
         case .changed:
             gestures.moveDrag(touch)
         case .ended:

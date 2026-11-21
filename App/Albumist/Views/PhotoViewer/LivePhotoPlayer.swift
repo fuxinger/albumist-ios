@@ -72,6 +72,7 @@ struct LivePhotoPlayer: UIViewRepresentable {
         func follow(_ command: LiveCommand) {
             guard command.serial != followed, let view else { return }
             followed = command.serial
+            if command.kind != .stop { LiveAudio.prepare() }
             switch command.kind {
             case .hint:
                 view.isMuted = true
@@ -86,16 +87,42 @@ struct LivePhotoPlayer: UIViewRepresentable {
         }
 
         nonisolated func livePhotoView(_ livePhotoView: PHLivePhotoView, willBeginPlaybackWith playbackStyle: PHLivePhotoViewPlaybackStyle) {
-            MainActor.assumeIsolated { self.show(playing: true) }
+            showOnMain(playing: true)
         }
 
         nonisolated func livePhotoView(_ livePhotoView: PHLivePhotoView, didEndPlaybackWith playbackStyle: PHLivePhotoViewPlaybackStyle) {
-            MainActor.assumeIsolated { self.show(playing: false) }
+            showOnMain(playing: false)
+        }
+
+        /// PhotoKit does not say on which thread it calls its delegate (the view plays through
+        /// an `AVPlayer`): on the main thread at once, from any other after a hop there, never a
+        /// trap (review D, M4). Only a `Bool` and this main-actor object cross.
+        nonisolated private func showOnMain(playing: Bool) {
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { self.show(playing: playing) }
+            } else {
+                Task { @MainActor in self.show(playing: playing) }
+            }
         }
 
         private func show(playing: Bool) {
             view?.alpha = playing ? 1 : 0
         }
+    }
+}
+
+/// The app's sound mixes with what the user listens to and follows the silent switch
+/// (`.ambient`), so a Live Photo never stops the user's music or podcast (review D, H2): with
+/// iOS's default session, other apps' audio stops as soon as a Live Photo plays, even muted.
+/// Albumist plays no other sound, so it is set once, before the first Live Photo plays.
+@MainActor
+enum LiveAudio {
+    private static var prepared = false
+
+    static func prepare() {
+        guard !prepared else { return }
+        prepared = true
+        try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default, options: [])
     }
 }
 
@@ -116,7 +143,7 @@ enum LivePhotoLoader {
     }
 
     private static func request(_ asset: ThumbnailRequest.Asset, pixels: CGSize) async -> Live? {
-        let answer = PhotoKitAnswer<Live?>(fallback: nil)
+        let answer = PhotoKitAnswer.image(fallback: Live?.none)
         answer.limit(.seconds(15))
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in

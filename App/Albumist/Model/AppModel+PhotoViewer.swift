@@ -5,17 +5,18 @@ import AlbumistCore
 /// title, as Photos shows them (`PhotoTitle`).
 extension AppModel {
     /// The title of `id`: in the app's language (`proposalWords`, so the title never speaks
-    /// another language than the bar around it), "Heute" by the iPhone's day and time zone, the
-    /// time on the iPhone's clock setting.
-    func photoTitle(for id: AssetID, now: Date = Date()) -> PhotoTitle {
-        PhotoTitle(facts: factsByID[id], now: now, currentZone: .current, words: proposalWords, clock: Self.deviceClock)
+    /// another language than the bar around it), "Heute" by the day on the photo's clock, the
+    /// time on `clock` (`deviceClock`). Without facts (not analysed yet) the date Photos keeps
+    /// for it (`photoDate`, `PhotoBasics`) counts, on the iPhone's clock.
+    func photoTitle(for id: AssetID, photoDate: Date?, clock: PhotoTitle.Clock, now: Date = Date()) -> PhotoTitle {
+        PhotoTitle(facts: factsByID[id], photoDate: photoDate, now: now, currentZone: .current, words: proposalWords, clock: clock)
     }
 
-    /// 12 or 24 hours, as the iPhone is set (Settings › General › Date & Time, or the region's
-    /// own): the "j" template asks for the hour as the user wants it. Read once per launch:
-    /// the template lookup is slow, and the photo view asks for a title on every frame of a pull.
-    static let deviceClock: PhotoTitle.Clock = {
-        let format = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: Locale.current) ?? ""
-        return format.contains("a") ? .twelveHour : .twentyFourHour
-    }()
+    /// 12 or 24 hours, as the iPhone is set (Settings › General › Date & Time, else its
+    /// region's): the hour cycle of the current locale (review D, L2: before, it was read once
+    /// per launch from a date format). The photo view keeps it and reads it again when the
+    /// iPhone's settings change.
+    nonisolated static func deviceClock(_ locale: Locale = .current) -> PhotoTitle.Clock {
+        PhotoTitle.Clock(hourCycle: locale.hourCycle)
+    }
 }

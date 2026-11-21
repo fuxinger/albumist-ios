@@ -21,6 +21,9 @@ struct AlbumistApp: App {
         EnergyMetricsSubscriber.start()
         // UI runs only: says in the log when the main thread or the whole app stood still.
         MainThreadWatch.shared.start()
+        // Design W2 H8: a photo shared while the app was ended stays in tmp no longer than until
+        // the next launch (review D, M5).
+        PhotoShare.removeLeftovers()
         // iOS warns that memory runs low: the caches go before iOS has to end the app, also
         // while the analysis goes on in the background (P4-06).
         _ = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { _ in

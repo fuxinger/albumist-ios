@@ -142,6 +142,12 @@ final class ThumbnailCache {
         await photoAsset(for: id)
     }
 
+    /// `asset(for:)`, telling "Photos does not know the photo" from "Photos did not answer in
+    /// time", for the photo view's share: no answer is no verdict (review D, M6).
+    func assetLookup(for id: AssetID) async -> AssetLookup {
+        await lookUpAsset(id)
+    }
+
     /// The PhotoKit asset of `id`, looked up once and then kept. The lookup never runs on the
     /// main thread: it reads the Photos database, and while Photos writes to it (new photos,
     /// the albums of a plan) each lookup waits. On the main actor every thumbnail on screen
@@ -162,7 +168,7 @@ final class ThumbnailCache {
 
     /// What a lookup found: the asset, no such photo (Photos answered), or no answer in time
     /// (Photos is busy; nothing is remembered, the next lookup asks again).
-    private enum AssetLookup: Sendable {
+    enum AssetLookup: Sendable {
         case found(ThumbnailRequest.Asset)
         case unknown
         case noAnswer

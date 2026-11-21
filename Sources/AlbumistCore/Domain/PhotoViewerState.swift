@@ -20,6 +20,13 @@ public struct ViewerChrome: Equatable, Sendable {
     public mutating func assistiveTechnology(running: Bool) {
         if running { isShown = true }
     }
+
+    /// The photo was zoomed in: the bars go, as in Photos, so no title stands on the zoomed
+    /// photo (design rule 1; review D, L6). A tap brings them back; with VoiceOver or Switch
+    /// Control they stay.
+    public mutating func zoomed(assistive: Bool) {
+        if !assistive { isShown = false }
+    }
 }
 
 /// When a Live Photo moves by itself (DS-10: "Live Photos bewegen sich"). As in Photos it plays

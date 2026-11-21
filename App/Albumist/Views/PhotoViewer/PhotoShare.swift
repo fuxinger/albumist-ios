@@ -5,38 +5,53 @@ import UniformTypeIdentifiers
 import AlbumistCore
 
 /// Sharing the photo the photo view shows (design wave 2, DS-10: "Teilen"), with iOS's share
-/// sheet. Only what is on the iPhone: the photo's data as Photos hands it out (its current
-/// version, edits included, as Photos shares it), never loaded from iCloud; Albumist itself
-/// sends nothing anywhere, the user picks where it goes.
+/// sheet. Only what is on the iPhone: the file Photos keeps for the photo, as Photos shares it
+/// (the edited version if it was edited, else the original), never loaded from iCloud; Albumist
+/// itself sends nothing anywhere, the user picks where it goes. Only still images are shared.
 ///
-/// For the share sheet the data goes into a temporary file with the photo's own name
-/// (`SharedPhotoFile`), in a folder of its own; the folder is removed when the share sheet
-/// closes, and whatever is left over (the app was ended meanwhile) when the photo view opens or
-/// closes. Nothing else is written and the photo in the library is not touched. "Bild sichern"
-/// is not offered: it would put a second copy of the photo into the library.
+/// Whether the file is on the iPhone is asked with its first bytes only (review D, M3: the whole
+/// photo was read into memory for this, up to 100 MB for a ProRAW photo). For the share sheet
+/// Photos copies the file into a temporary file with the photo's own name (`SharedPhotoFile`),
+/// in a folder of its own, without it ever being held in memory. The folder is removed when the
+/// share sheet closes; whatever is left over (the app was ended meanwhile) at the next launch
+/// and when the photo view opens or closes, but never the folder of the sheet on screen (M5).
+/// Nothing else is written and the photo in the library is not touched. "Bild sichern" and "Zu
+/// geteiltem Album hinzufügen" are not offered: they would put a second copy of the photo into
+/// the library or into iCloud (L8).
 enum PhotoShare {
     enum Prepared: Sendable {
         case file(URL)
-        /// Why not: only in iCloud, gone, or (`unknown`) Photos did not answer in time.
+        /// Why not: only in iCloud, or Photos has nothing to share (the photo is gone, or no
+        /// still image). `unknown`: Photos did not answer in time or the file could not be
+        /// written; nothing is known, the user is told and may try again (M6).
         case unavailable(ShareAvailability)
     }
 
     /// Where the files for the share sheet are made, each in a folder of its own.
     static let root = FileManager.default.temporaryDirectory.appending(path: "PhotoShare", directoryHint: .isDirectory)
 
-    /// Whether the whole photo is on the iPhone: Photos is asked for its data, without network.
-    /// `unknown` while Photos does not answer (the button stays on, a tap asks again).
+    /// The folder of the share whose sheet is open: `removeLeftovers` never removes it.
+    @MainActor private(set) static var onScreen: URL?
+
+    /// Whether the photo can be shared, without reading it (`firstBytes`). `unknown` while
+    /// Photos does not answer (the button stays on, a tap asks again).
     @MainActor
     static func availability(of id: AssetID) async -> ShareAvailability {
-        guard let asset = await ThumbnailCache.shared.asset(for: id) else { return .unknown }
-        return await load(asset).availability
+        switch await ThumbnailCache.shared.assetLookup(for: id) {
+        case .found(let asset): return await check(asset)
+        case .unknown: return .unavailable
+        case .noAnswer: return .unknown
+        }
     }
 
     /// The photo in a file for the share sheet, or why there is none.
     @MainActor
     static func prepare(_ id: AssetID, fallbackName: String) async -> Prepared {
-        guard let asset = await ThumbnailCache.shared.asset(for: id) else { return .unavailable(.unavailable) }
-        return await write(asset, fallbackName: fallbackName)
+        switch await ThumbnailCache.shared.assetLookup(for: id) {
+        case .found(let asset): return await write(asset, fallbackName: fallbackName)
+        case .unknown: return .unavailable(.unavailable)
+        case .noAnswer: return .unavailable(.unknown)
+        }
     }
 
     /// The share sheet for `file`, over whatever is on screen (the photo view); the file's
@@ -49,13 +64,17 @@ enum PhotoShare {
             return
         }
         let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
-        sheet.excludedActivityTypes = [.saveToCameraRoll]
-        sheet.completionWithItemsHandler = { _, _, _, _ in remove(folder) }
+        sheet.excludedActivityTypes = [.saveToCameraRoll, UIActivity.ActivityType(rawValue: "com.apple.mobileslideshow.StreamShareService")]
+        sheet.completionWithItemsHandler = { _, _, _, _ in
+            remove(folder)
+            Task { @MainActor in closed(folder) }
+        }
         if let popover = sheet.popoverPresentationController {
             // On an iPad: from the bar's right end, where the button is.
             popover.sourceView = top.view
             popover.sourceRect = CGRect(x: top.view.bounds.maxX - 100, y: top.view.safeAreaInsets.top - 44, width: 44, height: 44)
         }
+        onScreen = folder
         top.present(sheet, animated: true)
     }
 
@@ -65,41 +84,56 @@ enum PhotoShare {
         try? FileManager.default.removeItem(at: folder)
     }
 
-    /// The files of shares that were not cleaned up after (the app was ended meanwhile).
+    /// The files of shares that were not cleaned up after (the app was ended while a sheet was
+    /// open): at launch and when the photo view opens or closes. Never the folder of the sheet
+    /// on screen: a full-screen step of an activity (Markup, Print) may make SwiftUI run the
+    /// photo view's onDisappear and onAppear while the sheet is still up (review D, M5).
+    @MainActor
     static func removeLeftovers() {
-        try? FileManager.default.removeItem(at: root)
-    }
-
-    // MARK: Loading
-
-    private struct Loaded: Sendable {
-        var data: Data?
-        var type: String?
-        var inCloud = false
-        /// False: Photos did not answer in time, or the caller went away.
-        var answered = true
-
-        var availability: ShareAvailability {
-            if data != nil { return .onDevice }
-            if inCloud { return .onlyInICloud }
-            return answered ? .unavailable : .unknown
+        let kept = onScreen?.lastPathComponent
+        let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        for folder in folders where folder.lastPathComponent != kept {
+            try? FileManager.default.removeItem(at: folder)
         }
     }
 
-    private static func load(_ asset: ThumbnailRequest.Asset) async -> Loaded {
-        let answer = PhotoKitAnswer(fallback: Loaded(answered: false))
-        answer.limit(.seconds(20))
+    /// The sheet of `folder` closed.
+    @MainActor
+    private static func closed(_ folder: URL) {
+        if onScreen?.lastPathComponent == folder.lastPathComponent { onScreen = nil }
+    }
+
+    // MARK: Photos' file
+
+    /// The file Photos hands out for the photo: the edited version if it was edited
+    /// (`.fullSizePhoto`), else the original (`.photo`). None for anything but a still image
+    /// (review D, L4: a video was shared as its poster frame).
+    private static func sharedResource(of asset: ThumbnailRequest.Asset) -> PHAssetResource? {
+        guard asset.value.mediaType == .image else { return nil }
+        let resources = PHAssetResource.assetResources(for: asset.value)
+        return resources.first { $0.type == .fullSizePhoto } ?? resources.first { $0.type == .photo }
+    }
+
+    private static func check(_ asset: ThumbnailRequest.Asset) async -> ShareAvailability {
+        guard let resource = sharedResource(of: asset) else { return .unavailable }
+        return await firstBytes(of: resource)
+    }
+
+    /// Whether the file is on the iPhone: its first bytes are asked for with the network off,
+    /// and the reading stops with them. An error means it is not here (the photo is only in
+    /// iCloud); no answer in time, or the caller going away, is `unknown`.
+    private static func firstBytes(of resource: PHAssetResource) async -> ShareAvailability {
+        let answer = PhotoKitAnswer.resource(fallback: ShareAvailability.unknown)
+        answer.limit(.seconds(10))
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 guard answer.begin(continuation) else { return }
-                let options = PHImageRequestOptions()
+                let options = PHAssetResourceRequestOptions()
                 options.isNetworkAccessAllowed = false
-                options.version = .current
-                options.deliveryMode = .highQualityFormat
-                let id = PHImageManager.default().requestImageDataAndOrientation(for: asset.value, options: options) { data, type, _, info in
-                    // Only a preview is here, the photo itself is in iCloud.
-                    let inCloud = ((info as [AnyHashable: Any]?)?[PHImageResultIsInCloudKey] as? Bool) ?? false
-                    answer.finish(Loaded(data: data, type: type, inCloud: inCloud))
+                let id = PHAssetResourceManager.default().requestData(for: resource, options: options) { _ in
+                    answer.finish(.onDevice, stop: true)
+                } completionHandler: { error in
+                    answer.finish(error == nil ? .onDevice : .onlyInICloud)
                 }
                 answer.started(id)
             }
@@ -108,22 +142,48 @@ enum PhotoShare {
         }
     }
 
-    /// The data in a file named as Photos names the photo ("IMG_1234.HEIC"), off the main thread.
+    /// The photo's file, checked first (`firstBytes`), copied by Photos into a file named as
+    /// Photos names the photo ("IMG_1234.HEIC"; an edited one keeps the name with its own type's
+    /// extension), readable only while it is open.
     private static func write(_ asset: ThumbnailRequest.Asset, fallbackName: String) async -> Prepared {
-        let loaded = await load(asset)
-        guard let data = loaded.data else { return .unavailable(loaded.availability) }
+        guard let resource = sharedResource(of: asset) else { return .unavailable(.unavailable) }
+        let found = await firstBytes(of: resource)
+        guard found == .onDevice else { return .unavailable(found) }
         let original = PHAssetResource.assetResources(for: asset.value).first { $0.type == .photo }?.originalFilename
-        let type = loaded.type.flatMap { UTType($0)?.preferredFilenameExtension }
-        let name = SharedPhotoFile.name(original: original, typeExtension: type, fallback: fallbackName)
+        let type = UTType(resource.uniformTypeIdentifier)?.preferredFilenameExtension
+        let name = SharedPhotoFile.name(original: original ?? resource.originalFilename, typeExtension: type, fallback: fallbackName)
         let folder = root.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let file = folder.appending(path: name, directoryHint: .notDirectory)
+        let protection: [FileAttributeKey: Any] = [.protectionKey: FileProtectionType.completeUnlessOpen]
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let file = folder.appending(path: name, directoryHint: .notDirectory)
-            try data.write(to: file, options: [.atomic, .completeFileProtectionUnlessOpen])
-            return .file(file)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: protection)
         } catch {
+            return .unavailable(.unknown)
+        }
+        guard await copy(resource, to: file) else {
             remove(folder)
-            return .unavailable(.unavailable)
+            return .unavailable(.unknown)
+        }
+        try? FileManager.default.setAttributes(protection, ofItemAtPath: file.path)
+        return .file(file)
+    }
+
+    /// Photos writes the file with the network off; false when it could not (the iPhone is
+    /// full, the file went to iCloud meanwhile) or did not answer in time, or the caller went away.
+    private static func copy(_ resource: PHAssetResource, to file: URL) async -> Bool {
+        let answer = PhotoKitAnswer.write(fallback: false)
+        answer.limit(.seconds(60))
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard answer.begin(continuation) else { return }
+                let options = PHAssetResourceRequestOptions()
+                options.isNetworkAccessAllowed = false
+                PHAssetResourceManager.default().writeData(for: resource, toFile: file, options: options) { error in
+                    answer.finish(error == nil)
+                }
+            }
+        } onCancel: {
+            answer.cancel()
         }
     }
 

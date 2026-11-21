@@ -15400,6 +15400,16 @@
           }
         }
       }
+    },
+    "Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The photo could not be prepared for sharing. Please try again in a moment."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

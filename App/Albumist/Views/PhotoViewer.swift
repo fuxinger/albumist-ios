@@ -53,6 +53,11 @@ struct PhotoViewer: View {
     @State private var shareTask: Task<Void, Never>?
     /// The photos whose Live Photo motion is on the iPhone: their title shows the symbol.
     @State private var livePhotos: Set<AssetID> = []
+    /// What Photos says of each photo looked at: its date, for the title while Albumist has no
+    /// facts of it, and its kind (`PhotoBasics`).
+    @State private var basics: [AssetID: PhotoBasics] = [:]
+    /// 12 or 24 hours as the iPhone is set; read again when its settings change.
+    @State private var clock = AppModel.deviceClock()
 
     init(ids: [AssetID], current: AssetID, showsInfo: Bool = false) {
         self.ids = ids
@@ -74,6 +79,9 @@ struct PhotoViewer: View {
                 shareTask?.cancel()
                 PhotoShare.removeLeftovers()
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in
+                clock = AppModel.deviceClock()
+            }
     }
 
     // MARK: Pages
@@ -91,7 +99,7 @@ struct PhotoViewer: View {
             .overlay(alignment: .bottom) { notes }
             .animation(.snappy, value: model.lastIgnored)
             .onChange(of: assistive, initial: true) { _, running in chrome.assistiveTechnology(running: running) }
-            .task(id: current) { await checkSharing() }
+            .task(id: current) { await lookAtCurrent() }
     }
 
     private var pages: some View {
@@ -124,9 +132,15 @@ struct PhotoViewer: View {
         Color.black.opacity(1 - min(pull / 500, 0.7)).ignoresSafeArea()
     }
 
+    /// The title of a photo: what Albumist knows of it, else the date Photos keeps for it, on
+    /// the clock the iPhone is set to.
+    private func title(of id: AssetID) -> PhotoTitle {
+        model.photoTitle(for: id, photoDate: basics[id]?.date, clock: clock)
+    }
+
     /// What VoiceOver says for a photo: where and when it was taken, as its title says it.
     private func label(of id: AssetID) -> String {
-        model.photoTitle(for: id).spoken(live: livePhotos.contains(id))
+        title(of: id).spoken(live: livePhotos.contains(id))
     }
 
     /// "3 von 176": where the photo is among those swiped through (before, the bar's title).
@@ -158,7 +172,7 @@ struct PhotoViewer: View {
     }
 
     private var titleBar: some View {
-        PhotoTitleBar(title: model.photoTitle(for: current), live: livePhotos.contains(current))
+        PhotoTitleBar(title: title(of: current), live: livePhotos.contains(current))
     }
 
     /// Shares the photo from the iPhone (`PhotoShare`); off, with the reason, where only a
@@ -237,10 +251,19 @@ struct PhotoViewer: View {
         }
     }
 
+    /// The photo on screen: what Photos says of it (its date and kind, once per photo), then
+    /// whether it can be shared.
+    private func lookAtCurrent() async {
+        let id = current
+        if basics[id] == nil, let found = await PhotoBasics.of(id), !Task.isCancelled {
+            basics[id] = found
+        }
+        await checkSharing(id)
+    }
+
     /// Whether the photo shown can be shared: asked once it has been on screen a moment (not for
     /// every photo swiped past), and once per photo.
-    private func checkSharing() async {
-        let id = current
+    private func checkSharing(_ id: AssetID) async {
         guard sharing[id] == nil, !isVideo else { return }
         try? await Task.sleep(for: .milliseconds(600))
         guard !Task.isCancelled else { return }

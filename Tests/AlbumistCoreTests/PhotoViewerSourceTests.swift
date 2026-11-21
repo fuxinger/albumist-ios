@@ -68,14 +68,33 @@ struct PhotoViewerSourceTests {
         #expect(viewer.contains(" von \\("), "the position is gone for VoiceOver too")
         let model = AppSource.code(try AppSource.read("App/Albumist/Model/AppModel+PhotoViewer.swift"))
         let title = try #require(AppSource.body(of: "func photoTitle(", in: model))
-        #expect(title.contains("PhotoTitle(facts: factsByID[id]"))
+        #expect(title.contains("PhotoTitle(facts: factsByID[id], photoDate: photoDate"))
         #expect(title.contains("words: proposalWords"))
         #expect(title.contains("currentZone: .current"))
+        #expect(title.contains("clock: clock"))
+        // Without facts, the date Photos keeps for the photo (review D, M7).
+        let calls = AppSource.calls(of: "model.photoTitle(", in: viewer)
+        #expect(calls.count == 1)
+        #expect(calls.allSatisfy { $0.contains("photoDate: basics[id]?.date") && $0.contains("clock: clock") })
+        let basics = AppSource.code(try Self.file("PhotoBasics.swift"))
+        #expect(basics.contains("creationDate"))
+        #expect(basics.contains("ThumbnailCache.shared.asset(for:"))
+        // 12 or 24 hours from the hour cycle, read again when the iPhone's settings change (L2).
+        let clock = try #require(AppSource.body(of: "static func deviceClock(", in: model))
+        #expect(clock.contains("PhotoTitle.Clock(hourCycle:"))
+        #expect(!model.contains("dateFormat(fromTemplate"))
+        #expect(viewer.contains("NSLocale.currentLocaleDidChangeNotification"))
+        #expect(viewer.contains("clock = AppModel.deviceClock()"))
         let bar = AppSource.code(try Self.file("PhotoTitleBar.swift"))
         #expect(bar.contains(".accessibilityElement(children: .ignore)"))
         #expect(bar.contains("spoken(live:"))
         #expect(bar.contains(".accessibilityShowsLargeContentViewer"))
         #expect(bar.contains(".foregroundStyle(.noteText)"))
+        // The short form where the long one does not fit, cut at its start if even that is too
+        // long, so the time is never what goes on a narrow iPhone (L1).
+        #expect(bar.contains("ViewThatFits(in: .horizontal)"))
+        #expect(bar.contains("title.shortTitle, title.shortSubtitle"))
+        #expect(bar.contains(".truncationMode(.head)"))
     }
 
     // MARK: A tap hides everything

@@ -245,13 +245,21 @@ struct PhotoViewerSourceTests {
         #expect(!viewer.contains(".sequenced(before:"))
         #expect(AppSource.calls(of: "LivePress(", in: viewer).count == 1)
         let press = AppSource.code(try Self.file("LivePress.swift"))
-        #expect(press.contains("UIGestureRecognizerRepresentable"))
-        #expect(press.contains("UILongPressGestureRecognizer"))
-        #expect(press.contains("minimumPressDuration = 0.3"))
-        #expect(press.contains("numberOfTouches == 1"), "two fingers resting for a pinch would play it")
-        #expect(press.contains("shouldRecognizeSimultaneouslyWith"), "the press would hold the swipe back")
-        #expect(press.contains("case .began"))
-        #expect(press.contains("case .ended, .cancelled, .failed"))
+        #expect(press.contains("struct LivePress: UIGestureRecognizerRepresentable"))
+        #expect(press.contains("final class LivePressRecognizer: UILongPressGestureRecognizer, UIGestureRecognizerDelegate"))
+        // Each rule in its own place (review D2, N11): made with them, the recognizer its own
+        // delegate, one finger to begin, beside every other gesture, and it says both ends.
+        let make = try #require(AppSource.body(of: "func makeUIGestureRecognizer(", in: press))
+        for rule in ["recognizer.minimumPressDuration = 0.3", "recognizer.numberOfTouchesRequired = 1", "recognizer.delegate = recognizer"] {
+            #expect(make.contains(rule), "\(rule) is not where the recognizer is made")
+        }
+        let begins = try #require(AppSource.body(of: "func gestureRecognizerShouldBegin(", in: press))
+        #expect(begins.contains("gestureRecognizer.numberOfTouches == 1"), "two fingers resting for a pinch would play it")
+        let beside = try #require(AppSource.body(of: "shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool", in: press))
+        #expect(beside.filter { !$0.isWhitespace } == "{true}", "the press would hold the swipe back")
+        let handled = try #require(AppSource.body(of: "func handleUIGestureRecognizerAction(", in: press))
+        #expect(handled.contains("case .began: onPress(true)"))
+        #expect(handled.contains("case .ended, .cancelled, .failed: onPress(false)"))
         // The touch that was a press is neither a tap nor a pull down to close.
         for gesture in ["private var taps", "private var pullDown"] {
             let body = try #require(AppSource.body(of: gesture, in: viewer))
@@ -480,6 +488,9 @@ struct PhotoViewerSourceTests {
             "Teilen": "Share",
             "Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal.":
                 "The photo could not be prepared for sharing. Please try again in a moment.",
+            // The photo view's own alert for a failed share (review D2, N1).
+            "Das hat nicht geklappt": "That Didn\u{2019}t Work",
+            "OK": "OK",
         ]
         for (german, wanted) in english {
             let entry = try #require(catalog[german], "\(german) is not in the catalog")

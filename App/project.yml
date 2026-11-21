@@ -32,6 +32,8 @@ targets:
         product: AlbumistEngine
       - package: AlbumistKit
         product: AlbumistWorldMap
+      - package: AlbumistKit
+        product: AlbumistMap
     info:
       path: Albumist/Resources/Info.plist
       properties:
@@ -44,6 +46,9 @@ targets:
         # otherwise). The upload checks it before it signs and ships the archive.
         AlbumistCommit: $(ALBUMIST_COMMIT)
         LSRequiresIPhoneOS: true
+        # ProMotion: frames faster than 60 per second for our globe and the display links of
+        # the map prototype (CADisplayLink.preferredFrameRateRange, CAMetalLayer).
+        CADisableMinimumFrameDurationOnPhone: true
         UILaunchScreen:
           UIColorName: LaunchBackground
         UIApplicationSceneManifest:

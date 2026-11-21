@@ -13,8 +13,9 @@ struct ChangeCoverInputs: Equatable {
     var facts: Int
 }
 
-/// The covers of the changes Albumist made (DS-15, `PlanCovers`): which photos each one tries,
-/// worked out off the main thread (a starter pack holds thousands of photos).
+/// The covers of the changes Albumist made and is about to make (DS-15, `PlanCovers`): which
+/// photos each one tries, worked out off the main thread (a starter pack holds thousands of
+/// photos).
 extension AppModel {
     /// What the covers of `plans`, and of the plan cut off on its way, are worked out from.
     func changeCoverInputs(_ plans: [ChangePlan], interrupted: ChangePlan? = nil) -> ChangeCoverInputs {
@@ -50,6 +51,18 @@ extension AppModel {
         let dates = creationDates, ranks = previewRanks
         return await Task.detached(priority: .userInitiated) {
             PlanCovers.albums(of: plan, dates: dates, ranks: ranks)
+        }.value
+    }
+
+    /// The cover of each album the preview of `plan` lists (DS-15 part 2), before the run: the
+    /// photos the plan sets out to add (`applied: false`), as its receipt will show them, named as
+    /// the receipt names its albums (`PlanCovers.key`). Nil before the first facts of a launch, as
+    /// the receipt's.
+    func previewCovers(for plan: ChangePlan) async -> [String: PlanCovers.Cover]? {
+        guard !facts.isEmpty else { return nil }
+        let dates = creationDates, ranks = previewRanks
+        return await Task.detached(priority: .userInitiated) {
+            PlanCovers.albums(of: plan, applied: false, dates: dates, ranks: ranks)
         }.value
     }
 }

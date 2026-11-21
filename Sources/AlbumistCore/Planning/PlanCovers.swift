@@ -61,6 +61,17 @@ public enum PlanCovers {
     /// Albums a change's cover shows at most: four in a square, as a folder's tile.
     public static let tiles = 4
 
+    /// The name of the album `ref` wherever its cover is looked up: the receipt's
+    /// (`PlanReceipt.Album.id`), "planned:" and the key for a new album, the collection id for one
+    /// of the user's. The preview lists its albums by reference (`PlannedAlbumPreview.id`), the
+    /// receipt by this name; the covers of both are named by it (`albums(of:)`).
+    public static func key(of ref: AlbumRef) -> String {
+        switch ref {
+        case .planned(let key): "planned:" + key
+        case .existing(let id): id.rawValue
+        }
+    }
+
     /// The cover of an album of `photos`, as the tab "Alben" shows an album: newest first, photos
     /// only; hidden when every one is a sensitive document. Also what the preview before a run can
     /// show for an album it adds `photos` to.
@@ -71,9 +82,9 @@ public enum PlanCovers {
         return Cover(ids: ids, hidden: hidden)
     }
 
-    /// The cover of each album `plan` added photos to (the receipt's rows), named as the receipt
-    /// names its albums (`PlanReceipt.Album.id`). Albums without photos (taken out, removed) have
-    /// none.
+    /// The cover of each album `plan` added photos to (the receipt's rows), or sets out to add
+    /// photos to (`applied: false`: the preview's rows before the run), named as the receipt names
+    /// its albums (`key(of:)`). Albums without photos (taken out, removed) have none.
     public static func albums(of plan: ChangePlan, applied: Bool = true, dates: [AssetID: Date],
                               ranks: [AssetID: PreviewRank]) -> [String: Cover] {
         var covers: [String: Cover] = [:]
@@ -120,9 +131,9 @@ public enum PlanCovers {
             let album: String
             switch step.operation {
             case .createAlbum(let key, _, _):
-                album = ResultCoverStack.id(of: .planned(key))
+                album = Self.key(of: .planned(key))
             case .addAssets(let ref, let assets):
-                album = ResultCoverStack.id(of: ref)
+                album = Self.key(of: ref)
                 photos[album, default: []].formUnion(applied ? plan.confirmedMedia(of: step) : assets)
             default:
                 continue

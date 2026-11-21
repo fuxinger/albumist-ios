@@ -76,6 +76,36 @@ struct PhotoGridGestureTests {
     }
 
     /// Positions outside the grid's photos (a page that shrank meanwhile) change nothing.
+    /// A running drag follows the photos the grid shows now (review L3): more photos loaded after
+    /// them keep the range where it is and let it grow into them; new photos before it move it
+    /// with its photos; when its photos are no longer together in that order (one of them went,
+    /// or one came between), there is no range to keep and the drag ends.
+    @Test func aDragFollowsThePhotosTheGridShowsNow() throws {
+        var drag = PhotoGridDrag(anchor: 1, anchorWasSelected: false)
+        _ = drag.move(to: 3)
+        let old = ["a", "b", "c", "d", "e"]
+        #expect(drag.rebased(from: old, to: old) == drag)
+        // More loaded after them: the same range, which grows into them.
+        var on = try #require(drag.rebased(from: old, to: old + ["f", "g"]))
+        #expect(on == drag)
+        #expect(on.move(to: 6) == PhotoGridDrag.Change(marked: [4...6]))
+        // Photos before the range changed, its own stayed in place.
+        #expect(drag.rebased(from: old, to: ["q", "b", "c", "d"]) == drag)
+        // New photos at the top: the range moves with its photos.
+        let moved = try #require(drag.rebased(from: old, to: ["x", "y"] + old))
+        #expect(moved.anchor == 3 && moved.current == 5 && moved.mode == .select)
+        // Backwards from a ticked photo: the same.
+        var back = PhotoGridDrag(anchor: 3, anchorWasSelected: true)
+        _ = back.move(to: 2)
+        let shifted = try #require(back.rebased(from: old, to: ["x"] + old))
+        #expect(shifted.anchor == 4 && shifted.current == 3 && shifted.mode == .deselect)
+        // One of its photos went, or one came between: no range to keep.
+        #expect(drag.rebased(from: old, to: ["a", "b", "d", "e"]) == nil)
+        #expect(drag.rebased(from: old, to: ["a", "b", "c", "z", "d", "e"]) == nil)
+        #expect(drag.rebased(from: old, to: ["a", "c", "d", "e"]) == nil)
+        #expect(drag.rebased(from: old, to: []) == nil)
+    }
+
     @Test func positionsBeyondThePhotosChangeNothing() {
         var selection: Set<String> = ["a"]
         PhotoGridDrag.apply(PhotoGridDrag.Change(marked: [1...5], restored: [7...9]), mode: .select, to: &selection,

@@ -75,6 +75,25 @@ public struct PhotoGridDrag: Equatable, Sendable {
         return change
     }
 
+    /// The drag over the grid's photos `old` (in its order when the range was made) over `new`
+    /// (in its order now: more photos loaded, the days made anew; review L3): the same photos
+    /// from the first to the one under the finger, where they are now. Nil when they are no
+    /// longer together in that order (one of them went, or one came between): there is no range
+    /// to keep, and the drag ends with its photos ticked as they are.
+    public func rebased<ID: Equatable>(from old: [ID], to new: [ID]) -> PhotoGridDrag? {
+        let range = self.range
+        guard range.lowerBound >= 0, range.upperBound < old.count else { return nil }
+        let photos = old[range]
+        // In place: what changed is before or after the range (more photos loaded below).
+        if range.upperBound < new.count, new[range] == photos { return self }
+        guard let first = new.firstIndex(of: photos[range.lowerBound]), first + range.count <= new.count,
+              new[first..<(first + range.count)] == photos else { return nil }
+        let shift = first - range.lowerBound
+        var moved = PhotoGridDrag(anchor: anchor + shift, anchorWasSelected: mode == .deselect)
+        moved.current = current + shift
+        return moved
+    }
+
     /// The selection, as positions, the drag makes now of `base` (the selection when it began).
     public func selection(from base: Set<Int>) -> Set<Int> {
         switch mode {

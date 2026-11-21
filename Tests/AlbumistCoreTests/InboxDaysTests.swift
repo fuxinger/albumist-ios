@@ -271,6 +271,32 @@ struct InboxDaysTests {
         #expect(stopped == nil)
     }
 
+    // MARK: What a grid shows
+
+    /// A day of `ids` from `position` on, for the grid.
+    static func section(_ day: Int, _ ids: [String], from position: Int) -> PhotoGridSection {
+        PhotoGridSection(id: day, title: "\(day)", countText: "\(ids.count)",
+                         entries: ids.enumerated().map { PhotoGridEntry(id: AssetID($0.element), wallClock: nil, position: position + $0.offset) })
+    }
+
+    /// What a grid shows is the same as before when it is the same days' storage, range and limit,
+    /// without comparing its photos: the grid hands it to its gestures at every body, and they
+    /// make its photos' order again only when it changed (review L3).
+    @Test func whatAGridShowsIsComparedByItsStorage() {
+        let sections = [Self.section(2, ["a", "b"], from: 0), Self.section(1, ["c", "d"], from: 2)]
+        let shown = PhotoGridShown(sections[...], below: 3)
+        #expect(shown.ids.map(\.rawValue) == ["a", "b", "c"])
+        #expect(shown.isSame(as: PhotoGridShown(sections[...], below: 3)))
+        #expect(!shown.isSame(as: PhotoGridShown(sections[...], below: 4)), "a page more")
+        #expect(!shown.isSame(as: PhotoGridShown(sections.prefix(1), below: 3)), "a day fewer")
+        var changed = sections
+        changed[1] = Self.section(1, ["c", "e"], from: 2)
+        #expect(!shown.isSame(as: PhotoGridShown(changed[...], below: 3)), "the days made anew")
+        #expect(PhotoGridShown(sections[...]).ids.count == 4, "without a limit, all")
+        #expect(PhotoGridShown([]).isSame(as: PhotoGridShown([])))
+        #expect(PhotoGridShown([]).ids.isEmpty)
+    }
+
     // MARK: The suggestion's days
 
     /// A suggestion's days keep their order, headers and photos; each photo gets its wall clock.

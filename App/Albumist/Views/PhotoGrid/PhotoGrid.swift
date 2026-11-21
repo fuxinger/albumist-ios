@@ -63,6 +63,9 @@ struct PhotoGrid: View {
         // A copy for the animation, which runs apart from the view.
         let settle = self.settle
         let pinned = pinsHeaders && !typeSize.isAccessibilitySize
+        // What it shows, for a drag that runs while more photos load or the days change (review
+        // L3): handed over, nothing made here.
+        let _ = gestures.show(PhotoGridShown(sections, below: limit))
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: CGFloat(PhotoGridZoom.spacing)), count: columns),
                   spacing: CGFloat(PhotoGridZoom.spacing),
                   pinnedViews: pinned ? [.sectionHeaders] : []) {
@@ -207,7 +210,7 @@ struct PhotoGrid: View {
     private func dragged(_ touch: PhotoGridTouch) {
         switch touch.phase {
         case .began:
-            gestures.beginDrag(touch, ids: PhotoGridSection.ids(of: sections, below: limit), selection: $selection, scroller: scroller)
+            gestures.beginDrag(touch, selection: $selection, scroller: scroller)
         case .changed:
             gestures.moveDrag(touch)
         case .ended:

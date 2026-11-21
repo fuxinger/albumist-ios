@@ -68,6 +68,37 @@ public struct PhotoGridSection: Identifiable, Equatable, Sendable {
     }
 }
 
+/// The photos a grid shows: its days and, of their photos, the positions below `limit`
+/// (`PhotoGrid`). The grid hands it to its gestures at each of its bodies, and a running drag
+/// follows its photos (review L3 of design wave 3); whether it is the same as before is told by
+/// the days' storage, range and limit, without comparing photos, so their order is made again
+/// only when it changed.
+public struct PhotoGridShown: Sendable {
+    public let sections: ArraySlice<PhotoGridSection>
+    public let limit: Int
+
+    public init(_ sections: ArraySlice<PhotoGridSection>, below limit: Int = .max) {
+        self.sections = sections
+        self.limit = limit
+    }
+
+    /// Its photos in the grid's order.
+    public var ids: [AssetID] {
+        PhotoGridSection.ids(of: sections, below: limit)
+    }
+
+    /// The same days (the same storage, so the same photos) and limit. Days made anew are other
+    /// days, even with the same photos.
+    public func isSame(as other: PhotoGridShown) -> Bool {
+        guard limit == other.limit, sections.startIndex == other.sections.startIndex,
+              sections.count == other.sections.count else { return false }
+        if sections.isEmpty { return true }
+        return sections.withUnsafeBufferPointer { mine in
+            other.sections.withUnsafeBufferPointer { theirs in mine.baseAddress == theirs.baseAddress }
+        }
+    }
+}
+
 /// The photos of the tab "Unsortiert" (each of its filters) by day, as Photos shows its days
 /// (design wave 3, DS-21 "Unsortiert nach Tagen wie in Fotos").
 ///

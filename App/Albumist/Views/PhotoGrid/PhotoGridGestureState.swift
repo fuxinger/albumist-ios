@@ -17,6 +17,10 @@ final class PhotoGridGestureState {
     /// The days' headers on screen and their frames in the grid, by day: pinned, one lies over
     /// the photos scrolling under it, and a finger on it is on none of them (review L4).
     private var headers = PhotoGridOnScreen<Int, CGRect>()
+    /// The photos the grid shows now, as each of its bodies hands them over (`show`), and their
+    /// order, made when a gesture asks and again only when they changed (`order()`).
+    private var shown = PhotoGridShown([])
+    private var made: (shown: PhotoGridShown, ids: [AssetID])?
     private var drag: Drag?
     /// A drag that began where no photo is (on a day's header): it begins at the first photo the
     /// finger reaches.
@@ -32,7 +36,8 @@ final class PhotoGridGestureState {
         var range: PhotoGridDrag
         /// The selection when the drag began: what the photos the range gives back return to.
         var base: Set<AssetID>
-        /// The grid's photos in its order when the drag began.
+        /// The grid's photos in the order the range counts in (`follow()` keeps it the grid's
+        /// order now).
         var ids: [AssetID]
         var selection: Binding<Set<AssetID>>
         var scroller: PhotoGridScroller?
@@ -45,7 +50,6 @@ final class PhotoGridGestureState {
     }
 
     private struct Waiting {
-        var ids: [AssetID]
         var selection: Binding<Set<AssetID>>
         var scroller: PhotoGridScroller?
     }
@@ -116,12 +120,38 @@ final class PhotoGridGestureState {
 
     // MARK: Drag to select
 
-    /// A finger began to draw sideways across the grid, whose photos are `ids` in its order.
-    func beginDrag(_ touch: PhotoGridTouch, ids: [AssetID], selection: Binding<Set<AssetID>>, scroller: PhotoGridScroller?) {
+    // MARK: The photos the grid shows
+
+    /// The grid shows `shown` now (each of its bodies hands it over; nothing is made here).
+    func show(_ shown: PhotoGridShown) {
+        self.shown = shown
+    }
+
+    /// The photos the grid shows now in its order: made again only when they changed, so a drag
+    /// that follows them each frame costs nothing while they stay.
+    private func order() -> [AssetID] {
+        if let made, made.shown.isSame(as: shown) { return made.ids }
+        let ids = shown.ids
+        made = (shown, ids)
+        return ids
+    }
+
+    /// The same array (its storage), whatever its contents: both are alive here, so no other
+    /// array can have the same storage.
+    private static func same(_ a: [AssetID], _ b: [AssetID]) -> Bool {
+        guard a.count == b.count else { return false }
+        if a.isEmpty { return true }
+        return a.withUnsafeBufferPointer { pa in b.withUnsafeBufferPointer { pb in pa.baseAddress == pb.baseAddress } }
+    }
+
+    // MARK: Drag to select
+
+    /// A finger began to draw sideways across the grid.
+    func beginDrag(_ touch: PhotoGridTouch, selection: Binding<Set<AssetID>>, scroller: PhotoGridScroller?) {
         endDrag()
         // Where the finger touched: the pan begins only once it moved a little.
         let touched = CGPoint(x: touch.inGrid.x - touch.moved.x, y: touch.inGrid.y - touch.moved.y)
-        waiting = Waiting(ids: ids, selection: selection, scroller: scroller)
+        waiting = Waiting(selection: selection, scroller: scroller)
         start(touch, at: [touched, touch.inGrid])
     }
 
@@ -157,13 +187,13 @@ final class PhotoGridGestureState {
     /// waits for the finger to reach one.
     private func start(_ touch: PhotoGridTouch, at points: [CGPoint]) {
         guard let pending = waiting else { return }
-        let onScreen = cells(in: pending.ids)
+        let ids = order()
+        let onScreen = cells(in: ids)
         let covered = self.covered
         let found = points.lazy.compactMap { point in
             PhotoGridHitTest.position(x: Double(point.x), y: Double(point.y), in: onScreen, covered: covered)
         }.first
         guard let anchor = found else { return }
-        let ids = pending.ids
         let base = pending.selection.wrappedValue
         let range = PhotoGridDrag(anchor: anchor, anchorWasSelected: base.contains(ids[anchor]))
         waiting = nil
@@ -177,6 +207,7 @@ final class PhotoGridGestureState {
     /// The finger is at `point` in the grid: the range runs to the photo under it; between rows
     /// and on a header (also one pinned over photos) it keeps the photo it has.
     private func extend(to point: CGPoint) {
+        follow()
         guard var current = drag,
               let position = PhotoGridHitTest.position(x: Double(point.x), y: Double(point.y), in: cells(in: current.ids),
                                                        covered: covered)
@@ -184,6 +215,22 @@ final class PhotoGridGestureState {
         let change = current.range.move(to: position)
         drag = current
         apply(change)
+    }
+
+    /// The grid shows other photos than the range counts in (more were loaded below, the days
+    /// were made anew): the range follows its photos by id into the grid's order now
+    /// (`PhotoGridDrag.rebased`), or, where they are no longer together, the drag ends, its photos
+    /// ticked as they are (review L3).
+    private func follow() {
+        guard let current = drag else { return }
+        let now = order()
+        guard !Self.same(now, current.ids) else { return }
+        guard let range = current.range.rebased(from: current.ids, to: now) else {
+            endDrag()
+            return
+        }
+        drag?.range = range
+        drag?.ids = now
     }
 
     /// Ticks or unticks what the range took in, and gives back what it left.
@@ -210,7 +257,8 @@ final class PhotoGridGestureState {
         return PhotoGridAutoScroll.speed(y: Double(current.inScrollView.y), top: area.lowerBound, bottom: area.upperBound)
     }
 
-    /// One frame of scrolling by itself; false stops the clock (the finger left the edge).
+    /// One frame of scrolling by itself; false stops the clock (the finger left the edge, or the
+    /// drag ended because its range could not follow the photos the grid shows now).
     private func scrollStep(_ seconds: Double) -> Bool {
         guard let current = drag, let scroller = current.scroller else { return false }
         let speed = edgeSpeed()
@@ -221,7 +269,7 @@ final class PhotoGridGestureState {
         scroller.scroll(by: PhotoGridAutoScroll.step(speed: speed, seconds: seconds))
         // The photos the grid brought under the still finger join the range.
         extend(to: CGPoint(x: current.inGrid.x, y: current.inGrid.y + CGFloat(scroller.offset - current.offset)))
-        return true
+        return drag != nil
     }
 
     // MARK: Pinch to zoom

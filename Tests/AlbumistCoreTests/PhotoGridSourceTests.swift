@@ -169,6 +169,24 @@ struct PhotoGridSourceTests {
         #expect(hits == 2 && state.components(separatedBy: "covered: covered)").count - 1 == hits, "\(hits)")
     }
 
+    /// A running drag follows the photos the grid shows now (review L3): the grid hands them to
+    /// its gestures at every body (`PhotoGridShown`, compared by storage, its order made again
+    /// only when it changed), and the range follows them by id where the finger goes and while
+    /// the page scrolls by itself (`PhotoGridDrag.rebased`): more photos loaded at the bottom
+    /// tick on, and when the range cannot be kept the drag ends, its photos ticked as they are.
+    @Test func aDragFollowsThePhotosTheGridShowsNow() throws {
+        let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
+        #expect(view.contains("let_=gestures.show(PhotoGridShown(sections,below:limit))"), "\(view)")
+        let dragged = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func dragged("], in: Self.grid))
+        #expect(dragged.contains("gestures.beginDrag(touch,selection:$selection,scroller:scroller)"), "\(dragged)")
+        let extend = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func extend("], in: Self.state))
+        #expect(extend.hasPrefix("{follow()guardvarcurrent=drag,"), "\(extend)")
+        let follow = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func follow("], in: Self.state))
+        #expect(follow.contains("guardletrange=current.range.rebased(from:current.ids,to:now)else{endDrag()return}"), "\(follow)")
+        let step = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func scrollStep("], in: Self.state))
+        #expect(step.hasSuffix("returndrag!=nil}"), "a drag that ended stops the clock: \(step)")
+    }
+
     /// Drag to select is UIKit's own pan beside the scroll view, only while the page selects: it
     /// begins only on a mostly sideways start (`PhotoGridDrag.startsSelection`), the scroll
     /// view's pan (and any other pan, such as going back) waits for it to fail, so a vertical

@@ -20,7 +20,7 @@ import AlbumistCore
 /// 2. **it lies on a run:** both its legs were flown, it lies on the way between them, it shows no
 ///    stay (`FlightTrack.stays`), no leg of at most `runEndLongDuration` leads to a photo that
 ///    stays (`FlightTrack.staysAt`), and the run does not turn back right before or after it (a
-///    leg faster than ground transport that leaves the way); or
+///    leg faster than `turnBackSpeed` that leaves the way); or
 /// 3. **it is in a burst:** `burstPhotos` photos in a row, each at most `burstStepDuration` and at
 ///    least `burstStepMeters` after the one before, that move steadily (speeds above `burstSpeed`,
 ///    or above `aloftBurstSpeed` from one photo with a stored altitude above `aloftAltitude` to
@@ -41,20 +41,21 @@ import AlbumistCore
 /// - Rule 2 finds the window photos in the middle of a flight. Long legs find those of a long-haul
 ///   flight with a photo every few hours, or a burst over Siberia five hours after the gate photo.
 ///   A leg faster than `maximumFlightSpeed` is evidence of nothing (two people's photos from Munich
-///   and Rome in the same minutes, a wrong location). A **stay**: the photos in a row within
-///   `minimumLegMeters` around the photo, lasting at least `shortestStay`, did not move on along
-///   its legs faster than `maximumGroundSpeed` over their time (nor further than their stated
-///   accuracy). In a plane such a row lasts well under a minute and moves on at the plane's speed,
-///   so a stay is ground (or a location the iPhone failed to update): a layover of three photos
-///   over half an hour at Dubai between Munich and Bangkok stays on the ground, and so does a
-///   quick series of photos there, or at Vienna between Berlin and Athens, an hour or two from
-///   either. **A single photo shows no stay,** nor do photos within `shortestStay` (the iPhone
-///   updates the location about once a second, so the fixes of a plane's photos seconds apart may
-///   be up to a second's flight behind them): one photo at a layover between two flown legs counts
-///   as in flight, and so do photos there within five seconds. One such photo costs no place and
-///   no record (both need three photos within 3 km on one day) and no country unless that
-///   country's only photos are such layover photos; but its town is missing from the cities when
-///   it has no other photo. Three within five seconds can cost a place.
+///   and Rome in the same minutes, a wrong location); a photo out of reach (`jumpMeters`) is no
+///   neighbour at all. A **stay**: the photos in a row within `minimumLegMeters` around the
+///   photo, lasting at least `shortestStay`, did not move on along its legs faster than
+///   `maximumGroundSpeed` over their time (nor further than their stated accuracy). In a plane
+///   such a row lasts well under a minute and moves on at the plane's speed, so a stay is ground
+///   (or a location the iPhone failed to update): a layover of three photos over half an hour at
+///   Dubai between Munich and Bangkok stays on the ground, and so does a quick series of photos
+///   there, or at Vienna between Berlin and Athens, an hour or two from either. **A single photo
+///   shows no stay,** nor do photos within `shortestStay` (the iPhone updates the location about
+///   once a second, so the fixes of a plane's photos seconds apart may be up to a second's flight
+///   behind them): one photo at a layover between two flown legs counts as in flight, and so do
+///   photos there within five seconds. One such photo costs no place and no record (both need
+///   three photos within 3 km on one day) and no country unless that country's only photos are
+///   such layover photos; but its town is missing from the cities when it has no other photo.
+///   Three within five seconds can cost a place.
 /// - A **short leg to a stay** is no flight leg, for the reason of rule 4 below: a plane needs at
 ///   least a quarter of an hour from standing on the ground to an average above
 ///   `maximumGroundSpeed` (and back). It keeps out a location jumping 3 km to one side and 3 km to
@@ -62,6 +63,9 @@ import AlbumistCore
 /// - The **turn back** check: two people's photos from Munich, Florence and Rome alternating every
 ///   half hour (an iCloud Shared Library) look like flights Munich → Florence → Rome, but then
 ///   "fly" straight back to Munich. A real flight goes on, or its next leg is slow.
+/// - A photo **out of reach** (`jumpMeters`) is someone else's and nobody's neighbour: in a shared
+///   library the window photos between the photos someone takes at home are found as if those
+///   were not there. Within reach of them (near the airport of home) they can still zig-zag.
 /// - **Coming back** keeps out a location landing 1 to 3 km off in any direction every few seconds
 ///   indoors: now and then three of its photos happen to lie in a line at a plane's speed, but
 ///   within minutes the location is back near each of them. A plane is gone.
@@ -98,15 +102,15 @@ import AlbumistCore
 /// are flown (a short hop with two photos); the first or last window photo more than
 /// `runEndDuration` (`runEndLongDuration`) before or after the next one (a long-haul flight with a
 /// photo every few hours, unless its leg to the airport is flown), or off the way (a turn after
-/// take-off); window photos between photos taken at home by someone else in a shared library (they
-/// zig-zag); photos whose location the iPhone did not update in the plane for `shortestStay` and
-/// more (they look like a stay); a burst of three that does not head on (in a turn, on a route far
-/// off the line between the photos before and after it, or with no photo within
-/// `maximumLongLegDuration` on either side); a series whose steps the age of its fixes makes
-/// uneven (a fix a second old on a step of a second or two); a burst during the climb or descent
-/// slower than `burstSpeed` (with stored altitudes: below `aloftAltitude` or slower than
-/// `aloftBurstSpeed`), unless rule 4 takes it; photos of a plane circling back within 3 km in five
-/// minutes (a holding pattern).
+/// take-off); window photos next to photos someone else took within reach of them (in a shared
+/// library, at home near the airport); photos whose location the iPhone did not update in the
+/// plane for `shortestStay` and more (they look like a stay); a burst of three that does not head
+/// on (in a turn, on a route far off the line between the photos before and after it, or with no
+/// photo within `maximumLongLegDuration` on either side); a series whose steps the age of its
+/// fixes makes uneven (a fix a second old on a step of a second or two); a burst during the climb
+/// or descent slower than `burstSpeed` (with stored altitudes: below `aloftAltitude` or slower
+/// than `aloftBurstSpeed`), unless rule 4 takes it; photos of a plane circling back within 3 km in
+/// five minutes (a holding pattern).
 ///
 /// Ground photos it can take for window photos: three photos within seconds whose location jumps
 /// 3 km and more in a straight line at a plane's speed with no photo near either end and none
@@ -137,6 +141,14 @@ public enum AirborneFilter {
     /// hundred metres, which looks like any speed. A neighbour is the nearest photo at least
     /// this far away (a burst of window photos seconds apart reaches past its own burst).
     public static let minimumLegMeters = 3_000.0
+    /// A photo further from another than `maximumFlightSpeed` covers in the time between them, and
+    /// more than this further, is **out of reach**: someone else's photo (an iCloud Shared Library:
+    /// someone at home while the other flies) or a wrong location far off, and no photo's neighbour
+    /// (`FlightTrack.neighbour`). Twice `minimumLegMeters`: a location jumping indoors lands up to
+    /// that far off the true place (`returnDuration`), so two of one camera's fixes seconds apart
+    /// can lie up to this far apart. Such a leg ends the search for a neighbour, as evidence of
+    /// nothing: passed, the next jump 10 to 20 seconds away looked like a leg at a plane's speed.
+    static let jumpMeters = 2 * minimumLegMeters
     /// The longest leg: the longest non-stop flights take some 19 hours from the gate photo to the
     /// arrival photo. It also bounds the search for a photo's neighbours.
     static let maximumLongLegDuration: TimeInterval = 20 * 3_600
@@ -236,6 +248,14 @@ public enum AirborneFilter {
     /// run faster than this, and a train's photos have no flown leg. 200 km/h, in metres per
     /// second.
     static let stayMovingSpeed = 200.0 / 3.6
+    /// A run **turns back** (rules 2 and `FlightJudgement`) on a leg faster than this right before
+    /// or after it that leaves its way. A plane flies on; from the airport people go on by car or
+    /// train, slower than this as the crow flies (the trip's route measures turning back by the same
+    /// speed, `TripGeometryBuilder.turnBackSpeed`). Photos of two or three people taken in turn do
+    /// not: Munich, Florence and Rome every 20 minutes look like a flight Munich → Florence →
+    /// Rome, Munich next is out of reach, and Rome to Florence 40 minutes later is 345 km/h.
+    /// 200 km/h, in metres per second.
+    static let turnBackSpeed = 200.0 / 3.6
 
     /// The photos of `photos` taken in flight.
     /// - Parameters:
@@ -361,8 +381,18 @@ struct FlightTrack: Sendable {
     /// wrong locations and photos seconds apart make one. Once a photo's step falls short for `i`,
     /// it falls short for every later photo, so one pointer moving forward finds them all (and for
     /// the leg after, one moving back).
+    ///
+    /// The search passes photos out of reach as well (`AirborneFilter.jumpMeters`), and the bound
+    /// holds until it has passed one: the first such photo `k` it meets lies further from `i` than
+    /// `maximumFlightSpeed` covers in their time, the photo after `k` closer than
+    /// `minimumLegMeters`, so `k`'s step is long enough not to lie before `earliest[i]`. Past it
+    /// the search goes on unbounded.
     let earliest: [Int]
     let latest: [Int]
+    /// As `earliest` and `latest`, for a leg faster than `AirborneFilter.turnBackSpeed` (the turn
+    /// back of rule 2).
+    let turnEarliest: [Int]
+    let turnLatest: [Int]
     /// The first photo of each group (`AirborneFilter.groupRadiusMeters`), ascending.
     private let groupStarts: [Int]
     /// The group of each photo.
@@ -421,30 +451,38 @@ struct FlightTrack: Sendable {
         self.steps = steps
         self.pathMeters = pathMeters
 
-        let speed = AirborneFilter.maximumGroundSpeed, window = AirborneFilter.maximumLongLegDuration
-        let reach = AirborneFilter.minimumLegMeters + Self.boundMarginMeters
-        var windowStart = [Int](repeating: 0, count: count), earliest = [Int](repeating: 0, count: count)
-        var start = 0, first = 0
+        let speed = AirborneFilter.maximumGroundSpeed, turn = AirborneFilter.turnBackSpeed
+        let window = AirborneFilter.maximumLongLegDuration, reach = AirborneFilter.minimumLegMeters + Self.boundMarginMeters
+        var windowStart = [Int](repeating: 0, count: count), earliest = windowStart, turnEarliest = windowStart
+        var start = 0, first = 0, turnFirst = 0
         for i in 0..<count {
             while sorted[i] - sorted[start] > window { start += 1 }
             windowStart[i] = start
             first = max(first, start)
             while first < i && steps[first + 1] <= speed * (sorted[i] - sorted[first]) - reach { first += 1 }
             earliest[i] = first
+            turnFirst = max(turnFirst, start)
+            while turnFirst < i && steps[turnFirst + 1] <= turn * (sorted[i] - sorted[turnFirst]) - reach { turnFirst += 1 }
+            turnEarliest[i] = turnFirst
         }
-        var windowEnd = [Int](repeating: 0, count: count), latest = [Int](repeating: 0, count: count)
-        var end = count - 1, last = count - 1
+        var windowEnd = [Int](repeating: 0, count: count), latest = windowEnd, turnLatest = windowEnd
+        var end = count - 1, last = count - 1, turnLast = count - 1
         for i in stride(from: count - 1, through: 0, by: -1) {
             while sorted[end] - sorted[i] > window { end -= 1 }
             windowEnd[i] = end
             last = min(last, end)
             while last > i && steps[last] <= speed * (sorted[last] - sorted[i]) - reach { last -= 1 }
             latest[i] = last
+            turnLast = min(turnLast, end)
+            while turnLast > i && steps[turnLast] <= turn * (sorted[turnLast] - sorted[i]) - reach { turnLast -= 1 }
+            turnLatest[i] = turnLast
         }
         self.windowStart = windowStart
         self.windowEnd = windowEnd
         self.earliest = earliest
         self.latest = latest
+        self.turnEarliest = turnEarliest
+        self.turnLatest = turnLatest
     }
 
     // MARK: Distances and legs
@@ -463,8 +501,9 @@ struct FlightTrack: Sendable {
 
     func seconds(_ a: Int, _ b: Int) -> TimeInterval { (times[b] - times[a]).magnitude }
 
-    /// Faster than any ground transport (equal times included, at any distance above zero).
-    func fasterThanGround(_ a: Int, _ b: Int) -> Bool { meters(a, b) > AirborneFilter.maximumGroundSpeed * seconds(a, b) }
+    /// Faster than `AirborneFilter.turnBackSpeed` (equal times included, at any distance above
+    /// zero): a leg on which a run turns back when it leaves the way.
+    func fasterThanTurnBack(_ a: Int, _ b: Int) -> Bool { meters(a, b) > AirborneFilter.turnBackSpeed * seconds(a, b) }
 
     /// Flown: faster than ground transport, not faster than a plane.
     func flown(_ a: Int, _ b: Int) -> Bool {
@@ -561,10 +600,10 @@ struct FlightTrack: Sendable {
         if times[i] - times[before] <= short, staysAt(before, step: -1) { return false }
         if times[after] - times[i] <= short, staysAt(after, step: 1) { return false }
         // Turning back: the leg into the photo before (or out of the photo after) is faster than
-        // ground transport and leaves the way.
-        let previous = neighbours.fastBefore(before, in: self)
+        // `turnBackSpeed` and leaves the way.
+        let previous = neighbours.turnBefore(before, in: self)
         if previous >= 0, !onTheWay(previous, before, i) { return false }
-        let next = neighbours.fastAfter(after, in: self)
+        let next = neighbours.turnAfter(after, in: self)
         if next >= 0, !onTheWay(i, after, next) { return false }
         return !comesBack(i)
     }
@@ -589,11 +628,11 @@ struct FlightTrack: Sendable {
         if before >= 0, after >= 0, !onTheWay(before, i, after) { return false }
         if stays(i, before: before, after: after, movingSpeed: AirborneFilter.stayMovingSpeed) { return false }
         if before >= 0 {
-            let previous = neighbours.fastBefore(before, in: self)
+            let previous = neighbours.turnBefore(before, in: self)
             if previous >= 0, !onTheWay(previous, before, i) { return false }
         }
         if after >= 0 {
-            let next = neighbours.fastAfter(after, in: self)
+            let next = neighbours.turnAfter(after, in: self)
             if next >= 0, !onTheWay(i, after, next) { return false }
         }
         return !comesBack(i)
@@ -624,7 +663,8 @@ struct FlightTrack: Sendable {
 
     /// Whether the photo at `i` shows a stay: the photos in a row around it closer than
     /// `minimumLegMeters` (between its neighbours `before` and `after`, or as far as
-    /// `maximumLongLegDuration` where it has none), when they last at least
+    /// `maximumLongLegDuration` where it has none; photos out of reach between them, which the
+    /// neighbours' search passes, are someone else's and left out), when they last at least
     /// `AirborneFilter.shortestStay`, did not move on along its legs (away from the photo before,
     /// towards the photo after; without either, apart) faster than `movingSpeed` over their time
     /// (`maximumGroundSpeed`; `AirborneFilter.stayMovingSpeed` next to a single flown leg), nor
@@ -636,7 +676,9 @@ struct FlightTrack: Sendable {
     /// photo shows none either where a plane could not have landed after the leg before it, or
     /// taken off before the leg after it (`AirborneFilter.landingDuration`).
     func stays(_ i: Int, before: Int, after: Int, movingSpeed: Double = AirborneFilter.maximumGroundSpeed, landing: Bool = false) -> Bool {
-        let first = before >= 0 ? before + 1 : windowStart[i], last = after >= 0 ? after - 1 : windowEnd[i]
+        var first = before >= 0 ? before + 1 : windowStart[i], last = after >= 0 ? after - 1 : windowEnd[i]
+        while first < i && meters(first, i) >= AirborneFilter.minimumLegMeters { first += 1 }
+        while last > i && meters(i, last) >= AirborneFilter.minimumLegMeters { last -= 1 }
         guard first < last else { return false }
         let span = times[last] - times[first]
         guard span >= AirborneFilter.shortestStay else { return false }
@@ -726,20 +768,33 @@ struct FlightTrack: Sendable {
     // MARK: Neighbours
 
     /// The nearest photo before (`step` -1) or after (`step` 1) the photo at `i` that is at least
-    /// `minimumLegMeters` from it and at most `maximumLongLegDuration` apart in time, or -1; -1 too
-    /// once the search would pass `limit` (a photo index). With `staying`, `Neighbours.staying`
-    /// once it passes a photo closer than `minimumLegMeters` that is `stayDuration` or more from
-    /// it: the photos in a row around it then make a stay of that length (`stays`).
+    /// `minimumLegMeters` from it, at most `maximumLongLegDuration` apart in time and not **out of
+    /// reach** (`AirborneFilter.jumpMeters`), or -1; -1 too once the search would pass `limit` (a
+    /// photo index) before it has passed a photo out of reach. With `staying`,
+    /// `Neighbours.staying` once it passes a photo closer than `minimumLegMeters` that is
+    /// `stayDuration` or more from it: the photos in a row around it then make a stay of that
+    /// length (`stays`).
+    ///
+    /// A photo out of reach is someone else's (an iCloud Shared Library: someone at home while the
+    /// other flies) or a wrong location far off. It says nothing about this photo's way, so the
+    /// search passes it, as the trip's route does. Taken as the neighbour, the photos at home hid
+    /// the window photos between them: their legs were no flight (faster than a plane, or there
+    /// and back), and a series did not head on towards a photo at home behind the plane. `limit`
+    /// holds until the search has passed such a photo (see `earliest`); from there on it is lifted.
     ///
     /// Read group by group: the photos of the photo's own group are all closer than a leg; a
     /// group whose first photo is far enough clear of `minimumLegMeters` is passed or taken whole
-    /// (each of its photos lies within `groupRadiusMeters` of its first); only a group straddling
-    /// the leg length is read photo by photo. The time bound ends the search.
+    /// (each of its photos lies within `groupRadiusMeters` of its first), and so is a group far
+    /// enough from it whose photos are all within reach or all out of it; any other group is read
+    /// photo by photo. The time bound ends the search.
     func neighbour(of i: Int, step: Int, limit: Int, staying: Bool) -> Int {
         let time = times[i]
         let minimum = AirborneFilter.minimumLegMeters, window = AirborneFilter.maximumLongLegDuration
         let radius = AirborneFilter.groupRadiusMeters, margin = Self.roundingMarginMeters
+        let speed = AirborneFilter.maximumFlightSpeed, jump = AirborneFilter.jumpMeters
         let stay = staying ? AirborneFilter.stayDuration : .infinity
+        let unbounded = step < 0 ? 0 : times.count - 1
+        var limit = limit
         func groupEnd(_ group: Int) -> Int { group + 1 < groupStarts.count ? groupStarts[group + 1] - 1 : times.count - 1 }
         // Whether a group's photos on this side within the window reach `stay` from the photo.
         func reachesStay(_ group: Int) -> Bool {
@@ -759,14 +814,30 @@ struct FlightTrack: Sendable {
                 group += step
                 continue
             }
-            if anchor - radius - margin >= minimum { return nearest }
-            // Straddling: its photos one by one, nearest in time first.
+            if anchor - radius - margin >= minimum {
+                // All far enough: the nearest in time if surely within reach; passed whole if all
+                // its photos within the window are surely out of reach.
+                if anchor + radius + margin <= speed * (times[nearest] - time).magnitude + jump { return nearest }
+                let farthest = step < 0 ? max(first, windowStart[i]) : min(last, windowEnd[i])
+                if anchor - radius - margin > speed * (times[farthest] - time).magnitude + jump {
+                    limit = unbounded
+                    group += step
+                    continue
+                }
+            }
+            // Its photos one by one, nearest in time first.
             var j = nearest
             while j >= first && j <= last {
                 if step < 0 ? j < limit : j > limit { return -1 }
-                guard (times[j] - time).magnitude <= window else { return -1 }
-                if meters(j, i) >= minimum { return j }
-                if (times[j] - time).magnitude >= stay { return Neighbours.staying }
+                let seconds = (times[j] - time).magnitude
+                guard seconds <= window else { return -1 }
+                let meters = meters(j, i)
+                if meters >= minimum {
+                    if meters <= speed * seconds + jump { return j }
+                    limit = unbounded
+                } else if seconds >= stay {
+                    return Neighbours.staying
+                }
                 j += step
             }
             group += step
@@ -783,16 +854,16 @@ struct FlightTrack: Sendable {
         /// (else -1), or `staying`.
         private var runEarlier: [Int]
         private var runLater: [Int]
-        /// For the turn back: the neighbour, if the leg to it is faster than ground transport
-        /// (else -1).
-        private var fastEarlier: [Int]
-        private var fastLater: [Int]
+        /// For the turn back: the neighbour, if the leg to it is faster than
+        /// `AirborneFilter.turnBackSpeed` (else -1).
+        private var turnEarlier: [Int]
+        private var turnLater: [Int]
 
         init(count: Int) {
             runEarlier = [Int](repeating: Self.unknown, count: count)
             runLater = runEarlier
-            fastEarlier = runEarlier
-            fastLater = runEarlier
+            turnEarlier = runEarlier
+            turnLater = runEarlier
         }
 
         mutating func runBefore(_ i: Int, in track: FlightTrack) -> Int {
@@ -805,22 +876,24 @@ struct FlightTrack: Sendable {
             return runLater[i]
         }
 
-        mutating func fastBefore(_ i: Int, in track: FlightTrack) -> Int {
-            if fastEarlier[i] == Self.unknown {
+        /// The search for a run's neighbour is bounded for legs faster than ground transport, so
+        /// only a neighbour it found is the turn back's too.
+        mutating func turnBefore(_ i: Int, in track: FlightTrack) -> Int {
+            if turnEarlier[i] == Self.unknown {
                 var j = runEarlier[i]
-                if j == Self.unknown || j == Self.staying { j = track.neighbour(of: i, step: -1, limit: track.earliest[i], staying: false) }
-                fastEarlier[i] = j >= 0 && track.fasterThanGround(j, i) ? j : -1
+                if j < 0 { j = track.neighbour(of: i, step: -1, limit: track.turnEarliest[i], staying: false) }
+                turnEarlier[i] = j >= 0 && track.fasterThanTurnBack(j, i) ? j : -1
             }
-            return fastEarlier[i]
+            return turnEarlier[i]
         }
 
-        mutating func fastAfter(_ i: Int, in track: FlightTrack) -> Int {
-            if fastLater[i] == Self.unknown {
+        mutating func turnAfter(_ i: Int, in track: FlightTrack) -> Int {
+            if turnLater[i] == Self.unknown {
                 var j = runLater[i]
-                if j == Self.unknown || j == Self.staying { j = track.neighbour(of: i, step: 1, limit: track.latest[i], staying: false) }
-                fastLater[i] = j >= 0 && track.fasterThanGround(i, j) ? j : -1
+                if j < 0 { j = track.neighbour(of: i, step: 1, limit: track.turnLatest[i], staying: false) }
+                turnLater[i] = j >= 0 && track.fasterThanTurnBack(i, j) ? j : -1
             }
-            return fastLater[i]
+            return turnLater[i]
         }
     }
 

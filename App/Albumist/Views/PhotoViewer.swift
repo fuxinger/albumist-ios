@@ -55,6 +55,9 @@ struct PhotoViewer: View {
     @State private var shareTask: Task<Void, Never>?
     /// The photos whose Live Photo motion is on the iPhone: their title shows the symbol.
     @State private var livePhotos: Set<AssetID> = []
+    /// The photo whose Live Photo plays under a long press: the pager holds still meanwhile
+    /// (review D2, N4), as in Photos.
+    @State private var pressing: AssetID?
     /// What Photos says of each photo looked at: its date, for the title while Albumist has no
     /// facts of it, and its kind (`PhotoBasics`).
     @State private var basics: [AssetID: PhotoBasics] = [:]
@@ -126,6 +129,8 @@ struct PhotoViewer: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        // A thumb that drifts while a Live Photo plays under it does not page (review D2, N4).
+        .scrollDisabled(pressing != nil)
         .onChange(of: current) {
             window = window.following(ids.firstIndex(of: current) ?? 0, count: ids.count)
             // A share prepared for the photo left behind is not this one's (review D2, N7).
@@ -142,8 +147,19 @@ struct PhotoViewer: View {
         let id = ids[index]
         let photo = ZoomablePhoto(id: id, label: label(of: id), position: position(of: index), isCurrent: id == current,
                                   top: top, pull: $pull, onTap: { toggleChrome() }, onClose: { dismiss() },
-                                  onLive: { _ = livePhotos.insert($0) }, onZoom: { zoomChrome() })
+                                  onLive: { _ = livePhotos.insert($0) }, onZoom: { zoomChrome() },
+                                  onPressing: { livePress(id, $0) })
         return photo.ignoresSafeArea().tag(id)
+    }
+
+    /// A long press on the Live Photo of `id` began or ended: the pager holds still meanwhile.
+    /// Only the press of that photo ends it.
+    private func livePress(_ id: AssetID, _ pressed: Bool) {
+        if pressed {
+            pressing = id
+        } else if pressing == id {
+            pressing = nil
+        }
     }
 
     /// Black, lighter while the photo is pulled down to close.
@@ -372,6 +388,8 @@ private struct ZoomablePhoto: View {
     var onLive: (AssetID) -> Void
     /// It was zoomed in (the bars go).
     var onZoom: () -> Void
+    /// A long press on its Live Photo began (true) or ended (false): the pager holds still.
+    var onPressing: (Bool) -> Void
     @State private var image: UIImage?
     /// Nothing came from Photos (only in iCloud, or gone): said instead of an endless spinner.
     @State private var unavailable = false
@@ -394,7 +412,11 @@ private struct ZoomablePhoto: View {
                 .task(id: id) { await giveUp() }
                 .task(id: LiveRequest(id: id, isCurrent: isCurrent, shown: image != nil)) { await loadLive(in: area(of: geo.size)) }
         }
-        .onDisappear { reset() }
+        .onDisappear {
+            // Its press ends with it: the pager is never held for good.
+            if pressing { press(false) }
+            reset()
+        }
         .onChange(of: scale > 1) { _, zoomed in
             if zoomed { onZoom() }
         }
@@ -417,9 +439,12 @@ private struct ZoomablePhoto: View {
             .padding(.top, top)
             .frame(width: size.width, height: size.height)
             .contentShape(Rectangle())
+            // The long press first, innermost (review D2, N3): the gestures added after it give
+            // way to it, so a resting finger begins it and a short touch fails it at once and is
+            // a tap; added after the taps it would wait for a tap that never fails.
+            .gesture(LivePress(isEnabled: live != nil) { began in press(began) })
             .gesture(taps)
             .gesture(magnify)
-            .gesture(LivePress(isEnabled: live != nil) { began in press(began) })
             // Moving the zoomed photo wins over swiping to the next one; at normal size the
             // swipe goes to the next photo.
             .highPriorityGesture(pan, including: scale > 1 ? .all : .subviews)
@@ -492,14 +517,18 @@ private struct ZoomablePhoto: View {
     }
 
     /// The long press on a Live Photo began or is over: it plays whole while the press lasts,
-    /// as in Photos. Only a press that began ends one (a touch too short for a press is a tap).
+    /// as in Photos, and the page holds still (the photo view stops paging, `magnify` and `pan`
+    /// rest; review D2, N4). Only a press that began ends one (a touch too short for a press is
+    /// a tap).
     private func press(_ began: Bool) {
         if began {
             pressing = true
+            onPressing(true)
             play(.full)
         } else if pressing {
             pressing = false
             pressEnded = .now
+            onPressing(false)
             play(.stop)
         }
     }
@@ -513,18 +542,25 @@ private struct ZoomablePhoto: View {
         return ContinuousClock.now - pressEnded < .milliseconds(600)
     }
 
+    /// Pinch to zoom; not while a long press plays the Live Photo (a second finger then is no
+    /// pinch, review D2, N4).
     private var magnify: some Gesture {
         MagnifyGesture()
-            .onChanged { value in scale = min(max(lastScale * value.magnification, 1), 5) }
+            .onChanged { value in
+                guard !pressing else { return }
+                scale = min(max(lastScale * value.magnification, 1), 5)
+            }
             .onEnded { _ in
                 lastScale = scale
                 if scale <= 1.01 { withAnimation(.snappy) { reset() } }
             }
     }
 
+    /// Moving the zoomed photo; not while a long press plays its Live Photo (N4).
     private var pan: some Gesture {
         DragGesture()
             .onChanged { value in
+                guard !pressing else { return }
                 offset = CGSize(width: lastOffset.width + value.translation.width, height: lastOffset.height + value.translation.height)
             }
             .onEnded { _ in lastOffset = offset }

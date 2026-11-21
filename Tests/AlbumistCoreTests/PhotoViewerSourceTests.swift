@@ -210,6 +210,47 @@ struct PhotoViewerSourceTests {
         #expect(try Self.file("PhotoTitleBar.swift").contains("Image(systemName: \"livephoto\")"))
     }
 
+    /// The long press is the innermost gesture of the photo (review D2, N3): a gesture added
+    /// with `.gesture` gives way to those of the view it is added to, so attached after the
+    /// taps it would wait for a tap that never fails while a finger rests, and never begin. A
+    /// short touch makes it fail and the tap goes on. While it plays a Live Photo, the page
+    /// stays still: no paging, no pinch, no moving the zoomed photo (N4), as in Photos.
+    @Test func theLongPressComesFirstAndHoldsThePage() throws {
+        let source = AppSource.code(try Self.viewer(), keepStrings: true)
+        let content = try #require(AppSource.body(of: "private func content(in size: CGSize)", in: source))
+        var last = content.startIndex
+        for step in [".contentShape(Rectangle())", ".gesture(LivePress(isEnabled: live != nil) { began in press(began) })",
+                     ".gesture(taps)", ".gesture(magnify)", ".highPriorityGesture(pan,", ".simultaneousGesture(pullDown,"] {
+            let found = try #require(content.range(of: step, range: last..<content.endIndex), "\(step) is not in its place")
+            last = found.upperBound
+        }
+        #expect(Self.count(#"\.gesture\(LivePress\("#, in: source) == 1)
+        // The press is told to the photo view, which holds the pager still meanwhile.
+        let press = try #require(AppSource.body(of: "private func press(", in: source))
+        let began = try #require(press.range(of: "onPressing(true)"))
+        let ended = try #require(press.range(of: "onPressing(false)"))
+        #expect(began.lowerBound < ended.lowerBound)
+        let pages = try #require(AppSource.body(of: "private var pages", in: source))
+        let tabs = try #require(pages.range(of: "TabView(selection: $current)"))
+        let still = try #require(pages.range(of: ".scrollDisabled(pressing != nil)"), "the page slides away under a press")
+        #expect(tabs.upperBound < still.lowerBound)
+        let held = try #require(AppSource.body(of: "private func livePress(", in: source))
+        #expect(held.contains("pressing = id"))
+        #expect(held.contains("pressing == id"), "another page's end frees the pager")
+        #expect(AppSource.calls(of: "ZoomablePhoto(", in: source).allSatisfy { $0.contains("onPressing: { livePress(id, $0) }") })
+        // A page that goes while pressed ends its press, so the pager is never held for good.
+        let photo = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: source))
+        let gone = try #require(AppSource.body(of: ".onDisappear", in: photo))
+        #expect(gone.contains("if pressing { press(false) }"))
+        // No pinch and no moving the zoomed photo while the press plays.
+        for gesture in ["private var magnify", "private var pan"] {
+            let body = try #require(AppSource.body(of: gesture, in: source))
+            let changed = try #require(body.range(of: ".onChanged { value in"), "\(gesture)")
+            #expect(String(body[changed.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                .hasPrefix("guard !pressing else { return }"), "\(gesture) moves the photo under a press")
+        }
+    }
+
     // MARK: Sharing
 
     /// The share button shares the photo's file as Photos hands it out (the edited one, else the

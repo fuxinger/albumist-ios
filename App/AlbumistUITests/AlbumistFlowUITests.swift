@@ -1070,8 +1070,10 @@ final class AlbumistFlowUITests: XCTestCase {
                 shot("21a-history-receipt")
             }
             if opened && !undo.exists {
+                // Up to 10 swipes: since design wave 3 (DS-15) each album row has a 72 pt cover,
+                // about 36 pt more per row, and the demo plan lists 12 albums.
                 var more = 0
-                while !undo.exists && more < 6 { app.swipeUp(); more += 1 }
+                while !undo.exists && more < 10 { app.swipeUp(); more += 1 }
             }
             if opened, tap(undo, "undo in receipt", timeout: 10) {
                 // Another "Rückgängig machen" (the result card further back) can exist in
@@ -1117,8 +1119,11 @@ final class AlbumistFlowUITests: XCTestCase {
                     shot("22-undo-not-finished")
                 }
                 XCTAssertTrue(undone, "Undo did not finish")
-                // The receipt now ends with what the undo removed.
-                app.swipeUp(); app.swipeUp()
+                // The receipt now ends with what the undo removed: swiped down to it, up to 6
+                // times (the rows are taller since DS-15; two swipes were enough before).
+                let removedSection = anything("Entfernte Alben und Ordner")
+                var down = 0
+                while !removedSection.exists && down < 6 { app.swipeUp(); down += 1 }
                 // pacing: kept, the scroll comes to rest before the screenshot, and the reloaded
                 // receipt's rows are read right after it (one of them must not be there).
                 sleep(1)
@@ -1518,7 +1523,9 @@ final class AlbumistFlowUITests: XCTestCase {
         shot("60-trip-workshop"); audit("trip workshop")
         let day = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "workshop.day", "5. August")).firstMatch
         var swipes = 0
-        while !(day.exists && day.isHittable) && swipes < 4 {
+        // Up to 8 swipes: since design wave 3 (DS-14) a day shows three photos, about 160 pt
+        // instead of 60.
+        while !(day.exists && day.isHittable) && swipes < 8 {
             app.swipeUp()
             swipes += 1
             // pacing: kept, the scroll comes to rest before the tap measures the element's place
@@ -1553,8 +1560,9 @@ final class AlbumistFlowUITests: XCTestCase {
         shot("64-workshop-after-split")
         let after = app.buttons["workshop.merge.after"], before = app.buttons["workshop.merge.before"]
         swipes = 0
-        // Rows of a List exist only once they are on screen.
-        while !((after.exists && after.isHittable) || (before.exists && before.isHittable)) && swipes < 4 {
+        // Rows of a List exist only once they are on screen. Since DS-14 the merge rows sit at
+        // the ends of the timeline, under taller days: up to 8 swipes.
+        while !((after.exists && after.isHittable) || (before.exists && before.isHittable)) && swipes < 8 {
             app.swipeUp()
             swipes += 1
             // pacing: kept, the scroll comes to rest before the tap measures the element's place

@@ -2,6 +2,14 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. Suche, Reise-Werkstatt, Verlauf und Beleg mit Fotos (Design-Welle 3, DS-13 bis DS-15, noch in keinem
+  Build): Die leere Suche zeigt bis zu sechs Vorschläge als Foto-Kacheln wie im Tab „Alben“ (die zwei Städte mit
+  den meisten Fotos, eine Reise, das neueste Jahr, ein Thema, eine Art), jede mit einem eigenen Foto vom iPhone;
+  ein Tippen sucht wie vorher der Wortknopf, die Suche selbst ist unverändert. „Reise anpassen“ zeigt die Reise
+  als Zeitleiste: jeder Tag mit Ort und bis zu drei größeren Fotos, Tage ohne Fotos gepunktet, die Nachbarreisen
+  zum Zusammenlegen an den Enden; Teilen und Zusammenlegen wie bisher. Im Verlauf hat jede Änderung ein
+  Titelbild aus ihren Alben, im Beleg jedes Album ein größeres (72 statt 44 Punkte); heikle Fotos nie,
+  „Vorschau ausgeblendet“, wo alle heikel sind.
 - 21.11. Videos und ruhige Platzhalter (Design-Welle 3, DS-16 und DS-18, noch in keinem Build): Videos spielen in
   der Foto-Ansicht wie in Fotos: von selbst und in Schleife, wo Bewegung erwünscht ist (nicht mit „Bewegung
   reduzieren“ oder ohne automatische Videovorschau), stumm, bis „Ton an“ die Musik anhält; darunter „Abspielen“,

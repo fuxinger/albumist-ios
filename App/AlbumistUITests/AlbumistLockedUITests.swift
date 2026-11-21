@@ -114,7 +114,8 @@ final class AlbumistLockedUITests: XCTestCase {
             UITestWait.appears(app.navigationBars["Änderungen"], "receipt of history row \(index + 1) (locked)", timeout: 10)
             let undo = app.buttons["receipt.undo"]
             var more = 0
-            while !undo.exists && more < 6 { app.swipeUp(); more += 1 }
+            // Up to 10: the receipt's album rows are taller since design wave 3 (DS-15 covers).
+            while !undo.exists && more < 10 { app.swipeUp(); more += 1 }
             if undo.exists && undo.isEnabled {
                 undo.tap()
                 if let confirm = app.buttons.matching(identifier: "Rückgängig machen").allElementsBoundByIndex.first(where: \.isHittable) {

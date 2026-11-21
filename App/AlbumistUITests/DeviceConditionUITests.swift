@@ -1131,7 +1131,8 @@ final class DeviceConditionUITests: XCTestCase {
         // the undo button below is.
         _ = UITestWait.holds(timeout: 20) { app.buttons["Liste teilen"].exists || undo.exists }
         var swipes = 0
-        while !(undo.exists && undo.isHittable) && swipes < 6 { app.swipeUp(); swipes += 1 }
+        // Up to 10: the receipt's album rows are taller since design wave 3 (DS-15 covers).
+        while !(undo.exists && undo.isHittable) && swipes < 10 { app.swipeUp(); swipes += 1 }
         guard tap(undo, "undo \(title)"), confirm("Rückgängig machen", "confirm undo of \(title)") else { return true }
         let partial = anything("Nicht alles ließ sich rückgängig machen")
         let removed = anything("Entfernte Alben und Ordner")

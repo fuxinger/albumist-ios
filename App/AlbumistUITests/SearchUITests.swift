@@ -225,6 +225,19 @@ final class AlbumistSearchUITests: XCTestCase {
         print(started ? "UI_STEP_OK search starting points" : "UI_STEP_MISSING search starting points")
         XCTAssertTrue(started, "The empty search shows no starting points")
         print("UI_FACT search starting points \(app.descendants(matching: .any).matching(identifier: "search.example").allElementsBoundByIndex.map(\.label))")
+        // Design wave 3 (DS-13): after the analysis the starting points are photo tiles as in the
+        // tab "Alben": a name with "N Fotos" as its value, two side by side (well over 140 pt
+        // each; the word chips for papers are narrower), at most six, never "Live Photos" or
+        // "HDR". They are worked out after the page opens, so the first ones may be chips.
+        let counted = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ AND value MATCHES %@",
+                                                                             "search.example", "[0-9.]+ Fotos?"))
+        func tiles() -> [XCUIElement] { counted.allElementsBoundByIndex.filter { $0.frame.width >= 140 } }
+        let tiled = UITestWait.until("photo tiles among the search's starting points", timeout: 15) { !tiles().isEmpty }
+        let shown = tiles()
+        print("UI_FACT search tiles \(shown.map { "\($0.label) | \(($0.value as? String) ?? "")" })")
+        XCTAssertTrue(tiled, "The empty search shows no photo tiles after the analysis")
+        XCTAssertLessThanOrEqual(shown.count, 6, "More than six tiles in the empty search")
+        XCTAssertFalse(shown.contains { ["Live Photos", "HDR"].contains($0.label) }, "Live Photos or HDR offered as a starting point")
         shot("s0-search-start")
         field.tap()
 

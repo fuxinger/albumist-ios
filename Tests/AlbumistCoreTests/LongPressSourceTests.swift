@@ -22,6 +22,8 @@ struct LongPressSourceTests {
     static let photoMenu = "App/Albumist/Views/Menus/PhotoMenuItems.swift"
     static let model = "App/Albumist/Model/AppModel+LongPress.swift"
     static let quickCreate = "App/Albumist/Model/AppModel+QuickCreate.swift"
+    static let overview = "App/Albumist/Views/OverviewView.swift"
+    static let photoQuestion = "App/Albumist/Views/Menus/PhotoRemovalQuestion.swift"
 
     /// The code of `path` (comments blanked, strings kept).
     static func code(_ path: String) throws -> String {
@@ -66,9 +68,26 @@ struct LongPressSourceTests {
         // The page gives its cards no covers while their photos are hidden.
         let page = Self.squeezed(try Self.body(["private func card("], in: Self.start))
         #expect(page.contains("covers:text.hidesPreview?[]:model.proposalCoverIDs(for:proposal)"), "\(page)")
-        // The page shows what the menu opens ("Anpassen", the trip workshop, "Keine Reise?").
-        let sections = try Self.body(["struct StartSections", "var body: some View"], in: Self.start)
-        #expect(sections.contains(".suggestionMenuFlows()"))
+        // The page shows what the menu opens ("Anpassen", the trip workshop, "Keine Reise?"): on
+        // its scroll view, so the question comes from the screen, not from the middle of all the
+        // cards (review C of design wave 2, M1).
+        #expect(!(try Self.code(Self.start)).contains(".suggestionMenuFlows()"), "on the cards' tall stack")
+        let overview = Self.squeezed(try Self.body(["struct OverviewView", "var body: some View"], in: Self.overview))
+        #expect(overview.contains("}.suggestionMenuFlows().background(Theme.background).navigationTitle(\"Vorschläge\")"), "\(overview)")
+        #expect(overview.components(separatedBy: ".suggestionMenuFlows()").count == 2, "once, on the scroll view")
+    }
+
+    /// The page hands its cards one object for what their menus open, kept by the page: the same
+    /// one each time the page is drawn, so handing it down redraws no card (a closure made anew
+    /// would, at every change of the analysis, now that the start page's scroll view has it).
+    @Test func thePageHandsItsCardsOneLastingWayToOpen() throws {
+        let flows = try Self.code(Self.flows)
+        #expect(flows.contains("@MainActor @Observable\nfinal class SuggestionMenuFlowAction {"))
+        #expect(flows.contains("@State private var flows = SuggestionMenuFlowAction()"))
+        #expect(flows.contains(".environment(\\.openSuggestionMenuFlow, flows)"))
+        #expect(!flows.contains("SuggestionMenuFlowAction(open:"), "a closure made anew at each drawing")
+        #expect(flows.contains(".sheet(item: $flows.adjusting)") && flows.contains(".sheet(item: $flows.reshaping)"))
+        #expect(flows.contains("presenting: flows.askingNotATrip"))
     }
 
     /// The list's cards: the same, in their state (made, the list selecting).
@@ -101,7 +120,7 @@ struct LongPressSourceTests {
         #expect(items.contains("Button(action: act)"), "the word runs the card's own action")
         #expect(items.contains("Label(card.action.title"), "the word as the card shows it")
         #expect(items.contains("open(.adjust)") && items.contains("open(.reshapeTrip)") && items.contains("open(.notATrip)"))
-        #expect(items.contains("openFlow.open(SuggestionMenuFlow(kind: kind, proposal: current))"))
+        #expect(items.contains("openFlow?.open(SuggestionMenuFlow(kind: kind, proposal: current))"))
         #expect(items.contains("model.setDecision(.reject, for: current)"))
         let notNow = try Self.body(["struct ProposalDetailView", "private func notNowButton("], in: Self.suggestions)
         #expect(notNow.contains("model.setDecision(.reject, for: proposal)"), "the suggestion's own „Nicht jetzt“")
@@ -285,14 +304,22 @@ struct LongPressSourceTests {
             #expect(type.contains("AddToAlbumSheet(assets: addingToAlbum ?? [])"), "\(place.path)")
             #expect(type.contains("IgnoreUndoBar()"), "\(place.path): „Widerrufen“ after „Ignorieren“")
         }
-        // A suggestion's photo: asked first, then taken out as "Auswählen" takes several out.
+        // A suggestion's photo: asked first, on the suggestion's scroll view beside the question
+        // for several (not from the middle of all its days; review C of design wave 2, M1), then
+        // taken out as "Auswählen" takes several out.
         let photos = try Self.body(["struct ProposalPhotosView"], in: Self.suggestions)
-        #expect(photos.contains(".confirmationDialog(\"Foto aus diesem Vorschlag entfernen?\""))
-        #expect(photos.contains("Button(\"Entfernen\", role: .destructive) { remove(id) }"))
-        #expect(photos.contains("case .removeFromSuggestion: removing = id"))
+        #expect(!photos.contains(".confirmationDialog("), "asked from the middle of all its days")
+        #expect(photos.contains("case .removeFromSuggestion: askToRemove(id)"))
         #expect(photos.contains("case .view: open(id)"))
         let detail = Self.squeezed(try Self.body(["struct ProposalDetailView", "var body: some View"], in: Self.suggestions))
-        #expect(detail.contains("}remove:{idinTask{awaitmodel.removeFromProposal([id],proposal:proposal)}}"), "\(detail)")
+        #expect(detail.contains("}askToRemove:{idinremovingPhoto=id}"), "\(detail)")
+        let several = try #require(detail.range(of: ".confirmationDialog(\"FotosausdiesemVorschlagentfernen?\""))
+        let one = try #require(detail.range(of: ".photoRemovalQuestion($removingPhoto){idinTask{awaitmodel.removeFromProposal([id],proposal:proposal)}}"))
+        #expect(several.lowerBound < one.lowerBound)
+        let question = try Self.code(Self.photoQuestion)
+        #expect(question.contains(".confirmationDialog(\"Foto aus diesem Vorschlag entfernen?\""))
+        #expect(question.contains("Button(\"Entfernen\", role: .destructive) { remove(id) }"))
+        #expect(question.contains("Text(\"Es kommt nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleibt es.\")"))
     }
 
     /// A photo the user ignored offers "Nicht mehr ignorieren" also without a state of its own

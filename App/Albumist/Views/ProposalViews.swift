@@ -482,6 +482,8 @@ struct ProposalDetailView: View {
     @State private var selecting = false
     @State private var selected: Set<AssetID> = []
     @State private var confirmRemove = false
+    /// The photo whose long press chose "Aus Vorschlag entfernen", being asked about.
+    @State private var removingPhoto: AssetID?
     /// "Fotos anzeigen": the photos of a suggestion of sensitive documents only, shown on purpose.
     @State private var revealed = false
     /// The cover shows a sharp photo, not the calm placeholder: the status bar and the bar's
@@ -609,8 +611,8 @@ struct ProposalDetailView: View {
                 ProposalPhotosView(days: days, selecting: selecting, selected: $selected, hidden: photosHidden,
                                    disabled: busy) {
                     revealed = true
-                } remove: { id in
-                    Task { await model.removeFromProposal([id], proposal: proposal) }
+                } askToRemove: { id in
+                    removingPhoto = id
                 }
                 .padding(.top, Theme.Spacing.xl)
             }
@@ -692,6 +694,10 @@ struct ProposalDetailView: View {
             }
         } message: {
             Text("Sie kommen nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleiben sie.")
+        }
+        // One photo from its long press, asked the same way here, not from the middle of its days.
+        .photoRemovalQuestion($removingPhoto) { id in
+            Task { await model.removeFromProposal([id], proposal: proposal) }
         }
         // Asked for by "Keine Reise, hier bin ich öfter" in the menu; on the screen, because the
         // menu is gone once its item is tapped.
@@ -1682,12 +1688,10 @@ struct ProposalPhotosView: View {
     /// under them).
     var disabled: Bool
     var reveal: () -> Void
-    /// Takes one photo out of the suggestion, once its long press's "Aus Vorschlag entfernen"
-    /// was confirmed (`AppModel.removeFromProposal`, as "Auswählen" takes several out).
-    var remove: (AssetID) -> Void
+    /// A photo's long press chose "Aus Vorschlag entfernen": the suggestion asks first, on its
+    /// scroll view (`photoRemovalQuestion`), and takes it out as "Auswählen" takes several out.
+    var askToRemove: (AssetID) -> Void
     @State private var viewing: PhotoViewer.Start?
-    /// The photo whose "Aus Vorschlag entfernen" is being asked about.
-    @State private var removing: AssetID?
     @Namespace private var zoom
     /// Three in a row from the narrowest iPhone (375 pt) to the widest (440 pt); more on an iPad.
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 2)]
@@ -1721,17 +1725,6 @@ struct ProposalPhotosView: View {
             PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
                 .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
-        // One photo from its long press: asked first, as "Auswählen" asks for several.
-        .confirmationDialog("Foto aus diesem Vorschlag entfernen?", isPresented: asking, titleVisibility: .visible,
-                            presenting: removing) { id in
-            Button("Entfernen", role: .destructive) { remove(id) }
-        } message: { _ in
-            Text("Es kommt nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleibt es.")
-        }
-    }
-
-    private var asking: Binding<Bool> {
-        Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })
     }
 
     /// The photo large, the suggestion's others to swipe through (a snapshot: a photo ignored
@@ -1745,7 +1738,7 @@ struct ProposalPhotosView: View {
     private func perform(_ item: PhotoMenu.Item, on id: AssetID) {
         switch item {
         case .view: open(id)
-        case .removeFromSuggestion: removing = id
+        case .removeFromSuggestion: askToRemove(id)
         // Not offered for a suggestion's photos (`PhotoMenu`): they stay behind "Ansehen" › "Info".
         case .addToAlbum, .ignore, .stopIgnoring: break
         }

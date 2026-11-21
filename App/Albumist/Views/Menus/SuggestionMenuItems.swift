@@ -26,8 +26,8 @@ import AlbumistCore
 /// (`PhotoCard`).
 struct SuggestionMenuItems: View {
     var model: AppModel
-    /// The page's sheets and question (`suggestionMenuFlows()`).
-    var openFlow: SuggestionMenuFlowAction
+    /// The page's sheets and question (`suggestionMenuFlows()`); nil on a page without them.
+    var openFlow: SuggestionMenuFlowAction?
     var proposal: AlbumProposal
     var card: ProposalCardText
     /// "✓ Angelegt": made from this card a moment ago.
@@ -126,7 +126,7 @@ struct SuggestionMenuItems: View {
     /// What the open suggestion's "…" opens, on the page, for the suggestion as it is now.
     private func open(_ kind: SuggestionMenuFlow.Kind) {
         guard let current = model.currentSuggestion(proposal) else { return }
-        openFlow.open(SuggestionMenuFlow(kind: kind, proposal: current))
+        openFlow?.open(SuggestionMenuFlow(kind: kind, proposal: current))
     }
 
     /// "Nicht jetzt" as its button does it, then said to VoiceOver in the button's words

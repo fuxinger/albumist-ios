@@ -11,7 +11,10 @@ import AlbumistEngine
 /// Its own view with plain values from the page above, so the analysis' many changes do not
 /// redraw the cards: it reads the suggestions, the decisions and the purchases. What it keeps
 /// for one visit (`StartVisit`) begins afresh each time the page appears. The shelves run from
-/// edge to edge; everything else keeps the page's margin.
+/// edge to edge; everything else keeps the page's margin. What a card's long press opens
+/// ("Anpassen", the trip workshop, "Keine Reise?") is the page's scroll view's
+/// (`suggestionMenuFlows()` in `OverviewView`), not this tall stack's (review C of design wave
+/// 2, M1).
 struct StartSections: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
@@ -82,8 +85,6 @@ struct StartSections: View {
         .onChange(of: model.quickCreateBanner?.id) { _, _ in
             if let banner = model.quickCreateBanner { visit.announced(banner.proposalID, by: banner.plan.id) }
         }
-        // What a card's long press opens: "Anpassen", the trip workshop, "Keine Reise?" (DS-06a).
-        .suggestionMenuFlows()
     }
 
     /// A new visit (`StartVisit`), which remembers at once what it shows (whatever runs first,

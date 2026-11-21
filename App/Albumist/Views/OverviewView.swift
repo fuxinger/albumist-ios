@@ -79,6 +79,10 @@ struct OverviewView: View {
             .padding(.top, Theme.Spacing.s)
             .padding(.bottom, Theme.Spacing.xl)
         }
+        // Design W2 H7: what a suggestion card's long press opens ("Anpassen", the trip workshop,
+        // "Keine Reise?"), on the scroll view, so the question comes from the screen, not from the
+        // middle of all the cards (review C of design wave 2, M1).
+        .suggestionMenuFlows()
         .background(Theme.background)
         .navigationTitle("Vorschläge")
         .navigationBarTitleDisplayMode(.large)

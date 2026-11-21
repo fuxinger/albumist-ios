@@ -146,6 +146,7 @@ struct ShareInICloudNote: View {
             Text("Das ganze Foto liegt nur in iCloud. Teilen kannst du es in der Fotos-App.")
         } icon: {
             Image(systemName: "icloud")
+                .accessibilityHidden(true)
         }
         .font(.footnote)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -3,6 +3,7 @@
 Usage: python3 .github/scripts/toolchain.py xcode [--runtime]
        python3 .github/scripts/toolchain.py xcodegen
        python3 .github/scripts/toolchain.py swiftlint
+       python3 .github/scripts/toolchain.py periphery
 
 Every Mac job calls this instead of picking "the newest Xcode" (which on image xcode-27-arm64
 20261112 is a beta, and a beta build is refused by App Store Connect). It:
@@ -22,7 +23,9 @@ checksum stops the job.
 its own: SwiftLint only reads the code, it does not build the app, so a new version must not
 count in the app fingerprint of the UI runs the way toolchain.json does). It is the statically
 linked Linux binary of the release, run in the swift container of the Linux jobs (ci.yml,
-"SwiftLint report"), which has the libsourcekitdInProc.so it loads.
+"SwiftLint report"), which has the libsourcekitdInProc.so it loads. `periphery` installs the
+pinned Periphery (unused code; macOS zip with the libIndexStore.dylib it loads) from the same file
+(code-checks.yml).
 """
 from __future__ import annotations
 
@@ -117,21 +120,27 @@ def install_swiftlint(pin: dict, dest: str, fetch=None) -> str:
     return install_zip(pin, dest, pin["binary"], "SwiftLint", fetch)
 
 
+def install_periphery(pin: dict, dest: str, fetch=None) -> str:
+    """The pinned Periphery; returns the directory of its binary (pin["binary"])."""
+    return install_zip(pin, dest, pin["binary"], "Periphery", fetch)
+
+
 def lint_pins(path: str = LINT_TOOLS) -> dict:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
-def install_and_check(pin: dict, install, folder: str, command: str, name: str) -> int:
-    """Installs, checks `<command> --version` against the pin and puts the folder on GITHUB_PATH."""
+def install_and_check(pin: dict, install, folder: str, command: str, name: str, version_args=("--version",)) -> int:
+    """Installs, checks `<command> --version` (or version_args) against the pin and puts the folder
+    on GITHUB_PATH."""
     try:
         folder = install(pin, folder)
     except ValueError as error:
         return fail(str(error))
-    version = subprocess.run([os.path.join(folder, command), "--version"], capture_output=True, text=True).stdout
+    version = subprocess.run([os.path.join(folder, command), *version_args], capture_output=True, text=True).stdout
     print(version.strip())
     if pin["version"] not in version:
-        return fail(f"{command} --version says {version.strip()!r}, pinned {name} is {pin['version']}")
+        return fail(f"{command} {' '.join(version_args)} says {version.strip()!r}, pinned {name} is {pin['version']}")
     with open(os.environ.get("GITHUB_PATH", os.devnull), "a", encoding="utf-8") as out:
         out.write(folder + "\n")
     return 0
@@ -145,6 +154,10 @@ def main(argv: list[str]) -> int:
         pin = lint_pins()["swiftlint"]
         return install_and_check(pin, install_swiftlint, os.path.join(temp, "swiftlint"), os.path.basename(pin["binary"]),
                                  "SwiftLint")
+    if argv and argv[0] == "periphery":
+        pin = lint_pins()["periphery"]
+        return install_and_check(pin, install_periphery, os.path.join(temp, "periphery"), pin["binary"], "Periphery",
+                                 version_args=("version",))
     if not argv or argv[0] != "xcode":
         print(__doc__)
         return 2

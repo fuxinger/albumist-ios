@@ -257,10 +257,11 @@ struct TripWorkshopTests {
         let noteUnderTheMergeRows = footer.contains("if explains {") && footer.contains("TripChangeWaitNote()")
         #expect(noteUnderTheMergeRows, "the merge rows wait without the note under them")
         let body = code(try #require(AppSource.body(of: ["struct TripWorkshopView", "var body"], in: workshop)))
-        let firstExplains = body.contains("neighbourSection(before, side: .before, gap: timeline.quietDaysFromBefore, explains: true)")
-            && body.contains("neighbourSection(after, side: .after, gap: timeline.quietDaysToAfter, explains: around.before == nil)")
+        let firstExplains = body.contains("neighbourSection(before, side: .before, gap: gap(to: before, side: .before), explains: true)")
+            && body.contains("neighbourSection(after, side: .after, gap: gap(to: after, side: .after), explains: around.before == nil)")
         #expect(firstExplains, "the note is said under both merge rows, or under none")
-        let underTheChanges = body.contains("changesSection(saysWhy: !mergeShown)")
+        // Also until the timeline with the merge rows is made (review M5).
+        let underTheChanges = body.contains("changesSection(saysWhy: !mergeShown || timeline == nil)")
         #expect(underTheChanges, "the changes say why they wait also when a merge row says it")
         let notes = AppSource.callSites(of: "TripChangeWaitNote(", in: workshop).count
         #expect(notes == 3, "the note under the changes, under the first merge row and in the split bar, nowhere else")

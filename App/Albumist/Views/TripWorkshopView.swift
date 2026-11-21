@@ -34,6 +34,10 @@ struct TripWorkshopView: View {
     /// trip, its neighbours and the facts (review G6: the body worked it out at every tap); nil
     /// until it is first made.
     @State private var timeline: TripTimeline.Content?
+    /// What `timeline` was made from: a merge row says the days between only from a timeline made
+    /// with that neighbour (review M5: the gap to the trip before stood beside a new neighbour
+    /// until its timeline came).
+    @State private var timelineMadeFor: TimelineInputs?
 
     /// What the timeline is made from: the trip, the trips around it and the facts' revision (the
     /// photos' dates, places and ranks come from the facts).
@@ -52,6 +56,8 @@ struct TripWorkshopView: View {
 
     var body: some View {
         let around = model.tripNeighbours(of: proposal)
+        let inputs = TimelineInputs(trip: proposal.id, photos: proposal.assetIDs.count, before: around.before?.id,
+                                    after: around.after?.id, facts: model.factsVersion)
         List {
             if let done {
                 finished(done)
@@ -70,17 +76,18 @@ struct TripWorkshopView: View {
                 // Counted from the timeline once it is made: the body sorts no photos at a tap.
                 header(timeline?.days.count ?? days.count)
                 // While the changes wait, why is said once (review G4): under the first merge row
-                // shown, else under these controls.
-                changesSection(saysWhy: !mergeShown)
+                // shown, else under these controls, also until the timeline with the merge rows is
+                // made (review M5).
+                changesSection(saysWhy: !mergeShown || timeline == nil)
                 // The trip in the order of time (DS-14), each part a section under its own heading
                 // (review G3): the trip before it, its days, the trip after it.
                 if let timeline {
                     if let before = around.before {
-                        neighbourSection(before, side: .before, gap: timeline.quietDaysFromBefore, explains: true)
+                        neighbourSection(before, side: .before, gap: gap(to: before, side: .before), explains: true)
                     }
                     daysSection(timeline)
                     if let after = around.after {
-                        neighbourSection(after, side: .after, gap: timeline.quietDaysToAfter, explains: around.before == nil)
+                        neighbourSection(after, side: .after, gap: gap(to: after, side: .after), explains: around.before == nil)
                     }
                 }
             }
@@ -110,12 +117,12 @@ struct TripWorkshopView: View {
         }
         // The timeline, made off the main thread (review G6): again for other trips around it or
         // new facts. A day chosen on the timeline of before is let go when the days moved.
-        .task(id: TimelineInputs(trip: proposal.id, photos: proposal.assetIDs.count, before: around.before?.id,
-                                 after: around.after?.id, facts: model.factsVersion)) {
+        .task(id: inputs) {
             let made = await model.tripTimeline(of: proposal, before: around.before, after: around.after)
             guard !Task.isCancelled else { return }
             if made.days.map(\.id) != timeline?.days.map(\.id) { splitIndex = nil }
             timeline = made
+            timelineMadeFor = inputs
         }
         // The controls grey and the note comes while the changes wait, and both go back by
         // themselves when the run ends (they follow the model).
@@ -350,6 +357,19 @@ struct TripWorkshopView: View {
                     Text("Für eine Reise mit Pause, zum Beispiel ein Wochenende zu Hause zwischen zwei Stationen.")
                 }
             }
+        }
+    }
+
+    /// The days without photos between this trip and `other`, its neighbour on `side`, from the
+    /// timeline made with that neighbour there: nil while the timeline shown was made for another
+    /// trip or neighbour, so a merge row never says the days to a trip it is not about (review
+    /// M5). A new revision of the facts alone keeps the days shown until the new timeline comes.
+    private func gap(to other: AlbumProposal, side: Side) -> Int? {
+        guard let timeline, let made = timelineMadeFor, made.trip == proposal.id,
+              made.photos == proposal.assetIDs.count else { return nil }
+        switch side {
+        case .before: return made.before == other.id ? timeline.quietDaysFromBefore : nil
+        case .after: return made.after == other.id ? timeline.quietDaysToAfter : nil
         }
     }
 

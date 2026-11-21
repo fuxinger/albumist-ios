@@ -37,7 +37,7 @@ struct TripTimelineSourceTests {
     /// waits (review G4); the days between the trips are said in the merge rows.
     @Test func theTripReadsInTheOrderOfTimeEachPartUnderItsOwnHeading() throws {
         let body = Self.squeezed(try Self.body(["struct TripWorkshopView", "var body"], in: Self.workshop))
-        #expect(body.contains("header(timeline?.days.count??days.count)changesSection(saysWhy:!mergeShown)iflettimeline{ifletbefore=around.before{neighbourSection(before,side:.before,gap:timeline.quietDaysFromBefore,explains:true)}daysSection(timeline)ifletafter=around.after{neighbourSection(after,side:.after,gap:timeline.quietDaysToAfter,explains:around.before==nil)}}"))
+        #expect(body.contains("header(timeline?.days.count??days.count)changesSection(saysWhy:!mergeShown||timeline==nil)iflettimeline{ifletbefore=around.before{neighbourSection(before,side:.before,gap:gap(to:before,side:.before),explains:true)}daysSection(timeline)ifletafter=around.after{neighbourSection(after,side:.after,gap:gap(to:after,side:.after),explains:around.before==nil)}}"))
         #expect(!body.contains("timelineSection(") && !body.contains("splitSection(") && !body.contains("mergeSection("))
         // The days: their heading and the hint belong to them.
         let days = Self.squeezed(try Self.body(["func daysSection("], in: Self.workshop))
@@ -64,7 +64,8 @@ struct TripTimelineSourceTests {
         for work in ["TripTimeline.days(", "TripTimeline.span(", "TripTimeline.content(", "TripTimeline.quietDays(", "funcquietDays("] {
             #expect(!view.contains(work), "\(work) in the sheet")
         }
-        #expect(view.contains(".task(id:TimelineInputs(trip:proposal.id,photos:proposal.assetIDs.count,before:around.before?.id,after:around.after?.id,facts:model.factsVersion)){letmade=awaitmodel.tripTimeline(of:proposal,before:around.before,after:around.after)guard!Task.isCancelledelse{return}ifmade.days.map(\\.id)!=timeline?.days.map(\\.id){splitIndex=nil}timeline=made}"))
+        #expect(view.contains("letinputs=TimelineInputs(trip:proposal.id,photos:proposal.assetIDs.count,before:around.before?.id,after:around.after?.id,facts:model.factsVersion)"))
+        #expect(view.contains(".task(id:inputs){letmade=awaitmodel.tripTimeline(of:proposal,before:around.before,after:around.after)guard!Task.isCancelledelse{return}ifmade.days.map(\\.id)!=timeline?.days.map(\\.id){splitIndex=nil}timeline=madetimelineMadeFor=inputs}"))
         let inputs = Self.squeezed(try Self.body(["struct TripWorkshopView", "private struct TimelineInputs"], in: Self.workshop))
         #expect(inputs == "{vartrip:AlbumistIDvarphotos:Intvarbefore:AlbumistID?varafter:AlbumistID?varfacts:Int}")
         #expect(view.contains("@Stateprivatevartimeline:TripTimeline.Content?"))
@@ -73,6 +74,23 @@ struct TripTimelineSourceTests {
         let model = Self.squeezed(try Self.body(["func tripTimeline("], in: Self.model))
         #expect(model.contains("letfacts=factsByID,ranks=previewRanks,dates=creationDates,calendar=Calendar.current"))
         #expect(model.contains("returnawaitTask.detached(priority:.userInitiated){TripTimeline.content(of:photos,before:earlier,after:later,facts:facts,ranks:ranks,dates:dates,calendar:calendar)}.value"))
+    }
+
+    /// Until the timeline is made, why the changes wait is said under them (review M5: the merge
+    /// rows that say it come with the timeline, and nothing said it before). A merge row says the
+    /// days between only from a timeline made with that neighbour: the gap to the trip before
+    /// stood beside a new neighbour until its timeline came.
+    @Test func untilItsTimelineIsMadeTheWorkshopSaysWhatItKnows() throws {
+        let body = Self.squeezed(try Self.body(["struct TripWorkshopView", "var body"], in: Self.workshop))
+        #expect(body.contains("changesSection(saysWhy:!mergeShown||timeline==nil)"))
+        #expect(body.contains("neighbourSection(before,side:.before,gap:gap(to:before,side:.before),explains:true)"))
+        #expect(body.contains("neighbourSection(after,side:.after,gap:gap(to:after,side:.after),explains:around.before==nil)"))
+        #expect(!body.contains("gap:timeline.quietDays"), "the gap of whatever timeline is shown")
+        #expect(body.contains("timeline=madetimelineMadeFor=inputs}"))
+        let gap = Self.squeezed(try Self.body(["struct TripWorkshopView", "private func gap(to"], in: Self.workshop))
+        #expect(gap == "{guardlettimeline,letmade=timelineMadeFor,made.trip==proposal.id,made.photos==proposal.assetIDs.countelse{returnnil}switchside{case.before:returnmade.before==other.id?timeline.quietDaysFromBefore:nilcase.after:returnmade.after==other.id?timeline.quietDaysToAfter:nil}}")
+        let view = Self.squeezed(try Self.code(Self.workshop))
+        #expect(view.contains("@StateprivatevartimelineMadeFor:TimelineInputs?"))
     }
 
     /// Every day after the first is the button that chooses it as the start of the second trip,

@@ -20,12 +20,12 @@ final class ThumbnailCache {
     /// asset the lookup fetches anyway: a video's thumbnail says how long it is without a fetch
     /// of its own (100,000 photos in a grid). Only videos; goes on a memory warning and is read
     /// again with the next lookup.
-    private var videoLengths: [String: Double] = [:]
+    private var videoLengths = RecentRecords<Double>(limit: ThumbnailCache.recordLimit)
     /// The side each photo's thumbnail was last kept at (DS-18): the photo view shows that
     /// thumbnail from memory while its large picture comes (`thumbnailInMemory`).
-    private var keptSides: [String: CGFloat] = [:]
-    /// More entries than any grid shows between two memory warnings: past it the records start
-    /// again (they are only a shortcut to what is in memory).
+    private var keptSides = RecentRecords<CGFloat>(limit: ThumbnailCache.recordLimit)
+    /// More entries than any grid shows between two memory warnings: past it the older half of
+    /// the records goes (they are only a shortcut to what is in memory, review F, F14).
     private static let recordLimit = 20_000
 
     static let thumbnailCostLimit = 80 * 1024 * 1024
@@ -121,9 +121,13 @@ final class ThumbnailCache {
     }
 
     /// How long the video `id` is, as the lookup found it, from memory only (DS-16); nil for a
-    /// photo or while it was not looked up.
+    /// photo or while it was not looked up. Where its record went (`recordLimit`), from its asset
+    /// while that is in memory: a thumbnail from the image cache passes no lookup that would
+    /// write the record again (review F, F14).
     func videoLength(for id: AssetID) -> VideoDuration? {
-        videoLengths[id.rawValue].flatMap { VideoDuration(seconds: $0) }
+        if let seconds = videoLengths[id.rawValue] { return VideoDuration(seconds: seconds) }
+        guard let asset = assets.object(forKey: id.rawValue as NSString), asset.mediaType == .video else { return nil }
+        return VideoDuration(seconds: asset.duration)
     }
 
     private static func thumbnailKey(_ id: AssetID, _ side: CGFloat) -> NSString {
@@ -154,7 +158,6 @@ final class ThumbnailCache {
     private func keep(_ image: UIImage, id: AssetID, side: CGFloat) {
         let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
         cache.setObject(image, forKey: Self.thumbnailKey(id, side), cost: cost)
-        if keptSides.count >= Self.recordLimit { keptSides.removeAll() }
         keptSides[id.rawValue] = side
     }
 
@@ -285,7 +288,6 @@ final class ThumbnailCache {
                     missing[id] = nil
                     // A video's length comes with its asset (DS-16): no fetch of its own.
                     if asset.value.mediaType == .video {
-                        if videoLengths.count >= Self.recordLimit { videoLengths.removeAll() }
                         videoLengths[id] = asset.value.duration
                     }
                 } else {

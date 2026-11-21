@@ -440,6 +440,17 @@ struct VideoViewerSourceTests {
         #expect(lookUp.contains("videoLengths[id] = asset.value.duration"))
         let length = try #require(AppSource.body(of: "func videoLength(for id: AssetID) -> VideoDuration?", in: thumbnails))
         #expect(!length.contains("await") && length.contains("videoLengths[id.rawValue]"))
+        // The records keep what was looked at last: past their limit the older half goes, not
+        // all (review F, F14). Where a record went, the length comes from the asset still in
+        // memory: a thumbnail from the image cache passes no lookup that would write it again.
+        #expect(thumbnails.contains("private var videoLengths = RecentRecords<Double>(limit: ThumbnailCache.recordLimit)"))
+        #expect(thumbnails.contains("private var keptSides = RecentRecords<CGFloat>(limit: ThumbnailCache.recordLimit)"))
+        for owner in ["private func keep(", "private func lookUpWaiting(", "private func lookUpAsset("] {
+            let body = try #require(AppSource.body(of: owner, in: thumbnails))
+            #expect(!body.contains("removeAll()"), "\(owner): the records emptied whole")
+        }
+        #expect(Self.inOrder(["if let seconds = videoLengths[id.rawValue]", "assets.object(forKey: id.rawValue as NSString)",
+                              "asset.mediaType == .video", "VideoDuration(seconds: asset.duration)"], in: length), "\(length)")
         // Gone with the assets on a memory warning.
         let start = try #require(AppSource.body(of: ["final class ThumbnailCache", "init()"], in: thumbnails))
         #expect(start.contains("$0.videoLengths.removeAll()") && start.contains("$0.keptSides.removeAll()"))

@@ -1774,6 +1774,13 @@ def perf_report(name: str, text: str, summary: str | None = None) -> list[dict]:
     """UI_PERF_VALUE lines and a table in the job summary. Report only (owner 16.11.: generous
     limits or none): nothing here makes the run red."""
     values = perf_values(text)
+    if "PerformanceUITests" in text and not any(v["test"] != "own" for v in values):
+        # XCTest's own values were not recognised (UI run 44875998902: only the analysis time
+        # came through): the raw lines, so the next run shows their format.
+        raw = [line.strip() for line in text.splitlines() if " measured " in line or "XCTMetric" in line][:12]
+        print(f"UI_PERF_RAW {name} no XCTest values recognised; {len(raw)} line(s) with 'measured':", flush=True)
+        for line in raw:
+            print(f"UI_PERF_RAW {line[:400]}", flush=True)
     for v in values:
         rsd = f", spread {v['rsd']:.1f} %" if v["rsd"] is not None else ""
         print(f"UI_PERF_VALUE {name} {v['test']} {v['metric']}: {v['value']:g}{rsd}", flush=True)

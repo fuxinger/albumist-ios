@@ -332,6 +332,15 @@ class PerfReportTests(unittest.TestCase):
         self.assertIn("UI_PERF_VALUE flow-full own analysis (s): 287.4", out.getvalue())
         self.assertNotIn("::error", out.getvalue())
 
+    def test_unrecognised_xctest_lines_are_printed_raw(self):
+        text = "Test Case '-[AlbumistUITests.PerformanceUITests test1_LaunchTime]' passed\nsome new measured format 1.2 s\nUI_PERF analysis 150.0 s"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            ui_tests.perf_report("flow-full", text, summary="")
+        self.assertIn("UI_PERF_RAW some new measured format 1.2 s", out.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            ui_tests.perf_report("flow-full", self.LOG, summary="")
+        self.assertNotIn("UI_PERF_RAW", out.getvalue())
+
     def test_no_values_no_table(self):
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, "summary.md")

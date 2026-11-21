@@ -161,6 +161,8 @@ struct ProposalListView: View {
             let banner = model.quickCreateBanner?.proposalID
             made = made.filter { $0.key == banner }
         }
+        // What a card's long press opens: "Anpassen", the trip workshop, "Keine Reise?" (DS-06a).
+        .suggestionMenuFlows()
     }
 
     private var columns: [GridItem] {
@@ -254,6 +256,8 @@ struct ProposalListView: View {
 /// Photos will show it, its status, and its one action, or a tick while the list selects.
 private struct ProposalListCard: View {
     @Environment(AppModel.self) private var model
+    /// The list's sheets and question for the long press (`suggestionMenuFlows()`).
+    @Environment(\.openSuggestionMenuFlow) private var openFlow
     var proposal: AlbumProposal
     /// Its words (`AppModel.proposalCard`), made once for the whole list.
     var card: ProposalCardText
@@ -286,12 +290,37 @@ private struct ProposalListCard: View {
 
     /// The photo card, ticked while the list selects and the card is chosen.
     private var photoCard: some View {
-        PhotoCard(coverIDs: model.proposalCoverIDs(for: proposal), title: Text(verbatim: card.title),
+        PhotoCard(coverIDs: covers, title: Text(verbatim: card.title),
                   subtitle: card.styledSubtitle, hidesPreview: card.hidesPreview,
                   placeholderSymbol: proposal.placeholderSymbol, onOpen: opens) {
             cardAction
+        } menu: {
+            menuItems
+        } preview: {
+            menuPreview
         }
         .selected(selecting && isSelected)
+    }
+
+    /// The cover's candidates; none while its photos are hidden (every one a sensitive document).
+    private var covers: [AssetID] {
+        card.hidesPreview ? [] : model.proposalCoverIDs(for: proposal)
+    }
+
+    /// The long press (design wave 2, DS-06a; draft E4): the card's word first, doing what its
+    /// button does, then what the open suggestion's "…" offers; nothing while its album is made,
+    /// once it is made, or while the list selects.
+    private var menuItems: SuggestionMenuItems {
+        SuggestionMenuItems(model: model, openFlow: openFlow, proposal: proposal, card: card, made: made,
+                            working: model.quickCreating == proposal.id,
+                            waits: model.quickCreating != nil && model.quickCreating != proposal.id,
+                            selecting: selecting, act: { act(card.action) })
+    }
+
+    /// What the long press lifts: the suggestion large, as an album's long press shows the album.
+    private var menuPreview: SuggestionPreview {
+        SuggestionPreview(covers: covers, hidesPreview: card.hidesPreview, title: card.title, line: card.styledSubtitle,
+                          placeholderSymbol: proposal.placeholderSymbol)
     }
 
     /// The card's body opens the suggestion, or ticks it while the list selects (`onOpen`: its
@@ -933,7 +962,7 @@ struct ProposalDetailView: View {
                 .accessibilityIdentifier("proposal.oftenHere.no")
             // Why a button waits (design review N8 found the two buttons behaving differently
             // without a word why): "Ja" plans the trips anew, "Nein" changes nothing.
-            if let reason = oftenHereWaitReason(askedOnTheCard: true) {
+            if let reason = Self.oftenHereWaitReason(model, askedOnTheCard: true) {
                 Text(reason)
                     .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -943,8 +972,8 @@ struct ProposalDetailView: View {
 
     /// Why "Ja, hier bin ich öfter" on the question card (and during a change in "Dein
     /// Zuhause" also "Nein"), or "Keine Reise, hier bin ich öfter" on a trip, waits; nil when it
-    /// can be tapped.
-    private func oftenHereWaitReason(askedOnTheCard: Bool) -> LocalizedStringKey? {
+    /// can be tapped. Also the reason in a card's long press (`SuggestionMenuItems`).
+    static func oftenHereWaitReason(_ model: AppModel, askedOnTheCard: Bool) -> LocalizedStringKey? {
         if model.homeChangeRunning {
             return LocalizedStringKey("Gleich wieder möglich: Albumist passt gerade die Vorschläge an deine Änderung in „Dein Zuhause“ an.")
         }
@@ -1300,7 +1329,7 @@ struct ProposalDetailView: View {
                             Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
                             // Why it waits, as on the question card: a second Text in the label
                             // is the menu item's second line (screenshot 63b-trip-menu-analysis).
-                            if let reason = oftenHereWaitReason(askedOnTheCard: false) {
+                            if let reason = Self.oftenHereWaitReason(model, askedOnTheCard: false) {
                                 Text(reason)
                             }
                         }
@@ -1319,7 +1348,7 @@ struct ProposalDetailView: View {
     /// visited too rarely for the question (a semester abroad, a new second home). Not while
     /// the question card asks it.
     private var offersOftenHere: Bool {
-        model.recurringPlaceQuestion(for: proposal) == nil && model.canMarkRecurringPlace(proposal)
+        model.offersNotATrip(proposal)
     }
 
     // MARK: The preview

@@ -1,0 +1,132 @@
+import SwiftUI
+import AlbumistCore
+
+/// The long press on a suggestion's card (design wave 2, DS-06a; draft E4 "lang drücken": "Auf
+/// einer Vorschlags-Karte zeigt es dieselben Punkte wie „…“ im Vorschlag"): the items
+/// `SuggestionMenu` decides, each going the way that exists for it, never around it.
+///
+/// - The card's word ("Anlegen", "Ergänzen …", "Benennen …", "Ansehen …") runs the card's own
+///   action (`act`): "Anlegen" at once with its banner only where the button does it
+///   (`quickCreateAtOnce`), the purchase sheet or the suggestion otherwise, "Ergänzen …" the
+///   preview first.
+/// - "Anpassen", "Reise teilen oder zusammenlegen" and "Keine Reise, hier bin ich öfter" open
+///   what the open suggestion's "…" opens, on the page (`suggestionMenuFlows()`): its sheets, and
+///   the question before "Keine Reise", which waits and says why as it does there.
+/// - "Nicht jetzt" sets the suggestion aside as its button does; photos and albums stay.
+///
+/// Reads the model only when the menu is drawn, so a card is as cheap to build as before. The
+/// card hands in the model and the page's ways: what a menu shows is read from nothing of the
+/// environment's (the system draws the menu, and VoiceOver reads its items, apart from the card).
+/// The card's body has the same items as actions for VoiceOver, Voice Control and Switch Control
+/// (`PhotoCard`).
+struct SuggestionMenuItems: View {
+    var model: AppModel
+    /// The page's sheets and question (`suggestionMenuFlows()`).
+    var openFlow: SuggestionMenuFlowAction
+    var proposal: AlbumProposal
+    var card: ProposalCardText
+    /// "✓ Angelegt": made from this card a moment ago.
+    var made: Bool
+    /// Its album is being made, or its preview prepared.
+    var working: Bool
+    /// Another card's album is being made, or its preview prepared.
+    var waits: Bool
+    /// The list selects suggestions.
+    var selecting = false
+    /// What the card's button does.
+    var act: () -> Void
+
+    var body: some View {
+        let menu = model.suggestionMenu(for: proposal, action: card.action, made: made, working: working,
+                                        waits: waits, selecting: selecting)
+        ForEach(Array(menu.sections.enumerated()), id: \.offset) { index, section in
+            if index > 0 {
+                Divider()
+            }
+            ForEach(section) { entry in
+                item(entry)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func item(_ entry: SuggestionMenu.Entry) -> some View {
+        switch entry.item {
+        case .action:
+            actionItem
+                .disabled(!entry.isEnabled)
+        case .adjust:
+            adjustItem
+        case .reshapeTrip:
+            reshapeItem
+        case .notATrip:
+            notATripItem
+                .disabled(!entry.isEnabled)
+        case .notNow:
+            notNowItem
+        }
+    }
+
+    /// The card's word, as its button shows it.
+    private var actionItem: some View {
+        Button(action: act) {
+            Label(card.action.title, systemImage: card.action.menuSymbol)
+        }
+        .accessibilityIdentifier("suggestionMenu.action")
+    }
+
+    private var adjustItem: some View {
+        Button {
+            openFlow.open(SuggestionMenuFlow(kind: .adjust, proposal: proposal))
+        } label: {
+            Label("Anpassen", systemImage: "slider.horizontal.3")
+        }
+        .accessibilityIdentifier("suggestionMenu.adjust")
+    }
+
+    private var reshapeItem: some View {
+        Button {
+            openFlow.open(SuggestionMenuFlow(kind: .reshapeTrip, proposal: proposal))
+        } label: {
+            Label("Reise teilen oder zusammenlegen", systemImage: "scissors")
+        }
+        .accessibilityIdentifier("suggestionMenu.reshapeTrip")
+    }
+
+    /// Asked first ("Keine Reise?"), as in the open suggestion. While it waits, why, in the
+    /// suggestion's words: a second Text in the label is the item's second line.
+    private var notATripItem: some View {
+        Button {
+            openFlow.open(SuggestionMenuFlow(kind: .notATrip, proposal: proposal))
+        } label: {
+            Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
+            if let reason = ProposalDetailView.oftenHereWaitReason(model, askedOnTheCard: false) {
+                Text(reason)
+            }
+        }
+        .accessibilityIdentifier("suggestionMenu.notATrip")
+    }
+
+    /// Takes only the suggestion away, as its "Nicht jetzt" does (no question: it can be made
+    /// from "Nicht jetzt" any time).
+    private var notNowItem: some View {
+        Button {
+            model.setDecision(.reject, for: proposal)
+        } label: {
+            Label("Nicht jetzt", systemImage: "xmark.circle")
+        }
+        .accessibilityIdentifier("suggestionMenu.notNow")
+    }
+}
+
+extension ProposalCardAction {
+    /// The symbol of the card's word in its long press's menu.
+    var menuSymbol: String {
+        switch self {
+        case .create: "rectangle.stack.badge.plus"
+        case .add: "photo.badge.plus"
+        case .name: "pencil"
+        case .look: "eye"
+        }
+    }
+}

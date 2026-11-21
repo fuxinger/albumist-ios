@@ -82,6 +82,8 @@ struct StartSections: View {
         .onChange(of: model.quickCreateBanner?.id) { _, _ in
             if let banner = model.quickCreateBanner { visit.announced(banner.proposalID, by: banner.plan.id) }
         }
+        // What a card's long press opens: "Anpassen", the trip workshop, "Keine Reise?" (DS-06a).
+        .suggestionMenuFlows()
     }
 
     /// A new visit (`StartVisit`), which remembers at once what it shows (whatever runs first,
@@ -356,14 +358,36 @@ struct StartProposalCard: View {
     var style: PhotoCardStyle
     var onOpen: () -> Void
     var onAction: () -> Void
+    /// For the long press's menu, which reads them only when it is drawn.
+    @Environment(AppModel.self) private var model
+    @Environment(\.openSuggestionMenuFlow) private var openFlow
 
     var body: some View {
         PhotoCard(coverIDs: covers, title: Text(verbatim: text.title), subtitle: text.styledSubtitle,
                   hidesPreview: text.hidesPreview, aspectRatio: style == .large ? 2 : 3.0 / 2.0, style: style,
                   placeholderSymbol: proposal.kind.area.symbol, onOpen: onOpen) {
             button
+        } menu: {
+            menuItems
+        } preview: {
+            menuPreview
         }
         .accessibilityIdentifier("suggestion.card.\(made ? "made" : text.action.kind)")
+    }
+
+    /// The long press (design wave 2, DS-06a; draft E4): the card's word first, doing what its
+    /// button does, then what the open suggestion's "…" offers; nothing while it works or once
+    /// it is made. Each part a typed property of its own, so Xcode type-checks the card at once.
+    private var menuItems: SuggestionMenuItems {
+        SuggestionMenuItems(model: model, openFlow: openFlow, proposal: proposal, card: text, made: made,
+                            working: working, waits: waits, act: onAction)
+    }
+
+    /// What the long press lifts: the suggestion large, as an album's long press shows the album,
+    /// "Vorschau ausgeblendet" where the card hides its photos (the page hands it no covers then).
+    private var menuPreview: SuggestionPreview {
+        SuggestionPreview(covers: covers, hidesPreview: text.hidesPreview, title: text.title, line: text.styledSubtitle,
+                          placeholderSymbol: proposal.kind.area.symbol)
     }
 
     @ViewBuilder

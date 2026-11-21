@@ -182,6 +182,7 @@ enum UITestWait {
             if index > 0 {
                 print("UI_FLAKY_RETRY \(testID(test)) app still in the foreground (state \(app.state.rawValue)) \(Int(Date().timeIntervalSince(pressed))) s after the Home press \(why), tried: \(way.name)")
             }
+            clearSystemAlert(index == 0 ? "before the Home press \(why)" : "before the \(way.name) \(why)")
             if index < 2 {
                 XCUIDevice.shared.press(.home)
             } else {
@@ -207,6 +208,31 @@ enum UITestWait {
         // pacing: the minimum time in the background, counted from when iOS reported it
         if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
         return reached
+    }
+
+    /// A system alert in front of the app takes a Home press for itself: SpringBoard closes the
+    /// alert and the app stays in the foreground. In the full UI runs of 20.11. (44790864148,
+    /// 44814382842, 44828248004) every first Home press of the suite (5 of 5 per run) left the
+    /// app in the foreground and every second one worked within 1.4 s; each press came seconds
+    /// after a run the user started (rebuild, disk full, backup, analysis), which is when the app
+    /// asks for notifications (`ContinuedAnalysis.requestNotificationPermission`), and no test of
+    /// those groups had answered that question before. A Home press closes it unanswered, so
+    /// iOS asks again at the next run. The notification question is answered here as everywhere
+    /// in the UI tests ("Nicht erlauben", A10); any other system alert is only named, never
+    /// answered, because the tests that expect one (deleting albums, photo access) answer it
+    /// themselves.
+    static func clearSystemAlert(_ when: String) {
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        guard alert.exists else { return }
+        let title = alert.label
+        print("UI_FACT system alert in front \(when): \(title)")
+        let aboutNotifications = ["Notification", "Mitteilung"].contains { title.localizedCaseInsensitiveContains($0) }
+        guard aboutNotifications else { return }
+        for label in ["Nicht erlauben", "Don’t Allow", "Don't Allow"] where alert.buttons[label].exists {
+            alert.buttons[label].tap()
+            print("UI_STEP_OK notification question answered (don't allow) \(when)")
+            return
+        }
     }
 
     /// Brings `app` back to the front and waits until iOS has it there. On a starved CI Mac

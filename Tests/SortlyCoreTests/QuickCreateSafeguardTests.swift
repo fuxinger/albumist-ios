@@ -17,6 +17,7 @@ import SortlyTestSupport
 ///   suggestion the analysis no longer had.
 /// - Finding 11: "Widerrufen" did not hold the turn while it checked whether the album is deleted,
 ///   and an "Anlegen" meanwhile ended the undo without a word.
+/// - The App Store rating question could cover the banner right after "Anlegen".
 @Suite("Quick create: where and when it may make an album")
 struct QuickCreateSafeguardTests {
     static let model = "App/Sortly/Model/AppModel+QuickCreate.swift"
@@ -241,5 +242,17 @@ struct QuickCreateSafeguardTests {
         let undo = try Self.body("func undoQuickCreate(", in: Self.model)
         let replaced = try Self.between("guard state.banner?.id == banner.id else {", "return", in: undo)
         #expect(replaced.contains("message = .busy"), "the undo ends without a word")
+    }
+
+    // MARK: The rating question
+
+    /// The App Store rating question never covers the banner: it waits while one shows, and
+    /// asks nothing while it is still there.
+    @Test func theRatingQuestionWaitsForTheBanner() throws {
+        let ask = try Self.body("private func askForRatingIfDue()", in: Self.tabs)
+        #expect(ask.contains("model.quickCreateBanner != nil"), "the wait does not know the banner")
+        let confirm = try #require(ask.range(of: "confirm("))
+        let guarded = try #require(ask.range(of: "guard model.quickCreateBanner == nil else { return }"))
+        #expect(guarded.lowerBound < confirm.lowerBound)
     }
 }

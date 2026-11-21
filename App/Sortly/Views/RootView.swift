@@ -157,22 +157,25 @@ struct MainTabs: View {
     }
 
     /// Waits until the screen after the result has settled, and briefly for the check for new
-    /// photos that follows every plan; then asks if `ReviewPromptPolicy` still allows it. A newer
+    /// photos that follows every plan and for the banner after "Anlegen" (the question would
+    /// cover its "Widerrufen"); then asks if `ReviewPromptPolicy` still allows it. A newer
     /// moment, Albumist leaving the screen, or the tabs going away cancels the wait; a wait that
-    /// ran long (`ReviewPromptPolicy.momentLasts`) asks nothing. iOS decides whether the question
-    /// appears (at most three times a year); Albumist never shows a rating screen of its own.
+    /// ran long (`ReviewPromptPolicy.momentLasts`), or a banner still there, asks nothing. iOS
+    /// decides whether the question appears (at most three times a year); Albumist never shows a
+    /// rating screen of its own.
     private func askForRatingIfDue() async {
         guard let moment = ReviewPrompt.shared.due else { return }
         do {
             try await Task.sleep(for: ReviewPromptPolicy.delay)
             var waited = Duration.zero
-            while model.analysis.isRunning && waited < ReviewPromptPolicy.analysisWait {
+            while (model.analysis.isRunning || model.quickCreateBanner != nil) && waited < ReviewPromptPolicy.analysisWait {
                 try await Task.sleep(for: .milliseconds(500))
                 waited += .milliseconds(500)
             }
         } catch {
             return
         }
+        guard model.quickCreateBanner == nil else { return }
         if ReviewPrompt.shared.confirm(moment, model: model) { requestReview() }
     }
 }

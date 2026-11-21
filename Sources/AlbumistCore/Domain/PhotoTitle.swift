@@ -7,9 +7,11 @@ import Foundation
 ///
 /// Day and time are those of the clock where the photo was taken (decision of 19.11.2026,
 /// "Ortszeit am Aufnahmeort wie Apple Fotos", `LocalTime`): a photo taken in New York at 23:00
-/// says 23:00 on an iPhone set to German time. The days of the last week say "Heute", "Gestern"
-/// or their weekday, older days their date, with the year only when it is not this year; a day
-/// after today (a camera clock set wrong, a photo from Tokyo) says its date, never "Morgen".
+/// says 23:00 on an iPhone set to German time. "Heute" and "Gestern" are read on that same clock
+/// (review D, M1: a photo taken a minute ago in another zone said its date). The days of the
+/// last week say "Heute", "Gestern" or their weekday, older days their date, with the year only
+/// when it is not this year; a day after today on that clock (a camera clock set wrong) says its
+/// date, never "Morgen".
 ///
 /// Only a place from the photo's location or one the user chose counts (`AssetFacts.gpsPlace`):
 /// one guessed from the picture says nothing about where it was taken. Names stay whole here;
@@ -39,7 +41,8 @@ public struct PhotoTitle: Equatable, Sendable {
     ///   - date: The capture instant; nil when the photo has none.
     ///   - zone: The zone of the clock where it was taken (`AssetFacts.timeZone`); nil: the
     ///     iPhone's zone counts, as for facts made without zones.
-    ///   - now: This moment; `currentZone` the iPhone's zone, whose day is "Heute".
+    ///   - now: This moment: "Heute" is its day on the photo's clock (`zone`, else
+    ///     `currentZone`, the iPhone's zone).
     public init(date: Date?, zone: TimeZone?, place: PlaceComponents?, now: Date, currentZone: TimeZone,
                 words: ProposalWords = .german, clock: Clock? = nil) {
         let placeName = Self.placeName(place)
@@ -48,8 +51,9 @@ public struct PhotoTitle: Equatable, Sendable {
             self.init(title: title, subtitle: nil, parts: [title])
             return
         }
-        let wallClock = LocalTime.wallClock(date, in: zone ?? currentZone)
-        let today = CalendarDay(wallClock: LocalTime.wallClock(now, in: currentZone))
+        let clockZone = zone ?? currentZone
+        let wallClock = LocalTime.wallClock(date, in: clockZone)
+        let today = CalendarDay(wallClock: LocalTime.wallClock(now, in: clockZone))
         let day = Self.day(CalendarDay(wallClock: wallClock), today: today, words: words)
         let time = Self.time(wallClock, clock: clock ?? (words.isGerman ? .twentyFourHour : .twelveHour))
         if let placeName {

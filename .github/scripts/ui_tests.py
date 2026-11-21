@@ -1563,7 +1563,8 @@ def hang_report(name: str, log_path: str, gate: dict, summary: str | None = None
     if path:
         counts = ", ".join(f"{k} {len(kinds.get(k, []))}" for k in HANG_KINDS)
         with open(path, "a", encoding="utf-8") as out:
-            out.write(f"\n**Hangs ≥ {settings['limit_ms']} ms ({name}, mode {settings['mode']}):** {counts}\n")
+            out.write(f"\n**Hangs ≥ {settings['limit_ms']} ms ({name}, mode {settings['mode']}; measured up to "
+                      f"{MAIN_HANG_SLACK_MS} ms short, so counted from {settings['limit_ms'] - MAIN_HANG_SLACK_MS} ms):** {counts}\n")
             if rows:
                 out.write("\n| Count | Longest | Status | Sections | Albumist frames |\n|---|---|---|---|---|\n")
                 out.write("\n".join(rows[:25]) + "\n")
@@ -1665,7 +1666,7 @@ def mtc_dylib(udid: str, run=sh, exists=os.path.exists) -> str:
     return candidate if candidate and exists(candidate) else ""
 
 
-def mtc_preflight(udid: str, dylib: str, run=sh, sleep=time.sleep) -> bool:
+def mtc_preflight(udid: str, dylib: str, run=sh, sleep=time.sleep, retried: bool = False) -> bool:
     """Launches a system app with the checker inserted and sees it still running after 5 s: a
     library that cannot load stops every process it is inserted into, and the UI tests would
     then fail at every launch, looking like a simulator failure. False: run without it."""
@@ -1681,6 +1682,11 @@ def mtc_preflight(udid: str, dylib: str, run=sh, sleep=time.sleep) -> bool:
         else:
             os.environ[env_name] = previous
     match = re.search(r":\s*(\d+)\s*$", out.strip())
+    if (status or not match) and not retried:
+        # A simulator still settling after its boot: once more after a pause.
+        print(f"UI_MTC_PREFLIGHT launch failed, again in 30 s ({out.strip()[-200:]})", flush=True)
+        sleep(30)
+        return mtc_preflight(udid, dylib, run, sleep, retried=True)
     if status or not match:
         print(f"UI_MTC_PREFLIGHT launch failed ({out.strip()[-300:]})", flush=True)
         return False
@@ -1748,7 +1754,12 @@ def quality_gates(name: str, system_log_path: str, console: str, gate: dict) -> 
     except Exception as error:  # noqa: BLE001 - a broken report must not hide the test result
         print(f"::warning title=UI {name}::hang and Main Thread Checker report failed: {error!r}", flush=True)
         return False
-    red = (gate["hangs"]["mode"] == "fail" and new_hangs > 0) or (gate["main_thread_checker"]["mode"] == "fail" and new_mtc > 0)
+    checker = gate["main_thread_checker"]
+    # In fail mode a group that ran without the checker has no verdict on it: red, never a silent green.
+    unchecked = checker["mode"] == "fail" and checker.get("inject", True) and not MTC_DYLIB
+    if unchecked:
+        print(f"::error title=UI {name} Main Thread Checker::the group ran without the checker (UI_MTC_DYLIB)", flush=True)
+    red = (gate["hangs"]["mode"] == "fail" and new_hangs > 0) or (checker["mode"] == "fail" and new_mtc > 0) or unchecked
     if red:
         print(f"UI_QUALITY_GATE {name} red (hangs {new_hangs}, Main Thread Checker {new_mtc})", flush=True)
     return red

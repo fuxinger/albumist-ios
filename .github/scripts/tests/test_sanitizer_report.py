@@ -89,7 +89,8 @@ class ReportTests(unittest.TestCase):
         # Seen on Linux 21.11.: the wall-clock limit of this test fails only under TSan.
         log = ("✘ Test placeHeavyLibraryMatchesQuickly() recorded an issue at DecisionLifecycleTests.swift:662:9: "
                "Expectation failed: (seconds → 13.872977888000001) < (5 → 5.0)\n"
-               "✘ Test placeHeavyLibraryMatchesQuickly() failed after 14.1 seconds with 1 issue.\n")
+               "✘ Test placeHeavyLibraryMatchesQuickly() failed after 14.1 seconds with 1 issue.\n"
+               "✘ Test run with 1568 tests in 204 suites failed after 1418.667 seconds with 7 issues.\n")
         status, out = self.run_main(["--tests", "failure"], {"core.log": log})
         self.assertEqual(status, 0)
         self.assertIn("1 test(s) failed under TSan", out)
@@ -103,6 +104,10 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(status, 1)
         status, _ = self.run_main(["--tests", "failure"], {"core.log": "TEST_HANG x() running for 2700 s\n✘ Test y() failed\n"})
         self.assertEqual(status, 1)
+        # Stopped at the step's time limit: failed tests in the log but no end of the run.
+        status, out = self.run_main(["--tests", "failure"], {"core.log": "✘ Test y() failed after 1 seconds with 1 issue.\n"})
+        self.assertEqual(status, 1)
+        self.assertIn("never reported its end", out)
 
     def test_a_race_is_red_even_when_every_test_passed(self):
         status, _ = self.run_main(["--tests", "success"], {"core.log": RACE})

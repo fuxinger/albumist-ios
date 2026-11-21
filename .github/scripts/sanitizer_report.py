@@ -156,6 +156,9 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
     if tests != "success":
         crashes, failed = test_findings(logs)
+        finished = any(re.search(r"Test run with \d+ tests?.* (?:passed|failed)|Executed \d+ tests?", t) for t in logs.values())
+        if not finished:
+            crashes.append("the test run never reported its end (stopped at the step's time limit?)")
         if crashes or not logs or not failed:
             # A crash, no log, or a failed step without a failed test (the build, a hang): red.
             red = True

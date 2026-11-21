@@ -237,9 +237,10 @@ final class MainThreadWatch: @unchecked Sendable {
     /// The marked sections seen from 150 ms into the current ping (the hang line's, at most 4;
     /// `seenInStall` keeps its 0.5 s for the stall lines as before).
     private var hangSections: [String] = []
-    /// The watch's own sleep overran while the current ping waited: the whole process got no
-    /// time (a busy Mac), so the stack says nothing (`HangKind.starved`).
-    private var starvedInPing = false
+    /// How long the watch's own sleep overran while the current ping waited (s): the whole
+    /// process got no time then (a busy Mac). Over half the wait, the stack says nothing about
+    /// who blocked the main thread (`HangKind.starved`).
+    private var starvedInPing: Double = 0
     /// The app has been foreground-active at least once (a hang before is part of the start).
     private var wasActive = false
     /// The watch's tick: a hang of 250 ms is seen within 50 ms (it was 0.2 s before
@@ -375,9 +376,9 @@ final class MainThreadWatch: @unchecked Sendable {
                 inactiveInStall = !active
                 hangStack = nil
                 hangSections = []
-                starvedInPing = false
-            } else if slept >= Self.tick + 0.15 {
-                starvedInPing = true
+                starvedInPing = 0
+            } else if slept >= Self.tick + 0.05 {
+                starvedInPing += slept - Self.tick
             }
             let needsHangStack = pending != nil && hangStack == nil
             let waited = pending.map { Self.seconds(from: $0, to: now) } ?? 0
@@ -429,7 +430,7 @@ final class MainThreadWatch: @unchecked Sendable {
         let work = workInPing
         let addresses = hangStack ?? []
         let hangNames = hangSections.isEmpty ? "unmarked" : hangSections.joined(separator: ", ")
-        let starved = starvedInPing
+        let starved = starvedInPing >= waited / 2
         let started = wasActive
         hangStack = nil
         lock.unlock()

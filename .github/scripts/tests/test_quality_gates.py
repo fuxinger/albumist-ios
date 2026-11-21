@@ -175,14 +175,21 @@ class GateTests(unittest.TestCase):
             with open(log, "w") as f:
                 f.write(SYSTEM_LOG)
             env = dict(os.environ)
+            old = ui_tests.MTC_DYLIB
             os.environ.pop("GITHUB_STEP_SUMMARY", None)
             try:
+                ui_tests.MTC_DYLIB = "/R/usr/lib/libMainThreadChecker.dylib"
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.assertFalse(ui_tests.quality_gates("g", log, CONSOLE, gate()))
                     self.assertTrue(ui_tests.quality_gates("g", log, CONSOLE, gate(hangs="fail")))
                     self.assertTrue(ui_tests.quality_gates("g", log, CONSOLE, gate(mtc="fail")))
                     self.assertFalse(ui_tests.quality_gates("g", log, "", gate(mtc="fail")))
+                    # In fail mode a group without the checker is red, never a silent green.
+                    ui_tests.MTC_DYLIB = ""
+                    self.assertTrue(ui_tests.quality_gates("g", log, "", gate(mtc="fail")))
+                    self.assertFalse(ui_tests.quality_gates("g", log, "", gate()))
             finally:
+                ui_tests.MTC_DYLIB = old
                 os.environ.clear()
                 os.environ.update(env)
 
@@ -232,7 +239,10 @@ class MacSideTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertTrue(ui_tests.mtc_preflight("U", "/R/lib.dylib", run(True), sleep=lambda s: None))
             self.assertFalse(ui_tests.mtc_preflight("U", "/R/lib.dylib", run(False), sleep=lambda s: None))
-            self.assertFalse(ui_tests.mtc_preflight("U", "/R/lib.dylib", lambda cmd, **kw: (1, "error"), sleep=lambda s: None))
+            tries = []
+            self.assertFalse(ui_tests.mtc_preflight("U", "/R/lib.dylib", lambda cmd, **kw: tries.append(cmd) or (1, "error"),
+                                                    sleep=lambda s: None))
+            self.assertEqual(len(tries), 2)  # once more after a pause, then without the checker
         launch = [c for c in calls if c[0][:3] == ["xcrun", "simctl", "launch"]][0]
         self.assertEqual(launch[1], "/R/lib.dylib")  # inserted into the launched app only
         self.assertNotIn("SIMCTL_CHILD_DYLD_INSERT_LIBRARIES", os.environ)

@@ -15,6 +15,12 @@ struct ResultCoverSources: Equatable {
 /// What the moments of design wave 2 need from the model (Scheibe 3): the covers the result lays
 /// on its stack after a run (draft E3, `ResultCoverStack`). Kept apart from `AppModel.swift`.
 extension AppModel {
+    /// The albums Albumist made (its records): the result never calls them the user's own
+    /// ("deiner Alben", `ResultHeadline`).
+    var albumistAlbums: Set<CollectionID> {
+        Set(managedAlbums.lazy.filter(\.createdByAlbumist).map(\.albumID))
+    }
+
     /// What the stack must know of the suggestions `plan` came from, taken as it starts: the
     /// analysis may make its suggestions anew before the result shows. Personal: a sensitive
     /// suggestion, one whose card hides its preview, and one the analysis does not know

@@ -685,7 +685,7 @@ struct ResultCard: View {
         // What really happened, counted as in the receipt ("Zahlen wie im Beleg"; photos that
         // were no longer there are not counted), named by what the plan did.
         let receipt = PlanReceipt(plan: plan, inventory: model.inventory)
-        let headline = ResultHeadline(receipt, kind: PlanReceipt.Kind(plan))
+        let headline = ResultHeadline(receipt, plan: plan, albumistAlbums: model.albumistAlbums)
         // Where the new albums are, above the way to Photos (draft E3). Only after a run that
         // made new albums: a removal or an undo has none (N-07).
         let way = ResultText.whereNewAlbums(headline, root: model.settings.rootFolderTitle)
@@ -881,8 +881,8 @@ enum ResultText {
     /// The big count; nil when the headline has none ("Rückgängig gemacht", "Fertig").
     static func count(_ lead: ResultHeadline.Lead) -> Int? {
         switch lead {
-        case .newAlbums(let count), .addedPhotos(let count), .sortedPhotos(let count), .removedAlbums(let count),
-             .takenOutPhotos(let count):
+        case .newAlbums(let count), .addedPhotos(let count), .extendedAlbums(let count), .sortedPhotos(let count),
+             .removedAlbums(let count), .takenOutPhotos(let count):
             count
         case .undone, .plain:
             nil
@@ -890,11 +890,13 @@ enum ResultText {
     }
 
     /// What the count counts, below the number (as the atlas's "1 Land", "2 Länder"). Photos
-    /// added to albums of the user's: "12" over "Fotos", the albums in the line below (draft E3).
+    /// added to albums of the user's: "12" over "Fotos", the albums in the line below (draft E3);
+    /// to albums Albumist made: "1" over "Album ergänzt", the photos below.
     static func noun(_ lead: ResultHeadline.Lead) -> String {
         switch lead {
         case .newAlbums(let count): count == 1 ? String(localized: "neues Album") : String(localized: "neue Alben")
         case .addedPhotos(let count): count == 1 ? String(localized: "Foto") : String(localized: "Fotos")
+        case .extendedAlbums(let count): count == 1 ? String(localized: "Album ergänzt") : String(localized: "Alben ergänzt")
         case .sortedPhotos(let count): count == 1 ? String(localized: "Foto einsortiert") : String(localized: "Fotos einsortiert")
         case .removedAlbums(let count): count == 1 ? String(localized: "Album entfernt") : String(localized: "Alben entfernt")
         case .takenOutPhotos(let count):

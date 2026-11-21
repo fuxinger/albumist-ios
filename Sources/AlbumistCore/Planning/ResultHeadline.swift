@@ -6,7 +6,9 @@ import Foundation
 /// "176 photos became 15"), where the new albums are only when the run made some, and what
 /// "Rückgängig machen" below it does ("Entfernt die 10 neuen Alben. Deine Fotos bleiben.").
 /// Photos added only to albums of the user's read "12 Fotos in 3 deiner Alben ergänzt" (draft
-/// E3: the photos big, the user's albums in the line below).
+/// E3: the photos big, the user's albums in the line below). Photos added to albums Albumist
+/// made (a retry fills the albums its first run made) keep the neutral words "1 Album ergänzt"
+/// and "mit 5 Fotos": "deiner Alben" only for the user's own (review E of design wave 2).
 ///
 /// What the plan did decides the words (`PlanReceipt.Kind`): a removal from "Alben von
 /// Albumist" says what it removed ("1 Album entfernt"). Its result said "0 Fotos einsortiert"
@@ -18,8 +20,12 @@ public struct ResultHeadline: Hashable, Sendable {
         /// "10 neue Alben", "1 neues Album".
         case newAlbums(Int)
         /// "12 Fotos" over "in 3 deiner Alben ergänzt" (`Detail.inYourAlbums`): photos went into
-        /// albums of the user's, no album was made.
+        /// albums of the user's own, no album was made. Counts the photos of those albums only.
         case addedPhotos(Int)
+        /// "3 Alben ergänzt" over "mit 12 Fotos": photos went into existing albums, no album was
+        /// made, and Albumist made some of them (or a retry fills the albums its first run made):
+        /// no word about whose albums they are.
+        case extendedAlbums(Int)
         /// "342 Fotos einsortiert": photos went in, but into no album that counts as new or
         /// extended (an album found after an interruption, `PlanReceipt.Album.Change.adopted`).
         case sortedPhotos(Int)
@@ -87,8 +93,11 @@ public struct ResultHeadline: Hashable, Sendable {
         self.undoNote = undoNote
     }
 
-    /// The words for a plan that ran, from its receipt (built with the same plan).
-    public init(_ receipt: PlanReceipt, kind: PlanReceipt.Kind) {
+    /// The words for a plan that ran, from its receipt (built with the same plan). `albumistAlbums`:
+    /// the albums Albumist made (its records): photos added to them are not said to be in the
+    /// user's albums.
+    public init(_ receipt: PlanReceipt, plan: ChangePlan, albumistAlbums: Set<CollectionID> = []) {
+        let kind = PlanReceipt.Kind(plan)
         let created = receipt.albumsCreated
         let extended = receipt.albumsExtended
         let photos = receipt.photosAdded
@@ -102,9 +111,21 @@ public struct ResultHeadline: Hashable, Sendable {
                 self.init(kind: kind, lead: .newAlbums(created), detail: detail, showsWhereNewAlbumsAre: true,
                           undoNote: extended > 0 ? .removesNewAlbumsAndAddedPhotos : .removesNewAlbums(created))
             } else if extended > 0 {
-                // An album counts as extended only with photos the library confirmed in it.
-                self.init(kind: kind, lead: .addedPhotos(photos), detail: .inYourAlbums(extended),
-                          showsWhereNewAlbumsAre: false, undoNote: .takesOutAddedPhotos(albums: extended))
+                // The albums the line names: an album counts as extended only with photos the
+                // library confirmed in it. The big number counts their photos, not those of an
+                // album found after an interruption.
+                let named = Set(receipt.albums.lazy.filter { $0.change == .extended && $0.added > 0 }.map(\.id))
+                let added = Self.photos(addedTo: named, in: plan)
+                // "deiner Alben" only when each is the user's own: none Albumist made, and no
+                // retry (it fills the albums of its first run).
+                let albumists = Set(albumistAlbums.map(\.rawValue))
+                if plan.retries == nil && named.isDisjoint(with: albumists) {
+                    self.init(kind: kind, lead: .addedPhotos(added), detail: .inYourAlbums(named.count),
+                              showsWhereNewAlbumsAre: false, undoNote: .takesOutAddedPhotos(albums: named.count))
+                } else {
+                    self.init(kind: kind, lead: .extendedAlbums(named.count), detail: .withPhotos(added),
+                              showsWhereNewAlbumsAre: false, undoNote: .general)
+                }
             } else if photos > 0 {
                 self.init(kind: kind, lead: .sortedPhotos(photos), detail: nil, showsWhereNewAlbumsAre: false, undoNote: .general)
             } else {
@@ -132,7 +153,18 @@ public struct ResultHeadline: Hashable, Sendable {
 
     /// The words for a plan that ran. `inventory` only names albums, the counts come from the
     /// plan's journal.
-    public init(plan: ChangePlan, inventory: CollectionInventory = CollectionInventory()) {
-        self.init(PlanReceipt(plan: plan, inventory: inventory), kind: PlanReceipt.Kind(plan))
+    public init(plan: ChangePlan, inventory: CollectionInventory = CollectionInventory(), albumistAlbums: Set<CollectionID> = []) {
+        self.init(PlanReceipt(plan: plan, inventory: inventory), plan: plan, albumistAlbums: albumistAlbums)
+    }
+
+    /// Distinct photos the library confirmed `plan` put into the albums `albums` (receipt ids,
+    /// `PlanReceipt.Album.id`).
+    static func photos(addedTo albums: Set<String>, in plan: ChangePlan) -> Int {
+        var photos = Set<AssetID>()
+        for step in plan.steps {
+            guard case .addAssets(let ref, _) = step.operation, albums.contains(ResultCoverStack.id(of: ref)) else { continue }
+            photos.formUnion(plan.confirmedMedia(of: step))
+        }
+        return photos.count
     }
 }

@@ -180,6 +180,89 @@ struct ResultHeadlineTests {
         #expect(headline.undoNote == .removesNewAlbumsAndAddedPhotos)
     }
 
+    // MARK: Whose albums (review E of design wave 2, finding 12)
+
+    /// The key of the new album named `title` in `plan`.
+    static func albumKey(_ title: String, in plan: ChangePlan) throws -> String {
+        try #require(plan.steps.lazy.compactMap { step -> String? in
+            if case .createAlbum(let key, let name, _) = step.operation, name == title { key } else { nil }
+        }.first)
+    }
+
+    /// An album Albumist made (its records say so) that gets more photos is not one "deiner
+    /// Alben": the neutral words of before, "1 Album ergänzt" over "mit 2 Fotos", and "Rückgängig
+    /// machen" with the general sentence instead of "aus deinen Alben".
+    @Test func anAlbumAlbumistMadeKeepsNeutralWords() async throws {
+        let earlier = CollectionSnapshot(id: "earlier", title: "Rom, Juni 2022", assetIDs: ["own"])
+        let library = InMemoryPhotoLibrary(assets: Self.assets, collections: [earlier])
+        let made = try await Self.make([ConfirmedProposal(proposal: Self.rom, decision: .extendExisting("earlier"))], in: library)
+        let after = try await library.currentInventory()
+        let yours = ResultHeadline(plan: made, inventory: after)
+        #expect(yours.lead == .addedPhotos(2) && yours.detail == .inYourAlbums(1))
+
+        let albumists = ResultHeadline(plan: made, inventory: after, albumistAlbums: ["earlier"])
+        #expect(albumists.kind == .created)
+        #expect(albumists.lead == .extendedAlbums(1))
+        #expect(albumists.detail == .withPhotos(2))
+        #expect(!albumists.showsWhereNewAlbumsAre)
+        #expect(albumists.undoNote == .general)
+    }
+
+    /// "Fehlendes erneut versuchen" fills the album its first run made: neutral words, whatever
+    /// the records say.
+    @Test func aRetryKeepsNeutralWords() async throws {
+        let library = InMemoryPhotoLibrary(assets: Self.assets)
+        let made = try await Self.make([ConfirmedProposal(proposal: Self.kyoto, decision: Self.new)], in: library)
+        var gapped = made
+        let add = try #require(gapped.steps.firstIndex { if case .addAssets = $0.operation { true } else { false } })
+        gapped.steps[add].state = .failed(reason: "Fotos hat nicht geantwortet.")
+        gapped.status = .completedWithErrors
+        let album = try #require(gapped.resolvedKeys[try Self.albumKey(Self.kyoto.title, in: gapped)])
+        try await library.removeAssets(["k2", "k3"], from: album)
+        let retry = try #require(RetryPlanner().retryPlan(for: gapped, current: try await library.currentInventory()))
+        let retried = try await Self.run(retry, in: library)
+        let after = try await library.currentInventory()
+        #expect(PlanReceipt(plan: retried, inventory: after).albumsExtended == 1)
+
+        let headline = ResultHeadline(plan: retried, inventory: after)
+        #expect(headline.lead == .extendedAlbums(1))
+        #expect(headline.detail == .withPhotos(2))
+        #expect(headline.undoNote == .general)
+    }
+
+    /// The big number counts the photos of the albums the line names: photos that went into an
+    /// album found after an interruption ("adopted") are not "in deinen Alben", and an album of
+    /// the user's beside one of Albumist's gets the neutral words for both.
+    @Test func theBigNumberCountsWhatTheLineNames() async throws {
+        let mine = CollectionSnapshot(id: "mine", title: "Italien", assetIDs: ["own"])
+        let library = InMemoryPhotoLibrary(assets: Self.assets, collections: [mine])
+        let made = try await Self.make([ConfirmedProposal(proposal: Self.rom, decision: .extendExisting("mine")),
+                                        ConfirmedProposal(proposal: Self.kyoto, decision: Self.new)], in: library)
+        var found = made
+        let kyotoKey = try Self.albumKey(Self.kyoto.title, in: made)
+        found.record?.adoptedKeys.insert(kyotoKey)
+        let after = try await library.currentInventory()
+        let receipt = PlanReceipt(plan: found, inventory: after)
+        #expect(receipt.albumsCreated == 0 && receipt.albumsExtended == 1 && receipt.photosAdded == 5)
+
+        let headline = ResultHeadline(plan: found, inventory: after)
+        #expect(headline.lead == .addedPhotos(2), "the adopted album's photos are counted as in the user's album")
+        #expect(headline.detail == .inYourAlbums(1))
+        #expect(headline.undoNote == .takesOutAddedPhotos(albums: 1))
+
+        // The user's album and one Albumist made, side by side.
+        let japan = CollectionSnapshot(id: "japan", title: "Japan", assetIDs: [])
+        let earlier = CollectionSnapshot(id: "earlier", title: "Rom", assetIDs: [])
+        let both = InMemoryPhotoLibrary(assets: Self.assets, collections: [japan, earlier])
+        let mixed = try await Self.make([ConfirmedProposal(proposal: Self.kyoto, decision: .extendExisting("japan")),
+                                         ConfirmedProposal(proposal: Self.rom, decision: .extendExisting("earlier"))], in: both)
+        let mixedAfter = try await both.currentInventory()
+        #expect(ResultHeadline(plan: mixed, inventory: mixedAfter).lead == .addedPhotos(5))
+        let neutral = ResultHeadline(plan: mixed, inventory: mixedAfter, albumistAlbums: ["earlier"])
+        #expect(neutral.lead == .extendedAlbums(2))
+        #expect(neutral.detail == .withPhotos(5))
+    }
+
     // MARK: Undo
 
     /// The undo of new albums says it removed them again; the undo of a removal says that what
@@ -293,7 +376,12 @@ struct ResultHeadlineTests {
         let noun = try #require(AppSource.body(of: "static func noun(", in: file))
         #expect(noun.contains(#"case .addedPhotos(let count): count == 1 ? String(localized: "Foto") : String(localized: "Fotos")"#),
                 "\(noun)")
-        #expect(!file.contains(".extendedAlbums("), "the card still counts albums of the user's as the big number")
+        // Albums Albumist made, or a retry, keep the neutral words (review E, finding 12): the
+        // card names them by the records' albums Albumist created.
+        #expect(noun.contains(#"case .extendedAlbums(let count): count == 1 ? String(localized: "Album ergänzt") : String(localized: "Alben ergänzt")"#),
+                "\(noun)")
+        let card = try #require(AppSource.body(of: ["struct ResultCard", "var body: some View"], in: file))
+        #expect(card.contains("ResultHeadline(receipt, plan: plan, albumistAlbums: model.albumistAlbums)"), "\(card)")
 
         let url = AppSource.root.appendingPathComponent("App/Albumist/Resources/Localizable.xcstrings")
         let catalog = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
@@ -306,5 +394,12 @@ struct ResultHeadlineTests {
         }
         #expect(plural("de") == ["one": "in einem deiner Alben ergänzt", "other": "in %lld deiner Alben ergänzt"])
         #expect(plural("en") == ["one": "added to one of your albums", "other": "added to %lld of your albums"])
+        let strings = try #require(catalog["strings"] as? [String: Any])
+        func english(_ key: String) -> String? {
+            let entry = strings[key] as? [String: Any]
+            let en = (entry?["localizations"] as? [String: Any])?["en"] as? [String: Any]
+            return (en?["stringUnit"] as? [String: Any])?["value"] as? String
+        }
+        #expect(english("Album ergänzt") == "Album extended" && english("Alben ergänzt") == "Albums extended")
     }
 }

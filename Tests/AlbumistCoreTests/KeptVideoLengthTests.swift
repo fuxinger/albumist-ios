@@ -36,14 +36,43 @@ struct KeptVideoLengthTests {
 
     /// A record whose asset is no longer in memory cannot be checked against the change: it goes
     /// with the thumbnail kept for it, so the next look asks Photos again and writes it anew; an
-    /// old length never stays on unchecked. A cell on screen keeps what it shows meanwhile.
+    /// old length never stays on unchecked. The cells on screen read again (review X1): a cell
+    /// that shows the video's length asks Photos again (`reading`). Before, it was told nothing,
+    /// and a video trimmed while its asset was out of memory (after a trip to Photos) kept its old
+    /// length on screen until its cell was made anew.
     @Test func aRecordWithoutItsAssetGoesUnchecked() {
         let answers: [KeptVideoLength.Found?] = [nil, .changed(seconds: 20), .deleted]
         for found in answers {
             #expect(KeptVideoLength.step(kept: 45, inMemory: false, found: found) == .drop(checked: false),
                     "\(String(describing: found))")
         }
-        #expect(!KeptVideoLength.Step.drop(checked: false).readsAgain)
+        #expect(KeptVideoLength.Step.drop(checked: false).readsAgain)
+    }
+
+    /// When the cells read again, a cell on screen shows the length the thumbnails know, the new
+    /// one or the same. Knowing none is not "no video" (review X2): the cell keeps what it shows,
+    /// and when it shows a length it asks Photos again (review X1), as its record went unchecked
+    /// or a memory warning took it. A cell that shows no length has nothing to ask.
+    @Test func aCellOnScreenAsksAgainForALengthTheThumbnailsNoLongerKnow() throws {
+        let shown = try #require(VideoDuration(seconds: 45))
+        let trimmed = try #require(VideoDuration(seconds: 20))
+        #expect(KeptVideoLength.reading(shown: shown, known: trimmed) == .show(trimmed))
+        #expect(KeptVideoLength.reading(shown: shown, known: shown) == .show(shown))
+        #expect(KeptVideoLength.reading(shown: nil, known: trimmed) == .show(trimmed))
+        #expect(KeptVideoLength.reading(shown: shown, known: nil) == .askAgain)
+        #expect(KeptVideoLength.reading(shown: nil, known: nil) == .keep)
+    }
+
+    /// Once Photos answered, the cell shows the length it said, a trimmed video's new one; none
+    /// when Photos no longer knows the video (deleted) or it has no length; what it showed when
+    /// Photos did not answer in time (it asks again after the next change).
+    @Test func aCellThatAskedAgainTakesWhatPhotosSaid() throws {
+        let shown = try #require(VideoDuration(seconds: 45))
+        #expect(KeptVideoLength.afterAsking(shown: shown, answer: .length(seconds: 20)) == VideoDuration(seconds: 20))
+        #expect(KeptVideoLength.afterAsking(shown: shown, answer: .length(seconds: 45.2)) == shown)
+        #expect(KeptVideoLength.afterAsking(shown: shown, answer: .noLength) == nil)
+        #expect(KeptVideoLength.afterAsking(shown: shown, answer: .noAnswer) == shown)
+        #expect(KeptVideoLength.afterAsking(shown: nil, answer: .noAnswer) == nil)
     }
 }
 

@@ -220,6 +220,17 @@ struct PhotoViewerSourceTests {
         let check = try #require(AppSource.body(of: "private static func firstBytes(", in: share))
         #expect(check.contains("requestData("))
         #expect(check.contains("finish(.onDevice, stop: true)"))
+        // Only Photos' "network access required" says "only in iCloud"; any other error is
+        // unknown (review D2, N5), by the core's rule, with the errors under the error too.
+        let ended = try #require(check.range(of: "} completionHandler: { error in"))
+        #expect(String(check[ended.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            .hasPrefix("answer.finish(ShareAvailability.afterReading(errors: errorChain(of: error)))"))
+        #expect(!check.contains(".onlyInICloud"), "an error read as only in iCloud by itself")
+        let chain = try #require(AppSource.body(of: "static func errorChain(", in: share))
+        #expect(chain.contains("NSUnderlyingErrorKey"))
+        // The core's numbers are PhotoKit's (checked on every debug run of the app).
+        #expect(check.contains("PHPhotosError.errorDomain == ShareAvailability.photosErrorDomain"))
+        #expect(check.contains("PHPhotosError.Code.networkAccessRequired.rawValue == ShareAvailability.networkAccessRequired"))
         #expect(try Self.file("PhotoKitAnswer.swift").contains("cancelDataRequest("))
         // The share checks first, then Photos copies the file, readable only while it is open.
         let write = try #require(AppSource.body(of: "private static func write(", in: share))

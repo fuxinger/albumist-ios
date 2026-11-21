@@ -55,6 +55,29 @@ public enum ShareAvailability: Equatable, Sendable {
     public var canShare: Bool { self == .unknown || self == .onDevice }
 }
 
+extension ShareAvailability {
+    /// Photos' error domain (`PHPhotosErrorDomain`) and its code for "the file must come from
+    /// iCloud, and the network was not allowed" (`PHPhotosError.networkAccessRequired`). PhotoKit
+    /// is not on Linux: the numbers are written out here, and the app checks them against
+    /// PhotoKit's own on every debug run.
+    public static let photosErrorDomain = "PHPhotosErrorDomain"
+    public static let networkAccessRequired = 3164
+
+    /// What the end of reading a photo's first bytes says of where the photo is (review D2,
+    /// N5): no error, it is on the iPhone; Photos' "network access required", also under an
+    /// error of another kind, it is only in iCloud. Any other error says nothing about where it
+    /// is (the library busy, a file missing, the access changed meanwhile): unknown, so nothing
+    /// is kept, and a tap on "Teilen" asks again and says so if it fails. Before, every error
+    /// turned the button off with "Das ganze Foto liegt nur in iCloud", which was not true.
+    /// - Parameter errors: The error and the errors under it, as domain and code; empty when
+    ///   the reading ended without one.
+    public static func afterReading(errors: [(domain: String, code: Int)]) -> ShareAvailability {
+        guard !errors.isEmpty else { return .onDevice }
+        let needsNetwork = errors.contains { $0.domain == photosErrorDomain && $0.code == networkAccessRequired }
+        return needsNetwork ? .onlyInICloud : .unknown
+    }
+}
+
 /// The name a shared photo gets (DS-10): the name Photos knows for it, as Photos shares it, so a
 /// photo sent to a Mac or into Files is "IMG_1234.HEIC", never a random string. Photos hands an
 /// edited photo out in another format than its original sometimes: then the name keeps the

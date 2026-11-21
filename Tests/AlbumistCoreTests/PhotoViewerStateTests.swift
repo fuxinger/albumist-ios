@@ -88,6 +88,31 @@ struct PhotoViewerStateTests {
         #expect(!ShareAvailability.unavailable.canShare)
     }
 
+    /// What the end of reading a photo's first bytes says (review D2, N5): no error, the photo
+    /// is on the iPhone; only Photos' "network access required" (also under another error)
+    /// means it is only in iCloud. Any other error says nothing about where it is: unknown, so
+    /// nothing is kept and the next tap asks again; before, every error turned the button off
+    /// with "Das ganze Foto liegt nur in iCloud", which was not true.
+    @Test func onlyPhotosNetworkErrorMeansOnlyInICloud() {
+        let photos = "PHPhotosErrorDomain"
+        #expect(ShareAvailability.photosErrorDomain == photos)
+        #expect(ShareAvailability.networkAccessRequired == 3164)
+        #expect(ShareAvailability.afterReading(errors: []) == .onDevice)
+        #expect(ShareAvailability.afterReading(errors: [(photos, 3164)]) == .onlyInICloud)
+        // Under an error of another kind, the cause still is the network.
+        #expect(ShareAvailability.afterReading(errors: [("NSCocoaErrorDomain", 4), (photos, 3164)]) == .onlyInICloud)
+        // Other errors of Photos: cancelled, a network error, a file missing, an invalid one,
+        // no room, access restricted or denied, its internal error.
+        for code in [3072, 3169, 3303, 3302, 3305, 3310, 3311, -1, 3114] {
+            #expect(ShareAvailability.afterReading(errors: [(photos, code)]) == .unknown, "\(code)")
+        }
+        // The same number in another domain is another error.
+        #expect(ShareAvailability.afterReading(errors: [("NSCocoaErrorDomain", 3164)]) == .unknown)
+        #expect(ShareAvailability.afterReading(errors: [("NSURLErrorDomain", -1009)]) == .unknown)
+        // Unknown is no verdict: the button stays on.
+        #expect(ShareAvailability.afterReading(errors: [("NSCocoaErrorDomain", 4)]).canShare)
+    }
+
     /// A shared photo is called as in Photos: its original name when the data is of that type,
     /// the original's name with the type's extension for an edited photo Photos hands out in
     /// another format, the fallback name when Photos knows none. Never a path or a hidden file.

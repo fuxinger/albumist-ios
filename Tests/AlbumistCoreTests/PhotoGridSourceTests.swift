@@ -399,7 +399,7 @@ struct PhotoGridSourceTests {
         let library = try Self.code(Self.library)
         #expect(!library.contains("InboxDays.make("), "grouped in the view")
         let view = Self.squeezed(try Self.body(["struct LibraryView", "var body: some View"], in: Self.library))
-        #expect(view.contains(".task(id:DaysKey(bucket:bucket,members:members,words:model.proposalWords,today:Self.today())){"
+        #expect(view.contains(".task(id:DaysKey(bucket:bucket,members:members,words:model.proposalWords,today:today)){"
                               + "awaitmakeDays(of:members,in:bucket)}"), "\(view)")
         let key = Self.squeezed(try Self.body(["struct LibraryView", "private static func same<"], in: Self.library))
         #expect(key.contains("pa.baseAddress==pb.baseAddress"), "the same array, not equal contents: \(key)")
@@ -408,6 +408,20 @@ struct PhotoGridSourceTests {
                                  + "ifpage.photos<days.photoCount{moreComing(after:page.photos)}"), "\(content)")
         #expect(content.contains("}elseifdaysBucket==bucket,!days.sections.isEmpty{"),
                 "another area's days under this filter, or none while it has photos: \(content)")
+    }
+
+    /// "Heute" and "Gestern" follow midnight (review L11): the day that is today is kept and read
+    /// anew when iOS says a significant time changed (midnight, a new time zone, a carrier's
+    /// correction) and when the app is back on screen, so a tab left open overnight makes its
+    /// days anew.
+    @Test func todayAndYesterdayFollowMidnight() throws {
+        let library = try Self.code(Self.library)
+        #expect(library.contains("@State private var today = Self.today()"))
+        #expect(library.contains("@Environment(\\.scenePhase) private var scenePhase"))
+        let view = Self.squeezed(try Self.body(["struct LibraryView", "var body: some View"], in: Self.library))
+        #expect(view.contains(".onReceive(NotificationCenter.default.publisher(for:UIApplication.significantTimeChangeNotification))"
+                              + "{_intoday=Self.today()}"), "\(view)")
+        #expect(view.contains(".onChange(of:scenePhase){_,phaseinifphase==.active{today=Self.today()}}"), "\(view)")
     }
 
     /// The tab's own loading is calm (DS-18): words, no spinner, with the identifiers the UI

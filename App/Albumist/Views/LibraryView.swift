@@ -29,6 +29,11 @@ struct LibraryView: View {
     /// area they are of: while an area's days are made anew its days before stay.
     @State private var days = InboxDays()
     @State private var daysBucket: InboxBucket?
+    /// Today's number on the iPhone's clock, for "Heute" and "Gestern": read anew at midnight (iOS
+    /// says a significant time changed then, as for a new time zone) and when the app is back on
+    /// screen, so a tab left open overnight makes its days anew (review L11).
+    @State private var today = Self.today()
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private static let page = 3_000
@@ -53,8 +58,14 @@ struct LibraryView: View {
         // when it zooms.
         .photoGridScrolling()
         .background(Theme.background)
-        .task(id: DaysKey(bucket: bucket, members: members, words: model.proposalWords, today: Self.today())) {
+        .task(id: DaysKey(bucket: bucket, members: members, words: model.proposalWords, today: today)) {
             await makeDays(of: members, in: bucket)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            today = Self.today()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { today = Self.today() }
         }
         .onAppear { model.showLibraryBuckets() }
         .onDisappear { model.hideLibraryBuckets() }

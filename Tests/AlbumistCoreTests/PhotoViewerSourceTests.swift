@@ -122,6 +122,16 @@ struct PhotoViewerSourceTests {
         #expect(viewer.contains("TapGesture(count: 2)"))
         #expect(viewer.contains(".exclusively(before:"), "a double tap would hide the bars too")
         #expect(!viewer.contains("onTapGesture(count: 2)"))
+        // Zooming in hides the bars, so no title stands on the zoomed photo (review D, L6).
+        #expect(viewer.contains(".onChange(of: scale > 1)"))
+        let zoom = try #require(AppSource.body(of: "private func zoomChrome(", in: viewer))
+        #expect(zoom.contains("chrome.zoomed(assistive: assistive)"))
+        #expect(zoom.contains("reduceMotion"))
+        // "Widerrufen" stays for its time when a tap hides the bars; the iCloud note goes (L7).
+        let notes = try #require(AppSource.body(of: "private var notes", in: viewer))
+        #expect(notes.contains("IgnoreUndoBar()"))
+        #expect(notes.contains("if chrome.isShown && shareState == .onlyInICloud"))
+        #expect(!notes.contains("if chrome.isShown {"), "the undo bar goes with the bars")
     }
 
     // MARK: Live Photos

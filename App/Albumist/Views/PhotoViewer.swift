@@ -123,7 +123,7 @@ struct PhotoViewer: View {
         let id = ids[index]
         let photo = ZoomablePhoto(id: id, label: label(of: id), position: position(of: index), isCurrent: id == current,
                                   top: top, pull: $pull, onTap: { toggleChrome() }, onClose: { dismiss() },
-                                  onLive: { _ = livePhotos.insert($0) })
+                                  onLive: { _ = livePhotos.insert($0) }, onZoom: { zoomChrome() })
         return photo.ignoresSafeArea().tag(id)
     }
 
@@ -203,18 +203,16 @@ struct PhotoViewer: View {
         }
     }
 
-    /// Under the photo, on a solid ground: why it cannot be shared, and "Widerrufen" after
-    /// ignoring it from its details (design review D4). They go with the bars.
-    @ViewBuilder
+    /// Under the photo, on a solid ground: why it cannot be shared, which goes with the bars, and
+    /// "Widerrufen" after ignoring the photo from its details (design review D4), which stays for
+    /// its time even when a tap hides the bars (review D, L7).
     private var notes: some View {
-        if chrome.isShown {
-            VStack(spacing: 0) {
-                if shareState == .onlyInICloud && isImage {
-                    ShareInICloudNote()
-                        .transition(.opacity)
-                }
-                IgnoreUndoBar()
+        VStack(spacing: 0) {
+            if chrome.isShown && shareState == .onlyInICloud && isImage {
+                ShareInICloudNote()
+                    .transition(.opacity)
             }
+            IgnoreUndoBar()
         }
     }
 
@@ -254,6 +252,15 @@ struct PhotoViewer: View {
     private func toggleChrome() {
         withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.3)) {
             chrome.tap(assistive: assistive)
+        }
+    }
+
+    /// The photo was zoomed in: the bars go, as in Photos, so no title stands on the zoomed
+    /// photo (design rule 1; review D, L6); never with VoiceOver or Switch Control.
+    private func zoomChrome() {
+        guard chrome.isShown else { return }
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.3)) {
+            chrome.zoomed(assistive: assistive)
         }
     }
 
@@ -323,6 +330,8 @@ private struct ZoomablePhoto: View {
     var onClose: () -> Void
     /// Its Live Photo's motion is on the iPhone and can play.
     var onLive: (AssetID) -> Void
+    /// It was zoomed in (the bars go).
+    var onZoom: () -> Void
     @State private var image: UIImage?
     /// Nothing came from Photos (only in iCloud, or gone): said instead of an endless spinner.
     @State private var unavailable = false
@@ -346,6 +355,9 @@ private struct ZoomablePhoto: View {
                 .task(id: LiveRequest(id: id, isCurrent: isCurrent, shown: image != nil)) { await loadLive(in: area(of: geo.size)) }
         }
         .onDisappear { reset() }
+        .onChange(of: scale > 1) { _, zoomed in
+            if zoomed { onZoom() }
+        }
     }
 
     /// When the Live Photo is wanted: for the photo on screen, once its still is shown.

@@ -301,6 +301,20 @@ struct VideoPlaybackTests {
         #expect(VideoAvailability.unavailable.note == .unavailable)
     }
 
+    /// A video its player cannot play (a file it cannot decode) is not available now: the calm
+    /// note "Dieses Video lässt sich gerade nicht abspielen.", said at once, also when it never
+    /// played (review F, F11). A failure changes nothing else: a video not on the iPhone, or not
+    /// answered yet, stays as it is.
+    @Test func aVideoItsPlayerCannotPlayIsNotAvailable() {
+        #expect(VideoAvailability.onDevice.afterPlayer(failed: true) == .unavailable)
+        #expect(VideoAvailability.onDevice.afterPlayer(failed: true).note == .unavailable)
+        #expect(VideoAvailability.onDevice.afterPlayer(failed: false) == .onDevice)
+        for other in [VideoAvailability.unknown, .onlyInICloud, .unavailable] {
+            #expect(other.afterPlayer(failed: true) == other, "\(other)")
+            #expect(other.afterPlayer(failed: false) == other, "\(other)")
+        }
+    }
+
     // MARK: Seeking with the finger
 
     /// While the finger moves on the slider, one seek runs at a time, to the exact frame; the

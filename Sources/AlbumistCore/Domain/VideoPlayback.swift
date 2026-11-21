@@ -210,6 +210,13 @@ public enum VideoAvailability: Equatable, Sendable {
     /// Only a video on the iPhone plays.
     public var plays: Bool { self == .onDevice }
 
+    /// Where a video is once its player told how it stands (review F, F11): one on the iPhone
+    /// that its player, its item or its looper cannot play (a file it cannot decode) is not
+    /// available now, said at once, also when it never played. Nothing else changes.
+    public func afterPlayer(failed: Bool) -> VideoAvailability {
+        failed && self == .onDevice ? .unavailable : self
+    }
+
     /// What the photo view says under the video, with the bars.
     public var note: VideoNote? {
         switch self {

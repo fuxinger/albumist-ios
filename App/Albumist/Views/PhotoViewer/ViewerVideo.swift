@@ -44,6 +44,9 @@ final class ViewerVideo {
     @ObservationIgnored private var assetLength: VideoDuration?
     @ObservationIgnored private var looper: AVPlayerLooper?
     @ObservationIgnored private var observer: Any?
+    /// Tells when the item (a video that plays once) or the looper (it plays copies of the item)
+    /// fails, also before the video ever played, when no tick may come (review F, F11).
+    @ObservationIgnored private var statusObservation: NSKeyValueObservation?
     @ObservationIgnored private var start = VideoStart(reduceMotion: true, autoplayVideos: false, lowPowerMode: false)
     @ObservationIgnored private var chase = ChaseSeek()
     @ObservationIgnored private var scrubbing = false
@@ -228,11 +231,15 @@ final class ViewerVideo {
         let queue = AVQueuePlayer()
         queue.isMuted = !sound.isOn
         seekSerial += 1
+        // A file it cannot decode is said at once (`.initial`: also a failure before this line).
         if start.loops {
-            looper = AVPlayerLooper(player: queue, templateItem: item)
+            let looper = AVPlayerLooper(player: queue, templateItem: item)
+            statusObservation = looper.observe(\.status, options: [.initial, .new], changeHandler: Self.statusHandler(self))
+            self.looper = looper
         } else {
             queue.actionAtItemEnd = .pause
             queue.insert(item, after: nil)
+            statusObservation = item.observe(\.status, options: [.initial, .new], changeHandler: Self.statusHandler(self))
         }
         // As often as the slider's thumb glides (30 times a second for a short clip, review F,
         // F13; 10 in Low Power Mode, review V14), and whenever it starts, stops or jumps
@@ -306,6 +313,22 @@ final class ViewerVideo {
         }
     }
 
+    /// What key-value observing calls when the item's or the looper's status changed, on a thread
+    /// AVFoundation picks: a hop to the main actor, which looks whether the video failed. Made
+    /// outside the main actor, as `timeHandler`.
+    nonisolated private static func statusHandler<Object, Value>(_ video: ViewerVideo) -> @Sendable (Object, NSKeyValueObservedChange<Value>) -> Void {
+        { [weak video] _, _ in
+            guard let video else { return }
+            Task { @MainActor in video.statusChanged() }
+        }
+    }
+
+    /// The item's or the looper's status changed: a video that cannot play says so at once, also
+    /// one that never played (review F, F11).
+    private func statusChanged() {
+        if failed { fail() }
+    }
+
     /// The end of a seek, which AVFoundation tells on a queue of its own: a hop to the main actor,
     /// with the seek's number (`seekSerial`).
     nonisolated private static func seekHandler(_ video: ViewerVideo, serial: Int, settles: Bool) -> @Sendable (Bool) -> Void {
@@ -322,19 +345,24 @@ final class ViewerVideo {
         return player.value.status == .failed || player.value.currentItem?.status == .failed || looper?.status == .failed
     }
 
-    /// The video cannot be played: its player goes, and the calm note says so under its still
-    /// (`VideoAvailability.unavailable`); not asked again until the user comes back to it.
+    /// The video cannot be played: its player goes, and the calm note says so under its still or
+    /// on its page (`VideoAvailability.afterPlayer`); not asked again until the user comes back
+    /// to it.
     private func fail() {
         let failedID = id
+        let found = availability.afterPlayer(failed: true)
         stop()
         id = failedID
-        availability = .unavailable
+        availability = found
     }
 
     /// Stops the video and lets its player go: off screen nothing of it stays alive.
     private func stop() {
         if let observer, let player { player.value.removeTimeObserver(observer) }
         observer = nil
+        // Before the looper stops: what it says then is no failure to tell.
+        statusObservation?.invalidate()
+        statusObservation = nil
         player?.value.pause()
         // The looper first, so it puts no new copy of the video into the emptied queue.
         looper?.disableLooping()

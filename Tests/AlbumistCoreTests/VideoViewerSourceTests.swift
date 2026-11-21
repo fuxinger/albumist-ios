@@ -236,13 +236,38 @@ struct VideoViewerSourceTests {
             #expect(failed.contains(part), "\(part) is missing")
         }
         let fail = try #require(AppSource.body(of: "private func fail(", in: model))
-        #expect(Self.inOrder(["let failedID = id", "stop()", "id = failedID", "availability = .unavailable"], in: fail), "\(fail)")
+        #expect(Self.inOrder(["let failedID = id", "let found = availability.afterPlayer(failed: true)", "stop()", "id = failedID",
+                              "availability = found"], in: fail), "\(fail)")
         let ticked = try #require(AppSource.body(of: "private func ticked(", in: model))
         #expect(Self.inOrder(["guard let player else { return }", "if failed {", "fail()", "return"], in: ticked), "\(ticked)")
         let play = try #require(AppSource.body(of: "private func play(", in: model))
         #expect(Self.inOrder(["if failed {", "fail()", "return", "player.value.play()"], in: play), "\(play)")
         let open = try #require(AppSource.body(of: "func open(", in: model))
         #expect(open.contains("if self.id == id, player != nil || availability != .unknown { return }"), "asked again on every look")
+    }
+
+    /// A video whose item fails before it ever played says so at once (review F, F11): no tick
+    /// may come then. The status of its item (a video that plays once) or of its looper (a
+    /// looping one plays copies of the item) is observed; the change goes to the main actor as
+    /// with the other handlers (made outside it, the video held weakly), and a failure ends in
+    /// the calm note. The observation goes with the player, before the looper stops.
+    @Test func aVideoThatFailsBeforeItPlayedSaysSoAtOnce() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let make = try #require(AppSource.body(of: "private func make(", in: model))
+        #expect(Self.inOrder(["if start.loops {", "AVPlayerLooper(player: queue, templateItem: item)",
+                              "statusObservation = looper.observe(\\.status, options: [.initial, .new], changeHandler: Self.statusHandler(self))",
+                              "} else {", "queue.insert(item, after: nil)",
+                              "statusObservation = item.observe(\\.status, options: [.initial, .new], changeHandler: Self.statusHandler(self))"],
+                             in: make), "\(make)")
+        let handler = try #require(AppSource.body(of: "nonisolated private static func statusHandler<", in: model))
+        #expect(Self.inOrder(["[weak video]", "guard let video else { return }", "Task { @MainActor in video.statusChanged() }"], in: handler),
+                "\(handler)")
+        let changed = try #require(AppSource.body(of: "private func statusChanged(", in: model))
+        #expect(Self.squeezed(changed) == "{iffailed{fail()}}", "\(changed)")
+        let stop = try #require(AppSource.body(of: "private func stop(", in: model))
+        #expect(Self.inOrder(["statusObservation?.invalidate()", "statusObservation = nil", "looper?.disableLooping()"], in: stop), "\(stop)")
+        let fail = try #require(AppSource.body(of: "private func fail(", in: model))
+        #expect(Self.inOrder(["let failedID = id", "availability.afterPlayer(failed: true)", "stop()", "id = failedID"], in: fail), "\(fail)")
     }
 
     /// A video starts without sound; "Ton an" gives it sound, which stops the user's music and

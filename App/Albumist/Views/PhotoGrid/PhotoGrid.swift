@@ -169,13 +169,16 @@ struct PhotoGrid: View {
         .photoMenu(id, place: place, side: side, selecting: selecting, available: available) { item in
             perform(item, id)
         }
-        // Where it is, for the fingers of the gestures.
+        // Where it is, for the fingers of the gestures. Away (scrolled off, or the page left for
+        // another tab or page) it does not count, but its place is kept: back, it reports
+        // nothing new when nothing moved (review L1).
         .onGeometryChange(for: PhotoGridPlace.self) { proxy in
             PhotoGridPlace(position: entry.position, frame: proxy.frame(in: .named(PhotoGridPlace.space)))
         } action: { reported in
             gestures.place(id, reported)
         }
-        .onDisappear { gestures.forget(id) }
+        .onAppear { gestures.appeared(id) }
+        .onDisappear { gestures.disappeared(id) }
     }
 
     /// The photo's date and time on the clock where it was taken, as its day's header says it

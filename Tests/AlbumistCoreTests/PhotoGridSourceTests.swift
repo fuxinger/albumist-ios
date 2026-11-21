@@ -137,6 +137,20 @@ struct PhotoGridSourceTests {
 
     // MARK: Drag to select
 
+    /// A photo that goes (scrolled away, or its page left for another tab or page) keeps what it
+    /// reported and counts again once it is back (`PhotoGridOnScreen`): SwiftUI reports its frame
+    /// in the grid only when it changes, so the photos of a page shown again report nothing, and
+    /// a photo forgotten when it went would not be found by drag and pinch (review L1).
+    @Test func aPhotoIsFoundAgainAfterThePageWasAway() throws {
+        let cell = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.grid))
+        #expect(cell.contains("gestures.place(id,reported)}.onAppear{gestures.appeared(id)}.onDisappear{gestures.disappeared(id)}"),
+                "\(cell)")
+        #expect(!cell.contains("forget"), "\(cell)")
+        let state = try Self.code(Self.state)
+        #expect(state.contains("private var photos = PhotoGridOnScreen<AssetID, PhotoGridPlace>()"))
+        #expect(!state.contains("places["), "a dictionary of its own that forgets or grows")
+    }
+
     /// Drag to select is UIKit's own pan beside the scroll view, only while the page selects: it
     /// begins only on a mostly sideways start (`PhotoGridDrag.startsSelection`), the scroll
     /// view's pan (and any other pan, such as going back) waits for it to fail, so a vertical

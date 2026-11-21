@@ -11,8 +11,9 @@ import AlbumistCore
 @MainActor
 final class PhotoGridGestureState {
     /// The photos on screen: their place in the grid's order and their frames in the grid, as
-    /// each photo reports them (`PhotoGrid.cell`).
-    private var places: [AssetID: PhotoGridPlace] = [:]
+    /// each photo reports them (`PhotoGrid.cell`); kept while a photo is away, so the photos of
+    /// a page shown again, which report nothing new, are found (review L1).
+    private var photos = PhotoGridOnScreen<AssetID, PhotoGridPlace>()
     private var drag: Drag?
     /// A drag that began where no photo is (on a day's header): it begins at the first photo the
     /// finger reaches.
@@ -72,18 +73,22 @@ final class PhotoGridGestureState {
     // MARK: The photos on screen
 
     func place(_ id: AssetID, _ place: PhotoGridPlace) {
-        places[id] = place
+        photos.report(id, place)
     }
 
-    func forget(_ id: AssetID) {
-        places[id] = nil
+    func appeared(_ id: AssetID) {
+        photos.appeared(id)
+    }
+
+    func disappeared(_ id: AssetID) {
+        photos.disappeared(id)
     }
 
     /// The photos on screen of the grid whose photos are `ids`, in its order, with their frames.
     /// A photo that reports a place in another order (the days changed and it is about to go)
     /// is left out.
     private func cells(in ids: [AssetID]) -> [(position: Int, frame: GridRect)] {
-        places.compactMap { id, place in
+        photos.shown.compactMap { id, place in
             guard place.position >= 0, place.position < ids.count, ids[place.position] == id else { return nil }
             return (position: place.position, frame: GridRect(place.frame))
         }
@@ -202,11 +207,11 @@ final class PhotoGridGestureState {
     /// Two fingers touched the grid, which shows `columns` photos in a row: the photo they hold
     /// (`PhotoGridHitTest.nearest`) and the point of it under them.
     func beginPinch(_ touch: PhotoGridTouch, columns: Int, scroller: PhotoGridScroller?) {
-        let all = places.map { (position: $0.value.position, frame: GridRect($0.value.frame)) }
+        let all = photos.shown.map { (position: $0.value.position, frame: GridRect($0.value.frame)) }
         var photo: AssetID?
         var pointInPhoto = 0.5
         if let position = PhotoGridHitTest.nearest(x: Double(touch.inGrid.x), y: Double(touch.inGrid.y), in: all),
-           let held = places.first(where: { $0.value.position == position }) {
+           let held = photos.shown.first(where: { $0.value.position == position }) {
             photo = held.key
             let frame = held.value.frame
             if frame.height > 0 {

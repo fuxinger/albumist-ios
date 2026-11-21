@@ -122,6 +122,67 @@ struct PhotoGridGestureTests {
         #expect(PhotoGridHitTest.nearest(x: 50, y: 50, in: []) == nil, "no photo on screen")
     }
 
+    // MARK: What is on screen (review L1)
+
+    /// A photo that went (scrolled away, or its page left for another tab or page) no longer
+    /// counts, but what it reported is kept: back on screen it counts again with it, also when it
+    /// reports nothing new because nothing moved (SwiftUI reports a frame only when it changes).
+    @Test func aPhotoBackOnScreenCountsWithWhatItReported() {
+        var screen = PhotoGridOnScreen<String, Int>()
+        screen.report("a", 1)
+        screen.report("b", 2)
+        #expect(screen.shown == ["a": 1, "b": 2])
+        // The tab is left: every photo goes.
+        screen.disappeared("a")
+        screen.disappeared("b")
+        #expect(screen.shown.isEmpty)
+        // Back: they appear and report nothing new.
+        screen.appeared("a")
+        screen.appeared("b")
+        #expect(screen.shown == ["a": 1, "b": 2])
+    }
+
+    /// What a photo reports while it is away is kept for when it is back; a photo that appears
+    /// before it reported anything counts once it reports; one that never reported is not there.
+    @Test func whatAPhotoReportsAwayCountsWhenItIsBack() {
+        var screen = PhotoGridOnScreen<String, Int>()
+        screen.report("a", 1)
+        screen.disappeared("a")
+        screen.report("a", 5)
+        #expect(screen.shown.isEmpty, "away, it does not count")
+        screen.appeared("a")
+        #expect(screen.shown == ["a": 5])
+        screen.appeared("b")
+        #expect(screen.shown == ["a": 5])
+        screen.report("b", 2)
+        #expect(screen.shown == ["a": 5, "b": 2])
+        screen.disappeared("c")
+        screen.appeared("c")
+        #expect(screen.shown == ["a": 5, "b": 2])
+    }
+
+    /// Scrolling through a large library keeps at most twice `kept` photos that went, and always
+    /// the latest `kept` of them: the page left right after a long scroll finds its photos again.
+    @Test func whatWentIsKeptBounded() {
+        var screen = PhotoGridOnScreen<Int, Int>()
+        // 100 photos on screen at a time, 20,000 scrolled through.
+        for id in 0..<20_000 {
+            screen.report(id, id)
+            if id >= 100 { screen.disappeared(id - 100) }
+            #expect(screen.awayCount <= 2 * PhotoGridOnScreen<Int, Int>.kept)
+        }
+        #expect(screen.shown.count == 100)
+        // The page is left and shown again.
+        for id in 19_900..<20_000 { screen.disappeared(id) }
+        #expect(screen.shown.isEmpty)
+        for id in 19_900..<20_000 { screen.appeared(id) }
+        #expect(screen.shown.count == 100)
+        #expect(screen.shown[19_950] == 19_950)
+        // Long gone: not kept, not shown when something says it appeared.
+        screen.appeared(5)
+        #expect(screen.shown[5] == nil)
+    }
+
     // MARK: Scrolling by itself
 
     /// Near the top or bottom edge of what is visible the grid scrolls by itself, faster the

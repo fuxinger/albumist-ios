@@ -152,6 +152,57 @@ public enum PhotoGridHitTest {
     }
 }
 
+/// What the photos of a grid (or its days' headers) on screen last reported of where they are,
+/// for its gestures (review L1 of design wave 3). SwiftUI reports a photo's frame in the grid
+/// only when it changes, so one that goes and comes back with nothing moved (its page left for
+/// another tab or page and shown again, or scrolled away and back while SwiftUI kept it) reports
+/// nothing anew: what it reported is kept while it is away, only the ones on screen count, and
+/// back on screen it counts again. Kept for the latest `kept` that went (at most twice as many
+/// before they are cleared), so scrolling through a large library keeps no more; a page left
+/// and shown again finds all of its photos, the latest that went.
+public struct PhotoGridOnScreen<Key: Hashable, Value> {
+    /// The photos that went, whose report is kept for when they are back.
+    public static var kept: Int { 1_000 }
+
+    /// What each one on screen reported last.
+    public private(set) var shown: [Key: Value] = [:]
+    /// What each one that went reported last, and when it went (counted in goings).
+    private var away: [Key: (value: Value, went: Int)] = [:]
+    private var goings = 0
+
+    public init() {}
+
+    /// How many that went are kept.
+    public var awayCount: Int { away.count }
+
+    /// `key` reports `value`: on screen it counts at once (also before SwiftUI says it appeared);
+    /// away it is kept for when it is back.
+    public mutating func report(_ key: Key, _ value: Value) {
+        if away[key] != nil {
+            away[key]?.value = value
+        } else {
+            shown[key] = value
+        }
+    }
+
+    /// `key` is on screen again: it counts with what it reported last, if that is kept.
+    public mutating func appeared(_ key: Key) {
+        guard let back = away.removeValue(forKey: key) else { return }
+        shown[key] = back.value
+    }
+
+    /// `key` went: it no longer counts, and what it reported is kept for a while.
+    public mutating func disappeared(_ key: Key) {
+        guard let value = shown.removeValue(forKey: key) ?? away[key]?.value else { return }
+        goings += 1
+        away[key] = (value, goings)
+        if away.count > 2 * Self.kept {
+            let oldest = goings - Self.kept
+            away = away.filter { $0.value.went > oldest }
+        }
+    }
+}
+
 /// The grid scrolling by itself while a finger selects near its top or bottom edge (DS-06b:
 /// "Ziehen über mehr als einen Bildschirm"): smoothly from a standstill, faster the closer the
 /// finger is to the edge, at the fastest at the edge and beyond it (over a bar).

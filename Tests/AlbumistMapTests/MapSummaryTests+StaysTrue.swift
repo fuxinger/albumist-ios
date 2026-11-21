@@ -4,12 +4,14 @@ import Testing
 @testable import AlbumistMap
 import AlbumistTestSupport
 
-/// What the second re-check of "Deine Welt" found, from end to end: a held record still leads to
-/// its place, the longest trip shown is true of its trip, a visit to today's home before moving in
-/// puts nothing on it, a trip soon after a move starts at the new home, a photo listed twice in two
-/// states of the analysis gives one map, and a country's year follows its place.
+/// What the map shows stays true of its trip and its place, from end to end, while the analysis
+/// runs, the home moves and a photo comes twice (found in the second re-check of "Deine Welt"): a
+/// held record still leads to its place, the longest trip shown is true of its trip, a visit to
+/// today's home before moving in puts nothing on it, a trip soon after a move starts at the new
+/// home, a photo listed twice in two states of the analysis gives one map, and a country's year
+/// follows its place.
 extension MapSummaryTests {
-    // MARK: After the second re-check
+    // MARK: True of its trip and place
 
     /// A record kept while the analysis runs leads to the place it was made at: the trip's places
     /// are numbered anew as photos arrive (Oslo, earlier, comes before the North Cape), so its

@@ -48,16 +48,25 @@ struct PhotoViewer: View {
     @State private var top: CGFloat = 0
     /// Whether each photo looked at can be shared (asked once per photo).
     @State private var sharing: [AssetID: ShareAvailability] = [:]
-    @State private var preparingShare = false
-    /// Making the file for the share sheet; stopped when the viewer closes meanwhile.
+    /// The share being prepared for the photo on screen, and whether it failed
+    /// (`SharePreparation`; review D2, N1 and N7).
+    @State private var preparation = SharePreparation()
+    /// Making the file for the share sheet; stopped when the user leaves the share.
     @State private var shareTask: Task<Void, Never>?
     /// The photos whose Live Photo motion is on the iPhone: their title shows the symbol.
     @State private var livePhotos: Set<AssetID> = []
+    /// The photo whose Live Photo plays under a long press: the pager holds still meanwhile
+    /// (review D2, N4), as in Photos.
+    @State private var pressing: AssetID?
     /// What Photos says of each photo looked at: its date, for the title while Albumist has no
     /// facts of it, and its kind (`PhotoBasics`).
     @State private var basics: [AssetID: PhotoBasics] = [:]
     /// 12 or 24 hours as the iPhone is set; read again when its settings change.
     @State private var clock = AppModel.deviceClock()
+    /// The clock the analysis tells photos without a place on, asked once before the first date
+    /// shows: a photo not analysed yet is told on it (review D2, N10).
+    @State private var homeZone: TimeZone?
+    @State private var homeZoneAsked = false
 
     init(ids: [AssetID], current: AssetID, showsInfo: Bool = false) {
         self.ids = ids
@@ -73,15 +82,28 @@ struct PhotoViewer: View {
             .accessibilityAction(.escape) { dismiss() }
             .sheet(item: $info) { facts in details(facts) }
             .sheet(isPresented: addingBinding) { addSheet }
-            // A share the app could not clean up after (it was ended while the sheet was open).
-            .onAppear { PhotoShare.removeLeftovers() }
-            .onDisappear {
-                shareTask?.cancel()
-                PhotoShare.removeLeftovers()
+            // Said here, over the photo: the app's own alert cannot show over this full-screen
+            // view and came up after it had closed (review D2, N1).
+            .alert("Das hat nicht geklappt", isPresented: shareFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal.")
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in
-                clock = AppModel.deviceClock()
-            }
+            .onAppear { opened() }
+            .onDisappear { closed() }
+            .onReceive(NotificationCenter.default.publisher(for: NSLocale.currentLocaleDidChangeNotification)) { _ in clock = AppModel.deviceClock() }
+    }
+
+    /// A share the app could not clean up after (it was ended while the sheet was open) goes;
+    /// the app's sound is set to mix with the user's before any Live Photo plays (review D2, N9).
+    private func opened() {
+        PhotoShare.removeLeftovers()
+        LiveAudio.prepare()
+    }
+
+    private func closed() {
+        leaveShare()
+        PhotoShare.removeLeftovers()
     }
 
     // MARK: Pages
@@ -109,22 +131,52 @@ struct PhotoViewer: View {
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
+        // A thumb that drifts while a Live Photo plays under it does not page (review D2, N4).
+        .scrollDisabled(pressing != nil)
         .onChange(of: current) {
             window = window.following(ids.firstIndex(of: current) ?? 0, count: ids.count)
+            // A share prepared for the photo left behind is not this one's (review D2, N7).
+            leaveShare()
         }
         // The photos lie on the whole screen, under a bar of fixed height (`top`).
         .ignoresSafeArea()
+        // No photo under the title (design rule 1), also zoomed, after a tap while zoomed and
+        // with VoiceOver (review D2, N8).
+        .mask { photosArea }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { measured in
             if chrome.isShown { top = measured }
         }
+    }
+
+    /// Where the photos show: the whole screen but the bar's area while the bars show. With the
+    /// bars hidden a zoomed photo fills the screen, as in Photos; the area fades with the bars
+    /// (a fade with Reduce Motion too), and nothing moves.
+    private var photosArea: some View {
+        VStack(spacing: 0) {
+            Color.black.opacity(chrome.isShown ? 0 : 1)
+                .frame(height: top)
+            Color.black
+        }
+        .ignoresSafeArea()
     }
 
     private func page(at index: Int) -> some View {
         let id = ids[index]
         let photo = ZoomablePhoto(id: id, label: label(of: id), position: position(of: index), isCurrent: id == current,
                                   top: top, pull: $pull, onTap: { toggleChrome() }, onClose: { dismiss() },
-                                  onLive: { _ = livePhotos.insert($0) }, onZoom: { zoomChrome() })
+                                  onLive: { _ = livePhotos.insert($0) }, onZoom: { zoomChrome() },
+                                  onPressing: { livePress(id, $0) })
         return photo.ignoresSafeArea().tag(id)
+    }
+
+    /// A long press on the Live Photo of `id` began or ended: the pager holds still meanwhile.
+    /// Only the press of that photo ends it.
+    private func livePress(_ id: AssetID, _ pressed: Bool) {
+        if pressed {
+            pressing = id
+        } else if pressing == id {
+            pressing = nil
+        }
     }
 
     /// Black, lighter while the photo is pulled down to close.
@@ -133,9 +185,9 @@ struct PhotoViewer: View {
     }
 
     /// The title of a photo: what Albumist knows of it, else the date Photos keeps for it, on
-    /// the clock the iPhone is set to.
+    /// the clock its facts will have (`PhotoTitle.zoneWithoutFacts`).
     private func title(of id: AssetID) -> PhotoTitle {
-        model.photoTitle(for: id, photoDate: basics[id]?.date, clock: clock)
+        model.photoTitle(for: id, photo: basics[id], homeZone: homeZone, clock: clock)
     }
 
     /// What VoiceOver says for a photo: where and when it was taken, as its title says it.
@@ -181,7 +233,7 @@ struct PhotoViewer: View {
     private var shareButton: some View {
         if isImage {
             Button { share() } label: { Label("Teilen", systemImage: "square.and.arrow.up") }
-                .disabled(!shareState.canShare || preparingShare)
+                .disabled(!shareState.canShare || preparation.isPreparing)
                 .accessibilityHint(shareHint)
                 .accessibilityIdentifier("viewer.share")
         }
@@ -198,7 +250,12 @@ struct PhotoViewer: View {
     @ViewBuilder
     private var infoButton: some View {
         if showsInfo, let facts = model.factsByID[current] {
-            Button { info = facts } label: { Label("Info", systemImage: "info.circle") }
+            Button {
+                // The details cover the photo: a share still being prepared would come up over
+                // them, or fail where it cannot be said (review D2, N1).
+                leaveShare()
+                info = facts
+            } label: { Label("Info", systemImage: "info.circle") }
                 .accessibilityIdentifier("viewer.info")
         }
     }
@@ -228,6 +285,11 @@ struct PhotoViewer: View {
 
     private var addingBinding: Binding<Bool> {
         Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })
+    }
+
+    /// The share of the photo on screen failed: said until the user taps OK.
+    private var shareFailed: Binding<Bool> {
+        Binding(get: { preparation.failed }, set: { if !$0 { preparation.failureSeen() } })
     }
 
     private var addSheet: some View {
@@ -265,9 +327,14 @@ struct PhotoViewer: View {
     }
 
     /// The photo on screen: what Photos says of it (its date and kind, once per photo), then
-    /// whether it can be shared.
+    /// whether it can be shared. The home clock first, once, so a date never shows on another
+    /// clock before (review D2, N10).
     private func lookAtCurrent() async {
         let id = current
+        if !homeZoneAsked {
+            homeZone = await model.homeTimeZone()
+            homeZoneAsked = true
+        }
         if basics[id] == nil, let found = await PhotoBasics.of(id), !Task.isCancelled {
             basics[id] = found
         }
@@ -288,27 +355,33 @@ struct PhotoViewer: View {
 
     /// The share sheet with the photo shown, once its file is ready (a moment for a large one).
     /// A photo found only in iCloud turns the button off with its reason; when Photos did not
-    /// answer or the file could not be written, the app says so as everywhere and the button
-    /// stays on for another try (review D, M6).
+    /// answer or the file could not be written, the photo view says so and the button stays on
+    /// for another try (review D, M6). Only for the photo still on screen (`SharePreparation`,
+    /// review D2, N7): a share the user left is neither shown nor said, its file goes.
     private func share() {
-        let id = current
-        preparingShare = true
+        guard let ticket = preparation.begin(current) else { return }
         shareTask = Task {
-            let prepared = await PhotoShare.prepare(id, fallbackName: String(localized: "Foto"))
-            preparingShare = false
-            switch prepared {
-            case .file(let file) where id == current && !Task.isCancelled:
-                PhotoShare.present(file)
-            case .file(let file):
-                // Swiped on or closed meanwhile: not the photo on screen.
-                PhotoShare.remove(file.deletingLastPathComponent())
-            case .unavailable(.unknown):
-                guard !Task.isCancelled else { return }
-                model.message = .failure(String(localized: "Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal."))
-            case .unavailable(let reason):
-                withAnimation(.easeInOut(duration: 0.2)) { sharing[id] = reason }
+            let prepared = await PhotoShare.prepare(ticket.photo, fallbackName: String(localized: "Foto"))
+            switch preparation.end(ticket, with: prepared.result, onScreen: current) {
+            case .present:
+                if case .file(let file) = prepared { PhotoShare.present(file) }
+            case .discard:
+                if case .file(let file) = prepared { PhotoShare.remove(file.deletingLastPathComponent()) }
+            case .remember(let reason):
+                withAnimation(.easeInOut(duration: 0.2)) { sharing[ticket.photo] = reason }
+            case .sayFailed:
+                // The alert on the root shows while `preparation.failed`.
+                break
             }
         }
+    }
+
+    /// The user left the share being prepared (a swipe, the details, closing the view): its
+    /// button is free again, and its end is neither shown nor said.
+    private func leaveShare() {
+        preparation.leave()
+        shareTask?.cancel()
+        shareTask = nil
     }
 }
 
@@ -332,6 +405,8 @@ private struct ZoomablePhoto: View {
     var onLive: (AssetID) -> Void
     /// It was zoomed in (the bars go).
     var onZoom: () -> Void
+    /// A long press on its Live Photo began (true) or ended (false): the pager holds still.
+    var onPressing: (Bool) -> Void
     @State private var image: UIImage?
     /// Nothing came from Photos (only in iCloud, or gone): said instead of an endless spinner.
     @State private var unavailable = false
@@ -354,7 +429,11 @@ private struct ZoomablePhoto: View {
                 .task(id: id) { await giveUp() }
                 .task(id: LiveRequest(id: id, isCurrent: isCurrent, shown: image != nil)) { await loadLive(in: area(of: geo.size)) }
         }
-        .onDisappear { reset() }
+        .onDisappear {
+            // Its press ends with it: the pager is never held for good.
+            if pressing { press(false) }
+            reset()
+        }
         .onChange(of: scale > 1) { _, zoomed in
             if zoomed { onZoom() }
         }
@@ -377,9 +456,12 @@ private struct ZoomablePhoto: View {
             .padding(.top, top)
             .frame(width: size.width, height: size.height)
             .contentShape(Rectangle())
+            // The long press first, innermost (review D2, N3): the gestures added after it give
+            // way to it, so a resting finger begins it and a short touch fails it at once and is
+            // a tap; added after the taps it would wait for a tap that never fails.
+            .gesture(LivePress(isEnabled: live != nil) { began in press(began) })
             .gesture(taps)
             .gesture(magnify)
-            .gesture(LivePress(isEnabled: live != nil) { began in press(began) })
             // Moving the zoomed photo wins over swiping to the next one; at normal size the
             // swipe goes to the next photo.
             .highPriorityGesture(pan, including: scale > 1 ? .all : .subviews)
@@ -452,14 +534,18 @@ private struct ZoomablePhoto: View {
     }
 
     /// The long press on a Live Photo began or is over: it plays whole while the press lasts,
-    /// as in Photos. Only a press that began ends one (a touch too short for a press is a tap).
+    /// as in Photos, and the page holds still (the photo view stops paging, `magnify` and `pan`
+    /// rest; review D2, N4). Only a press that began ends one (a touch too short for a press is
+    /// a tap).
     private func press(_ began: Bool) {
         if began {
             pressing = true
+            onPressing(true)
             play(.full)
         } else if pressing {
             pressing = false
             pressEnded = .now
+            onPressing(false)
             play(.stop)
         }
     }
@@ -473,18 +559,25 @@ private struct ZoomablePhoto: View {
         return ContinuousClock.now - pressEnded < .milliseconds(600)
     }
 
+    /// Pinch to zoom; not while a long press plays the Live Photo (a second finger then is no
+    /// pinch, review D2, N4).
     private var magnify: some Gesture {
         MagnifyGesture()
-            .onChanged { value in scale = min(max(lastScale * value.magnification, 1), 5) }
+            .onChanged { value in
+                guard !pressing else { return }
+                scale = min(max(lastScale * value.magnification, 1), 5)
+            }
             .onEnded { _ in
                 lastScale = scale
                 if scale <= 1.01 { withAnimation(.snappy) { reset() } }
             }
     }
 
+    /// Moving the zoomed photo; not while a long press plays its Live Photo (N4).
     private var pan: some Gesture {
         DragGesture()
             .onChanged { value in
+                guard !pressing else { return }
                 offset = CGSize(width: lastOffset.width + value.translation.width, height: lastOffset.height + value.translation.height)
             }
             .onEnded { _ in lastOffset = offset }

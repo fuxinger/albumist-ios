@@ -25,6 +25,15 @@ enum PhotoShare {
         /// still image). `unknown`: Photos did not answer in time or the file could not be
         /// written; nothing is known, the user is told and may try again (M6).
         case unavailable(ShareAvailability)
+
+        /// What preparing ended with, for `SharePreparation`: no answer from Photos, or no file
+        /// written, is a failure; Photos' own reasons are kept.
+        var result: SharePreparation.Result {
+            switch self {
+            case .file: .file
+            case .unavailable(let reason): reason.canShare ? .failed : .unavailable(reason)
+            }
+        }
     }
 
     /// Where the files for the share sheet are made, each in a folder of its own.
@@ -120,9 +129,13 @@ enum PhotoShare {
     }
 
     /// Whether the file is on the iPhone: its first bytes are asked for with the network off,
-    /// and the reading stops with them. An error means it is not here (the photo is only in
-    /// iCloud); no answer in time, or the caller going away, is `unknown`.
+    /// and the reading stops with them. Only Photos' "network access required" means it is not
+    /// here (the photo is only in iCloud); any other error, no answer in time or the caller going
+    /// away is `unknown` (review D2, N5: `ShareAvailability.afterReading`).
     private static func firstBytes(of resource: PHAssetResource) async -> ShareAvailability {
+        assert(PHPhotosError.errorDomain == ShareAvailability.photosErrorDomain
+               && PHPhotosError.Code.networkAccessRequired.rawValue == ShareAvailability.networkAccessRequired,
+               "The core's numbers for Photos' network error are not PhotoKit's")
         let answer = PhotoKitAnswer.resource(fallback: ShareAvailability.unknown)
         answer.limit(.seconds(10))
         return await withTaskCancellationHandler {
@@ -133,13 +146,25 @@ enum PhotoShare {
                 let id = PHAssetResourceManager.default().requestData(for: resource, options: options) { _ in
                     answer.finish(.onDevice, stop: true)
                 } completionHandler: { error in
-                    answer.finish(error == nil ? .onDevice : .onlyInICloud)
+                    answer.finish(ShareAvailability.afterReading(errors: errorChain(of: error)))
                 }
                 answer.started(id)
             }
         } onCancel: {
             answer.cancel()
         }
+    }
+
+    /// An error and the errors under it (`NSUnderlyingErrorKey`), as domain and code: Photos
+    /// may say why under an error of another kind. Empty without an error.
+    static func errorChain(of error: (any Error)?) -> [(domain: String, code: Int)] {
+        var chain: [(domain: String, code: Int)] = []
+        var next = error.map { $0 as NSError }
+        while let current = next, chain.count < 8 {
+            chain.append((current.domain, current.code))
+            next = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return chain
     }
 
     /// The photo's file, checked first (`firstBytes`), copied by Photos into a file named as

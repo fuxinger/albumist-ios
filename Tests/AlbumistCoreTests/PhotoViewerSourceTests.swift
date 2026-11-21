@@ -72,17 +72,32 @@ struct PhotoViewerSourceTests {
         #expect(viewer.contains(" von \\("), "the position is gone for VoiceOver too")
         let model = AppSource.code(try AppSource.read("App/Albumist/Model/AppModel+PhotoViewer.swift"))
         let title = try #require(AppSource.body(of: "func photoTitle(", in: model))
-        #expect(title.contains("PhotoTitle(facts: factsByID[id], photoDate: photoDate"))
+        #expect(title.contains("PhotoTitle(facts: factsByID[id], photoDate: photo?.date, photoLocated: photo?.isLocated ?? false, homeZone: homeZone,"))
         #expect(title.contains("words: proposalWords"))
         #expect(title.contains("currentZone: .current"))
         #expect(title.contains("clock: clock"))
-        // Without facts, the date Photos keeps for the photo (review D, M7).
+        // Without facts, the date Photos keeps for the photo (review D, M7), on the clock its
+        // facts will have: the home clock without a location (review D2, N10).
         let calls = AppSource.calls(of: "model.photoTitle(", in: viewer)
         #expect(calls.count == 1)
-        #expect(calls.allSatisfy { $0.contains("photoDate: basics[id]?.date") && $0.contains("clock: clock") })
+        #expect(calls.allSatisfy { $0.contains("photo: basics[id], homeZone: homeZone, clock: clock") })
         let basics = AppSource.code(try Self.file("PhotoBasics.swift"))
         #expect(basics.contains("creationDate"))
+        #expect(basics.contains("isLocated: asset.value.location != nil"))
         #expect(basics.contains("ThumbnailCache.shared.asset(for:"))
+        // The home clock as the analysis keeps it, under the analysis' own key.
+        let home = try #require(AppSource.body(of: "func homeTimeZone(", in: model))
+        #expect(home.contains("store.value(String.self, forKey: Self.homeTimeZoneKey)"))
+        let keys = AppSource.code(try AppSource.read("App/Albumist/Model/AppModel+PhotoViewer.swift"), keepStrings: true)
+        let engine = AppSource.code(try AppSource.read("Sources/AlbumistEngine/AnalysisPipeline.swift"), keepStrings: true)
+        #expect(engine.contains("static let homeTimeZone = \"user.homeTimeZone\""), "the analysis keeps the home clock elsewhere")
+        #expect(keys.contains("nonisolated static let homeTimeZoneKey = \"user.homeTimeZone\""))
+        // Asked once, before the first date is shown, so no title changes clock while it shows.
+        let look = try #require(AppSource.body(of: "private func lookAtCurrent(", in: viewer))
+        let asked = try #require(look.range(of: "homeZone = await model.homeTimeZone()"))
+        let dated = try #require(look.range(of: "await PhotoBasics.of(id)"))
+        #expect(asked.lowerBound < dated.lowerBound, "the date shows before the home clock is known")
+        #expect(look.contains("if !homeZoneAsked {"))
         // 12 or 24 hours from the hour cycle, read again when the iPhone's settings change (L2).
         let clock = try #require(AppSource.body(of: "static func deviceClock(", in: model))
         #expect(clock.contains("PhotoTitle.Clock(hourCycle:"))
@@ -94,11 +109,32 @@ struct PhotoViewerSourceTests {
         #expect(bar.contains("spoken(live:"))
         #expect(bar.contains(".accessibilityShowsLargeContentViewer"))
         #expect(bar.contains(".foregroundStyle(.noteText)"))
-        // The short form where the long one does not fit, cut at its start if even that is too
-        // long, so the time is never what goes on a narrow iPhone (L1).
-        #expect(bar.contains("ViewThatFits(in: .horizontal)"))
-        #expect(bar.contains("title.shortTitle, title.shortSubtitle"))
-        #expect(bar.contains(".truncationMode(.head)"))
+    }
+
+    /// The short form where the long one does not fit, cut at its start if even that is too
+    /// long, so the time is never what goes on a narrow iPhone (L1). Each line picks its own
+    /// form (review D2, N6): a long place no longer turns "30. September 2024 · 14:32" into
+    /// "30.09.2024" when the long date fits; the first line has a short form only when it is
+    /// an older day (a place has none).
+    @Test func eachLineOfTheTitlePicksItsOwnForm() throws {
+        let bar = AppSource.code(try Self.file("PhotoTitleBar.swift"))
+        #expect(Self.count(#"ViewThatFits\("#, in: bar) == 2)
+        let body = try #require(AppSource.body(of: "var body: some View", in: bar))
+        #expect(!body.contains("ViewThatFits("), "both lines pick their form together")
+        let first = try #require(body.range(of: "titleLine"))
+        let second = try #require(body.range(of: "subtitleLine"))
+        #expect(first.upperBound < second.lowerBound)
+        for (line, guarded, long, short) in [("private var titleLine", "if title.shortTitle != title.title {", "heading(title.title)", "heading(title.shortTitle)"),
+                                             ("private var subtitleLine", "if title.shortSubtitle != title.subtitle {", "line(title.subtitle)", "line(title.shortSubtitle)")] {
+            let code = try #require(AppSource.body(of: line, in: bar), "\(line) is missing")
+            let condition = try #require(code.range(of: guarded), "\(line) picks a form it does not have")
+            let fits = try #require(code.range(of: "ViewThatFits(in: .horizontal) {", range: condition.upperBound..<code.endIndex))
+            let longForm = try #require(code.range(of: long, range: fits.upperBound..<code.endIndex))
+            let shortForm = try #require(code.range(of: short, range: longForm.upperBound..<code.endIndex))
+            #expect(!code[fits.lowerBound..<shortForm.upperBound].contains(line == "private var titleLine" ? "subtitle" : "title.title"),
+                    "\(line) picks with the other line")
+        }
+        #expect(try #require(AppSource.body(of: "private func line(", in: bar)).contains(".truncationMode(.head)"))
     }
 
     // MARK: A tap hides everything
@@ -134,6 +170,28 @@ struct PhotoViewerSourceTests {
         #expect(!notes.contains("if chrome.isShown {"), "the undo bar goes with the bars")
     }
 
+    /// The title never stands on the photo (design rule 1, strict; review D2, N8): while the bars
+    /// show, the bar's area shows no photo, also zoomed, after a tap while zoomed and with
+    /// VoiceOver or Switch Control (whose bars never go). The photo's own area stays where it is
+    /// (`top`, kept while the bars are hidden), so nothing jumps; with the bars hidden a zoomed
+    /// photo fills the screen, as in Photos, and the bar's area fades with the bars.
+    @Test func theTitleNeverStandsOnThePhoto() throws {
+        let viewer = AppSource.code(try Self.viewer())
+        let pages = try #require(AppSource.body(of: "private var pages", in: viewer))
+        let whole = try #require(pages.range(of: ".ignoresSafeArea()"))
+        let masked = try #require(pages.range(of: ".mask { photosArea }"), "the photo passes under the title")
+        #expect(whole.upperBound <= masked.lowerBound, "the mask is not the whole screen's")
+        let area = try #require(AppSource.body(of: "private var photosArea", in: viewer))
+        let band = try #require(area.range(of: "Color.black.opacity(chrome.isShown ? 0 : 1)"))
+        let height = try #require(area.range(of: ".frame(height: top)", range: band.upperBound..<area.endIndex))
+        _ = try #require(area.range(of: "Color.black", range: height.upperBound..<area.endIndex), "nothing of the photo shows")
+        #expect(area.contains(".ignoresSafeArea()"))
+        // The bar's height is measured only while the bars show, so the photo never moves.
+        #expect(pages.contains("if chrome.isShown { top = measured }"))
+        let content = try #require(AppSource.body(of: "private func content(in size: CGSize)", in: viewer))
+        #expect(content.contains(".padding(.top, top)"))
+    }
+
     // MARK: Live Photos
 
     /// A Live Photo moves in Photos' own view, which takes no touch of its own (the photo view's
@@ -149,11 +207,23 @@ struct PhotoViewerSourceTests {
         #expect(player.contains("startPlayback(with: .full)"))
         #expect(player.contains("stopPlayback()"))
         #expect(player.contains("isOtherAudioPlaying"), "a Live Photo's sound would stop the user's music")
-        // The app's sound mixes with the user's and follows the silent switch, set once before
-        // the first Live Photo plays (review D, H2).
+        // The app's sound mixes with the user's and follows the silent switch (review D, H2).
+        // Set when the photo view opens, off the main thread and not where a Live Photo starts
+        // to move; kept only once it worked, so a failure is tried again (review D2, N9).
         #expect(player.contains("setCategory(.ambient"))
         let follow = try #require(AppSource.body(of: "func follow(", in: player))
-        #expect(follow.contains("LiveAudio.prepare()"))
+        #expect(!follow.contains("LiveAudio.prepare()"), "the audio server is called where the motion starts")
+        let short = try #require(follow.range(of: "case .hint:"))
+        let ready = try #require(follow.range(of: "guard LiveAudio.isReady else { return }", range: short.upperBound..<follow.endIndex),
+                                 "the short motion may stop the user's music")
+        #expect(follow.range(of: "case .full:", range: short.upperBound..<ready.lowerBound) == nil)
+        let prepare = try #require(AppSource.body(of: "static func prepare(", in: player))
+        let detached = try #require(prepare.range(of: "Task.detached("))
+        let set = try #require(prepare.range(of: "setCategory(.ambient", range: detached.upperBound..<prepare.endIndex))
+        _ = try #require(prepare.range(of: "await LiveAudio.finished(done)", range: set.upperBound..<prepare.endIndex))
+        #expect(!prepare.contains("isReady = true"), "kept before it worked")
+        #expect(try #require(AppSource.body(of: "private static func finished(", in: player)).contains("isReady = done"))
+        #expect(try #require(AppSource.body(of: "private func opened(", in: AppSource.code(try Self.viewer()))).contains("LiveAudio.prepare()"))
         // PhotoKit does not promise the main thread for its delegate calls: a hop, not a trap (M4).
         let hop = try #require(AppSource.body(of: "nonisolated private func showOnMain(", in: player))
         #expect(hop.contains("if Thread.isMainThread"))
@@ -175,13 +245,21 @@ struct PhotoViewerSourceTests {
         #expect(!viewer.contains(".sequenced(before:"))
         #expect(AppSource.calls(of: "LivePress(", in: viewer).count == 1)
         let press = AppSource.code(try Self.file("LivePress.swift"))
-        #expect(press.contains("UIGestureRecognizerRepresentable"))
-        #expect(press.contains("UILongPressGestureRecognizer"))
-        #expect(press.contains("minimumPressDuration = 0.3"))
-        #expect(press.contains("numberOfTouches == 1"), "two fingers resting for a pinch would play it")
-        #expect(press.contains("shouldRecognizeSimultaneouslyWith"), "the press would hold the swipe back")
-        #expect(press.contains("case .began"))
-        #expect(press.contains("case .ended, .cancelled, .failed"))
+        #expect(press.contains("struct LivePress: UIGestureRecognizerRepresentable"))
+        #expect(press.contains("final class LivePressRecognizer: UILongPressGestureRecognizer, UIGestureRecognizerDelegate"))
+        // Each rule in its own place (review D2, N11): made with them, the recognizer its own
+        // delegate, one finger to begin, beside every other gesture, and it says both ends.
+        let make = try #require(AppSource.body(of: "func makeUIGestureRecognizer(", in: press))
+        for rule in ["recognizer.minimumPressDuration = 0.3", "recognizer.numberOfTouchesRequired = 1", "recognizer.delegate = recognizer"] {
+            #expect(make.contains(rule), "\(rule) is not where the recognizer is made")
+        }
+        let begins = try #require(AppSource.body(of: "func gestureRecognizerShouldBegin(", in: press))
+        #expect(begins.contains("gestureRecognizer.numberOfTouches == 1"), "two fingers resting for a pinch would play it")
+        let beside = try #require(AppSource.body(of: "shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool", in: press))
+        #expect(beside.filter { !$0.isWhitespace } == "{true}", "the press would hold the swipe back")
+        let handled = try #require(AppSource.body(of: "func handleUIGestureRecognizerAction(", in: press))
+        #expect(handled.contains("case .began: onPress(true)"))
+        #expect(handled.contains("case .ended, .cancelled, .failed: onPress(false)"))
         // The touch that was a press is neither a tap nor a pull down to close.
         for gesture in ["private var taps", "private var pullDown"] {
             let body = try #require(AppSource.body(of: gesture, in: viewer))
@@ -193,6 +271,54 @@ struct PhotoViewerSourceTests {
             #expect(!(try AppSource.read(path)).contains("\"livephoto\""), "\(path): a Live Photo sign on the photo")
         }
         #expect(try Self.file("PhotoTitleBar.swift").contains("Image(systemName: \"livephoto\")"))
+    }
+
+    /// The long press is the innermost gesture of the photo (review D2, N3): a gesture added
+    /// with `.gesture` gives way to those of the view it is added to, so attached after the
+    /// taps it would wait for a tap that never fails while a finger rests, and never begin. A
+    /// short touch makes it fail and the tap goes on. While it plays a Live Photo, the page
+    /// stays still: no paging, no pinch, no moving the zoomed photo (N4), as in Photos.
+    @Test func theLongPressComesFirstAndHoldsThePage() throws {
+        let source = AppSource.code(try Self.viewer(), keepStrings: true)
+        let content = try #require(AppSource.body(of: "private func content(in size: CGSize)", in: source))
+        var last = content.startIndex
+        for step in [".contentShape(Rectangle())", ".gesture(LivePress(isEnabled: live != nil) { began in press(began) })",
+                     ".gesture(taps)", ".gesture(magnify)", ".highPriorityGesture(pan,", ".simultaneousGesture(pullDown,"] {
+            let found = try #require(content.range(of: step, range: last..<content.endIndex), "\(step) is not in its place")
+            last = found.upperBound
+        }
+        #expect(Self.count(#"\.gesture\(LivePress\("#, in: source) == 1)
+        // A pinch that waits for the press is not kept waiting: a second finger fails it at once.
+        let recognizer = AppSource.code(try Self.file("LivePress.swift"))
+        #expect(recognizer.contains("import UIKit.UIGestureRecognizerSubclass"))
+        let touches = try #require(AppSource.body(of: "override func touchesBegan(", in: recognizer), "a pinch waits for the press")
+        let begun = try #require(touches.range(of: "super.touchesBegan(touches, with: event)"))
+        let fails = try #require(touches.range(of: "if numberOfTouches > 1, state == .possible { state = .failed }"))
+        #expect(begun.upperBound < fails.lowerBound)
+        // The press is told to the photo view, which holds the pager still meanwhile.
+        let press = try #require(AppSource.body(of: "private func press(", in: source))
+        let began = try #require(press.range(of: "onPressing(true)"))
+        let ended = try #require(press.range(of: "onPressing(false)"))
+        #expect(began.lowerBound < ended.lowerBound)
+        let pages = try #require(AppSource.body(of: "private var pages", in: source))
+        let tabs = try #require(pages.range(of: "TabView(selection: $current)"))
+        let still = try #require(pages.range(of: ".scrollDisabled(pressing != nil)"), "the page slides away under a press")
+        #expect(tabs.upperBound < still.lowerBound)
+        let held = try #require(AppSource.body(of: "private func livePress(", in: source))
+        #expect(held.contains("pressing = id"))
+        #expect(held.contains("pressing == id"), "another page's end frees the pager")
+        #expect(AppSource.calls(of: "ZoomablePhoto(", in: source).allSatisfy { $0.contains("onPressing: { livePress(id, $0) }") })
+        // A page that goes while pressed ends its press, so the pager is never held for good.
+        let photo = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: source))
+        let gone = try #require(AppSource.body(of: ".onDisappear", in: photo))
+        #expect(gone.contains("if pressing { press(false) }"))
+        // No pinch and no moving the zoomed photo while the press plays.
+        for gesture in ["private var magnify", "private var pan"] {
+            let body = try #require(AppSource.body(of: gesture, in: source))
+            let changed = try #require(body.range(of: ".onChanged { value in"), "\(gesture)")
+            #expect(String(body[changed.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                .hasPrefix("guard !pressing else { return }"), "\(gesture) moves the photo under a press")
+        }
     }
 
     // MARK: Sharing
@@ -220,6 +346,17 @@ struct PhotoViewerSourceTests {
         let check = try #require(AppSource.body(of: "private static func firstBytes(", in: share))
         #expect(check.contains("requestData("))
         #expect(check.contains("finish(.onDevice, stop: true)"))
+        // Only Photos' "network access required" says "only in iCloud"; any other error is
+        // unknown (review D2, N5), by the core's rule, with the errors under the error too.
+        let ended = try #require(check.range(of: "} completionHandler: { error in"))
+        #expect(String(check[ended.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            .hasPrefix("answer.finish(ShareAvailability.afterReading(errors: errorChain(of: error)))"))
+        #expect(!check.contains(".onlyInICloud"), "an error read as only in iCloud by itself")
+        let chain = try #require(AppSource.body(of: "static func errorChain(", in: share))
+        #expect(chain.contains("NSUnderlyingErrorKey"))
+        // The core's numbers are PhotoKit's (checked on every debug run of the app).
+        #expect(check.contains("PHPhotosError.errorDomain == ShareAvailability.photosErrorDomain"))
+        #expect(check.contains("PHPhotosError.Code.networkAccessRequired.rawValue == ShareAvailability.networkAccessRequired"))
         #expect(try Self.file("PhotoKitAnswer.swift").contains("cancelDataRequest("))
         // The share checks first, then Photos copies the file, readable only while it is open.
         let write = try #require(AppSource.body(of: "private static func write(", in: share))
@@ -245,17 +382,62 @@ struct PhotoViewerSourceTests {
         // Only still images, by Photos' own kind once known.
         #expect(try #require(AppSource.body(of: "private var shareButton", in: viewer)).contains("if isImage"))
         #expect(try #require(AppSource.body(of: "private var isImage", in: viewer)).contains("basics[current]"))
-        // A failed share is said, not remembered; a file not shown is removed.
-        let sharing = try #require(AppSource.body(of: "private func share(", in: viewer))
-        #expect(sharing.contains("case .unavailable(.unknown):"))
-        #expect(sharing.contains("model.message = .failure("))
-        #expect(sharing.contains("Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal."))
-        #expect(sharing.contains("PhotoShare.remove(file.deletingLastPathComponent())"))
+        // Only a verdict is kept; leftovers go when the view opens and closes.
         #expect(try #require(AppSource.body(of: "private func checkSharing(", in: viewer)).contains("found != .unknown"))
-        let appear = try #require(AppSource.body(of: ".onAppear", in: viewer))
-        let disappear = try #require(AppSource.body(of: ".onDisappear", in: viewer))
-        #expect(appear.contains("PhotoShare.removeLeftovers()"))
-        #expect(disappear.contains("PhotoShare.removeLeftovers()"))
+        #expect(try #require(AppSource.body(of: "private func opened(", in: viewer)).contains("PhotoShare.removeLeftovers()"))
+        #expect(try #require(AppSource.body(of: "private func closed(", in: viewer)).contains("PhotoShare.removeLeftovers()"))
+    }
+
+    /// The share being prepared belongs to the photo on screen (`SharePreparation`, review D2,
+    /// N7): a swipe, the details or closing the view leave it, and only its end for the photo
+    /// still on screen shows the sheet or says that it failed; a file not shown is removed. The
+    /// failure is said by the photo view itself, on its root (N1): the app's alert
+    /// (`model.message`, on `RootView`) cannot show over the full-screen photo view and came up
+    /// after it had closed.
+    @Test func aShareIsForThePhotoOnScreenAndSaysItsFailureItself() throws {
+        let source = try Self.viewer()
+        let viewer = AppSource.code(source, keepStrings: true)
+        #expect(!AppSource.code(source).contains("model.message"), "the photo view uses the app's alert")
+        func position(_ text: String, in body: String, after: String.Index? = nil) throws -> String.Index {
+            let range = try #require(body.range(of: text, range: (after ?? body.startIndex)..<body.endIndex), "\(text) not found in place")
+            return range.lowerBound
+        }
+        // On the photo view's root, after the navigation root, not inside the pages.
+        let body = try #require(AppSource.body(of: ["struct PhotoViewer", "var body: some View"], in: viewer))
+        let root = try position("NavigationRoot { pager }", in: body)
+        let alert = try position(".alert(\"Das hat nicht geklappt\", isPresented: shareFailed)", in: body, after: root)
+        _ = try position("Button(\"OK\", role: .cancel) {}", in: body, after: alert)
+        _ = try position("Text(\"Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal.\")", in: body, after: alert)
+        for part in ["private var pager", "private var pages"] {
+            #expect(!(try #require(AppSource.body(of: part, in: viewer))).contains(".alert("), "\(part) has the alert")
+        }
+        let failed = try #require(AppSource.body(of: "private var shareFailed", in: viewer))
+        #expect(failed.contains("get: { preparation.failed }"))
+        #expect(failed.contains("preparation.failureSeen()"))
+        // The share: begun for the photo on screen, ended by the core's rule.
+        let share = try #require(AppSource.body(of: "private func share(", in: viewer))
+        let begun = try position("guard let ticket = preparation.begin(current) else { return }", in: share)
+        let prepared = try position("await PhotoShare.prepare(ticket.photo", in: share, after: begun)
+        let ended = try position("switch preparation.end(ticket, with: prepared.result, onScreen: current)", in: share, after: prepared)
+        let shown = try position("case .present:", in: share, after: ended)
+        _ = try position("PhotoShare.present(file)", in: share, after: shown)
+        let discarded = try position("case .discard:", in: share, after: ended)
+        _ = try position("PhotoShare.remove(file.deletingLastPathComponent())", in: share, after: discarded)
+        let kept = try position("case .remember(let reason):", in: share, after: ended)
+        _ = try position("sharing[ticket.photo] = reason", in: share, after: kept)
+        #expect(viewer.contains(".disabled(!shareState.canShare || preparation.isPreparing)"))
+        // Left on a swipe, when the details open and when the view closes.
+        let leave = try #require(AppSource.body(of: "private func leaveShare(", in: viewer))
+        #expect(leave.contains("preparation.leave()"))
+        #expect(leave.contains("shareTask?.cancel()"))
+        #expect(try #require(AppSource.body(of: ".onChange(of: current)", in: viewer)).contains("leaveShare()"))
+        let info = try #require(AppSource.body(of: "private var infoButton", in: viewer))
+        _ = try position("info = facts", in: info, after: try position("leaveShare()", in: info))
+        #expect(try #require(AppSource.body(of: "private func closed(", in: viewer)).contains("leaveShare()"))
+        // No answer, or no file written, is a failure; Photos' verdicts are kept.
+        let result = try #require(AppSource.body(of: "var result: SharePreparation.Result", in: AppSource.code(try Self.file("PhotoShare.swift"))))
+        #expect(result.contains("case .file: .file"))
+        #expect(result.contains("case .unavailable(let reason): reason.canShare ? .failed : .unavailable(reason)"))
     }
 
     // MARK: What stays
@@ -306,6 +488,9 @@ struct PhotoViewerSourceTests {
             "Teilen": "Share",
             "Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal.":
                 "The photo could not be prepared for sharing. Please try again in a moment.",
+            // The photo view's own alert for a failed share (review D2, N1).
+            "Das hat nicht geklappt": "That Didn\u{2019}t Work",
+            "OK": "OK",
         ]
         for (german, wanted) in english {
             let entry = try #require(catalog[german], "\(german) is not in the catalog")

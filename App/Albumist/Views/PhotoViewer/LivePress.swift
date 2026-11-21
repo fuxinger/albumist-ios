@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 /// The long press that plays a Live Photo whole (design wave 2, DS-10), as in Photos. It is
 /// UIKit's own long press beside SwiftUI's gestures, not SwiftUI's long press followed by a
@@ -39,8 +40,14 @@ struct LivePress: UIGestureRecognizerRepresentable {
 }
 
 /// A long press that is its own delegate: every other gesture runs beside it, and it begins
-/// only under one finger.
+/// only under one finger. A second finger fails it at once: the photo's pinch, attached after
+/// it, gives way to it and so never waits the press's 0.3 s (review D2, N3).
 final class LivePressRecognizer: UILongPressGestureRecognizer, UIGestureRecognizerDelegate {
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        if numberOfTouches > 1, state == .possible { state = .failed }
+    }
+
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         gestureRecognizer.numberOfTouches == 1
     }

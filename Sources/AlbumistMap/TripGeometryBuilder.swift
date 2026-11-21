@@ -558,55 +558,49 @@ enum TripGeometryBuilder {
     /// (photos in no place are skipped), consecutive photos at one place one visit. A → B → A in
     /// one day are three visits.
     ///
-    /// Nothing travels faster than a plane (`AirborneFilter.maximumFlightSpeed`): a visit no one
-    /// could have reached from the one before (`isNoTravel`) was taken at the same time as it,
-    /// somewhere else, by a second camera in the library (an iCloud Shared Library) or with a
-    /// wrong location. The order of such a run of visits is no way anyone went, so the route
-    /// passes each of the run's places once, at its first visit in the run: photos taken in turn
-    /// in two places add no point and no kilometre, whichever of them came last.
+    /// Some legs from one visit to the next nobody went (`travelledLegs`): the two visits were
+    /// taken at the same time in two places, by a second camera in the library (an iCloud Shared
+    /// Library) or with a wrong location. The order of a run of visits joined by such legs is no
+    /// way anyone went, so the route passes each of the run's places once, at its first visit in
+    /// the run: photos taken in turn in two places add no point and no kilometre, whichever of
+    /// them came last. A leg someone went starts a new run, from the route's last point; a visit
+    /// to that point's own place adds no point but lengthens it to the visit's last photo.
     ///
     /// The legs are those between all the visits (`legs`). More than `TripGeometry.maxRoutePoints`
     /// visits are then cut (`simplified`), each leg of the cut route carrying the legs it stands
     /// for (`cutLegs`): "vor Ort" counts every leg, the cut changes only what is drawn.
     static func route(placeOfPhoto: [Int], photos: [Photo], coordinates: [GeoCoordinate]) -> (visits: [Visit], legs: [RouteLeg]) {
+        var all: [Visit] = []
+        for (i, place) in placeOfPhoto.enumerated() where place >= 0 {
+            if let last = all.last, last.place == place {
+                all[all.count - 1].last = i
+            } else {
+                all.append(Visit(place: place, first: i, last: i))
+            }
+        }
+        let travelled = travelledLegs(all, photos: photos)
+        // The visits kept; the runs of visits joined by legs nobody went, numbered, and per place
+        // the last run it was kept in.
         var visits: [Visit] = []
-        // The visit before (kept or not); the runs of visits taken at the same time, numbered,
-        // and per place the last run it was kept in.
-        var previous: Visit?
         var run = 0
         var keptInRun = [Int](repeating: -1, count: coordinates.count)
-        func add(_ visit: Visit) {
-            defer { previous = visit }
-            guard let before = previous else {
+        for (k, visit) in all.enumerated() {
+            if k == 0 {
                 visits.append(visit)
-                keptInRun[visit.place] = run
-                return
-            }
-            if isNoTravel(from: photos[before.last], to: photos[visit.first]) {
-                // In the run of the visit before: its place once.
-                guard keptInRun[visit.place] != run else { return }
-                visits.append(visit)
-            } else {
-                // Travelled: a new run, from the route's last point when it is here already.
+            } else if travelled[k - 1] {
+                // A new run, from the route's last point when it is here already.
                 run += 1
                 if visits[visits.count - 1].place == visit.place {
                     visits[visits.count - 1].last = visit.last
                 } else {
                     visits.append(visit)
                 }
+            } else if keptInRun[visit.place] != run {
+                // In the run of the visit before: its place once.
+                visits.append(visit)
             }
             keptInRun[visit.place] = run
         }
-        var current: Visit?
-        for (i, place) in placeOfPhoto.enumerated() where place >= 0 {
-            if let visit = current, visit.place == place {
-                current?.last = i
-            } else {
-                if let visit = current { add(visit) }
-                current = Visit(place: place, first: i, last: i)
-            }
-        }
-        if let visit = current { add(visit) }
 
         let legs = legs(visits, photos: photos, coordinates: coordinates)
         guard visits.count > TripGeometry.maxRoutePoints else { return (visits, legs) }
@@ -614,11 +608,76 @@ enum TripGeometryBuilder {
         return (cut.visits, cutLegs(legs, startingAt: cut.starts))
     }
 
+    /// Faster than this, as the crow flies from the last photo at one place to the first at the
+    /// next, nobody goes door to door on the ground between the places of a trip, except by
+    /// high-speed train between stations a hundred kilometres and more apart (Beijing to Tianjin,
+    /// 108 km in half an hour): a car averages well under it even on a motorway, the Shanghai
+    /// airport maglev comes to some 180 km/h (24 km in eight minutes). Planes reach it in the air
+    /// and, gate to gate, from some 150 km on (Honolulu to Maui in 40 minutes). 200 km/h, in
+    /// metres per second.
+    static let turnBackSpeed = 200.0 / 3.6
+    /// At most this long at a place (from its first photo there to its last), between legs faster
+    /// than `turnBackSpeed` from one place and back to it, is turning back right away: an hour.
+    /// Whoever gets somewhere that fast mostly stays for hours (a day out by high-speed train, an
+    /// island by plane); two cameras taking photos in turn mostly stay minutes at each turn.
+    static let turnBackStay: TimeInterval = 3_600
+
+    /// For each leg from one visit to the next (`visits[k]` to `visits[k + 1]`, from the last
+    /// photo of the one to the first of the other), whether someone went it, as far as the photos
+    /// tell. Nobody went it
+    /// - when nothing could have gone it in the time, not even a plane (`isNoTravel`); or
+    /// - when it leads to or from a visit the route **turns back** from right away, with another
+    ///   such visit next to it or one visit away (A → B → A → B, or A → B → A → C → A, the visit
+    ///   between them as long as it may be). The route turns back from a visit right away when
+    ///   the visits before and after it are at one place, both its legs are faster than
+    ///   `turnBackSpeed` (`isFast`) and it lasts at most `turnBackStay`. Once is a way people go:
+    ///   a scenic flight circling a glacier and back to the airfield, a high-speed train out and
+    ///   straight back. Twice in a row is not: the photos were taken in two places at the same
+    ///   time, by two cameras or with a location jumping to and fro (review: Reykjavík and
+    ///   Þingvellir, 41 km apart, in turn every ten minutes made 18 route points and 700 km
+    ///   "vor Ort").
+    ///
+    /// So photos taken in turn in two places still zig-zag when their legs are slower than
+    /// `turnBackSpeed` (two cameras 41 km apart, in turn every quarter of an hour), when the route
+    /// turns back right away from one visit with no other such visit next to it or one visit away
+    /// (A → B → A, then on to C), and when the visits last longer than `turnBackStay`. Real ways
+    /// back and forth this fast with no more than `turnBackStay` at two turns in a row (shuttle
+    /// flights with a crew's short turnarounds, photos at two spots of a race track lap after
+    /// lap) count as no way anyone went.
+    static func travelledLegs(_ visits: [Visit], photos: [Photo]) -> [Bool] {
+        guard visits.count > 1 else { return [] }
+        var travelled: [Bool] = [], fast: [Bool] = []
+        travelled.reserveCapacity(visits.count - 1)
+        fast.reserveCapacity(visits.count - 1)
+        for (from, to) in zip(visits, visits.dropFirst()) {
+            travelled.append(!isNoTravel(from: photos[from.last], to: photos[to.first]))
+            fast.append(isFast(from: photos[from.last], to: photos[to.first]))
+        }
+        // The visits the route turns back from right away (never the first or the last).
+        var turnsBack = [Bool](repeating: false, count: visits.count)
+        for k in 1..<(visits.count - 1) where visits[k - 1].place == visits[k + 1].place && fast[k - 1] && fast[k] {
+            turnsBack[k] = photos[visits[k].last].date.timeIntervalSince(photos[visits[k].first].date) <= turnBackStay
+        }
+        // Two of them in a row: the legs to and from both.
+        for k in turnsBack.indices where turnsBack[k] {
+            for other in [k + 1, k + 2] where other < turnsBack.count && turnsBack[other] {
+                for leg in [k - 1, k, other - 1, other] { travelled[leg] = false }
+            }
+        }
+        return travelled
+    }
+
     /// Whether nothing could have gone from where `a` was taken to where `b` was in the time
     /// between them (`b` not before `a`), not even a plane (`AirborneFilter.maximumFlightSpeed`,
     /// as the crow flies): they were taken at the same time in two places.
     static func isNoTravel(from a: Photo, to b: Photo) -> Bool {
         GeoMath.distance(a.coordinate, b.coordinate) > AirborneFilter.maximumFlightSpeed * b.date.timeIntervalSince(a.date)
+    }
+
+    /// Whether going from where `a` was taken to where `b` was in the time between them (`b` not
+    /// before `a`) is faster than `turnBackSpeed`, as the crow flies.
+    static func isFast(from a: Photo, to b: Photo) -> Bool {
+        GeoMath.distance(a.coordinate, b.coordinate) > turnBackSpeed * b.date.timeIntervalSince(a.date)
     }
 
     /// At most `limit` visits of `visits` (concept §9), the first and last always among them,

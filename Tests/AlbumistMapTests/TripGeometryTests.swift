@@ -432,6 +432,168 @@ struct TripGeometryTests {
         #expect(abs(byTrain.metersOnSite - 5 * direct) < 10_000)
     }
 
+    /// Two people's photos in one library 41 km apart, an afternoon in Reykjavík and at Þingvellir:
+    /// three photos at one, ten minutes later three at the other, in turn (review: 18 route points
+    /// and 699 km "vor Ort", which "unterwegs" counts too). A plane could fly it, but nobody goes 41 km
+    /// door to door in nine minutes on the ground, and each visit turns straight back: one leg.
+    @Test func twoCamerasFortyKilometresApartAreNoZigZag() {
+        var photos: [AssetFacts] = []
+        for round in 0..<9 {
+            let t = MapFixture.date("2023-06-15 12:00").addingTimeInterval(Double(round) * 1_200)
+            for k in 0..<3 {
+                photos.append(MapFixture.photo("a-\(round)-\(k)", at: t.addingTimeInterval(Double(k) * 20),
+                                               Fixture.jitter(Places.reykjavik, seed: k, meters: 50), country: "IS", town: "Reykjavík"))
+                photos.append(MapFixture.photo("b-\(round)-\(k)", at: t.addingTimeInterval(600 + Double(k) * 20),
+                                               Fixture.jitter(Places.thingvellir, seed: k, meters: 50), country: "IS", town: "Þingvellir"))
+            }
+        }
+        let geometry = Self.build(photos, id: "iceland")
+        #expect(geometry.route.count <= 3)
+        #expect(geometry.metersOnSite < 100_000)
+        // Each place once, at its first visit.
+        #expect(geometry.places.map(\.name) == ["Reykjavík", "Þingvellir"])
+        #expect(geometry.route.map(\.placeIndex) == [0, 1])
+        #expect(geometry.route.map(\.arrival) == ["2023-06-15 12:00", "2023-06-15 12:10"].map(MapFixture.date))
+        #expect(geometry.legs.count == 1 && !geometry.legs[0].withoutPhotos)
+        #expect(abs(geometry.metersOnSite - GeoMath.distance(Places.reykjavik, Places.thingvellir)) < 500)
+        for seed in 1...3 as ClosedRange<UInt64> {
+            #expect(Self.build(Self.shuffled(photos, seed: seed), id: "iceland") == geometry)
+        }
+    }
+
+    /// The route turns back from a visit right away when it comes from a place and goes back to it,
+    /// both legs faster than `TripGeometryBuilder.turnBackSpeed` (200 km/h as the crow flies, photo
+    /// to photo), after at most `turnBackStay` (an hour) there. Once is a way people go; twice in a
+    /// row is not: those legs join a run, as photos taken at the same time do.
+    @Test func turningBackRightAwayTwiceInARowIsNoZigZag() {
+        let a = Places.reykjavik, b = Places.thingvellir, c = Places.geysir, d = Places.vik
+        /// Visits at `places` in turn from 08:00: three photos right at the place, the first and the
+        /// last `stay` apart (`stays` by visit), then `leg` to the next.
+        func inTurn(_ prefix: String, _ places: [GeoCoordinate], leg: TimeInterval, stay: TimeInterval = 40,
+                    stays: [Int: TimeInterval] = [:]) -> [Int] {
+            var facts: [AssetFacts] = []
+            var start = MapFixture.date("2023-06-15 08:00")
+            for (v, place) in places.enumerated() {
+                let span = stays[v] ?? stay
+                for k in 0..<3 {
+                    facts.append(MapFixture.photo("\(prefix)-\(v)-\(k)", at: start.addingTimeInterval(span * Double(k) / 2), place, country: "IS"))
+                }
+                start = start.addingTimeInterval(span + leg)
+            }
+            return Self.build(facts).route.map(\.placeIndex)
+        }
+        let alternating = [a, b, a, b, a, b]
+        // 41 km at exactly the speed take 12 minutes 21 seconds: from one to the other 2 % faster is
+        // one leg, 2 % slower is as it is.
+        let atTheSpeed = GeoMath.distance(a, b) / TripGeometryBuilder.turnBackSpeed
+        #expect(abs(atTheSpeed - 741) < 1)
+        #expect(inTurn("faster", alternating, leg: atTheSpeed * 0.98) == [0, 1])
+        #expect(inTurn("slower", alternating, leg: atTheSpeed * 1.02) == [0, 1, 0, 1, 0, 1])
+        // Ten minutes from one to the other: an hour at every place (first to last photo) is turning
+        // back right away, an hour and a minute is not.
+        #expect(inTurn("hour", alternating, leg: 600, stay: TripGeometryBuilder.turnBackStay) == [0, 1])
+        #expect(inTurn("longer", alternating, leg: 600, stay: TripGeometryBuilder.turnBackStay + 60) == [0, 1, 0, 1, 0, 1])
+        // Once is a way people go: a scenic flight, a high-speed train out and straight back.
+        #expect(inTurn("once", [a, b, a], leg: 600) == [0, 1, 0])
+        // Twice in a row: at two visits next to each other, ...
+        #expect(inTurn("twice", [a, b, a, b], leg: 600) == [0, 1])
+        // ... or with one between them, however long (one camera taking photos all day at one place,
+        // the other now and then at another) ...
+        #expect(inTurn("all-day", [a, b, a, b, a], leg: 600, stays: [0: 10_800, 2: 10_800, 4: 10_800]) == [0, 1])
+        // ... or going on to another place (the other camera moving on): each place once.
+        #expect(inTurn("moving-on", [a, b, a, c, a], leg: 600) == [0, 1, 2])
+        // Two turns with two visits between them are not in a row: as it is.
+        #expect(inTurn("apart", [a, b, a, c, d, c], leg: 600) == [0, 1, 0, 2, 3, 2])
+        // Every leg of ten minutes here is faster than `turnBackSpeed`, none faster than a plane.
+        for (p, q) in [(a, b), (a, c), (c, d)] {
+            let speed = GeoMath.distance(p, q) / 600
+            #expect(speed > TripGeometryBuilder.turnBackSpeed && speed < AirborneFilter.maximumFlightSpeed)
+        }
+    }
+
+    /// Real ways there and back stay as they are: legs slower than `TripGeometryBuilder.turnBackSpeed`
+    /// however often they turn back (a car, a ferry), faster ones turning back once at a time or
+    /// after time spent at the far end (a high-speed train, a scenic flight, island hops by plane).
+    @Test func realWaysThereAndBackStayAsTheyAre() {
+        /// `count` photos at `place` from `start` (UTC), one every `minutes`.
+        func stop(_ prefix: String, _ place: GeoCoordinate, _ start: String, count: Int = 3, minutes: Double = 10) -> [AssetFacts] {
+            (0..<count).map { i in
+                MapFixture.photo("\(prefix)-\(i)", at: MapFixture.date(start).addingTimeInterval(Double(i) * minutes * 60),
+                                 Fixture.jitter(place, seed: i, meters: 80))
+            }
+        }
+        /// From each stop to the next at another place: the speed from its last photo to the next one's first.
+        func speeds(_ stops: [[AssetFacts]]) -> [Double] {
+            zip(stops, stops.dropFirst()).compactMap { from, to in
+                let a = from[from.count - 1].asset, b = to[0].asset
+                let meters = GeoMath.distance(a.location!, b.location!)
+                return meters > TripGeometry.placeRadiusMeters ? meters / b.creationDate!.timeIntervalSince(a.creationDate!) : nil
+            }
+        }
+        func route(_ stops: [[AssetFacts]]) -> [Int] { Self.build(stops.flatMap { $0 }).route.map(\.placeIndex) }
+        let fast = TripGeometryBuilder.turnBackSpeed
+
+        // By car from the hotel in Vík to Skógafoss, back for something forgotten, to the waterfall
+        // again and back: 28 km in 25 minutes, ten minutes at either end.
+        let (vik, skogafoss) = (Places.vik, Places.skogafoss)
+        let car = [stop("vik1", vik, "2023-06-17 09:00", minutes: 5), stop("skoga1", skogafoss, "2023-06-17 09:35", minutes: 5),
+                   stop("vik2", vik, "2023-06-17 10:10", minutes: 5), stop("skoga2", skogafoss, "2023-06-17 10:45", minutes: 5),
+                   stop("vik3", vik, "2023-06-17 11:20", minutes: 5)]
+        #expect(speeds(car).count == 4 && speeds(car).allSatisfy { $0 < fast })
+        #expect(route(car) == [0, 1, 0, 1, 0])
+        // The ferry from Landeyjahöfn to Heimaey and back, twice: 12 km in 35 minutes.
+        let landeyjahofn = MapFixture.at(63.5310, -20.1170), heimaey = MapFixture.at(63.4430, -20.2700)
+        let ferry = [stop("land1", landeyjahofn, "2023-06-18 08:00"), stop("heim1", heimaey, "2023-06-18 08:55"),
+                     stop("land2", landeyjahofn, "2023-06-18 09:50"), stop("heim2", heimaey, "2023-06-18 10:45"),
+                     stop("land3", landeyjahofn, "2023-06-18 11:40")]
+        #expect(speeds(ferry).count == 4 && speeds(ferry).allSatisfy { $0 < fast })
+        #expect(route(ferry) == [0, 1, 0, 1, 0])
+
+        // By high-speed train from Beijing to Tianjin, 108 km in half an hour platform to platform,
+        // faster than `turnBackSpeed`: a day out with five hours there, ...
+        let beijing = MapFixture.at(39.8652, 116.3786), tianjin = MapFixture.at(39.1365, 117.2098)
+        let dayOut = [stop("bj-am", beijing, "2023-06-20 07:40"), stop("tj", tianjin, "2023-06-20 08:30", count: 6, minutes: 60),
+                      stop("bj-pm", beijing, "2023-06-20 14:00")]
+        #expect(speeds(dayOut).count == 2 && speeds(dayOut).allSatisfy { $0 > fast })
+        #expect(route(dayOut) == [0, 1, 0])
+        // ... out and straight back, twenty minutes at the station (turning back once), ...
+        let straightBack = [stop("bj-out", beijing, "2023-06-21 07:40"), stop("tj-station", tianjin, "2023-06-21 08:30"),
+                            stop("bj-back", beijing, "2023-06-21 09:20")]
+        #expect(speeds(straightBack).count == 2 && speeds(straightBack).allSatisfy { $0 > fast })
+        #expect(route(straightBack) == [0, 1, 0])
+        // ... and three days in Beijing from a hotel in Tianjin, there and back every day.
+        var commute: [[AssetFacts]] = []
+        for day in 22...24 {
+            commute += [stop("tj-am-\(day)", tianjin, "2023-06-\(day) 06:30"), stop("bj-\(day)", beijing, "2023-06-\(day) 07:20", count: 11, minutes: 60)]
+            if day < 24 { commute.append(stop("tj-pm-\(day)", tianjin, "2023-06-\(day) 17:50")) }
+        }
+        #expect(speeds(commute).count == 5 && speeds(commute).allSatisfy { $0 > fast })
+        #expect(route(commute) == [0, 1, 0, 1, 0, 1])
+
+        // A scenic flight from Reykjavík (the last photo while taxiing) to Langjökull, 102 km in 26
+        // minutes, ten minutes circling over the glacier and back (photos the airborne filter keeps:
+        // a slow plane, circling): it turns back once.
+        let langjokull = MapFixture.at(64.70, -20.25)
+        let scenic = [stop("field-out", Places.reykjavik, "2023-06-19 09:57", minutes: 15), stop("glacier", langjokull, "2023-06-19 10:53", minutes: 5),
+                      stop("field-back", Places.reykjavik, "2023-06-19 11:29")]
+        #expect(speeds(scenic).count == 2 && speeds(scenic).allSatisfy { $0 > fast })
+        #expect(route(scenic) == [0, 1, 0])
+
+        // Island hops by plane from a hotel in Honolulu, 151 km to Maui and 173 km to Kauai in 40 and
+        // 45 minutes gate to gate: a day on each, ...
+        let honolulu = Places.honolulu, maui = MapFixture.at(20.8893, -156.4729), kauai = MapFixture.at(21.9811, -159.3711)
+        let islands = [stop("hnl1", honolulu, "2023-07-01 07:40"), stop("maui", maui, "2023-07-01 08:40", count: 7, minutes: 60),
+                       stop("hnl2", honolulu, "2023-07-01 15:20"), stop("hnl3", honolulu, "2023-07-02 07:35"),
+                       stop("kauai", kauai, "2023-07-02 08:40", count: 7, minutes: 60), stop("hnl4", honolulu, "2023-07-02 15:25")]
+        #expect(speeds(islands).count == 4 && speeds(islands).allSatisfy { $0 > fast })
+        #expect(route(islands) == [0, 1, 0, 2, 0])
+        // ... and from Maui to Kauai with forty minutes at Honolulu's airport between the flights.
+        let hop = [stop("ogg", maui, "2023-07-05 07:40"), stop("hnl", honolulu, "2023-07-05 08:40", count: 5),
+                   stop("lih", kauai, "2023-07-05 10:05")]
+        #expect(speeds(hop).count == 2 && speeds(hop).allSatisfy { $0 > fast })
+        #expect(route(hop) == [0, 1, 2])
+    }
+
     /// "km vor Ort" are the legs between all route points, counted before the route is cut to
     /// `TripGeometry.maxRoutePoints` (review: a 360-place road trip showed 7,983 km against 8,872 km
     /// between all its day places). A leg of the cut route carries the legs it stands for.

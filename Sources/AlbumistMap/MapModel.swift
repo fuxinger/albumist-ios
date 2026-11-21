@@ -173,9 +173,11 @@ public struct TripPlace: Hashable, Sendable, Codable {
 
 /// One stop of the route: a visit to a place of the trip, in time order. A place visited twice
 /// (back to the hotel) appears twice, never twice in a row. Photos taken in turn in two places
-/// that nothing could travel between in the time (`AirborneFilter.maximumFlightSpeed`: two
-/// cameras in one library) are no way anyone went: the route passes each place of such a run
-/// once, at its first visit in the run.
+/// are no way anyone went (two cameras in one library) when nothing could travel between them in
+/// the time (`AirborneFilter.maximumFlightSpeed`), or when the route would turn back right away
+/// twice in a row (A → B → A → B), each way faster than 200 km/h as the crow flies and at most an
+/// hour at each turn: the route passes each place of such a run once, at its first visit in the
+/// run.
 public struct RoutePoint: Hashable, Sendable, Codable {
     public var placeIndex: Int
     /// First and last photo of this visit.

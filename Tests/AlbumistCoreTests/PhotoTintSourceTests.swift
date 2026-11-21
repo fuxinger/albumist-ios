@@ -90,9 +90,11 @@ struct PhotoTintSourceTests {
     /// formula there would find no cover here, and the page would quietly lose its colour.
     @Test func theReaderLooksAtTheSizeTheCoverIsKeptAt() throws {
         let file = try Self.code(Self.ground)
-        let pixels = try Self.body(["struct CoverTintReader", "private var pixels: CGSize"], in: file)
+        let pixels = try Self.body(["struct CoverTintReader", "private func pixels(at width: CGFloat) -> CGSize"], in: file)
         #expect(pixels.contains("CGSize(width: width.rounded(.up) * displayScale, height: (width / ratio).rounded(.up) * displayScale)"),
                 "\(pixels)")
+        let shown = try Self.body(["struct CoverTintReader", "private var pixels: CGSize"], in: file)
+        #expect(shown.contains("pixels(at: width)"), "\(shown)")
         let cover = try Self.code(Self.cover)
         let request = try #require(AppSource.body(of: "private var request: CoverLoader.Request?", in: cover))
         #expect(request.contains("let points = CGSize(width: width.rounded(.up), height: (width / aspectRatio).rounded(.up))"), "\(request)")
@@ -100,8 +102,8 @@ struct PhotoTintSourceTests {
         #expect(request.contains("height: points.height * displayScale"), "\(request)")
         #expect(cover.contains("self.aspectRatio = max(aspectRatio, 0.1)"))
         let reader = try Self.body(["struct CoverTintReader", "func body(content: Content)"], in: file)
-        #expect(reader.contains("Key(ids: CoverPhoto.candidates(ids), pixels: pixels, sharp: sharp)"), "\(reader)")
-        #expect(reader.contains("guard width >= 1 else { return }"), "\(reader)")
+        #expect(reader.contains("Key(ids: CoverPhoto.candidates(ids), pixels: pixels, sharp: sharp && !hidden)"), "\(reader)")
+        #expect(reader.contains("guard !Task.isCancelled, key.pixels.width >= 1 else { return }"), "\(reader)")
         let follow = try Self.body(["struct CoverTintReader", "private func follow("], in: file)
         #expect(follow.contains("PhotoTints.shared.known(for: key.ids, pixels: key.pixels)"), "\(follow)")
     }
@@ -147,6 +149,36 @@ struct PhotoTintSourceTests {
         #expect(asked.upperBound < faded.lowerBound, "\(follow)")
     }
 
+    /// A page opened again is in its colour from its first frame, with no switch from the neutral
+    /// ground (verification review V5): as the reader measures the page for the first time, before
+    /// the cover tells that it shows a sharp photo, it takes the colour known for the cover kept at
+    /// this size, at once (no fade), never for a hidden preview. That colour stays while the cover
+    /// is still to tell; a hidden preview or another cover takes it away.
+    @Test func aKnownColourIsThereFromThePagesFirstFrame() throws {
+        let file = try Self.code(Self.ground)
+        let reader = try Self.body(["struct CoverTintReader", "func body(content: Content)"], in: file)
+        let measured = try #require(reader.range(of: "action: { new in"), "\(reader)")
+        let seeded = try #require(reader.range(of: "if width < 1 { seed(width: new) }"), "not seeded as the page is first measured: \(reader)")
+        let kept = try #require(reader.range(of: "width = new"), "\(reader)")
+        #expect(measured.upperBound < seeded.lowerBound && seeded.upperBound < kept.lowerBound, "\(reader)")
+        let seed = try Self.body(["struct CoverTintReader", "private func seed(width: CGFloat)"], in: file)
+        #expect(seed.contains("guard !hidden, tint == nil, width >= 1 else { return }"), "\(seed)")
+        #expect(seed.contains("if case .tint(let known?) = PhotoTints.shared.known(for: CoverPhoto.candidates(ids), pixels: pixels(at: width))"),
+                "\(seed)")
+        #expect(seed.contains("tint = known"), "\(seed)")
+        #expect(!seed.contains("withAnimation"), "a known colour fades in: \(seed)")
+        // Kept while the cover is still to tell; gone for a hidden preview or another cover.
+        let notSharp = try #require(reader.range(of: "guard key.sharp else {"), "\(reader)")
+        let stays = try #require(reader.range(of: "if tint != nil, hidden || PhotoTints.shared.known(for: key.ids, pixels: key.pixels) != .tint(tint) {"),
+                                 "a seeded colour goes before the cover told: \(reader)")
+        #expect(notSharp.upperBound < stays.lowerBound, "\(reader)")
+        #expect(reader.contains("Key(ids: CoverPhoto.candidates(ids), pixels: pixels, sharp: sharp && !hidden)"), "\(reader)")
+        // The page says whether its preview is hidden, apart from whether a sharp photo shows.
+        let page = try Self.code(Self.page)
+        let cover = try Self.body(["struct ProposalDetailView", "private func cover("], in: page)
+        #expect(cover.contains(".coverTint(of: ids, aspectRatio: ratio, sharp: coverIsPhoto, hidden: card.hidesPreview, into: $tint)"), "\(cover)")
+    }
+
     /// The one new place (DS-11): the ground of a suggestion's page, under its cover, header,
     /// photos and the bar with its fade, from its cover once a sharp photo shows (never from
     /// "Vorschau ausgeblendet"). No card, list or other page takes it.
@@ -162,7 +194,7 @@ struct PhotoTintSourceTests {
         #expect(bar.contains("LinearGradient(colors: [ground.opacity(0), ground]"), "\(bar)")
         #expect(!bar.contains("Theme.background"), "the bar stands on another ground than the page: \(bar)")
         let cover = try Self.body(["struct ProposalDetailView", "private func cover("], in: page)
-        #expect(cover.contains(".coverTint(of: ids, aspectRatio: ratio, sharp: coverIsPhoto && !card.hidesPreview, into: $tint)"), "\(cover)")
+        #expect(cover.contains(".coverTint(of: ids, aspectRatio: ratio, sharp: coverIsPhoto, hidden: card.hidesPreview, into: $tint)"), "\(cover)")
         #expect(cover.contains("aspectRatio: ratio, cornerRadius: 0, hidesPreview: card.hidesPreview"), "\(cover)")
         // Nowhere else: not on a card, a list or another page.
         for path in AppSource.swiftFiles(under: "App/Albumist") where !path.hasSuffix("ProposalViews.swift") && !path.hasSuffix("PhotoTintGround.swift") {

@@ -1433,14 +1433,16 @@ def run_group(args) -> int:
     system_log_path = os.path.join(args.out, f"{args.name}-swiftui.txt")
     if swiftui_warnings(system_log_path) != 0:
         failed, infra_only = True, False
+    # The video first: its base64 lines are most of the job log, and the reports below are read
+    # from the log's end (a tail of 350 lines held only video in UI run 44870948643).
+    if args.video:
+        video_to_log(args.video)
     if quality_gates(args.name, system_log_path, "\n".join(CONSOLES), gate) and not infra_only:
         failed = True
     try:
         perf_report(args.name, "\n".join(p[4] for p in passes))
     except Exception as error:  # noqa: BLE001 - a report must not hide the test result
         print(f"::warning title=UI {args.name}::speed report failed: {error!r}", flush=True)
-    if args.video:
-        video_to_log(args.video)
     if args.a11y_summary:
         joined = "\n".join(p[4] for p in passes)
         print(f"A11Y_SUMMARY {args.name} fails {joined.count('A11Y_FAIL ')} warnings {joined.count('A11Y_WARN ')}")

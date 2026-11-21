@@ -415,6 +415,9 @@ final class MainThreadWatch: @unchecked Sendable {
         }
     }
 
+    /// Where a hang's stack is named and logged (see `answered`); serial, so the lines keep their order.
+    private static let hangNaming = DispatchQueue(label: "app.albumist.uitest.hang-naming", qos: .utility)
+
     private func answered() {
         let now = DispatchTime.now().uptimeNanoseconds
         lock.lock()
@@ -436,9 +439,14 @@ final class MainThreadWatch: @unchecked Sendable {
         lock.unlock()
         guard asked != nil else { return }
         if waited >= Self.hangLimit - Self.tick {
-            let frames = addresses.enumerated().map { Self.symbol($0.element, isReturnAddress: $0.offset > 0) }
-            let kind = HangKind(frames: frames, inactive: inactive, beforeFirstActive: !started, starved: starved)
-            note("UI_MAIN_HANG \(Int(waited * 1000)) ms \(kind.rawValue) in [\(hangNames)]: \(HangKind.shortStack(frames))")
+            // Named off the main thread: `dladdr` and demangling of up to 64 frames took up to half
+            // a second here when the images' symbol tables were cold, and the watch reported its
+            // own naming as a hang of the app (accessibility, UI run 44870948643).
+            Self.hangNaming.async { [self] in
+                let frames = addresses.enumerated().map { Self.symbol($0.element, isReturnAddress: $0.offset > 0) }
+                let kind = HangKind(frames: frames, inactive: inactive, beforeFirstActive: !started, starved: starved)
+                note("UI_MAIN_HANG \(Int(waited * 1000)) ms \(kind.rawValue) in [\(hangNames)]: \(HangKind.shortStack(frames))")
+            }
         }
         // Written only here, on the main thread.
         if waited > 0.5, let file {

@@ -347,3 +347,15 @@ class PerfReportTests(unittest.TestCase):
         groups = json.load(open(os.path.join(ROOT, ".github", "ui-groups.json"), encoding="utf-8"))
         full = next(g for g in groups["groups"] if g["group"] == "flow-full")
         self.assertIn("PerformanceUITests", full["only"].split())
+
+
+class HangNamingTests(unittest.TestCase):
+    def test_the_watch_names_a_hang_off_the_main_thread(self):
+        # UI run 44870948643 (accessibility): naming the stack in `answered` (main thread) was
+        # itself reported as a 492 ms hang of the app. The naming runs on `hangNaming` now.
+        swift = open(os.path.join(ROOT, "App", "Albumist", "Platform", "UITestSupport.swift"), encoding="utf-8").read()
+        body = swift.split("private func answered() {", 1)[1].split("\n    }\n", 1)[0]
+        naming = body.index("Self.hangNaming.async")
+        self.assertLess(naming, body.index("Self.symbol("))
+        self.assertLess(naming, body.index("HangKind(frames:"))
+        self.assertEqual(body.count("Self.symbol("), 1)

@@ -20,6 +20,10 @@ on:
         description: Random libraries for the stress test
         type: string
         default: '300'
+      only_tsan:
+        description: Only the Thread Sanitizer pass on Linux (no Mac), to try sanitize.yml on a branch
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,6 +45,7 @@ concurrency:
 
 jobs:
   core-linux:
+    if: ${{ !inputs.only_tsan }}
     name: Stress and load tests (Linux)
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
@@ -74,6 +79,7 @@ jobs:
             --swift-log core.log --swift-log load.log --load-log load.log >> "$GITHUB_STEP_SUMMARY" || true
 
   macos:
+    if: ${{ !inputs.only_tsan }}
     name: Clean build, stress, load and app tests (macOS)
     runs-on: xcode-27
     timeout-minutes: 75
@@ -148,7 +154,7 @@ jobs:
     # decision 16.11.2026; red on any report (sanitize.yml).
     uses: ./.github/workflows/sanitize.yml
     with:
-      mac: true
+      mac: ${{ !inputs.only_tsan }}
 
   # TODO(ui.yml): the UI flow in English and on a second device size (test plan A11, A16).
   # ui.yml can be called now (`workflow_call`, testflight.yml uses it), but its only input is

@@ -1386,9 +1386,14 @@ final class AlbumistFlowUITests: XCTestCase {
         print("UI_STEP_OK open the video")
         // While the video comes, its page waits with the grid's thumbnail or black, never with
         // "Dieses Video ist gerade nicht verfügbar" (verification review of H11, V1: a small
-        // still flashed the note before the player came).
-        let unavailable = app.descendants(matching: .any)["viewer.unavailable"]
-        UITestWait.never("the video's page says it is not available while it comes", for: 2) { unavailable.exists }
+        // still flashed the note before the player came). A smoke check only: the demo clip's
+        // still is sharp on every iPhone, so the note could not show here even without that fix;
+        // the rule's teeth are the core's `LoadingPlaceholderTests` (verification V, X8). Asked by
+        // the video's own words, so a neighbour photo's note ("Dieses Foto …") does not count.
+        let unavailable = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Dieses Video ist gerade nicht verfügbar"))
+            .firstMatch
+        UITestWait.never("the video's page never says it is not available while it comes", for: 2) { unavailable.exists }
         // The controls are the viewer's own; pressed in place (the scrolling taps of `tap`
         // would page or close the viewer).
         func press(_ element: XCUIElement, _ step: String) -> Bool {

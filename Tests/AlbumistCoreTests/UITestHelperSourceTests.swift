@@ -140,4 +140,48 @@ struct UITestHelperSourceTests {
         #expect(scroll.contains("\"plan.bar\"") && scroll.contains("\"proposal.bar\""), "the drag does not keep clear of the page's own bar")
         #expect(scroll.contains("UI_FACT"), "a page the swipes did not move is not reported")
     }
+
+    /// "Anlegen" makes at once only what needs no look first (`AppModel.createNow`: a plan with
+    /// something to point out opens the suggestion's page before the free albums are counted).
+    /// UI run 44878163259: locked test8 tapped „København V, Mai 2023“, whose page opened instead
+    /// of the purchase sheet (an earlier test had left an album of that name in its folder), as
+    /// in UI run 44862187776; `FrameUITests.test3` went on to the next card in the same run and
+    /// passed. test8 tries the next card too, at most three, and fails only when none opens the
+    /// sheet.
+    @Test func theLockedCardTestTriesTheNextCardWhenOneIsLookedAtFirst() throws {
+        let locked = try AppSource.read("App/AlbumistUITests/AlbumistLockedUITests.swift")
+        let test8 = try #require(AppSource.body(of: "func test8_CardWithoutFreeAlbumsOpensThePurchaseSheet(", in: locked))
+        #expect(test8.contains(/for attempt in 0\.\.<3/), "test8 taps one card only")
+        #expect(test8.contains("cardThatCreates(skipping: attempt)"), "test8 does not go on to the next card")
+        #expect(test8.contains("UITestScreens.SuggestionPage.isShown(app)"), "test8 does not see that the card opened its page")
+        let finder = try #require(AppSource.body(of: "private func cardThatCreates(", in: locked))
+        #expect(finder.contains("element(boundBy: skipped)"), "the cards after the first are never found")
+    }
+
+    /// testRemovePhotoFromSuggestion runs last of its group in flow-other: the flows before it
+    /// made nearly every suggestion, no area had two open any more and so no "Alle N", and the
+    /// test failed on its first step in every UI run of design waves 1 to 3 (the last
+    /// 44878163259; test7 before it found its personal place alone on the page). It takes back
+    /// the newest plans then, as the locked tests do, through the same helper, which lives in
+    /// `UITestScreens` once.
+    @Test func theRemovePhotoTestTakesBackPlansWhenNoListIsLeft() throws {
+        let flow = try AppSource.read("App/AlbumistUITests/AlbumistFlowUITests.swift")
+        let test = try #require(AppSource.body(of: "func testRemovePhotoFromSuggestion(", in: flow))
+        #expect(test.contains("UITestScreens.Albums.takeBackNewestPlans(app,"), "no list, and nothing taken back")
+        #expect(test.matches(of: /StartPage\.openList\(/).count >= 2, "the list is not looked for again after taking back")
+        #expect(test.contains("shot(\"x-"), "a missing list leaves no picture")
+
+        let screens = try AppSource.read("App/AlbumistUITests/UITestScreens.swift")
+        let shared = try #require(AppSource.body(of: "static func takeBackNewestPlans(", in: screens))
+        #expect(shared.contains("\"receipt.undo\""), "the shared helper takes nothing back")
+        #expect(shared.contains("springboard"), "the shared helper does not answer iOS's question before albums are deleted")
+        let locked = try AppSource.read("App/AlbumistUITests/AlbumistLockedUITests.swift")
+        let own = try #require(AppSource.body(of: "private func takeBackNewestPlans(", in: locked))
+        #expect(own.contains("UITestScreens.Albums.takeBackNewestPlans(app,"), "the locked tests keep a copy of their own")
+        #expect(!own.contains("receipt.undo"), "the locked tests keep a copy of their own")
+
+        // A list that is not found says what the page showed instead.
+        let start = try #require(AppSource.body(of: "static func openList(", in: screens))
+        #expect(start.contains("facts(app)"), "a missing \"Alle N\" does not say what the page showed")
+    }
 }

@@ -212,6 +212,7 @@ struct StartSections: View {
             // One album at a time (`createNow`): the other cards wait meanwhile.
             waits: (creating != nil && creating != proposal.id) || (previewing != nil && previewing != proposal.id),
             style: style, onOpen: { open(proposal) }, onAction: { perform(text.action, on: proposal) })
+        .quickCreateMomentSource(proposal.id, aspectRatio: style == .large ? 2 : 3.0 / 2.0) // Design W2 H6: moment source
     }
 
     // MARK: Actions

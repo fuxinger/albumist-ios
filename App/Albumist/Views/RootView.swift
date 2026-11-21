@@ -79,6 +79,8 @@ struct MainTabs: View {
     @State private var tab: MainTab = .suggestions
     /// The stack of the tab "Vorschläge", also for Siri, Shortcuts and Spotlight (`AppScreen`).
     @State private var suggestionsNavigator = Navigator()
+    /// The tab bar stays open while a new album comes to "Alben" (`QuickCreateMomentLayer`).
+    @State private var momentHoldsTabBar = false
 
     enum MainTab: Hashable { case suggestions, unsorted, albums, search }
 
@@ -114,8 +116,15 @@ struct MainTabs: View {
         }
         // iPad: tabs become a sidebar; iPhone: the Liquid Glass tab bar shrinks while scrolling.
         .tabViewStyle(.sidebarAdaptable)
-        // UI tests tap every tab by name; a shrunken bar hides all but the current one.
-        .tabBarMinimizeBehavior(UITestSupport.isRunning ? .never : .onScrollDown)
+        // UI tests tap every tab by name; a shrunken bar hides all but the current one, so it
+        // also stays open while a new album comes to "Alben".
+        .tabBarMinimizeBehavior(UITestSupport.isRunning || momentHoldsTabBar ? .never : .onScrollDown)
+        // "Anlegen" on a card made an album (draft E6): the card's cover flies into "Alben" as
+        // its banner comes, with the album's one haptic (`QuickCreateMomentLayer`): over the
+        // tabs, never tapped, hidden from VoiceOver.
+        .overlay {
+            QuickCreateMomentLayer(holdsTabBar: $momentHoldsTabBar, showsAlbumsTab: tab != .search)
+        }
         // Siri, Shortcuts, Spotlight and the analysis card's buttons open their target from
         // the tab "Vorschläge": pushed onto its path, and the route is taken.
         .onChange(of: model.route, initial: true) { _, target in
@@ -137,11 +146,6 @@ struct MainTabs: View {
             Button("OK", role: .cancel) {}
         } message: { message in
             Text(message.text)
-        }
-        // "Anlegen" on a card made an album: one success tap as its banner comes, as after the
-        // preview's run (`ExecutionHaptics`).
-        .sensoryFeedback(.success, trigger: model.quickCreateBanner?.id) { (old: AlbumistID?, new: AlbumistID?) in
-            new != nil && new != old
         }
         // "Anlegen" found the free albums used up: the purchase sheet instead of the album. Once
         // Albumist is unlocked, the album is made as tapped; closed without buying, the

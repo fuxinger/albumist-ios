@@ -78,7 +78,8 @@
     die Karte zeigt „✓ Angelegt“, sobald das Album in Fotos ist. „Bescheid sagen, wenn fertig“ erst, wenn
     die Analyse dauert; die Einführung fragt nicht mehr nach Mitteilungen.
   - Vorschläge: Karten mit Titelbild, „Auswählen“ wie in Fotos statt eines Korbs; ein offener Vorschlag
-    zeigt ein großes Titelbild, die Fotos nach Tagen und unten zwei Knöpfe. Aus einem erledigten oder
+    zeigt ein großes Titelbild, die Fotos nach Tagen und unten zwei Knöpfe (bei den größten Schriften unten
+    nur der Hauptknopf, „Nicht jetzt“ dann unter den Angaben zum Album). Aus einem erledigten oder
     persönlichen Vorschlag legt „Album anlegen“ nichts sofort an; ein nach „Anpassen“ getippter Name gilt;
     Umbenennen und Verschieben eines eigenen Albums heißen so; „Alle auswählen“ lässt „Nicht jetzt“ aus;
     VoiceOver nennt bei Häkchen und Knöpfen das Album.

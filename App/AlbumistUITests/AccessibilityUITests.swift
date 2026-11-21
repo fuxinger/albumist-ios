@@ -301,7 +301,7 @@ final class AccessibilityUITests: XCTestCase {
         // check() waits for the screen to come to rest after every swipe before it.
         check("\(tag) start page", english: english)
         if !short {
-            app.swipeUp(); app.swipeUp()
+            scrollUp("\(tag) start page lower", swipes: 2)
             check("\(tag) start page lower", english: english)
             app.swipeDown(); app.swipeDown(); app.swipeDown(); app.swipeDown()
             UITestWait.screenAtRest(app, "\(tag) start page back at the top")
@@ -328,7 +328,7 @@ final class AccessibilityUITests: XCTestCase {
                 check("\(tag) suggestion detail", english: english)
                 reportMoreCount("\(tag) suggestion detail", w)
                 if !short {
-                    app.swipeUp()
+                    scrollUp("\(tag) suggestion detail lower", swipes: 1)
                     check("\(tag) suggestion detail lower", english: english)
                 }
                 back("\(tag) suggestion detail", confirmed: detailShown)
@@ -356,7 +356,7 @@ final class AccessibilityUITests: XCTestCase {
                 check("\(tag) plan", english: english)
                 expectApplyInReach("\(tag) plan", required: applyStarter)
                 if !short {
-                    app.swipeUp(); app.swipeUp()
+                    scrollUp("\(tag) plan lower", swipes: 2)
                     check("\(tag) plan lower", english: english)
                 }
                 if applyStarter, tap(app.buttons["plan.apply"], "\(tag) apply plan", timeout: 30) {
@@ -402,7 +402,7 @@ final class AccessibilityUITests: XCTestCase {
             sleep(3)
             check("\(tag) atlas", english: english)
             if !short {
-                app.swipeUp(); app.swipeUp()
+                scrollUp("\(tag) atlas lower", swipes: 2)
                 check("\(tag) atlas lower", english: english)
                 if accessibilitySize { checkAtlasRows(tag) }
                 // A country: its photo colours sit behind the title and caption.
@@ -1276,6 +1276,39 @@ final class AccessibilityUITests: XCTestCase {
         if !reached {
             print("UI_FACT \(step): button \(apply.exists ? "\(apply.frame)" : "missing"), tab bar \(tabs.exists ? "\(tabs.frame)" : "missing")")
         }
+    }
+
+    /// Brings the lower part of a page up for its "lower" check: `swipes` swipes, and when they
+    /// moved nothing on the screen, as many drags inside the part of the page that shows,
+    /// between the navigation bar and the page's own bar ("plan.bar", "proposal.bar") or the
+    /// tab bar. At the largest text size of UI run 44852630315 a swipe left the suggestion's page
+    /// and the preview where they were (their "lower" shots equal the first ones, their trees
+    /// too), so their lower parts went unchecked; both have a tall bar of their own at the
+    /// bottom. Not asserted: a page too short to scroll stays where it is, and says so.
+    private func scrollUp(_ step: String, swipes: Int) {
+        let before = XCUIScreen.main.screenshot().pngRepresentation
+        for _ in 0..<swipes { app.swipeUp() }
+        UITestWait.screenAtRest(app, "\(step): after the swipes")
+        guard XCUIScreen.main.screenshot().pngRepresentation == before else { return }
+        let window = app.windows.firstMatch.frame
+        let bar = app.navigationBars.firstMatch
+        let tabs = app.tabBars.firstMatch
+        let ownBar = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier IN %@", ["plan.bar", "proposal.bar"])).firstMatch
+        let top = (bar.exists ? bar.frame.maxY : window.minY + 60) + 24
+        var bottom = tabs.exists ? tabs.frame.minY : window.maxY
+        if ownBar.exists { bottom = min(bottom, ownBar.frame.minY) }
+        bottom -= 24
+        print("UI_FACT \(step): \(swipes) swipe(s) moved nothing; dragging from \(Int(bottom)) to \(Int(top))")
+        guard bottom - top > 40 else { return }
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        for _ in 0..<swipes {
+            origin.withOffset(CGVector(dx: window.midX, dy: bottom))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.midX, dy: top)))
+        }
+        UITestWait.screenAtRest(app, "\(step): after the drags")
+        let moved = XCUIScreen.main.screenshot().pngRepresentation != before
+        print("UI_FACT \(step): the drags \(moved ? "moved the page" : "moved nothing either")")
     }
 
     @discardableResult

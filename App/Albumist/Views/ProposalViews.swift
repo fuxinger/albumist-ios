@@ -610,6 +610,12 @@ struct ProposalDetailView: View {
                     if showsAlbumCard {
                         albumCard
                     }
+                    // At the accessibility sizes the bar keeps only the main button (`actionBar`):
+                    // "Nicht jetzt" follows what the page says about the album, before its photos,
+                    // and goes with the bar while photos are picked.
+                    if typeSize.isAccessibilitySize && !needsFullAccess && !selecting {
+                        notNowButton(card, beside: false)
+                    }
                 }
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.l)
@@ -1144,8 +1150,10 @@ struct ProposalDetailView: View {
 
     /// "Nicht jetzt" and the main button, fixed at the bottom on the page's background, so the
     /// photos that scroll under it never show through its words. Side by side with the main
-    /// button wider (draft E2: 1 to 1.4); below each other, the main one first, at the
-    /// accessibility text sizes.
+    /// button wider (draft E2: 1 to 1.4). At the accessibility text sizes only the main button,
+    /// in reach without scrolling as in the preview's bar (P3-05): both, one above the other,
+    /// took 267 of the small iPhone's 667 points at the largest size, and the page opened
+    /// without the album's name (UI run 44852630315). "Nicht jetzt" is then in the page.
     private func actionBar(_ card: ProposalCardText) -> some View {
         Group {
             if needsFullAccess {
@@ -1153,10 +1161,7 @@ struct ProposalDetailView: View {
                 // "Einstellungen öffnen" (`FullAccessCard`).
                 notNowButton(card, beside: false)
             } else if typeSize.isAccessibilitySize {
-                VStack(spacing: Theme.Spacing.s) {
-                    primaryButton(card, beside: false)
-                    notNowButton(card, beside: false)
-                }
+                primaryButton(card, beside: false)
             } else {
                 ActionBarLayout(spacing: Theme.Spacing.s) {
                     notNowButton(card, beside: true)

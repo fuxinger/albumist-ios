@@ -100,6 +100,31 @@ struct SuggestionPageWordsTests {
         #expect(bar.contains("primaryButton(card, beside: false)") && bar.contains("notNowButton(card, beside: false)"))
     }
 
+    /// At the accessibility text sizes the bar held both buttons, one above the other: on the
+    /// small iPhone at the largest size they took 267 of its 667 points, and the page opened
+    /// with a strip of its cover and the pill but without the album's name (UI run 44852630315,
+    /// "xxxl suggestion detail"). As in the preview's bar (`PlanReviewView.compactBar`, P3-05),
+    /// the bar keeps only the main button, in reach without scrolling; "Nicht jetzt" follows
+    /// what the page says about the album, before its photos. Where full access is missing, the
+    /// bar keeps "Nicht jetzt" alone, as before, and the page has no second one.
+    @Test func atTheAccessibilitySizesTheBarHoldsOnlyTheMainButton() throws {
+        let bar = try Self.body(["private func actionBar("], in: Self.views)
+        let large = try #require(bar.range(of: "} else if typeSize.isAccessibilitySize {"), "no branch for the accessibility sizes")
+        let rest = bar[large.upperBound...]
+        let branch = String(rest[..<(rest.range(of: "} else {")?.lowerBound ?? rest.endIndex)])
+        #expect(branch.contains("primaryButton(card, beside: false)"))
+        #expect(!branch.contains("notNowButton("), "both buttons are still in the bar at the accessibility sizes")
+        let page = try Self.body(["struct ProposalDetailView", "var body: some View"], in: Self.views)
+        // Not while photos are picked: the bar is gone then too.
+        let inPage = try #require(page.range(of: "if typeSize.isAccessibilitySize && !needsFullAccess && !selecting {"),
+                                  "\"Nicht jetzt\" is not in the page at the accessibility sizes")
+        #expect(page[inPage.upperBound...].prefix(80).contains("notNowButton(card, beside: false)"))
+        // After what the page says about the album, before its photos.
+        let album = try #require(page.range(of: "albumCard"))
+        let photos = try #require(page.range(of: "ProposalPhotosView("))
+        #expect(album.upperBound < inPage.lowerBound && inPage.upperBound < photos.lowerBound)
+    }
+
     /// Review B, 12: back from its own preview, the page closes only when that preview's plan
     /// ran, not when any plan ended meanwhile (one started on another tab).
     @Test func onlyItsOwnPreviewsRunClosesThePage() throws {

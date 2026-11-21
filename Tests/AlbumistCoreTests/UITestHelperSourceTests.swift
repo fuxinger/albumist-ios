@@ -95,4 +95,26 @@ struct UITestHelperSourceTests {
         let package = try AppSource.read("Package.swift")
         #expect(package.contains("\"SideShelfCheck.swift\""), "Linux does not build the side check")
     }
+
+    /// At the largest text size of UI run 44852630315 a swipe left the suggestion's page and the
+    /// preview where they were: their "lower" shots equal the first ones and so do their trees,
+    /// so their lower parts were never checked. Both have a tall bar of their own at the bottom.
+    /// The lower checks scroll by `scrollUp(_:swipes:)`: when the swipes moved nothing on the
+    /// screen, it drags inside the part of the page that shows (between the navigation bar and
+    /// the page's own bar or the tab bar) and says so.
+    @Test func theLowerChecksSeeTheLowerPart() throws {
+        let walk = try AppSource.read("App/AlbumistUITests/AccessibilityUITests.swift")
+        let code = AppSource.code(walk, keepStrings: true)
+        for screen in ["start page", "suggestion detail", "plan", "atlas"] {
+            let check = "check(\"\\(tag) \(screen) lower\""
+            let at = try #require(code.range(of: check), "no lower check of the \(screen)")
+            let before = code[..<at.lowerBound].suffix(160)
+            #expect(before.contains("scrollUp(\"\\(tag) \(screen) lower\""), "the \(screen)'s lower check follows a bare swipe")
+        }
+        let scroll = try #require(AppSource.body(of: "private func scrollUp(", in: walk))
+        #expect(scroll.contains("XCUIScreen.main.screenshot()"), "the walk does not see whether the swipes moved the page")
+        #expect(scroll.contains("press(forDuration:"), "no drag where the swipes moved nothing")
+        #expect(scroll.contains("\"plan.bar\"") && scroll.contains("\"proposal.bar\""), "the drag does not keep clear of the page's own bar")
+        #expect(scroll.contains("UI_FACT"), "a page the swipes did not move is not reported")
+    }
 }

@@ -98,6 +98,8 @@ struct MapPrototypeView: View {
     @State private var autoplay = false
     @State private var tripID: AlbumistID?
     @State private var toolNote: String?
+    /// The camera probe over Apple's map is open (full screen, from the playback's tab).
+    @State private var probeOpen = false
 
     var body: some View {
         reacting
@@ -121,6 +123,9 @@ struct MapPrototypeView: View {
             .onChange(of: layers) { applyLayers() }
             .onChange(of: metrics.runningTest == nil) { _, ended in if ended { testEnded() } }
             .onChange(of: hudSource, initial: true) { metrics.activeSource = hudSource }
+            .fullScreenCover(isPresented: $probeOpen) {
+                CameraProbeView(onClose: { probeOpen = false })
+            }
     }
 
     /// The HUD has a band of its own between the bar and the map, so it never covers what the
@@ -149,9 +154,14 @@ struct MapPrototypeView: View {
             AppleGlobeView(scene: scene, camera: scene.firstCamera, isAutoRotating: isTesting(.appleGlobe), metrics: metrics)
                 .id(sceneVersion)
         case .playback:
-            TripPlaybackView(trip: playbackTrip, showsPhotos: showsOwnTrips, autoplay: autoplay, metrics: metrics,
-                             onFinished: { playbackFinished() })
-                .id(playbackKey)
+            // The probe has a map of its own: the playback's map and clock stop under it.
+            if probeOpen {
+                Color.black
+            } else {
+                TripPlaybackView(trip: playbackTrip, showsPhotos: showsOwnTrips, autoplay: autoplay, metrics: metrics,
+                                 onFinished: { playbackFinished() })
+                    .id(playbackKey)
+            }
         }
     }
 
@@ -188,7 +198,12 @@ struct MapPrototypeView: View {
                 .foregroundStyle(Color.white.opacity(0.8))
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         case .playback:
-            MapPrototypeTripPicker(trips: ownTripsNewestFirst, selection: $tripID, current: playbackTrip)
+            HStack(spacing: 8) {
+                MapPrototypeTripPicker(trips: ownTripsNewestFirst, selection: $tripID, current: playbackTrip)
+                PrototypeButton(title: "Kamera-Probe", prominent: false, action: { openProbe() })
+                    .frame(maxWidth: 132)
+                    .accessibilityIdentifier("proto.cameraProbe")
+            }
         }
     }
 
@@ -319,6 +334,14 @@ struct MapPrototypeView: View {
     private func playbackFinished() {
         guard isTesting(.playback) else { return }
         playbackRun += 1
+    }
+
+    /// The camera probe (`CameraProbeView`): the heights of the fourth web draft over Apple's
+    /// map. A running test ends, as when the tab changes: the probe is not the playback.
+    private func openProbe() {
+        metrics.cancelTest()
+        autoplay = false
+        probeOpen = true
     }
 
     private func checkAltitudes() {

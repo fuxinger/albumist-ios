@@ -227,6 +227,7 @@ final class MapPrototypeUITests: XCTestCase {
         ownGlobe()
         appleGlobe()
         playback()
+        cameraProbe()
         tools()
         ownTrips()
 
@@ -313,5 +314,30 @@ final class MapPrototypeUITests: XCTestCase {
         soft("own globe draws the own trips (60 more frames)", timeout: 15) { framesInHUD() >= before + 60 }
         reportHUD("own trips")
         shot("p5-own-trips")
+    }
+}
+
+// The camera probe's step, here and not in the class body, which keeps within SwiftLint's
+// type_body_length; an extension in the same file sees the class's private helpers.
+extension MapPrototypeUITests {
+    /// 3b. The camera probe over Apple's map: each of its six cameras, what MapKit made of it and
+    /// when the map was ready, and a screenshot. Map tiles may not come to a CI simulator, so the
+    /// map's readiness is reported only; the probe's own plate and buttons must be there.
+    private func cameraProbe() {
+        guard tap(page("proto.cameraProbe"), "open camera probe") else { return }
+        guard UITestWait.appears(page("probe.title"), "camera probe plate", timeout: 15) else { return }
+        for number in 1...6 {
+            UITestWait.until("camera probe shows camera \(number)", timeout: 10) { text("probe.title").hasPrefix("\(number) von 6") }
+            soft("camera probe \(number): map rendered or the wait over", timeout: 20) { !text("probe.state").hasPrefix("Karte lädt") }
+            let facts = [text("probe.title"), text("probe.asked"), text("probe.got"), text("probe.state")]
+            print("UI_FACT map prototype camera probe \(number): " + facts.joined(separator: " | "))
+            shot("p3b-probe-\(number)")
+            if number < 6 { tap(page("probe.next"), "camera probe next") }
+        }
+        tap(page("probe.copy"), "copy camera probe")
+        UITestWait.until("camera probe copied", timeout: 10) { page("probe.copy").label == "Kopiert" }
+        tap(page("probe.close"), "close camera probe")
+        UITestWait.disappears(page("probe.title"), "camera probe closed", timeout: 15)
+        UITestWait.appears(page("proto.cameraProbe"), "playback tab after the probe", timeout: 15)
     }
 }

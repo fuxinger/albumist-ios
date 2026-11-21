@@ -32,6 +32,10 @@ struct MapLibrary {
     var travelPhotos: Set<AssetID> = []
     /// What the flights are like.
     var flights = Flights()
+    /// The draws that build the library, in order: the same seed gives the same library.
+    var random: MapRandom
+    /// How many photo ids `nextID` has given out.
+    var counter = 0
 
     struct Flights {
         var count = 0
@@ -47,6 +51,19 @@ struct MapLibrary {
         var layovers = 0
         /// Journeys to the airport by train.
         var byTrain = 0
+
+        /// Counts the flight of `leg` along `path`.
+        mutating func add(_ leg: Leg, along path: Flight) {
+            count += 1
+            if path.meters >= 6_000_000 { longHaul += 1 }
+            if leg.hub != nil { layovers += 1 }
+            switch leg.shape {
+            case .sparse: sparse += 1
+            case .burst: burstOnly += 1
+            case .two: two += 1
+            case .regular, .none: break
+            }
+        }
     }
 
     static let hamburg = MapFixture.at(53.5511, 9.9937)
@@ -71,9 +88,9 @@ struct MapLibrary {
         var zone: String
         var center: GeoCoordinate
         /// Where flights land, if it is flown to.
-        var airport: GeoCoordinate? = nil
+        var airport: GeoCoordinate?
         /// A layover on the way there and back.
-        var via: Hub? = nil
+        var via: Hub?
         /// Flights there leave from Frankfurt, reached by train.
         var fromFrankfurt = false
     }
@@ -100,144 +117,47 @@ struct MapLibrary {
         Destination(name: "Provence", country: "FR", zone: "Europe/Paris", center: MapFixture.at(43.9493, 4.8055), airport: MapFixture.at(43.4393, 5.2214)),
         Destination(name: "Lofoten", country: "NO", zone: "Europe/Oslo", center: MapFixture.at(68.2, 13.9), airport: MapFixture.at(67.2692, 14.3653)),
         Destination(name: "Schottland", country: "GB", zone: "Europe/London", center: MapFixture.at(57.12, -4.71), airport: MapFixture.at(57.5425, -4.0475)),
-        Destination(name: "New York", country: "US", zone: "America/New_York", center: MapFixture.at(40.7128, -74.0060), airport: MapFixture.at(40.6413, -73.7781)),
-        Destination(name: "Kalifornien", country: "US", zone: "America/Los_Angeles", center: MapFixture.at(36.7783, -119.4179), airport: MapFixture.at(33.9416, -118.4085)),
+        Destination(name: "New York", country: "US", zone: "America/New_York", center: MapFixture.at(40.7128, -74.0060),
+                    airport: MapFixture.at(40.6413, -73.7781)),
+        Destination(name: "Kalifornien", country: "US", zone: "America/Los_Angeles", center: MapFixture.at(36.7783, -119.4179),
+                    airport: MapFixture.at(33.9416, -118.4085)),
         Destination(name: "Tokio", country: "JP", zone: "Asia/Tokyo", center: MapFixture.Places.tokyo, airport: MapFixture.at(35.7720, 140.3929),
                     fromFrankfurt: true),
         Destination(name: "Bangkok", country: "TH", zone: "Asia/Bangkok", center: MapFixture.at(13.7563, 100.5018), airport: MapFixture.at(13.6900, 100.7501),
                     via: dubai),
-        Destination(name: "Kapstadt", country: "ZA", zone: "Africa/Johannesburg", center: MapFixture.at(-33.9249, 18.4241), airport: MapFixture.at(-33.9715, 18.6021)),
+        Destination(name: "Kapstadt", country: "ZA", zone: "Africa/Johannesburg", center: MapFixture.at(-33.9249, 18.4241),
+                    airport: MapFixture.at(-33.9715, 18.6021)),
         Destination(name: "Neuseeland", country: "NZ", zone: "Pacific/Auckland", center: MapFixture.Places.auckland, airport: MapFixture.at(-37.0082, 174.7850),
                     via: singapore),
-        Destination(name: "Fidschi", country: "FJ", zone: "Pacific/Fiji", center: MapFixture.Places.suva, airport: MapFixture.at(-17.7554, 177.4433), via: singapore),
-        Destination(name: "Marrakesch", country: "MA", zone: "Africa/Casablanca", center: MapFixture.at(31.6295, -7.9811), airport: MapFixture.at(31.6069, -8.0363)),
-        Destination(name: "Kopenhagen", country: "DK", zone: "Europe/Copenhagen", center: MapFixture.at(55.6761, 12.5683), airport: MapFixture.at(55.6180, 12.6508)),
-        Destination(name: "Amsterdam", country: "NL", zone: "Europe/Amsterdam", center: MapFixture.at(52.3676, 4.9041), airport: MapFixture.at(52.3105, 4.7683)),
+        Destination(name: "Fidschi", country: "FJ", zone: "Pacific/Fiji", center: MapFixture.Places.suva, airport: MapFixture.at(-17.7554, 177.4433),
+                    via: singapore),
+        Destination(name: "Marrakesch", country: "MA", zone: "Africa/Casablanca", center: MapFixture.at(31.6295, -7.9811),
+                    airport: MapFixture.at(31.6069, -8.0363)),
+        Destination(name: "Kopenhagen", country: "DK", zone: "Europe/Copenhagen", center: MapFixture.at(55.6761, 12.5683),
+                    airport: MapFixture.at(55.6180, 12.6508)),
+        Destination(name: "Amsterdam", country: "NL", zone: "Europe/Amsterdam", center: MapFixture.at(52.3676, 4.9041),
+                    airport: MapFixture.at(52.3105, 4.7683)),
     ]
+
+    /// The library's days: photos from `start` until before `end`.
+    static let start = MapFixture.date("2016-01-01"), end = MapFixture.date("2026-10-31")
 
     /// About `count` photos (the last day may round it a little; with very few photos per day
     /// the ten years may end first).
     init(count: Int = 50_000, seed: UInt64 = 7) {
-        var random = MapRandom(seed: seed)
-        var counter = 0
-        func nextID() -> String { counter += 1; return String(format: "p%06d", counter) }
-        let start = MapFixture.date("2016-01-01"), end = MapFixture.date("2026-10-31")
+        random = MapRandom(seed: seed)
         homeSettings = HomeSettings(former: [FormerHome(place: HomePlace(center: Self.hamburg, components: PlaceComponents(isoCountryCode: "DE")),
                                                         until: Self.movedOn)])
 
         // Trips first: their days are kept free of everyday photos.
-        let tripPhotos = count * 2 / 5
-        var tripBudget = tripPhotos
-        var tripDays: [ClosedRange<Date>] = []
-        var tripIndex = 0
-        while tripBudget > 0 {
-            tripIndex += 1
-            let kind = random.int(0..<100)
-            let (destination, days, perDay, roadTrip): (Destination, Int, Int, Bool) =
-                kind < 55 ? (Self.nearby[random.int(0..<Self.nearby.count)], random.int(1..<4), random.int(8..<25), false)
-                : kind < 92 ? (Self.abroad[random.int(0..<Self.abroad.count)], random.int(4..<15), random.int(15..<35), false)
-                : (Self.abroad[random.int(0..<Self.abroad.count)], random.int(15..<31), random.int(20..<35), true)
-            // Room for the journey there and back (two days on top, and a third for the longest).
-            let span = end.timeIntervalSince(start) - Double(days + 5) * 86_400
-            let first = Date(timeInterval: (span * random.unit() / 86_400).rounded(.down) * 86_400, since: start)
-            let id = AlbumistID("trip-\(tripIndex)")
-            let home = first < Self.movedOn ? Self.hamburg : MapFixture.Places.regensburg
-            let homeAirport = first < Self.movedOn ? Self.hamburgAirport : Self.munichAirport
-
-            // Flown: most trips abroad 450 km and more away (a plane's climb and descent need some
-            // 400 km), always beyond 3,000 km.
-            var journeyOut: [Leg] = [], journeyBack: [Leg] = []
-            if kind >= 55, let airport = destination.airport {
-                let origin = destination.fromFrankfurt ? Self.frankfurtAirport : homeAirport
-                let meters = GeoMath.distance(origin, airport)
-                if meters >= 450_000 && (meters >= 3_000_000 || random.int(0..<4) != 0) {
-                    let hops = destination.via.map { [($0.airport, $0)] } ?? []
-                    journeyOut = Self.plan(from: origin, to: airport, via: hops.first, random: &random)
-                    journeyBack = Self.plan(from: airport, to: homeAirport, via: hops.first, random: &random)
-                }
-            }
-            let flown = !journeyOut.isEmpty
-            let train = flown && destination.fromFrankfurt
-            // Day 0 the journey there (from 04:00 UTC, by train first where it leaves from
-            // Frankfurt); the days at the destination start the first day whose 09:00 UTC is an
-            // hour after the arrival photos; then the journey back.
-            let departure = first.addingTimeInterval(Double(5 + random.int(0..<4)) * 3_600 + (train ? 4 * 3_600 : 0))
-            let arrivalOut = Self.arrival(of: journeyOut, leaving: departure)
-            var firstDay = flown ? 1 : 0
-            while flown && first.addingTimeInterval(Double(firstDay) * 86_400 + 9 * 3_600) < arrivalOut.addingTimeInterval(3_600) { firstDay += 1 }
-            let backDay = firstDay + days
-            let departureBack = first.addingTimeInterval(Double(backDay) * 86_400 + Double(6 + random.int(0..<4)) * 3_600)
-            let arrivalBack = Self.arrival(of: journeyBack, leaving: departureBack)
-            let lastDay = flown ? Int((arrivalBack.timeIntervalSince(first) / 86_400).rounded(.down)) : days
-            let range = first...first.addingTimeInterval(Double(lastDay) * 86_400)
-            if tripDays.contains(where: { $0.overlaps(range) }) { continue }
-            tripDays.append(range)
-
-            var members: [AssetFacts] = []
-            var position = destination.center
-            if flown {
-                if train {
-                    flights.byTrain += 1
-                    members += self.train(from: home, to: Self.frankfurtAirport, arriving: departure.addingTimeInterval(-50 * 60), trip: id,
-                                          random: &random, nextID: nextID)
-                }
-                members += fly(journeyOut, leaving: departure, origin: train ? Hub(name: "Frankfurt", country: "DE", zone: "Europe/Berlin",
-                                                                                     airport: Self.frankfurtAirport) : Self.homeHub(homeAirport),
-                               destination: destination, trip: id, random: &random, nextID: nextID)
-            }
-            for day in 0..<days {
-                if roadTrip {
-                    position = MapFixture.at(position.latitude + (random.unit() - 0.5) * 1.2, position.longitude + (random.unit() - 0.5) * 1.6)
-                }
-                let places = random.int(1..<4)
-                for p in 0..<places {
-                    let spot = MapFixture.at(position.latitude + (random.unit() - 0.5) * 0.6, position.longitude + (random.unit() - 0.5) * 0.8)
-                    let town = "\(destination.name) \(tripIndex)-\(day)-\(p)"
-                    let dayStart = first.addingTimeInterval(Double(firstDay + day) * 86_400 + Double(9 + p * 4) * 3_600)
-                    for k in 0..<(perDay / places) {
-                        let located = random.int(0..<20) != 0
-                        var fact = MapFixture.photo(nextID(), at: dayStart.addingTimeInterval(Double(k) * 300),
-                                                    located ? Fixture.jitter(spot, seed: k, meters: 400) : nil,
-                                                    country: destination.country, town: town, pointOfInterest: k % 3 == 0 ? "Sight \(p)" : nil,
-                                                    timeZone: destination.zone, trip: id, favorite: random.int(0..<50) == 0,
-                                                    analysed: random.int(0..<10) != 0)
-                        if !located { fact.place = nil; fact.placeSource = nil; fact.tripID = nil }
-                        members.append(fact)
-                    }
-                }
-            }
-            if flown {
-                let hub = Hub(name: destination.name, country: destination.country, zone: destination.zone, airport: journeyBack[0].from)
-                members += fly(journeyBack, leaving: departureBack, origin: hub, destination: Self.homeDestination(homeAirport),
-                               trip: id, random: &random, nextID: nextID)
-            }
-            tripBudget -= members.count
-            facts += members
-            trips.append(MapFixture.trip(id, members.filter { $0.tripID == id }))
-        }
+        let tripDays = addTrips(photos: count * 2 / 5)
 
         // Everyday photos at home on the other days, as many as fill up `count`.
-        var free: [Date] = []
-        var day = start
-        while day < end {
-            if !tripDays.contains(where: { $0.contains(day) }) { free.append(day) }
-            day = day.addingTimeInterval(86_400)
-        }
-        // Rounded up: the days drawn below average a little more, so the free days fill `count`.
-        let perDay = max(2, Int((Double(count - facts.count) / Double(max(1, free.count))).rounded(.up)))
-        for day in free where facts.count < count {
-            let home = day < Self.movedOn ? Self.hamburg : MapFixture.Places.regensburg
-            for k in 0..<random.int(perDay / 2..<(perDay * 3 / 2 + 2)) {
-                let isScreenshot = random.int(0..<25) == 0
-                var fact = MapFixture.photo(nextID(), at: day.addingTimeInterval(Double(8 * 3_600 + k * 2_400)),
-                                            isScreenshot ? nil : Fixture.jitter(home, seed: k + Int(day.timeIntervalSince1970) % 997, meters: 6_000),
-                                            country: "DE", town: day < Self.movedOn ? "Hamburg" : "Regensburg", timeZone: "Europe/Berlin",
-                                            atHome: !isScreenshot)
-                if isScreenshot { fact.asset.subtypes = [.screenshot]; fact.place = nil; fact.placeSource = nil }
-                facts.append(fact)
-            }
-        }
+        addEverydayPhotos(count: count, besides: tripDays)
     }
+
+    /// The id of the next photo: the photos are numbered in the order they are made.
+    mutating func nextID() -> String { counter += 1; return String(format: "p%06d", counter) }
 }
 
 /// A plane's way from take-off to landing, for photos out of its window: on the great circle,

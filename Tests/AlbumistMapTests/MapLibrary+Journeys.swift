@@ -78,8 +78,7 @@ extension MapLibrary {
 
     /// The photos of a journey leaving (first gate photo) at `departure`: gate photos at `origin`,
     /// each flight's window photos, layover photos, arrival photos at the destination airport.
-    mutating func fly(_ journey: [Leg], leaving departure: Date, origin: Hub, destination: Destination, trip: AlbumistID,
-                      random: inout MapRandom, nextID: () -> String) -> [AssetFacts] {
+    mutating func fly(_ journey: [Leg], leaving departure: Date, origin: Hub, destination: Destination, trip: AlbumistID) -> [AssetFacts] {
         var photos: [AssetFacts] = []
         var ground = origin
         var time = departure
@@ -97,16 +96,8 @@ extension MapLibrary {
             }
             let before = photos[photos.count - 1]
             let path = Flight(from: leg.from, to: leg.to, takeoff: takeoff, cruiseKmh: leg.cruiseKmh)
-            let flying = window(path, leg.shape, trip: trip, random: &random, nextID: nextID)
-            flights.count += 1
-            if path.meters >= 6_000_000 { flights.longHaul += 1 }
-            if leg.hub != nil { flights.layovers += 1 }
-            switch leg.shape {
-            case .sparse: flights.sparse += 1
-            case .burst: flights.burstOnly += 1
-            case .two: flights.two += 1
-            case .regular, .none: break
-            }
+            let flying = window(path, leg.shape, trip: trip)
+            flights.add(leg, along: path)
             photos += flying
             let landed = path.landing
             let after = photos.count
@@ -172,7 +163,7 @@ extension MapLibrary {
     }
 
     /// The window photos of one flight.
-    mutating func window(_ path: Flight, _ shape: Shape, trip: AlbumistID, random: inout MapRandom, nextID: () -> String) -> [AssetFacts] {
+    mutating func window(_ path: Flight, _ shape: Shape, trip: AlbumistID) -> [AssetFacts] {
         var photos: [AssetFacts] = []
         func shoot(_ minutes: Double, burst: Int = 1, stepSeconds: Double = 3) {
             for b in 0..<burst {
@@ -212,8 +203,7 @@ extension MapLibrary {
 
     /// Photos on a train at up to 280 km/h from `from` to `to`, arriving at `arriving`: one every
     /// 5 to 30 minutes and a burst on the way. On the ground.
-    mutating func train(from: GeoCoordinate, to: GeoCoordinate, arriving: Date, trip: AlbumistID, random: inout MapRandom,
-                        nextID: () -> String) -> [AssetFacts] {
+    mutating func train(from: GeoCoordinate, to: GeoCoordinate, arriving: Date, trip: AlbumistID) -> [AssetFacts] {
         let meters = GeoMath.distance(from, to), speed = 280_000.0 / 3_600
         let seconds = meters / speed, leaving = arriving.addingTimeInterval(-seconds)
         var photos: [AssetFacts] = []
@@ -236,11 +226,18 @@ extension MapLibrary {
         return photos
     }
 
+    /// A point on the unit sphere, as `along` works with it.
+    struct Vector {
+        var x: Double
+        var y: Double
+        var z: Double
+    }
+
     /// The point a fraction `f` of the way from `a` to `b` on the great circle (a plane's track).
     static func along(_ a: GeoCoordinate, _ b: GeoCoordinate, _ f: Double) -> GeoCoordinate {
-        func vector(_ c: GeoCoordinate) -> (x: Double, y: Double, z: Double) {
+        func vector(_ c: GeoCoordinate) -> Vector {
             let latitude = c.latitude * .pi / 180, longitude = c.longitude * .pi / 180
-            return (cos(latitude) * cos(longitude), cos(latitude) * sin(longitude), sin(latitude))
+            return Vector(x: cos(latitude) * cos(longitude), y: cos(latitude) * sin(longitude), z: sin(latitude))
         }
         let p = vector(a), q = vector(b)
         let angle = acos(min(1, max(-1, p.x * q.x + p.y * q.y + p.z * q.z)))

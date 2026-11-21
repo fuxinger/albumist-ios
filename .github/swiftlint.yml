@@ -1,0 +1,10 @@
+# SwiftLint configuration (ci.yml, "SwiftLint report"; version pinned in .github/lint-tools.json).
+# Here and not at the top of the repository: a file there would count in the app fingerprint of
+# the UI runs (ui_groups.py), and a lint setting does not change the app.
+#
+# For now SwiftLint's default rules, report-only: the first runs show what it finds in this code
+# base; then rules are switched off or tuned on purpose (each with a reason here), the baseline
+# is committed, and only new findings fail.
+
+# The folders are named on the command line (ci.yml). A wrong folder must not read as "clean".
+allow_zero_lintable_files: false

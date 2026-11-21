@@ -630,53 +630,85 @@ enum TripGeometryBuilder {
     /// and, gate to gate, from some 150 km on (Honolulu to Maui in 40 minutes). 200 km/h, in
     /// metres per second.
     static let turnBackSpeed = 200.0 / 3.6
-    /// At most this long at a place (from its first photo there to its last), between legs faster
-    /// than `turnBackSpeed` from one place and back to it, is turning back right away: an hour.
-    /// Whoever gets somewhere that fast mostly stays for hours (a day out by high-speed train, an
-    /// island by plane); two cameras taking photos in turn mostly stay minutes at each turn.
+    /// At most this long at each place on the way of a quick return (`travelledLegs`), from its
+    /// first photo there to its last, is turning back right away: an hour. Whoever gets
+    /// somewhere that fast mostly stays for hours (a day out by high-speed train, an island by
+    /// plane); two cameras taking photos in turn mostly stay minutes at each turn.
     static let turnBackStay: TimeInterval = 3_600
 
     /// For each leg from one visit to the next (`visits[k]` to `visits[k + 1]`, from the last
     /// photo of the one to the first of the other), whether someone went it, as far as the photos
     /// tell. Nobody went it
     /// - when nothing could have gone it in the time, not even a plane (`isNoTravel`); or
-    /// - when it leads to or from a visit the route **turns back** from right away, with another
-    ///   such visit next to it or one visit away (A → B → A → B, or A → B → A → C → A, the visit
-    ///   between them as long as it may be). The route turns back from a visit right away when
-    ///   the visits before and after it are at one place, both its legs are faster than
-    ///   `turnBackSpeed` (`isFast`) and it lasts at most `turnBackStay`. Once is a way people go:
-    ///   a scenic flight circling a glacier and back to the airfield, a high-speed train out and
-    ///   straight back. Twice in a row is not: the photos were taken in two places at the same
-    ///   time, by two cameras or with a location jumping to and fro (review: Reykjavík and
-    ///   Þingvellir, 41 km apart, in turn every ten minutes made 18 route points and 700 km
-    ///   "vor Ort").
+    /// - when it lies on a **quick return** that shares a visit with another one: two returns in
+    ///   a row (A → B → A → B, or A → B → A → C → A with the visit between them as long as it may
+    ///   be, or three places in turn, A → B → C → A → B). A quick return goes from a visit back
+    ///   to the next visit at its place through visits of at most `turnBackStay` each, its legs
+    ///   together faster than `turnBackSpeed` as the crow flies. Once is a way people go: a
+    ///   scenic flight circling a glacier and back to the airfield, a high-speed train out and
+    ///   straight back, once round by helicopter. Twice in a row is not: the photos were taken in
+    ///   two or three places at the same time, by several cameras or with a location jumping to
+    ///   and fro (review: Reykjavík and Þingvellir, 41 km apart, in turn every ten minutes made
+    ///   18 route points and 700 km "vor Ort"). The legs together, not each one: two cameras take
+    ///   their photos at minutes of their own, so the way from one to the other may take a minute
+    ///   and the way back the rest of the round, and the round is what nobody goes (third review:
+    ///   with the photos at the same minutes it was 18 route points again; three people in three
+    ///   places, 36 route points and 1,704 km).
     ///
-    /// So photos taken in turn in two places still zig-zag when their legs are slower than
-    /// `turnBackSpeed` (two cameras 41 km apart, in turn every quarter of an hour), when the route
-    /// turns back right away from one visit with no other such visit next to it or one visit away
-    /// (A → B → A, then on to C), and when the visits last longer than `turnBackStay`. Real ways
-    /// back and forth this fast with no more than `turnBackStay` at two turns in a row (shuttle
-    /// flights with a crew's short turnarounds, photos at two spots of a race track lap after
-    /// lap) count as no way anyone went.
+    /// So photos taken in turn in several places still zig-zag when going round is slower than
+    /// `turnBackSpeed` (two cameras 41 km apart in turn every half hour, or 5 to 20 km apart every
+    /// 5 to 20 minutes, as a car on a motorway can go), when the route returns quickly once only
+    /// (A → B → A, then on to C), and when a visit on the way lasts longer than `turnBackStay`.
+    /// Real ways round this fast with no more than `turnBackStay` at each turn, twice in a row
+    /// (shuttle flights with a crew's short turnarounds, photos at two spots of a race track lap
+    /// after lap), count as no way anyone went. The camera of each photo, stored by the analysis,
+    /// would part several cameras' photos at any speed; it is not stored yet.
     static func travelledLegs(_ visits: [Visit], photos: [Photo]) -> [Bool] {
         guard visits.count > 1 else { return [] }
-        var travelled: [Bool] = [], fast: [Bool] = []
-        travelled.reserveCapacity(visits.count - 1)
-        fast.reserveCapacity(visits.count - 1)
+        let count = visits.count
+        var travelled: [Bool] = []
+        travelled.reserveCapacity(count - 1)
+        // Running totals: `meters[k]` and `seconds[k]` of the legs before visit `k`, `long[k]` the
+        // visits before it that last longer than `turnBackStay`.
+        var meters = [0.0], seconds = [0.0], long = [0]
+        meters.reserveCapacity(count)
+        seconds.reserveCapacity(count)
+        long.reserveCapacity(count + 1)
         for (from, to) in zip(visits, visits.dropFirst()) {
-            travelled.append(!isNoTravel(from: photos[from.last], to: photos[to.first]))
-            fast.append(isFast(from: photos[from.last], to: photos[to.first]))
+            let a = photos[from.last], b = photos[to.first]
+            travelled.append(!isNoTravel(from: a, to: b))
+            meters.append(meters[meters.count - 1] + GeoMath.distance(a.coordinate, b.coordinate))
+            seconds.append(seconds[seconds.count - 1] + b.date.timeIntervalSince(a.date))
         }
-        // The visits the route turns back from right away (never the first or the last).
-        var turnsBack = [Bool](repeating: false, count: visits.count)
-        for k in 1..<(visits.count - 1) where visits[k - 1].place == visits[k + 1].place && fast[k - 1] && fast[k] {
-            turnsBack[k] = photos[visits[k].last].date.timeIntervalSince(photos[visits[k].first].date) <= turnBackStay
+        for visit in visits {
+            let stay = photos[visit.last].date.timeIntervalSince(photos[visit.first].date)
+            long.append(long[long.count - 1] + (stay > turnBackStay ? 1 : 0))
         }
-        // Two of them in a row: the legs to and from both.
-        for k in turnsBack.indices where turnsBack[k] {
-            for other in [k + 1, k + 2] where other < turnsBack.count && turnsBack[other] {
-                for leg in [k - 1, k, other - 1, other] { travelled[leg] = false }
+        // The quick returns, from visit `from` back to its place at visit `to`.
+        var returns: [(from: Int, to: Int)] = []
+        var lastVisit: [Int: Int] = [:]
+        for (k, visit) in visits.enumerated() {
+            if let j = lastVisit[visit.place], long[k] == long[j + 1],
+               meters[k] - meters[j] > turnBackSpeed * (seconds[k] - seconds[j]) {
+                returns.append((j, k))
             }
+            lastVisit[visit.place] = k
+        }
+        // Those sharing a visit with another: their legs. `shared[k]`: the visits before `k` on
+        // two returns or more.
+        var starts = [Int](repeating: 0, count: count + 1)
+        for r in returns {
+            starts[r.from] += 1
+            starts[r.to + 1] -= 1
+        }
+        var shared = [0], depth = 0
+        shared.reserveCapacity(count + 1)
+        for k in 0..<count {
+            depth += starts[k]
+            shared.append(shared[k] + (depth >= 2 ? 1 : 0))
+        }
+        for r in returns where shared[r.to + 1] > shared[r.from] {
+            for leg in r.from..<r.to { travelled[leg] = false }
         }
         return travelled
     }
@@ -686,12 +718,6 @@ enum TripGeometryBuilder {
     /// as the crow flies): they were taken at the same time in two places.
     static func isNoTravel(from a: Photo, to b: Photo) -> Bool {
         GeoMath.distance(a.coordinate, b.coordinate) > AirborneFilter.maximumFlightSpeed * b.date.timeIntervalSince(a.date)
-    }
-
-    /// Whether going from where `a` was taken to where `b` was in the time between them (`b` not
-    /// before `a`) is faster than `turnBackSpeed`, as the crow flies.
-    static func isFast(from a: Photo, to b: Photo) -> Bool {
-        GeoMath.distance(a.coordinate, b.coordinate) > turnBackSpeed * b.date.timeIntervalSince(a.date)
     }
 
     /// At most `limit` visits of `visits` (concept §9), the first and last always among them,

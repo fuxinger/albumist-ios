@@ -455,17 +455,27 @@ struct TripGeometryTests {
     /// three photos at one, ten minutes later three at the other, in turn (review: 18 route points
     /// and 699 km "vor Ort", which "unterwegs" counts too). A plane could fly it, but nobody goes 41 km
     /// door to door in nine minutes on the ground, and each visit turns straight back: one leg.
+    ///
+    /// Whenever the second camera takes its photos (third review: it passed only while they came 7
+    /// to 12 minutes after the first's; at the same minutes it was 18 route points and 699 km
+    /// again): from Reykjavík there and back to it takes the round of 20 minutes, 82 km at some
+    /// 260 km/h, however the round splits into the way there and the way back.
     @Test func twoCamerasFortyKilometresApartAreNoZigZag() {
-        var photos: [AssetFacts] = []
-        for round in 0..<9 {
-            let t = MapFixture.date("2023-06-15 12:00").addingTimeInterval(Double(round) * 1_200)
-            for k in 0..<3 {
-                photos.append(MapFixture.photo("a-\(round)-\(k)", at: t.addingTimeInterval(Double(k) * 20),
-                                               Fixture.jitter(Places.reykjavik, seed: k, meters: 50), country: "IS", town: "Reykjavík"))
-                photos.append(MapFixture.photo("b-\(round)-\(k)", at: t.addingTimeInterval(600 + Double(k) * 20),
-                                               Fixture.jitter(Places.thingvellir, seed: k, meters: 50), country: "IS", town: "Þingvellir"))
+        /// Three photos in Reykjavík every 20 minutes from 12:00, and three at Þingvellir `offset` after each.
+        func cameras(offset: TimeInterval) -> [AssetFacts] {
+            var photos: [AssetFacts] = []
+            for round in 0..<9 {
+                let t = MapFixture.date("2023-06-15 12:00").addingTimeInterval(Double(round) * 1_200)
+                for k in 0..<3 {
+                    photos.append(MapFixture.photo("a-\(round)-\(k)", at: t.addingTimeInterval(Double(k) * 20),
+                                                   Fixture.jitter(Places.reykjavik, seed: k, meters: 50), country: "IS", town: "Reykjavík"))
+                    photos.append(MapFixture.photo("b-\(round)-\(k)", at: t.addingTimeInterval(offset + Double(k) * 20),
+                                                   Fixture.jitter(Places.thingvellir, seed: k, meters: 50), country: "IS", town: "Þingvellir"))
+                }
             }
+            return photos
         }
+        let photos = cameras(offset: 600)
         let geometry = Self.build(photos, id: "iceland")
         #expect(geometry.route.count <= 3)
         #expect(geometry.metersOnSite < 100_000)
@@ -478,6 +488,47 @@ struct TripGeometryTests {
         for seed in 1...3 as ClosedRange<UInt64> {
             #expect(Self.build(Self.shuffled(photos, seed: seed), id: "iceland") == geometry)
         }
+        for minutes in 0..<20 {
+            let other = Self.build(cameras(offset: Double(minutes) * 60), id: "iceland")
+            #expect(other.route.map(\.placeIndex) == [0, 1], "Þingvellir \(minutes) min after Reykjavík: \(other.route.count) route points")
+            #expect(abs(other.metersOnSite - GeoMath.distance(Places.reykjavik, Places.thingvellir)) < 500,
+                    "Þingvellir \(minutes) min after Reykjavík: \(Int(other.metersOnSite / 1_000)) km vor Ort")
+        }
+    }
+
+    /// Three people's photos in one library in three places, each in turn every quarter of an hour
+    /// for three hours: Reykjavík, Þingvellir (41 km) and a place 45 km south-east of Reykjavík
+    /// (third review: 36 route points and 1,704 km "vor Ort"). Going round them takes the quarter
+    /// of an hour, 160 km at some 650 km/h, with half a minute at each: no way anyone goes twice
+    /// in a row. Each place once. Once round as fast, as by helicopter with two landings, is a way
+    /// people go and stays as it is.
+    ///
+    /// Documented limit, measured: two people closer together or taking photos less often go
+    /// there and back slower than `TripGeometryBuilder.turnBackSpeed`, at 130 to 170 km/h (41 km
+    /// apart every 30 minutes, 20 km every 20, 10 km every 10, 5 km every 5), as a car on a
+    /// motorway can, and still zig-zag: 16, 24, 48 and 96 route points in four hours, 459 to
+    /// 614 km "vor Ort". The camera of each photo, stored by the analysis, would part their photos
+    /// at any speed; it is not stored yet.
+    @Test func threeCamerasInThreePlacesInTurnAreNoZigZag() {
+        let south = Self.destination(from: Places.reykjavik, bearing: 160, meters: 45_000)
+        let places = [(Places.reykjavik, "Reykjavík"), (Places.thingvellir, "Þingvellir"), (south, "Süden")]
+        let round = GeoMath.distance(Places.reykjavik, Places.thingvellir) + GeoMath.distance(Places.thingvellir, south)
+        // A turn every five minutes, two minutes after the one before, and all at the same
+        // minutes (each in the order of the photos' names then: Reykjavík, Süden, Þingvellir).
+        for (offset, way) in [(300.0, round), (120, round),
+                              (0, GeoMath.distance(Places.reykjavik, south) + GeoMath.distance(south, Places.thingvellir))] {
+            let geometry = Self.build(Self.inTurn(places, rounds: 12, period: 900, offset: offset), id: "iceland")
+            #expect(geometry.route.map(\.placeIndex) == [0, 1, 2], "every \(Int(offset)) s: \(geometry.route.count) route points")
+            #expect(abs(geometry.metersOnSite - way) < 1_000, "every \(Int(offset)) s: \(Int(geometry.metersOnSite / 1_000)) km vor Ort")
+        }
+        // Once round, ten minutes from one landing to the next (as fast, at 350 km/h): as it is.
+        let back = (0..<3).map { k in
+            MapFixture.photo("back-\(k)", at: MapFixture.date("2023-06-15 12:30").addingTimeInterval(Double(k) * 20),
+                             Fixture.jitter(Places.reykjavik, seed: k, meters: 50), country: "IS", town: "Reykjavík")
+        }
+        let once = Self.build(Self.inTurn(places, rounds: 1, period: 1_800, offset: 600) + back, id: "iceland")
+        #expect(once.route.map(\.placeIndex) == [0, 1, 2, 0])
+        #expect(abs(once.metersOnSite - round - GeoMath.distance(south, Places.reykjavik)) < 1_000)
     }
 
     /// After an afternoon of photos in turn in Reykjavík and at Þingvellir (a run of visits joined

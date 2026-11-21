@@ -561,10 +561,10 @@ Jede Zeile ein Befund aus `docs/BEFUNDE-STATUS.md`, jeder mit einem Test, der vo
 <!-- rename:keep-begin: the project's folder outside this repository keeps its name -->
 Konzept 2.0: `/mnt/project-files/sortly-app/entwuerfe/karte-2026-11-20/KONZEPT.md` (freigegeben 20.11.2026).
 <!-- rename:keep-end -->
-Welle 0 ist der Kern im eigenen Modul `SortlyMap` (`Sources/SortlyMap/`, Einstieg
+Welle 0 ist der Kern im eigenen Modul `AlbumistMap` (`Sources/AlbumistMap/`, Einstieg
 `MapSummary.build`): aus den gespeicherten Fakten, Reisen und dem Zuhause eine kleine
 Zusammenfassung mit Reisen, Orten, Routen, Ländern, Bögen, Stecknadeln, Zahlen, Jahren und den
-Daten der vier Teilen-Motive. Alle Tests laufen auf Linux (`swift test --filter SortlyMapTests`).
+Daten der vier Teilen-Motive. Alle Tests laufen auf Linux (`swift test --filter AlbumistMapTests`).
 Die App-Seite (Globus, Reise, Abspielen, Teilen-Seite) kommt mit Welle 1; ihre Fälle aus §11
 (Bedienungstests, Bildvergleiche, Messung am iPhone) stehen unten als offen. Diese Tabelle hat
 keinen Stand wie die Abdeckung oben: die Karte ist noch in keinem Build.

@@ -359,3 +359,19 @@ class HangNamingTests(unittest.TestCase):
         self.assertLess(naming, body.index("Self.symbol("))
         self.assertLess(naming, body.index("HangKind(frames:"))
         self.assertEqual(body.count("Self.symbol("), 1)
+
+
+class SmartAssistantAvailabilityTests(unittest.TestCase):
+    def test_availability_is_asked_off_the_main_thread_and_cached(self):
+        # Hang watch, UI run 44870948643: `SmartAssistant.isAvailable` asked FoundationModels in
+        # the body of SearchView, AtlasView and ProposalDetailView, 0.7 to 1 s each on a cold
+        # start. The system is asked in one place (`refreshNow`), in the background at launch
+        # and on each return to the screen; `isAvailable` reads the cached answer.
+        swift = open(os.path.join(ROOT, "App", "Albumist", "Platform", "SmartAssistant.swift"), encoding="utf-8").read()
+        self.assertEqual(swift.count("SystemLanguageModel.default.availability"), 1)
+        getter = swift.split("static var isAvailable: Bool {", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("known.withLock", getter)
+        self.assertNotIn("SystemLanguageModel", getter)
+        self.assertIn("DispatchQueue.global", swift)
+        app = open(os.path.join(ROOT, "App", "Albumist", "App", "AlbumistApp.swift"), encoding="utf-8").read()
+        self.assertIn("SmartAssistant.watchAvailability()", app)

@@ -20,15 +20,15 @@ extension AppModel {
     }
 
     /// What the long press on `proposal`'s card offers now. `made`, `working`, `waits` and
-    /// `selecting` are the card's state as its page knows it; without a menu nothing else is read.
+    /// `selecting` are the card's state as its page knows it. Each fact is read only where the
+    /// menu shows what it decides: nothing without a menu, and whether "Keine Reise" can be
+    /// answered now (the analysis, the plans) only where it is offered, so a card is not tied to
+    /// the analysis' changes (review C of design wave 2, M5).
     func suggestionMenu(for proposal: AlbumProposal, action: ProposalCardAction, made: Bool, working: Bool,
                         waits: Bool, selecting: Bool) -> SuggestionMenu {
-        guard !made, !working, !selecting else {
-            return SuggestionMenu(SuggestionMenu.Card(action: action, made: made, working: working, selecting: selecting))
-        }
-        return SuggestionMenu(SuggestionMenu.Card(
-            action: action, waits: waits, setAside: isSetAside(proposal), canReshape: canReshape(proposal),
-            offersNotATrip: offersNotATrip(proposal), canAnswerNotATrip: canChangeHome))
+        SuggestionMenu(action: action, made: made, working: working, waits: waits, selecting: selecting,
+                       setAside: { isSetAside(proposal) }, canReshape: { canReshape(proposal) },
+                       offersNotATrip: { offersNotATrip(proposal) }, canAnswerNotATrip: { canChangeHome })
     }
 
     /// The suggestion as the analysis has it now, found by its id, with its photos and name now

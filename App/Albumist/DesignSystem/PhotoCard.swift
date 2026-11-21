@@ -46,11 +46,14 @@ enum PhotoCardStyle: Sendable {
 ///   an accessibility action, and nothing is nested: `onOpen` is the body's own button, behind
 ///   the cover and the texts (they let touches through to it), never a button around the card.
 /// - Long press (`menu:`, optionally `preview:` for what it lifts instead of the card): the menu
-///   sits on the card, so a long press lifts what was pressed, and its buttons are also actions
-///   of the body, because the card around the body is a container that VoiceOver, Switch
-///   Control, Voice Control and Full Keyboard Access do not stop on (second review of wave 1).
-///   A card with a menu still passes its actions first (`{}` when it has none): the first
-///   trailing closure is always `actions`.
+///   sits on the card, so a long press lifts what was pressed, in the card's own shape, and its
+///   buttons are also actions of the body, because the card around the body is a container that
+///   VoiceOver, Switch Control, Voice Control and Full Keyboard Access do not stop on (second
+///   review of wave 1). A card with a menu still passes its actions first (`{}` when it has
+///   none): the first trailing closure is always `actions`. `menuOffered(false)` switches the
+///   long press off the documented way, an empty menu closure (no lift, no menu, no actions);
+///   `menuAccessibilityActions(_:)` gives the body other actions than the menu's items, such as
+///   all but the card's own button (review C of design wave 2, M4, L3).
 /// - Dark mode: the card colour of the system; Increase Contrast: the card gets an edge (as
 ///   `Card`); the actions' own contrast: `CardActionButtonStyle`.
 struct PhotoCard<Actions: View, MenuItems: View, MenuPreview: View>: View {
@@ -69,6 +72,11 @@ struct PhotoCard<Actions: View, MenuItems: View, MenuPreview: View>: View {
     private let menuItems: MenuItems
     /// What the long press lifts; `EmptyView`: the card itself.
     private let menuPreview: MenuPreview
+    /// The long press is offered now (`menuOffered(_:)`); without it the menu's closure returns
+    /// nothing.
+    private var isMenuOffered = true
+    /// The body's accessibility actions instead of the menu's items (`menuAccessibilityActions(_:)`).
+    private var accessibilityMenuItems: MenuItems?
     /// Ticked in a list that selects (`selected(_:)`).
     private var isSelected = false
 
@@ -105,10 +113,17 @@ struct PhotoCard<Actions: View, MenuItems: View, MenuPreview: View>: View {
             shaped
         } else if hasMenuPreview {
             // On the card, so a long press lifts what was pressed (the body is a clear button
-            // behind cover and texts); assistive technologies get the items on the body.
-            shaped.contextMenu { menuItems } preview: { menuPreview }
+            // behind cover and texts); assistive technologies get the items on the body. A menu
+            // closure that returns nothing is how SwiftUI switches a context menu off.
+            shaped.contextMenu {
+                if isMenuOffered { menuItems }
+            } preview: {
+                menuPreview
+            }
         } else {
-            shaped.contextMenu { menuItems }
+            shaped.contextMenu {
+                if isMenuOffered { menuItems }
+            }
         }
     }
 
@@ -165,6 +180,8 @@ struct PhotoCard<Actions: View, MenuItems: View, MenuPreview: View>: View {
                     .allowsHitTesting(false)
             }
         }
+        // A long press lifts the card itself in its own shape (the system's has smaller corners).
+        .contentShape(.contextMenuPreview, shape)
         .accessibilityElement(children: .contain)
     }
 
@@ -217,8 +234,11 @@ struct PhotoCard<Actions: View, MenuItems: View, MenuPreview: View>: View {
             .accessibilitySortPriority(1)
             .accessibilityIdentifier("photoCard.body")
         if hasMenu {
-            // The long press's items as the body's own actions (VoiceOver: swipe up or down).
-            described.accessibilityActions { menuItems }
+            // The long press's items as the body's own actions (VoiceOver: swipe up or down), or
+            // those given for them; none while the long press is off.
+            described.accessibilityActions {
+                if isMenuOffered { accessibilityMenuItems ?? menuItems }
+            }
         } else {
             described
         }
@@ -315,6 +335,25 @@ extension PhotoCard {
     func selected(_ selected: Bool) -> Self {
         var card = self
         card.isSelected = selected
+        return card
+    }
+
+    /// Whether the long press is offered now: without it the menu's closure returns nothing,
+    /// the documented way to switch a context menu off, so a long press lifts nothing and the
+    /// body has no actions (a card made a moment ago, one whose album is made, a list that
+    /// selects; review C of design wave 2, M4).
+    func menuOffered(_ offered: Bool) -> Self {
+        var card = self
+        card.isMenuOffered = offered
+        return card
+    }
+
+    /// The body's actions for VoiceOver, Voice Control and Switch Control instead of the menu's
+    /// items, such as all but what the card shows as its own button (review C of design wave 2,
+    /// L3).
+    func menuAccessibilityActions(_ items: MenuItems) -> Self {
+        var card = self
+        card.accessibilityMenuItems = items
         return card
     }
 }

@@ -22,8 +22,9 @@ import AlbumistCore
 /// Reads the model only when the menu is drawn, so a card is as cheap to build as before. The
 /// card hands in the model and the page's ways: what a menu shows is read from nothing of the
 /// environment's (the system draws the menu, and VoiceOver reads its items, apart from the card).
-/// The card's body has the same items as actions for VoiceOver, Voice Control and Switch Control
-/// (`PhotoCard`).
+/// The card's body has the items as actions for VoiceOver, Voice Control and Switch Control
+/// (`forVoiceOver`, `PhotoCard.menuAccessibilityActions`): all that can be done now but the
+/// card's word, which is the card's own button there (review C of design wave 2, L1, L3).
 struct SuggestionMenuItems: View {
     var model: AppModel
     /// The page's sheets and question (`suggestionMenuFlows()`); nil on a page without them.
@@ -38,18 +39,26 @@ struct SuggestionMenuItems: View {
     var waits: Bool
     /// The list selects suggestions.
     var selecting = false
+    /// The actions of the card's body, not its menu: no groups, no word, nothing that waits.
+    var forVoiceOver = false
     /// What the card's button does.
     var act: () -> Void
 
     var body: some View {
         let menu = model.suggestionMenu(for: proposal, action: card.action, made: made, working: working,
                                         waits: waits, selecting: selecting)
-        ForEach(Array(menu.sections.enumerated()), id: \.offset) { index, section in
-            if index > 0 {
-                Divider()
+        if forVoiceOver {
+            ForEach(menu.accessibilityItems, id: \.id) { action in
+                item(SuggestionMenu.Entry(action))
             }
-            ForEach(section) { entry in
-                item(entry)
+        } else {
+            ForEach(Array(menu.sections.enumerated()), id: \.offset) { index, section in
+                if index > 0 {
+                    Divider()
+                }
+                ForEach(section) { entry in
+                    item(entry)
+                }
             }
         }
     }

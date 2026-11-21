@@ -306,6 +306,8 @@ private struct ProposalListCard: View {
             menuPreview
         }
         .selected(selecting && isSelected)
+        .menuOffered(SuggestionMenu.isOffered(made: made, working: model.quickCreating == proposal.id, selecting: selecting))
+        .menuAccessibilityActions(voiceOverItems)
     }
 
     /// The cover's candidates; none while its photos are hidden (every one a sensitive document).
@@ -321,6 +323,14 @@ private struct ProposalListCard: View {
                             working: model.quickCreating == proposal.id,
                             waits: model.quickCreating != nil && model.quickCreating != proposal.id,
                             selecting: selecting, act: { act(card.action) })
+    }
+
+    /// The same items as actions of the card's body, but the word (review C of design wave 2, L3).
+    private var voiceOverItems: SuggestionMenuItems {
+        SuggestionMenuItems(model: model, openFlow: openFlow, proposal: proposal, card: card, made: made,
+                            working: model.quickCreating == proposal.id,
+                            waits: model.quickCreating != nil && model.quickCreating != proposal.id,
+                            selecting: selecting, forVoiceOver: true, act: { act(card.action) })
     }
 
     /// What the long press lifts: the suggestion large, as an album's long press shows the album.

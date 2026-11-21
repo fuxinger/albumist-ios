@@ -26,13 +26,20 @@ private struct PhotoLongPress: ViewModifier {
     func body(content: Content) -> some View {
         content
             .contextMenu {
-                items(forVoiceOver: false)
+                if offered { items(forVoiceOver: false) }
             } preview: {
                 liftedPhoto
             }
             .accessibilityActions {
-                items(forVoiceOver: true)
+                if offered { items(forVoiceOver: true) }
             }
+    }
+
+    /// Whether the photo has a menu at all: while the grid selects, or the photo cannot open,
+    /// the closures return nothing, the documented way to switch a context menu off (no lift,
+    /// no menu, no actions; review C of design wave 2, M4).
+    private var offered: Bool {
+        PhotoMenu.isOffered(selecting: selecting, available: available)
     }
 
     private func items(forVoiceOver: Bool) -> PhotoMenuItems {

@@ -24,6 +24,7 @@ struct LongPressSourceTests {
     static let quickCreate = "App/Albumist/Model/AppModel+QuickCreate.swift"
     static let overview = "App/Albumist/Views/OverviewView.swift"
     static let photoQuestion = "App/Albumist/Views/Menus/PhotoRemovalQuestion.swift"
+    static let photoCard = "App/Albumist/DesignSystem/PhotoCard.swift"
 
     /// The code of `path` (comments blanked, strings kept).
     static func code(_ path: String) throws -> String {
@@ -56,6 +57,12 @@ struct LongPressSourceTests {
         #expect(card.contains("private var identifier: String"))
         #expect(card.contains("private var menuItems: SuggestionMenuItems"))
         #expect(card.contains("private var menuPreview: SuggestionPreview"))
+        // No menu at all once it is made or while it works (an empty menu closure, M4), and for
+        // VoiceOver the items without the card's word (its own button, L3).
+        #expect(shown.contains(".menuOffered(SuggestionMenu.isOffered(made:made,working:working,selecting:false))"), "\(shown)")
+        #expect(shown.contains(".menuAccessibilityActions(voiceOverItems)"), "\(shown)")
+        let spoken = Self.squeezed(try Self.body(["struct StartProposalCard", "private var voiceOverItems: SuggestionMenuItems"], in: Self.start))
+        #expect(spoken.contains("forVoiceOver:true") && spoken.contains("act:onAction"), "\(spoken)")
         let items = Self.squeezed(try Self.body(["struct StartProposalCard", "private var menuItems"], in: Self.start))
         // The word does what the card's button does (`perform`, `quickCreateAtOnce`, the
         // purchase sheet), in the card's state.
@@ -102,6 +109,10 @@ struct LongPressSourceTests {
         #expect(items.contains("model:model,openFlow:openFlow"), "handed in by the card: \(items)")
         #expect(items.contains("made:made") && items.contains("selecting:selecting"), "\(items)")
         #expect(items.contains("working:model.quickCreating==proposal.id"), "\(items)")
+        #expect(shown.contains(".menuOffered(SuggestionMenu.isOffered(made:made,working:model.quickCreating==proposal.id,selecting:selecting))"), "\(shown)")
+        #expect(shown.contains(".menuAccessibilityActions(voiceOverItems)"), "\(shown)")
+        let spoken = Self.squeezed(try Self.body(["private struct ProposalListCard", "private var voiceOverItems: SuggestionMenuItems"], in: Self.suggestions))
+        #expect(spoken.contains("forVoiceOver:true") && spoken.contains("act:{act(card.action)}"), "\(spoken)")
         let preview = Self.squeezed(try Self.body(["private struct ProposalListCard", "private var menuPreview"], in: Self.suggestions))
         #expect(preview.contains("hidesPreview:card.hidesPreview") && preview.contains("line:card.styledSubtitle"), "\(preview)")
         let list = try Self.body(["struct ProposalListView", "var body: some View"], in: Self.suggestions)
@@ -206,11 +217,15 @@ struct LongPressSourceTests {
     /// rule, its wait from `canChangeHome` as the suggestion's item waits, "Nicht jetzt" not for
     /// what is set aside (the list's own "Nicht jetzt" group).
     @Test func theCardsMenuReadsWhatTheSuggestionReads() throws {
+        // Read only where the menu shows what they decide (`SuggestionMenu`'s lazy init, review C
+        // of design wave 2, M5): nothing for a card without a menu, the state of the analysis and
+        // the plans only where "Keine Reise" is offered.
         let model = Self.squeezed(try Self.body(["func suggestionMenu(for proposal: AlbumProposal"], in: Self.model))
-        #expect(model.contains("setAside:isSetAside(proposal)"), "\(model)")
-        #expect(model.contains("canReshape:canReshape(proposal)"))
-        #expect(model.contains("offersNotATrip:offersNotATrip(proposal)"))
-        #expect(model.contains("canAnswerNotATrip:canChangeHome"))
+        #expect(model.contains("setAside:{isSetAside(proposal)}"), "\(model)")
+        #expect(model.contains("canReshape:{canReshape(proposal)}"))
+        #expect(model.contains("offersNotATrip:{offersNotATrip(proposal)}"))
+        #expect(model.contains("canAnswerNotATrip:{canChangeHome}"))
+        #expect(!(try Self.code(Self.model)).contains("SuggestionMenu.Card("), "every fact read for every card")
         let offers = try Self.body(["struct ProposalDetailView", "private var offersOftenHere"], in: Self.suggestions)
         #expect(offers.contains("model.offersNotATrip(proposal)"), "the suggestion's „…“ and the card ask the same")
         let aside = Self.squeezed(try Self.body(["func isSetAside("], in: Self.model))
@@ -233,6 +248,28 @@ struct LongPressSourceTests {
         #expect(!preview.contains("@Environment(AppModel"), "the system draws the lifted card apart: everything handed in")
     }
 
+    /// A card's long press is switched off the documented way: its menu closure returns nothing
+    /// (`menuOffered`), so a made or working card, or a card of a list that selects, lifts
+    /// nothing and has no actions (review C of design wave 2, M4). Its body's actions can leave
+    /// out what the card shows as a button (`menuAccessibilityActions`, L3).
+    @Test func aCardsMenuIsSwitchedOffByAnEmptyClosure() throws {
+        let card = try Self.body(["struct PhotoCard<"], in: Self.photoCard)
+        #expect(card.contains("private var isMenuOffered = true"))
+        #expect(card.contains("private var accessibilityMenuItems: MenuItems?"))
+        let body = Self.squeezed(try Self.body(["struct PhotoCard<", "var body: some View"], in: Self.photoCard))
+        #expect(body.contains("shaped.contextMenu{ifisMenuOffered{menuItems}}preview:{menuPreview}"), "\(body)")
+        #expect(body.contains("shaped.contextMenu{ifisMenuOffered{menuItems}}"), "\(body)")
+        let actions = Self.squeezed(try Self.body(["struct PhotoCard<", "private func describedAsBody("], in: Self.photoCard))
+        #expect(actions.contains("described.accessibilityActions{ifisMenuOffered{accessibilityMenuItems??menuItems}}"), "\(actions)")
+        let code = try Self.code(Self.photoCard)
+        #expect(code.contains("func menuOffered(_ offered: Bool) -> Self {"))
+        #expect(code.contains("func menuAccessibilityActions(_ items: MenuItems) -> Self {"))
+        // For VoiceOver the items say what can be done beside the card's button, nothing that waits.
+        let items = try Self.body(["struct SuggestionMenuItems", "var body: some View"], in: Self.suggestionItems)
+        #expect(items.contains("if forVoiceOver {") && items.contains("menu.accessibilityItems"), "\(items)")
+    }
+
+    // MARK: Photos
     // MARK: Photos
 
     /// Every grid of photos has the long press, at its place, off while it selects; the
@@ -261,6 +298,13 @@ struct LongPressSourceTests {
         #expect(press.contains("} preview: {"))
         #expect(press.contains(".accessibilityActions {"))
         #expect(press.contains("items(forVoiceOver: true)") && press.contains("items(forVoiceOver: false)"))
+        // Switched off the documented way while the grid selects or the photo cannot open: the
+        // closures return nothing (review C of design wave 2, M4).
+        let squeezedPress = Self.squeezed(press)
+        #expect(squeezedPress.contains(".contextMenu{ifoffered{items(forVoiceOver:false)}}preview:{"), "\(squeezedPress)")
+        #expect(squeezedPress.contains(".accessibilityActions{ifoffered{items(forVoiceOver:true)}}"), "\(squeezedPress)")
+        let offered = Self.squeezed(try Self.body(["private struct PhotoLongPress", "private var offered: Bool"], in: Self.photoMenu))
+        #expect(offered == "{PhotoMenu.isOffered(selecting:selecting,available:available)}", "\(offered)")
         let items = try Self.body(["struct PhotoMenuItems", "var body: some View"], in: Self.photoMenu)
         #expect(items.contains("menu.accessibilityItems"))
         #expect(!(try Self.body(["struct PhotoMenuItems"], in: Self.photoMenu)).contains("@Environment("),

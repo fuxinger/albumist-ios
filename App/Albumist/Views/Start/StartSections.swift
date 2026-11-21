@@ -373,7 +373,8 @@ struct StartProposalCard: View {
             .accessibilityIdentifier(identifier)
     }
 
-    /// The card with its one button, and the long press's menu and lifted card.
+    /// The card with its one button, and the long press's menu and lifted card: none once it is
+    /// made or while it works; for VoiceOver its items but the card's word, its own button.
     private var photoCard: some View {
         PhotoCard(coverIDs: covers, title: Text(verbatim: text.title), subtitle: text.styledSubtitle,
                   hidesPreview: text.hidesPreview, aspectRatio: aspectRatio, style: style,
@@ -384,6 +385,8 @@ struct StartProposalCard: View {
         } preview: {
             menuPreview
         }
+        .menuOffered(SuggestionMenu.isOffered(made: made, working: working, selecting: false))
+        .menuAccessibilityActions(voiceOverItems)
     }
 
     /// Wide on a large card, 3:2 in a row.
@@ -402,6 +405,12 @@ struct StartProposalCard: View {
     private var menuItems: SuggestionMenuItems {
         SuggestionMenuItems(model: model, openFlow: openFlow, proposal: proposal, card: text, made: made,
                             working: working, waits: waits, act: onAction)
+    }
+
+    /// The same items as actions of the card's body, but the word (review C of design wave 2, L3).
+    private var voiceOverItems: SuggestionMenuItems {
+        SuggestionMenuItems(model: model, openFlow: openFlow, proposal: proposal, card: text, made: made,
+                            working: working, waits: waits, forVoiceOver: true, act: onAction)
     }
 
     /// What the long press lifts: the suggestion large, as an album's long press shows the album,

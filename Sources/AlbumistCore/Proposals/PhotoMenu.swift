@@ -46,7 +46,7 @@ public struct PhotoMenu: Equatable, Sendable {
     ///   - isIgnored: the photo is ignored (its "Info" offers "Nicht mehr ignorieren").
     ///   - selecting: the grid selects photos.
     ///   - available: the photo can be opened now (a search hit has its facts; a suggestion's
-    ///     photos are not waiting for its album).
+    ///     photos are not waiting for its album, and the suggestion is still there).
     public init(place: Place, isIgnored: Bool = false, selecting: Bool = false, available: Bool = true) {
         guard Self.isOffered(selecting: selecting, available: available) else {
             sections = []

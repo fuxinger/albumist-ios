@@ -312,7 +312,7 @@ struct LongPressSourceTests {
             (Self.library, ["struct LibraryView", "private func cell("],
              ".photoMenu(id, place: .unsorted, side: Self.photoSide, selecting: selecting)", 110, "id"),
             (Self.suggestions, ["struct ProposalPhotosView", "private func tile("],
-             ".photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled)", 140, "id"),
+             ".photoMenu(id, place: .suggestion, side: Self.photoSide, selecting: selecting, available: !disabled && isCurrent)", 140, "id"),
             (Self.albums, ["struct AlbumScreen", "private func tile("], ".photoMenu(photo, place: .album, side: Self.photoSide)", 110,
              "photo"),
             (Self.search, ["struct SearchView", "private func thumbnail("],
@@ -462,12 +462,39 @@ struct LongPressSourceTests {
         let detail = Self.squeezed(try Self.body(["struct ProposalDetailView", "var body: some View"], in: Self.suggestions))
         #expect(detail.contains("}askToRemove:{idinremovingPhoto=id}"), "\(detail)")
         let several = try #require(detail.range(of: ".confirmationDialog(\"FotosausdiesemVorschlagentfernen?\""))
-        let one = try #require(detail.range(of: ".photoRemovalQuestion($removingPhoto){idinTask{awaitmodel.removeFromProposal([id],proposal:proposal)}}"))
+        let one = try #require(detail.range(of: ".photoRemovalQuestion($removingPhoto){idinguardisCurrentelse{return}"
+                                                + "Task{awaitmodel.removeFromProposal([id],proposal:proposal)}}"), "\(detail)")
         #expect(several.lowerBound < one.lowerBound)
         let question = try Self.code(Self.photoQuestion)
         #expect(question.contains(".confirmationDialog(\"Foto aus diesem Vorschlag entfernen?\""))
         #expect(question.contains("Button(\"Entfernen\", role: .destructive) { remove(id) }"))
         #expect(question.contains("Text(\"Es kommt nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleibt es.\")"))
+    }
+
+    /// A suggestion that went while its page is open (made from its card, split, merged, made
+    /// anew) still shows its photos as it was opened, but none can be taken out of it any more:
+    /// its photos' long press offers nothing, "Auswählen" and "N aus Vorschlag entfernen" wait
+    /// as the page's other buttons do, and both questions take nothing out once answered, as
+    /// the override would be kept for a suggestion no one has (review C2 of design wave 2, N4).
+    @Test func nothingIsTakenOutOfASuggestionThatWent() throws {
+        let photos = try Self.body(["struct ProposalPhotosView"], in: Self.suggestions)
+        #expect(photos.contains("    var isCurrent: Bool\n"), "\(photos)")
+        let tile = try Self.body(["struct ProposalPhotosView", "private func tile("], in: Self.suggestions)
+        #expect(tile.contains("available: !disabled && isCurrent)"), "\(tile)")
+        let detail = Self.squeezed(try Self.body(["struct ProposalDetailView", "var body: some View"], in: Self.suggestions))
+        #expect(detail.contains("ProposalPhotosView(days:days,selecting:selecting,selected:$selected,hidden:photosHidden,"
+                                + "disabled:busy,isCurrent:isCurrent)"), "\(detail)")
+        // Both questions: for the photos ticked with "Auswählen", and for one photo's long press.
+        let several = try #require(detail.range(of: "Button(\"Entfernen\",role:.destructive){"), "\(detail)")
+        #expect(detail[several.upperBound...].hasPrefix("guardisCurrentelse{return}letchosen=selected"), "\(detail)")
+        let one = try #require(detail.range(of: ".photoRemovalQuestion($removingPhoto){idin"), "\(detail)")
+        #expect(detail[one.upperBound...].hasPrefix("guardisCurrentelse{return}Task{"), "\(detail)")
+        // Their buttons wait, as "Nicht jetzt" and the main button do (only "Fertig" stays).
+        #expect(detail.contains(".disabled(!selecting&&(busy||!isCurrent||days.isEmpty||photosHidden))"), "\(detail)")
+        #expect(detail.contains(".disabled(selected.isEmpty||!isCurrent)"), "\(detail)")
+        // One rule of the page for what went: the same id with the same photos.
+        let current = Self.squeezed(try Self.body(["struct ProposalDetailView", "private var isCurrent: Bool"], in: Self.suggestions))
+        #expect(current == "{model.proposals.contains{$0.id==proposal.id&&$0.assetIDs==proposal.assetIDs}}", "\(current)")
     }
 
     /// A photo the user ignored offers "Nicht mehr ignorieren" also without a state of its own

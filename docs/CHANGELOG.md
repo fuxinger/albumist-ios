@@ -6,10 +6,13 @@
   in keinem Build): In der Vorschau vor dem Umsetzen hat jedes Album schon das Titelbild, das später sein Beleg und
   der Tab „Alben“ zeigen (72 statt 44 Punkte, aus den Fotos, die der Plan hinzufügen will; heikle Fotos,
   Screenshots und Papiere nie); „Neu“ oder „Ergänzt“ und die Zahl der Fotos stehen unter dem Ordner, ein Album ohne
-  neue Fotos zeigt das Stapel-Symbol. „Album entfernen“ sagt im Verlauf, was es getan hat („1 entfernt“, „12 Fotos
-  herausgenommen“), statt „0 Fotos“. Jede Such-Kachel zeigt ein eigenes Foto, „Screenshots“ ihr Symbol, und die
-  Kacheln folgen jeder neuen Analyse. Die Reise-Werkstatt liest sich in der Zeit: „Reise davor“, die Tage, „Reise
-  danach“, der Hinweis zum Warten steht einmal.
+  neue Fotos zeigt das Stapel-Symbol; während der Plan läuft, rechnet die Vorschau nichts neu. Der Verlauf sagt jede
+  Änderung in Worten, nie „0 Fotos“: „1 entfernt“, „12 Fotos herausgenommen“ (auch wenn Albumist ein Album behält,
+  weil gerade ein Foto hineinkam), „1 umbenannt“, „1 verschoben“, „Nichts entfernt“ für eine abgelehnte oder
+  gescheiterte Entfernung, „Nichts geändert“, wenn nichts ankam, und ein neues Album ohne Fotos als „1 neu“. Jede
+  Such-Kachel zeigt ein eigenes Foto, „Screenshots“ ihr Symbol, und die Kacheln folgen jeder neuen Analyse. Die
+  Reise-Werkstatt liest sich in der Zeit: „Reise davor“, die Tage, „Reise danach“; der Hinweis zum Warten steht
+  einmal und gleich beim Öffnen, die Tage zu einer Nachbarreise erst, wenn sie zu genau dieser gehören.
 - 21.11. Sortier-Show, ruhige Farben und die ersten 100 % (Design-Welle 3, DS-17, DS-11 und DS-08, mit der
   Zweitprüfung K, noch in keinem Build): In der Sortier-Show fliegen größere Fotos vom Stapel in ihr Album, das als
   sein echtes Titelbild wartet (grau, bis es gefüllt ist, dann farbig, der Haken auf einem Ring); der Stapel zeigt

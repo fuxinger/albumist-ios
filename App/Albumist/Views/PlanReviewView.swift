@@ -183,9 +183,9 @@ struct PlanReviewView: View {
         // The albums' covers (DS-15 part 2), worked out off the main thread from what the plan
         // sets out to add, again for another plan or when the facts change (the photos' dates and
         // ranks with them), as the receipt's: a photo the analysis finds to be a sensitive
-        // document leaves its cover at once.
-        .task(id: model.changeCoverInputs(plan.map { [$0] } ?? [])) {
-            guard let plan else { return }
+        // document leaves its cover at once. Not while the plan runs (`albumCoverInputs`).
+        .task(id: albumCoverInputs) {
+            guard albumCoverInputs != nil, let plan else { return }
             let made = await model.previewCovers(for: plan)
             guard !Task.isCancelled else { return }
             albumCovers = AlbumCovers(plan: plan.id, covers: made)
@@ -336,6 +336,16 @@ struct PlanReviewView: View {
         var plan: AlbumistID
         /// By the receipt's name of the album (`PlanCovers.key`); nil before the first facts.
         var covers: [String: PlanCovers.Cover]?
+    }
+
+    /// What the albums' covers are worked out from (`AppModel.changeCoverInputs`): nil while the
+    /// plan runs, its sorting show included (review M4 of design wave 3). The list is not on
+    /// screen then, and the facts the run brings would draw the screen again and work the covers
+    /// out for nothing; the covers made before stay, and a plan made after the run works out its
+    /// own. Read in this order, the body reads the facts' revision only while the plan can show.
+    private var albumCoverInputs: ChangeCoverInputs? {
+        guard show == nil, !model.execution.isRunning, let plan else { return nil }
+        return model.changeCoverInputs([plan])
     }
 
     /// The covers of `plan`'s albums: nil while they are worked out, never another plan's.

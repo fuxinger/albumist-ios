@@ -76,11 +76,86 @@ struct PhotoGridGestureTests {
     }
 
     /// Positions outside the grid's photos (a page that shrank meanwhile) change nothing.
+    /// A running drag follows the photos the grid shows now (review L3): more photos loaded after
+    /// them keep the range where it is and let it grow into them; new photos before it move it
+    /// with its photos; when its photos are no longer together in that order (one of them went,
+    /// or one came between), there is no range to keep and the drag ends.
+    @Test func aDragFollowsThePhotosTheGridShowsNow() throws {
+        var drag = PhotoGridDrag(anchor: 1, anchorWasSelected: false)
+        _ = drag.move(to: 3)
+        let old = ["a", "b", "c", "d", "e"]
+        #expect(drag.rebased(from: old, to: old) == drag)
+        // More loaded after them: the same range, which grows into them.
+        var on = try #require(drag.rebased(from: old, to: old + ["f", "g"]))
+        #expect(on == drag)
+        #expect(on.move(to: 6) == PhotoGridDrag.Change(marked: [4...6]))
+        // Photos before the range changed, its own stayed in place.
+        #expect(drag.rebased(from: old, to: ["q", "b", "c", "d"]) == drag)
+        // New photos at the top: the range moves with its photos.
+        let moved = try #require(drag.rebased(from: old, to: ["x", "y"] + old))
+        #expect(moved.anchor == 3 && moved.current == 5 && moved.mode == .select)
+        // Backwards from a ticked photo: the same.
+        var back = PhotoGridDrag(anchor: 3, anchorWasSelected: true)
+        _ = back.move(to: 2)
+        let shifted = try #require(back.rebased(from: old, to: ["x"] + old))
+        #expect(shifted.anchor == 4 && shifted.current == 3 && shifted.mode == .deselect)
+        // One of its photos went, or one came between: no range to keep.
+        #expect(drag.rebased(from: old, to: ["a", "b", "d", "e"]) == nil)
+        #expect(drag.rebased(from: old, to: ["a", "b", "c", "z", "d", "e"]) == nil)
+        #expect(drag.rebased(from: old, to: ["a", "c", "d", "e"]) == nil)
+        #expect(drag.rebased(from: old, to: []) == nil)
+    }
+
     @Test func positionsBeyondThePhotosChangeNothing() {
         var selection: Set<String> = ["a"]
         PhotoGridDrag.apply(PhotoGridDrag.Change(marked: [1...5], restored: [7...9]), mode: .select, to: &selection,
                             base: ["a"], ids: ["a", "b", "c"])
         #expect(selection == ["a", "b", "c"])
+    }
+
+    // MARK: A gesture's lift (review L8)
+
+    /// The lift that ends a drag or a pinch is no tap (UIKit may hand it to the photo's button
+    /// too, before or right after the gesture's end); a tap after the next finger touched down is
+    /// one of its own, however soon: a tap right after a drag ticks, one right after a pinch opens.
+    @Test func onlyTheLiftOfTheGestureThatEndedIsNoTap() {
+        var lift = PhotoGridLift()
+        #expect(!lift.swallowsTap, "a plain tap")
+        // A drag: its finger touches down, then it begins.
+        lift.touchedDown()
+        lift.gestureBegan()
+        #expect(lift.swallowsTap, "a tap while it runs")
+        lift.gestureEnded()
+        #expect(lift.swallowsTap, "its own lift")
+        #expect(lift.swallowsTap, "its lift, however late, until a finger touches again")
+        lift.touchedDown()
+        #expect(!lift.swallowsTap, "a tap right after the drag ticks or unticks")
+        // A pinch: its second finger touches down while it runs, which is no tap of its own.
+        lift.gestureBegan()
+        lift.touchedDown()
+        #expect(lift.swallowsTap)
+        lift.gestureEnded()
+        #expect(lift.swallowsTap, "the lift of its fingers")
+        lift.touchedDown()
+        #expect(!lift.swallowsTap, "a tap right after the pinch opens")
+    }
+
+    /// A drag and a pinch at once: a tap is their lift until both ended and a finger touched again.
+    @Test func twoGesturesAtOnceLiftTogether() {
+        var lift = PhotoGridLift()
+        lift.gestureBegan()
+        lift.gestureBegan()
+        lift.gestureEnded()
+        lift.touchedDown()
+        #expect(lift.swallowsTap, "the other one still runs")
+        lift.gestureEnded()
+        #expect(lift.swallowsTap)
+        lift.touchedDown()
+        #expect(!lift.swallowsTap)
+        // An end without a beginning leaves nothing running.
+        lift.gestureEnded()
+        lift.touchedDown()
+        #expect(!lift.swallowsTap)
     }
 
     // MARK: The photo under the finger
@@ -109,6 +184,23 @@ struct PhotoGridGestureTests {
         #expect(PhotoGridHitTest.position(x: 50, y: 50, in: []) == nil)
     }
 
+    /// A day's header pinned at the top over the photos scrolling under it hides them: a finger
+    /// on it is on no photo, so the drag ticks nothing the user cannot see (review L4); above and
+    /// below it the photos count, and a header that covers nothing changes nothing.
+    @Test func noPhotoUnderAPinnedHeader() {
+        // The second day's header pinned over the first row, from 40 to 90.
+        let pinned = GridRect(x: 0, y: 40, width: 304, height: 50)
+        #expect(PhotoGridHitTest.position(x: 50, y: 60, in: Self.cells, covered: [pinned]) == nil)
+        #expect(PhotoGridHitTest.position(x: 150, y: 90, in: Self.cells, covered: [pinned]) == nil, "its edge")
+        #expect(PhotoGridHitTest.position(x: 150, y: 95, in: Self.cells, covered: [pinned]) == 1, "below it")
+        #expect(PhotoGridHitTest.position(x: 150, y: 20, in: Self.cells, covered: [pinned]) == 1, "above it")
+        #expect(PhotoGridHitTest.position(x: 50, y: 60, in: Self.cells) == 0, "nothing pinned: the photo")
+        // A header in its own place, between the days.
+        let between = GridRect(x: 0, y: 100, width: 304, height: 50)
+        #expect(PhotoGridHitTest.position(x: 50, y: 160, in: Self.cells, covered: [between]) == 3)
+        #expect(PhotoGridHitTest.position(x: 50, y: 50, in: Self.cells, covered: [between]) == 0)
+    }
+
     /// Two fingers always hold a photo, the one whose place the zoom keeps: the one under them,
     /// else the nearest (between rows, on a header, beside the grid); on a tie the earlier one.
     @Test func twoFingersHoldTheNearestPhoto() {
@@ -120,6 +212,67 @@ struct PhotoGridGestureTests {
         #expect(PhotoGridHitTest.nearest(x: 280, y: 400, in: Self.cells) == 4, "below the grid: its nearest photo")
         #expect(PhotoGridHitTest.nearest(x: 50, y: -60, in: Self.cells) == 0, "above the grid")
         #expect(PhotoGridHitTest.nearest(x: 50, y: 50, in: []) == nil, "no photo on screen")
+    }
+
+    // MARK: What is on screen (review L1)
+
+    /// A photo that went (scrolled away, or its page left for another tab or page) no longer
+    /// counts, but what it reported is kept: back on screen it counts again with it, also when it
+    /// reports nothing new because nothing moved (SwiftUI reports a frame only when it changes).
+    @Test func aPhotoBackOnScreenCountsWithWhatItReported() {
+        var screen = PhotoGridOnScreen<String, Int>()
+        screen.report("a", 1)
+        screen.report("b", 2)
+        #expect(screen.shown == ["a": 1, "b": 2])
+        // The tab is left: every photo goes.
+        screen.disappeared("a")
+        screen.disappeared("b")
+        #expect(screen.shown.isEmpty)
+        // Back: they appear and report nothing new.
+        screen.appeared("a")
+        screen.appeared("b")
+        #expect(screen.shown == ["a": 1, "b": 2])
+    }
+
+    /// What a photo reports while it is away is kept for when it is back; a photo that appears
+    /// before it reported anything counts once it reports; one that never reported is not there.
+    @Test func whatAPhotoReportsAwayCountsWhenItIsBack() {
+        var screen = PhotoGridOnScreen<String, Int>()
+        screen.report("a", 1)
+        screen.disappeared("a")
+        screen.report("a", 5)
+        #expect(screen.shown.isEmpty, "away, it does not count")
+        screen.appeared("a")
+        #expect(screen.shown == ["a": 5])
+        screen.appeared("b")
+        #expect(screen.shown == ["a": 5])
+        screen.report("b", 2)
+        #expect(screen.shown == ["a": 5, "b": 2])
+        screen.disappeared("c")
+        screen.appeared("c")
+        #expect(screen.shown == ["a": 5, "b": 2])
+    }
+
+    /// Scrolling through a large library keeps at most twice `kept` photos that went, and always
+    /// the latest `kept` of them: the page left right after a long scroll finds its photos again.
+    @Test func whatWentIsKeptBounded() {
+        var screen = PhotoGridOnScreen<Int, Int>()
+        // 100 photos on screen at a time, 20,000 scrolled through.
+        for id in 0..<20_000 {
+            screen.report(id, id)
+            if id >= 100 { screen.disappeared(id - 100) }
+            #expect(screen.awayCount <= 2 * PhotoGridOnScreen<Int, Int>.kept)
+        }
+        #expect(screen.shown.count == 100)
+        // The page is left and shown again.
+        for id in 19_900..<20_000 { screen.disappeared(id) }
+        #expect(screen.shown.isEmpty)
+        for id in 19_900..<20_000 { screen.appeared(id) }
+        #expect(screen.shown.count == 100)
+        #expect(screen.shown[19_950] == 19_950)
+        // Long gone: not kept, not shown when something says it appeared.
+        screen.appeared(5)
+        #expect(screen.shown[5] == nil)
     }
 
     // MARK: Scrolling by itself
@@ -198,6 +351,62 @@ struct PhotoGridGestureTests {
         #expect(target.next(by: -60, offset: -20, range: -50...1_000) == -50)
     }
 
+    /// Whether `scrollTo(y:)` takes the content offset or counts from where the scroll view rests
+    /// at the top is learned from the first step that can tell (review L5): asked as the content
+    /// offset, the scroll view reports the same, or less by the top inset; from then on the steps
+    /// ask so the scroll view goes where they mean, also to the content's last rows.
+    @Test func howScrollToCountsIsLearnedFromTheFirstStep() {
+        // Content offsets from -100 (at rest at the top, under 100 pt of bars) to 2,000.
+        let range = -100.0...2_000
+        var asOffset = PhotoGridAutoScroll.Calibration()
+        #expect(asOffset.y(for: 510, insetTop: 100) == 510, "not known yet: as the content offset")
+        asOffset.asked(510, from: 500, insetTop: 100, range: range)
+        asOffset.reported(500)
+        #expect(asOffset.convention == nil, "not moved yet")
+        asOffset.reported(510)
+        #expect(asOffset.convention == .contentOffset)
+        #expect(asOffset.y(for: 2_000, insetTop: 100) == 2_000)
+
+        var fromTop = PhotoGridAutoScroll.Calibration()
+        fromTop.asked(510, from: 500, insetTop: 100, range: range)
+        fromTop.reported(410)
+        #expect(fromTop.convention == .fromRestingTop)
+        #expect(fromTop.y(for: 520, insetTop: 100) == 620)
+        #expect(fromTop.y(for: 2_000, insetTop: 100) == 2_100, "the last rows are reached")
+        #expect(fromTop.y(for: -100, insetTop: 100) == 0, "the top")
+        // Learned once: a later step changes nothing.
+        fromTop.asked(700, from: 520, insetTop: 100, range: range)
+        fromTop.reported(700)
+        #expect(fromTop.convention == .fromRestingTop)
+    }
+
+    /// A step that cannot tell teaches nothing: without a top inset (both ways agree), cut at an
+    /// end of the content one way, answered with an offset of neither way (something else moved
+    /// the scroll view), or let go before it was answered.
+    @Test func aStepThatCannotTellTeachesNothing() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        calibration.asked(510, from: 500, insetTop: 0, range: 0...2_000)
+        calibration.reported(510)
+        #expect(calibration.convention == nil, "no top inset: both ways agree")
+        #expect(calibration.y(for: 510, insetTop: 0) == 510)
+        calibration.asked(-95, from: -100, insetTop: 100, range: range)
+        calibration.reported(-100)
+        #expect(calibration.convention == nil, "from the top: counted from the top it would be cut there")
+        calibration.asked(1_999.5, from: 1_990, insetTop: 100, range: range)
+        calibration.reported(1_999.5)
+        #expect(calibration.convention == nil, "at the bottom: as the content offset it would be cut")
+        calibration.asked(510, from: 500, insetTop: 100, range: range)
+        calibration.reported(455)
+        #expect(calibration.convention == nil, "moved by something else")
+        calibration.reset()
+        calibration.reported(510)
+        #expect(calibration.convention == nil, "a step let go teaches nothing")
+        calibration.asked(510, from: 500, insetTop: 100, range: range)
+        calibration.reported(510)
+        #expect(calibration.convention == .contentOffset, "the next step that can tell")
+    }
+
     // MARK: Pinch to zoom
 
     /// Three, five or seven in a row, as Photos offers 3 and 5 among others; three when
@@ -265,6 +474,43 @@ struct PhotoGridGestureTests {
             }
         }
         #expect(PhotoGridZoom.anchor(fingerY: 100, visibleHeight: 50, side: 80, pointInPhoto: 0.5) == 0, "a photo taller than the area")
+    }
+
+    /// At five and seven in a row a grid's cell is small (52 pt on a 375-pt iPhone): its photo is
+    /// still lifted at least as large as at three in a row, the grids' size before they zoomed and
+    /// the menu's lift then, never under 110 pt (review L9); as large as it is sharp from a larger
+    /// image kept of it, as at three in a row.
+    @Test func aSmallCellsPhotoIsLiftedAsLargeAsAtThreeInARow() {
+        let width = 375.0
+        let three = PhotoGridZoom.side(width: width, columns: 3)
+        let seven = PhotoGridZoom.side(width: width, columns: 7)
+        #expect(PhotoGridZoom.liftSide(cell: seven, gridWidth: width) == three)
+        #expect(PhotoGridZoom.liftSide(cell: three, gridWidth: width) == three)
+        #expect(PhotoGridZoom.liftSide(cell: 50, gridWidth: 300) == 110, "never under 110 pt")
+        #expect(PhotoGridZoom.liftSide(cell: 140, gridWidth: 300) == 140, "a larger cell: its own side")
+        #expect(PhotoGridZoom.sides(width: width) == [3, 5, 7].map { PhotoGridZoom.side(width: width, columns: $0) })
+        let lifted = PhotoGridZoom.liftSide(cell: seven, gridWidth: width)
+        func close(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 0.01 }
+        // Only the cell's own thumbnail at seven in a row (156 px on a 3x screen): as large as at three.
+        let small = PhotoMenu.liftSize(imageWidth: 156, imageHeight: 156, scale: 3, cellSide: lifted)
+        #expect(close(small.width, three) && close(small.height, three))
+        let across = PhotoMenu.liftSize(imageWidth: 208, imageHeight: 156, scale: 3, cellSide: lifted)
+        #expect(close(across.height, three) && close(across.aspectRatio, 4.0 / 3.0))
+        // The three-in-a-row thumbnail kept: lifted as at three in a row.
+        #expect(PhotoMenu.liftSize(imageWidth: 440, imageHeight: 330, scale: 3, cellSide: lifted)
+                == PhotoMenu.liftSize(imageWidth: 440, imageHeight: 330, scale: 3, cellSide: three))
+        // No image in memory: a square as large as at three in a row.
+        let none = PhotoMenu.liftSize(imageWidth: 0, imageHeight: 0, scale: 3, cellSide: lifted)
+        #expect(close(none.width, three) && close(none.height, three))
+    }
+
+    /// Of the images kept in memory of a photo (at the grid's sizes, and the one a grid showed
+    /// last) the one with the most pixels is lifted, the sharpest at any size; on a tie the first
+    /// (the cell's own). Nothing kept: none, and nothing is asked of Photos for the lift.
+    @Test func theSharpestImageKeptIsLifted() {
+        #expect(PhotoGridZoom.sharpestKept([(width: 156, height: 156), (width: 440, height: 330), (width: 260, height: 260)]) == 1)
+        #expect(PhotoGridZoom.sharpestKept([(width: 156, height: 156), (width: 156, height: 156)]) == 0)
+        #expect(PhotoGridZoom.sharpestKept([]) == nil)
     }
 
     /// Calm: the new size settles from the old one around the fingers, a little in from far

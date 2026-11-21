@@ -44,15 +44,23 @@ private struct PhotoGridScrollHost: ViewModifier {
 /// a step on while a finger selects at an edge (`PhotoGridAutoScroll`), and a photo to show at a
 /// point of the visible area after a zoom step (`PhotoGridZoom.anchor`).
 ///
-/// Offsets are the scroll view's own (UIKit's `contentOffset`): at the top it is minus the top
-/// inset (the bars), and `ScrollPosition.scrollTo(y:)` takes the same.
+/// Offsets are the scroll view's own (UIKit's `contentOffset`, as `ScrollGeometry` reports it):
+/// at the top it is minus the top inset (the bars). What `ScrollPosition.scrollTo(y:)` takes is
+/// learned from the scroll view (`PhotoGridAutoScroll.Calibration`, review L5).
 @MainActor @Observable
 final class PhotoGridScroller {
     /// The scroll view's position (`scrollPosition`), which it writes as it moves.
     var position = ScrollPosition(idType: AssetID.self)
-    /// The point of a photo and of the visible area that `show` lines up; nil until the first
-    /// zoom step (the scroll view's own default then).
+    /// The point of a photo and of the visible area that `show` lines up, while a zoom step lands;
+    /// nil otherwise (the scroll view's plain scrolling).
     private(set) var anchor: UnitPoint?
+    /// A zoom step's photo is on its way: only then the scroll view finds the grid's photos by id
+    /// (the grid's scroll target layout is on), so otherwise it follows no photo (review L6).
+    private(set) var findsPhotos = false
+    /// The steps asked for, so only the last one's landing gives back plain scrolling.
+    @ObservationIgnored private var steps = 0
+    /// How long a zoom step takes to land: the grid settles in 0.3 s (`PhotoGridSettle`).
+    static let landing: Duration = .milliseconds(350)
     /// The scroll view as it reported itself last, at every frame while it moves: not observed,
     /// nothing is drawn again for it.
     @ObservationIgnored private var geometry: ScrollGeometry?
@@ -61,6 +69,9 @@ final class PhotoGridScroller {
     @ObservationIgnored private var safeArea = PhotoGridSafeEdges()
     /// The offsets asked for while the grid scrolls by itself.
     @ObservationIgnored private var target = PhotoGridAutoScroll.Target()
+    /// How `scrollTo(y:)` counts, learned once for the app from the first step of scrolling by
+    /// itself that can tell (SwiftUI's way, the same on every page).
+    private static var calibration = PhotoGridAutoScroll.Calibration()
 
     /// The offset the scroll view reported last.
     var offset: Double {
@@ -90,7 +101,9 @@ final class PhotoGridScroller {
 
     func reported(_ geometry: ScrollGeometry) {
         self.geometry = geometry
-        target.reported(Double(geometry.contentOffset.y))
+        let offset = Double(geometry.contentOffset.y)
+        target.reported(offset)
+        Self.calibration.reported(offset)
     }
 
     func reported(safeArea: PhotoGridSafeEdges) {
@@ -100,22 +113,45 @@ final class PhotoGridScroller {
     /// One frame's step of scrolling by itself, `step` points (negative: up), within the content.
     func scroll(by step: Double) {
         guard let geometry else { return }
-        let top = -Double(geometry.contentInsets.top)
+        let insetTop = Double(geometry.contentInsets.top)
+        let top = -insetTop
         let bottom = max(top, Double(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height))
-        if let y = target.next(by: step, offset: offset, range: top...bottom) { position.scrollTo(y: CGFloat(y)) }
+        guard let wanted = target.next(by: step, offset: offset, range: top...bottom) else { return }
+        let y = Self.calibration.y(for: wanted, insetTop: insetTop)
+        Self.calibration.asked(y, from: offset, insetTop: insetTop, range: top...bottom)
+        position.scrollTo(y: CGFloat(y))
     }
 
     /// The finger left the edge or lifted: the next steps go on from where the scroll view is.
     func endAutoScroll() {
         target.reset()
+        Self.calibration.reset()
     }
 
     /// Scrolls `photo` to where the point `unitY` of it (0 its top, 1 its bottom) and of the
-    /// visible area meet: the modifier's anchor and the step's, both.
+    /// visible area meet: the modifier's anchor and the step's, both, while the step lands (the
+    /// scroll view keeps the photo there as the grid lays out its new size).
     func show(_ photo: AssetID, unitY: Double) {
         let point = UnitPoint(x: 0.5, y: unitY)
+        findsPhotos = true
         anchor = point
         position.scrollTo(id: photo, anchor: point)
+        steps += 1
+        let step = steps
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: PhotoGridScroller.landing)
+            guard let self, self.steps == step else { return }
+            self.land()
+        }
+    }
+
+    /// The zoom step landed: the scroll view scrolls plainly again, as before the zoom. No anchor
+    /// is left, its position names no photo (one that goes leaves nothing behind), and it finds
+    /// and follows none while the user scrolls (review L6).
+    private func land() {
+        anchor = nil
+        findsPhotos = false
+        position = ScrollPosition(idType: AssetID.self)
     }
 }
 

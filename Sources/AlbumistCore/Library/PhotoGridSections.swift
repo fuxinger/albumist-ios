@@ -35,6 +35,25 @@ public struct PhotoGridSection: Identifiable, Equatable, Sendable {
         self.entries = entries
     }
 
+    /// The day's photos at positions below `limit`: all of them, or the first ones when the
+    /// grid's page ends inside the day (`InboxDays.shown`). A slice, nothing copied.
+    public func entries(below limit: Int) -> ArraySlice<PhotoGridEntry> {
+        guard let first = entries.first else { return entries[...] }
+        return entries.prefix(max(0, min(entries.count, limit - first.position)))
+    }
+
+    /// The ids of the photos of `sections` at positions below `limit`, in the grid's order: the
+    /// photos a page shows, for the photo view and drag to select.
+    public static func ids(of sections: some Sequence<PhotoGridSection>, below limit: Int = .max) -> [AssetID] {
+        var ids: [AssetID] = []
+        for section in sections {
+            let shown = section.entries(below: limit)
+            if shown.isEmpty { break }
+            ids.append(contentsOf: shown.lazy.map(\.id))
+        }
+        return ids
+    }
+
     /// A suggestion's days (`PhotoDays.group`: oldest day first, its photos in the suggestion's
     /// order) as the grid's sections, each photo with its wall clock (`wallClock`, from its facts).
     public static func sections(_ days: [PhotoDay], wallClock: (AssetID) -> Date?) -> [PhotoGridSection] {
@@ -45,6 +64,37 @@ public struct PhotoGridSection: Identifiable, Equatable, Sendable {
                 return PhotoGridEntry(id: id, wallClock: wallClock(id), position: position)
             }
             return PhotoGridSection(id: day.id, title: day.title, countText: day.countText, entries: entries)
+        }
+    }
+}
+
+/// The photos a grid shows: its days and, of their photos, the positions below `limit`
+/// (`PhotoGrid`). The grid hands it to its gestures at each of its bodies, and a running drag
+/// follows its photos (review L3 of design wave 3); whether it is the same as before is told by
+/// the days' storage, range and limit, without comparing photos, so their order is made again
+/// only when it changed.
+public struct PhotoGridShown: Sendable {
+    public let sections: ArraySlice<PhotoGridSection>
+    public let limit: Int
+
+    public init(_ sections: ArraySlice<PhotoGridSection>, below limit: Int = .max) {
+        self.sections = sections
+        self.limit = limit
+    }
+
+    /// Its photos in the grid's order.
+    public var ids: [AssetID] {
+        PhotoGridSection.ids(of: sections, below: limit)
+    }
+
+    /// The same days (the same storage, so the same photos) and limit. Days made anew are other
+    /// days, even with the same photos.
+    public func isSame(as other: PhotoGridShown) -> Bool {
+        guard limit == other.limit, sections.startIndex == other.sections.startIndex,
+              sections.count == other.sections.count else { return false }
+        if sections.isEmpty { return true }
+        return sections.withUnsafeBufferPointer { mine in
+            other.sections.withUnsafeBufferPointer { theirs in mine.baseAddress == theirs.baseAddress }
         }
     }
 }
@@ -68,7 +118,8 @@ public struct PhotoGridSection: Identifiable, Equatable, Sendable {
 ///   the weekday and date ("Samstag, 12. Oktober"), with the year when it is not this year.
 ///
 /// Made off the main thread (`AppModel.inboxDays`): grouping 100,000 photos reads every photo's
-/// facts. The grid shows whole days page by page (`shownDays`).
+/// facts. The grid shows a page of photos at a time from the top, a day larger than a page cut
+/// where the page ends (`shown(forPhotos:)`).
 public struct InboxDays: Equatable, Sendable {
     /// The days in the grid's order.
     public let sections: [PhotoGridSection]
@@ -165,25 +216,22 @@ public struct InboxDays: Equatable, Sendable {
         }
     }
 
-    /// How many days the grid shows when `photos` photos are asked for: whole days, up to and
-    /// including the day that reaches that number, so a day's header never counts photos that
-    /// are not shown yet. At least one day while there is one.
-    public func shownDays(forPhotos photos: Int) -> Int {
-        guard !sections.isEmpty else { return 0 }
-        guard photos < photoCount else { return sections.count }
-        // The last day that starts before `photos` photos are shown.
+    /// What the grid shows when `photos` photos are asked for (one page or several): the days
+    /// from the top up to the one that holds the last of them (`days`), that one cut there when
+    /// it holds more, and how many photos that is (`photos`: the grid shows the positions below
+    /// it, `PhotoGridSection.entries(below:)`). So a page never shows more photos than asked
+    /// for, whatever one day holds (40,000 photos with one wrong camera date, or without a date;
+    /// review L2); the cut day's header still counts the whole day. At least one photo while
+    /// there is one.
+    public func shown(forPhotos photos: Int) -> (days: Int, photos: Int) {
+        guard !sections.isEmpty else { return (0, 0) }
+        let count = min(max(photos, 1), photoCount)
+        // The last day that starts before `count` photos are shown.
         var low = 0, high = sections.count - 1
         while low < high {
             let mid = (low + high + 1) / 2
-            if before[mid] < photos { low = mid } else { high = mid - 1 }
+            if before[mid] < count { low = mid } else { high = mid - 1 }
         }
-        return max(1, low + 1)
-    }
-
-    /// The photos of the first `days` days.
-    public func photos(inFirst days: Int) -> Int {
-        guard days > 0 else { return 0 }
-        guard days < sections.count else { return photoCount }
-        return before[days]
+        return (low + 1, count)
     }
 }

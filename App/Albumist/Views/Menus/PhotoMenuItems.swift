@@ -6,13 +6,16 @@ extension View {
     /// The long press on a photo of a grid (design wave 2, DS-06a; draft E4 "lang drücken"): the
     /// photo lifted larger, and what this place offers for it (`PhotoMenu`), also as VoiceOver's
     /// actions of the photo. `side`: the side the cell's thumbnail is asked for
-    /// (`AssetThumbnail`), whose image is lifted. `perform` runs "Ansehen", "Zu Album hinzufügen
-    /// …" and "Aus Vorschlag entfernen" the place's way; "Ignorieren" and "Nicht mehr ignorieren"
-    /// are the model's, the same everywhere, with "Widerrufen" on the screen (`IgnoreUndoBar`).
-    func photoMenu(_ id: AssetID, place: PhotoMenu.Place, side: CGFloat, selecting: Bool = false, available: Bool = true,
-                   perform: @escaping @MainActor (PhotoMenu.Item) -> Void) -> some View {
-        modifier(PhotoLongPress(id: id, place: place, side: side, selecting: selecting, available: available,
-                                perform: perform))
+    /// (`AssetThumbnail`), whose image is lifted. `gridWidth`: the width of a grid that zooms
+    /// (`PhotoGrid`), whose photo is lifted at least as large as at three in a row, from the
+    /// sharpest image kept of it (review L9 of design wave 3); nil elsewhere. `perform` runs
+    /// "Ansehen", "Zu Album hinzufügen …" and "Aus Vorschlag entfernen" the place's way;
+    /// "Ignorieren" and "Nicht mehr ignorieren" are the model's, the same everywhere, with
+    /// "Widerrufen" on the screen (`IgnoreUndoBar`).
+    func photoMenu(_ id: AssetID, place: PhotoMenu.Place, side: CGFloat, gridWidth: CGFloat? = nil, selecting: Bool = false,
+                   available: Bool = true, perform: @escaping @MainActor (PhotoMenu.Item) -> Void) -> some View {
+        modifier(PhotoLongPress(id: id, place: place, side: side, gridWidth: gridWidth, selecting: selecting,
+                                available: available, perform: perform))
     }
 }
 
@@ -30,6 +33,7 @@ private struct PhotoLongPress: ViewModifier {
     var id: AssetID
     var place: PhotoMenu.Place
     var side: CGFloat
+    var gridWidth: CGFloat?
     var selecting: Bool
     var available: Bool
     var perform: @MainActor (PhotoMenu.Item) -> Void
@@ -41,7 +45,7 @@ private struct PhotoLongPress: ViewModifier {
                     .contextMenu {
                         items(forVoiceOver: false)
                     } preview: {
-                        PhotoPreview(id: id, side: side)
+                        PhotoPreview(id: id, side: side, gridWidth: gridWidth)
                     }
                     .accessibilityActions {
                         items(forVoiceOver: true)
@@ -134,22 +138,28 @@ struct PhotoMenuItems: View {
 /// proportions, as large as it is sharp (`PhotoMenu.liftSize`: never smaller than the cell, at
 /// most 320 × 427 pt). So never an empty surface where the cell shows a photo, never a blurry
 /// enlargement, nothing loaded from iCloud, and no lift counted as a cover (`CoverStats` counts
-/// the cards' covers). Gone from memory (a memory warning) while its cell still shows it: as
-/// large as its cell, asked for again as the cell asks. Worked out in its own body, when SwiftUI
-/// draws the preview, not in the cell's; gets everything handed in (the system draws it apart
-/// from the screen).
+/// the cards' covers). In a grid that zooms (`gridWidth`) at least as large as at three in a
+/// row, also at five and seven in a row, from the sharpest image kept of it at the grid's sizes
+/// (review L9 of design wave 3); nothing is asked of Photos for the lift. Gone from memory (a
+/// memory warning) while its cell still shows it: that large, asked for again as the cell asks.
+/// Worked out in its own body, when SwiftUI draws the preview, not in the cell's; gets
+/// everything handed in (the system draws it apart from the screen).
 /// Decorative: the menu says what can be done with it.
 struct PhotoPreview: View {
     var id: AssetID
     /// The side its cell's thumbnail is asked for (`AssetThumbnail.side`), in points.
     var side: CGFloat
+    /// The width of a grid that zooms (`PhotoGrid`), nil elsewhere.
+    var gridWidth: CGFloat? = nil
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        if let image = ThumbnailCache.shared.cachedThumbnail(for: id, side: side) {
+        // The lift's floor: the cell's side, in a zooming grid as at three in a row.
+        let lifted = gridWidth.map { CGFloat(PhotoGridZoom.liftSide(cell: Double(side), gridWidth: Double($0))) } ?? side
+        if let image = sharpestInMemory {
             let size = PhotoMenu.liftSize(imageWidth: Double(image.size.width * image.scale),
                                           imageHeight: Double(image.size.height * image.scale),
-                                          scale: Double(displayScale), cellSide: Double(side))
+                                          scale: Double(displayScale), cellSide: Double(lifted))
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
@@ -159,7 +169,20 @@ struct PhotoPreview: View {
         } else {
             AssetThumbnail(id: id, side: side)
                 .environment(\.thumbnailShowsVideoLength, false) // the lifted photo, as from memory
-                .frame(width: side, height: side)
+                .frame(width: lifted, height: lifted)
         }
+    }
+
+    /// The image of the photo to lift, from memory only. In a zooming grid the sharpest kept
+    /// (`PhotoGridZoom.sharpestKept`): its cell's, one of the grid's other sizes, or the one a
+    /// grid showed last. Elsewhere (album, search) its cell's own, as before.
+    private var sharpestInMemory: UIImage? {
+        let cache = ThumbnailCache.shared
+        guard let gridWidth else { return cache.cachedThumbnail(for: id, side: side) }
+        let sides: [CGFloat] = [side] + PhotoGridZoom.sides(width: Double(gridWidth)).map { CGFloat($0) }
+        var images = sides.compactMap { cache.cachedThumbnail(for: id, side: $0) }
+        if let last = cache.thumbnailInMemory(for: id) { images.append(last) }
+        let pixels = images.map { (width: Double($0.size.width * $0.scale), height: Double($0.size.height * $0.scale)) }
+        return PhotoGridZoom.sharpestKept(pixels).map { images[$0] }
     }
 }

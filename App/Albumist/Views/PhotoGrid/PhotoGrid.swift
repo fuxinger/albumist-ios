@@ -28,6 +28,9 @@ struct PhotoGrid: View {
     @Environment(\.photoGridScroller) private var scroller
     /// The days shown, in the grid's order, each photo with its place in it.
     var sections: ArraySlice<PhotoGridSection>
+    /// The photos shown are the ones at positions below it: a page of "Unsortiert" may end
+    /// inside a day (`InboxDays.shown`), whose header still counts the whole day.
+    var limit = Int.max
     /// Where the photos are, for their long press (`PhotoMenu`).
     var place: PhotoMenu.Place
     var selecting: Bool
@@ -60,21 +63,25 @@ struct PhotoGrid: View {
         // A copy for the animation, which runs apart from the view.
         let settle = self.settle
         let pinned = pinsHeaders && !typeSize.isAccessibilitySize
+        // What it shows, for a drag that runs while more photos load or the days change (review
+        // L3): handed over, nothing made here.
+        let _ = gestures.show(PhotoGridShown(sections, below: limit))
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: CGFloat(PhotoGridZoom.spacing)), count: columns),
                   spacing: CGFloat(PhotoGridZoom.spacing),
                   pinnedViews: pinned ? [.sectionHeaders] : []) {
             ForEach(sections) { section in
                 Section {
-                    ForEach(section.entries) { entry in
+                    ForEach(section.entries(below: limit)) { entry in
                         cell(entry, side: side, columns: columns)
                     }
                 } header: {
-                    PhotoGridHeader(section: section, pinned: pinned)
+                    header(section, pinned: pinned)
                 }
             }
         }
-        // The scroll view finds a photo by its id (`PhotoGridScroller.show`).
-        .scrollTargetLayout()
+        // The scroll view finds a photo by its id while a zoom step lands
+        // (`PhotoGridScroller.show`), and follows none otherwise (review L6).
+        .scrollTargetLayout(isEnabled: scroller?.findsPhotos ?? false)
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.width
         } action: { newWidth in
@@ -82,8 +89,10 @@ struct PhotoGrid: View {
         }
         // Fingers between two photos are on the grid too.
         .contentShape(Rectangle())
-        .gesture(PhotoGridSelectDrag(isEnabled: selecting && !disabled, space: PhotoGridPlace.space) { touch in dragged(touch) })
-        .gesture(PhotoGridPinch(isEnabled: !disabled, space: PhotoGridPlace.space) { touch in pinched(touch) })
+        .gesture(PhotoGridSelectDrag(isEnabled: selecting && !disabled, space: PhotoGridPlace.space,
+                                     touchedDown: { gestures.touchedDown() }) { touch in dragged(touch) })
+        .gesture(PhotoGridPinch(isEnabled: !disabled, space: PhotoGridPlace.space,
+                                touchedDown: { gestures.touchedDown() }) { touch in pinched(touch) })
         .coordinateSpace(.named(PhotoGridPlace.space))
         // After a pinch's step the grid settles from the old size around the fingers, so the
         // step looks like a zoom; not under Reduce Motion (`step(to:)`).
@@ -99,6 +108,20 @@ struct PhotoGrid: View {
         }
     }
 
+    /// A day's header, and where it is for the gestures: pinned, where it is pinned over the
+    /// photos scrolling under it, which a finger on it does not reach (review L4); kept while it
+    /// is away, as the photos' places are.
+    private func header(_ section: PhotoGridSection, pinned: Bool) -> some View {
+        PhotoGridHeader(section: section, pinned: pinned)
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .named(PhotoGridPlace.space))
+            } action: { frame in
+                gestures.header(section.id, frame)
+            }
+            .onAppear { gestures.headerAppeared(section.id) }
+            .onDisappear { gestures.headerDisappeared(section.id) }
+    }
+
     /// One photo: a tap opens it, or ticks it while the grid selects; its long press lifts it
     /// with what the page offers for it (DS-06a), none while selecting.
     private func cell(_ entry: PhotoGridEntry, side: CGFloat, columns: Int) -> some View {
@@ -107,8 +130,9 @@ struct PhotoGrid: View {
         // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
         return Button {
             // The lift that ends a drag or a pinch is no tap: the drag ticked its first photo
-            // already, and a pinch opens nothing.
-            guard !gestures.endsGesture else { return }
+            // already, and a pinch opens nothing. Only that lift: a tap right after either one
+            // ticks or opens (review L8).
+            guard !gestures.swallowsTap else { return }
             guard selecting else {
                 open(id)
                 return
@@ -162,17 +186,21 @@ struct PhotoGrid: View {
                 Button("Verkleinern") { step(zoomingIn: false, on: id, columns: columns) }
             }
         }
-        // The long press (DS-06a): the photo larger, and what the page offers for it.
-        .photoMenu(id, place: place, side: side, selecting: selecting, available: available) { item in
+        // The long press (DS-06a): the photo larger (at least as at three in a row, review L9),
+        // and what the page offers for it.
+        .photoMenu(id, place: place, side: side, gridWidth: width, selecting: selecting, available: available) { item in
             perform(item, id)
         }
-        // Where it is, for the fingers of the gestures.
+        // Where it is, for the fingers of the gestures. Away (scrolled off, or the page left for
+        // another tab or page) it does not count, but its place is kept: back, it reports
+        // nothing new when nothing moved (review L1).
         .onGeometryChange(for: PhotoGridPlace.self) { proxy in
             PhotoGridPlace(position: entry.position, frame: proxy.frame(in: .named(PhotoGridPlace.space)))
         } action: { reported in
             gestures.place(id, reported)
         }
-        .onDisappear { gestures.forget(id) }
+        .onAppear { gestures.appeared(id) }
+        .onDisappear { gestures.disappeared(id) }
     }
 
     /// The photo's date and time on the clock where it was taken, as its day's header says it
@@ -187,7 +215,7 @@ struct PhotoGrid: View {
     private func dragged(_ touch: PhotoGridTouch) {
         switch touch.phase {
         case .began:
-            gestures.beginDrag(touch, ids: sections.flatMap { $0.entries.map(\.id) }, selection: $selection, scroller: scroller)
+            gestures.beginDrag(touch, selection: $selection, scroller: scroller)
         case .changed:
             gestures.moveDrag(touch)
         case .ended:
@@ -226,11 +254,15 @@ struct PhotoGrid: View {
     }
 
     /// A step without two fingers (VoiceOver's zoom, "Vergrößern", "Verkleinern") on `photo`:
-    /// it stays in the middle of the screen, and the new size is said. Not while the grid waits,
-    /// as the pinch.
+    /// it stays in the middle of the screen, and the new size is said. At the largest or smallest
+    /// size VoiceOver's zoom stays, and says the size it stays at (review L13). Not while the grid
+    /// waits, as the pinch.
     private func step(zoomingIn: Bool, on photo: AssetID, columns: Int) {
-        guard !disabled, let next = zoomingIn ? PhotoGridZoom.fewer(than: columns) : PhotoGridZoom.more(than: columns) else { return }
-        step(to: next, from: columns, keeping: photo, anchor: { _ in 0.5 }, around: nil)
+        guard !disabled else { return }
+        let next = (zoomingIn ? PhotoGridZoom.fewer(than: columns) : PhotoGridZoom.more(than: columns)) ?? columns
+        if next != columns {
+            step(to: next, from: columns, keeping: photo, anchor: { _ in 0.5 }, around: nil)
+        }
         AccessibilityNotification.Announcement(String(localized: "\(next) \(next.formatted()) Fotos pro Reihe")).post()
     }
 }
@@ -303,18 +335,25 @@ struct PhotoGridPlace: Equatable, Sendable {
 }
 
 /// A suggestion's days as the grid's sections, made again only when its page hands over other
-/// days (`ProposalPageCache` makes them anew when the suggestion or the facts change), not each
-/// time the page draws (at every letter of a name and every tick of a photo).
+/// days (`ProposalPageCache` makes them anew when the suggestion or the facts change) or what
+/// each photo's spoken time is read from changes (the facts' revision, `AppModel.factsVersion`:
+/// a place found later moves a photo to its clock; and the iPhone's clock, for facts without a
+/// zone; review L12), not each time the page draws (at every letter of a name and every tick of
+/// a photo).
 @MainActor
 final class PhotoGridSectionsCache {
     private var days: [PhotoDay] = []
+    private var facts = 0
+    private var zone: TimeZone?
     private var made: [PhotoGridSection] = []
     private var isMade = false
 
-    func sections(for days: [PhotoDay], make: () -> [PhotoGridSection]) -> [PhotoGridSection] {
-        if !isMade || !Self.same(days, self.days) {
+    func sections(for days: [PhotoDay], facts: Int, zone: TimeZone, make: () -> [PhotoGridSection]) -> [PhotoGridSection] {
+        if !isMade || !Self.same(days, self.days) || facts != self.facts || zone != self.zone {
             made = make()
             self.days = days
+            self.facts = facts
+            self.zone = zone
             isMade = true
         }
         return made

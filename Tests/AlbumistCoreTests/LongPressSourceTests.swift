@@ -395,7 +395,8 @@ struct LongPressSourceTests {
         // lifts the image the photo asked for, at the side it is shown at (three, five or seven
         // in a row), never at a second side.
         let shared = try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.photoGrid)
-        #expect(shared.contains(".photoMenu(id, place: place, side: side, selecting: selecting, available: available)"), "\(shared)")
+        #expect(shared.contains(".photoMenu(id, place: place, side: side, gridWidth: width, selecting: selecting, available: available)"),
+                "\(shared)")
         #expect(shared.contains("AssetThumbnail(id: id, side: side)"), "\(shared)")
         let gridCode = try Self.code(Self.photoGrid)
         #expect(gridCode.components(separatedBy: "AssetThumbnail(").count - 1 == 1, "a second thumbnail in the grid")
@@ -440,7 +441,8 @@ struct LongPressSourceTests {
         // Without one (the grid selects, the photo cannot open), none of them at all:
         // `aPhotoWithoutAMenuHasNoContextMenuAtAll` (review C2 of design wave 2, N1).
         let squeezedPress = Self.squeezed(press)
-        #expect(squeezedPress.contains("ifoffered{content.contextMenu{items(forVoiceOver:false)}preview:{PhotoPreview(id:id,side:side)}"
+        #expect(squeezedPress.contains("ifoffered{content.contextMenu{items(forVoiceOver:false)}"
+                                       + "preview:{PhotoPreview(id:id,side:side,gridWidth:gridWidth)}"
                                        + ".accessibilityActions{items(forVoiceOver:true)}}"), "\(squeezedPress)")
         let offered = Self.squeezed(try Self.body(["private struct PhotoLongPress", "private var offered: Bool"], in: Self.photoMenu))
         #expect(offered == "{PhotoMenu.isOffered(selecting:selecting,available:available)}", "\(offered)")
@@ -454,7 +456,24 @@ struct LongPressSourceTests {
         #expect(!(try Self.body(["private struct PhotoLongPress"], in: Self.photoMenu)).contains("factsByID"),
                 "every cell tied to the facts")
         let lifted = try Self.body(["struct PhotoPreview"], in: Self.photoMenu)
-        #expect(lifted.contains("ThumbnailCache.shared.cachedThumbnail(for: id, side: side)"), "the image the cell shows")
+        // In a zooming grid the sharpest image kept in memory: the cell's, one of the grid's other
+        // sizes, or the one a grid showed last; at least as large as at three in a row (review
+        // L9). Album and search lift their cell's own thumbnail, as before.
+        let sharpest = Self.squeezed(try Self.body(["struct PhotoPreview", "private var sharpestInMemory"], in: Self.photoMenu))
+        #expect(sharpest.contains("guardletgridWidthelse{returncache.cachedThumbnail(for:id,side:side)}"),
+                "album and search as before: \(sharpest)")
+        #expect(sharpest.contains("letsides:[CGFloat]=[side]+PhotoGridZoom.sides(width:Double(gridWidth)).map{CGFloat($0)}"),
+                "\(sharpest)")
+        #expect(sharpest.contains("varimages=sides.compactMap{cache.cachedThumbnail(for:id,side:$0)}"
+                                  + "ifletlast=cache.thumbnailInMemory(for:id){images.append(last)}"), "\(sharpest)")
+        #expect(sharpest.contains("returnPhotoGridZoom.sharpestKept(pixels).map{images[$0]}"), "\(sharpest)")
+        #expect(Self.squeezed(lifted).contains("letlifted=gridWidth.map{CGFloat(PhotoGridZoom.liftSide(cell:Double(side),"
+                                               + "gridWidth:Double($0)))}??side"), "the floor of a zooming grid: \(lifted)")
+        #expect(Self.squeezed(lifted).contains("scale:Double(displayScale),cellSide:Double(lifted))"), "\(lifted)")
+        #expect(Self.squeezed(lifted).contains(".frame(width:lifted,height:lifted)"), "\(lifted)")
+        for request in ["image(for:", "requestImage(", "PHImageManager", "largeImage("] {
+            #expect(!lifted.contains(request), "the lift asks Photos itself: \(request)")
+        }
         #expect(lifted.contains("PhotoMenu.liftSize(imageWidth:"))
         #expect(lifted.contains("@Environment(\\.displayScale)"))
         #expect(lifted.contains("AssetThumbnail(id: id, side: side)"), "gone from memory: as large as its cell, asked for again")
@@ -537,7 +556,7 @@ struct LongPressSourceTests {
         }
         // The tap and "Ansehen" open the photo the same way; "Zu Album hinzufügen …" the sheet.
         let places: [(path: String, type: String, perform: String, tap: String)] = [
-            (Self.library, "struct LibraryView", "private func perform(", "open(id, in: days)"),
+            (Self.library, "struct LibraryView", "private func perform(", "open(id, in: days, limit: limit)"),
             (Self.search, "struct SearchView", "private func perform(", "open(id, from: key)"),
             (Self.albums, "struct AlbumScreen", "private func perform(", "open(photo, ids: ids)"),
         ]

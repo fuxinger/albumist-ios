@@ -4,7 +4,8 @@ import UIKit
 /// The shared photo grid of design wave 3 (DS-21 "Unsortiert" by day, DS-06b drag to select and
 /// pinch to zoom): while "Auswählen" is on, a finger drawn sideways ticks every photo from the
 /// first it touched to the one under it, across rows and days, and a drag that starts on a
-/// ticked photo takes the ticks away; a vertical swipe scrolls and ticks nothing. Two fingers
+/// ticked photo takes the ticks away; a vertical swipe scrolls and ticks nothing; a tap right
+/// after a drag ticks; from the left screen edge a suggestion's page goes back. Two fingers
 /// show three, five or seven photos in a row, one step per pinch, the same size in a
 /// suggestion's photos, and three again after a relaunch (a UI run starts at the standard
 /// size, `PhotoGridMemory`). Each test brings the app to an onboarded, analysed demo library
@@ -219,9 +220,21 @@ final class PhotoGridUITests: XCTestCase {
             XCTFail("\(test): no photo of a later row two places to the right on screen: \(all.prefix(24).map { "\(Int($0.minX)),\(Int($0.minY))" })")
             return
         }
-        let ticked = last - first + 1
-        print("UI_FACT \(test): drag from photo \(first) to photo \(last) (\(ticked) photos)")
+        let range = last - first + 1
+        print("UI_FACT \(test): drag from photo \(first) to photo \(last) (\(range) photos)")
+        // The photo after the range, tapped as soon as the finger is up: a tap right after a drag
+        // ticks (review L8 of H10: a time window after the drag swallowed it). Its point is worked
+        // out before the drag, so the tap follows without asking the app again.
+        let next = last + 1 < all.count && onScreen(all[last + 1]) ? last + 1 : nil
+        let origin = app.coordinate(withNormalizedOffset: .zero)
         drag(from: fromPoint, to: toPoint(last))
+        if let next {
+            origin.withOffset(CGVector(dx: all[next].midX, dy: all[next].midY)).tap()
+            print("UI_STEP_OK \(test): tap photo \(next) right after the drag")
+        } else {
+            print("UI_FACT \(test): no photo after the range on screen: no tap right after the drag")
+        }
+        let ticked = range + (next == nil ? 0 : 1)
         let counted = UITestWait.until("\(test): \(ticked) ausgewählt after the drag", timeout: 5) { selectedCount(ticked).exists }
         if !counted {
             let shown = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", " ausgewählt")).firstMatch
@@ -231,8 +244,10 @@ final class PhotoGridUITests: XCTestCase {
         // its end, away from the edges, so the page did not scroll).
         let afterDrag = photos("library.photo")
         if afterDrag.count == all.count {
-            let wrong = all.indices.filter { onScreen(all[$0]) && afterDrag[$0].selected != (first...last).contains($0) }
-            XCTAssertTrue(wrong.isEmpty, "\(test): photos ticked other than \(first) to \(last): \(wrong)")
+            let wrong = all.indices.filter {
+                onScreen(all[$0]) && afterDrag[$0].selected != ((first...last).contains($0) || $0 == next)
+            }
+            XCTAssertTrue(wrong.isEmpty, "\(test): photos ticked other than \(first) to \(last)\(next.map { " and \($0)" } ?? ""): \(wrong)")
         } else {
             print("UI_FACT \(test): \(afterDrag.count) photos built after the drag, \(all.count) before: ticks not compared")
         }
@@ -331,5 +346,86 @@ final class PhotoGridUITests: XCTestCase {
             again.firstMatch.exists && columns(again.firstMatch.frame.width) == 3
         }
         XCTAssertTrue(restarted, "\(test): a relaunch of a UI run does not start at three photos in a row")
+    }
+
+    // MARK: 3 Back from the left edge while selecting
+
+    /// On a suggestion's page while "Auswählen" is on, a finger drawn sideways along a row of
+    /// photos ticks them and the page stays; a finger from the left screen edge, at the height of
+    /// that row, goes back to the suggestions (review L7 of H10: the drag to select took the swipe
+    /// back away from the edge).
+    func test3_FromTheLeftEdgeASuggestionsPageGoesBackWhileSelecting() {
+        continueAfterFailure = true
+        let test = "PhotoGridUITests.test3"
+        prepare(test)
+        let suggestions = UITestScreens.Tabs.german.suggestions
+        guard tap(tabButton(suggestions), "\(test): tab \(suggestions)"),
+              let card = UITestScreens.Cards.first(app, swipes: 6, timeout: 10),
+              UITestScreens.Cards.open(card, in: app, "\(test): a suggestion's page"),
+              UITestWait.until("\(test): the suggestion's page", timeout: 10, { UITestScreens.SuggestionPage.isShown(app) }) else {
+            shot("x-no-suggestion-page")
+            XCTFail("\(test): no suggestion's page to select on")
+            return
+        }
+        guard tap(UITestScreens.SuggestionPage.selectPhotos(app), "\(test): Auswählen", timeout: 5),
+              UITestWait.appears(UITestScreens.SuggestionPage.endSelection(app), "\(test): selecting", timeout: 5) else { return }
+        guard UITestScreens.SuggestionPage.photoInReach(app) != nil else {
+            shot("x-no-suggestion-photo")
+            XCTFail("\(test): no photo of the suggestion came clear of the bars")
+            return
+        }
+
+        // A row of photos well away from the bars: within 72 pt of them the page scrolls on by
+        // itself under a held finger, which would tick more.
+        let calm = 90.0
+        let window = app.windows.firstMatch.frame
+        var row: [CGRect] = []
+        for swipe in 0...3 {
+            if swipe > 0 { app.swipeUp(velocity: .slow) }
+            let top = app.navigationBars.firstMatch.exists ? app.navigationBars.firstMatch.frame.maxY : 0
+            let bar = app.toolbars.firstMatch
+            let bottom = bar.exists && bar.frame.minY > window.midY ? bar.frame.minY : window.maxY - 90
+            let all = photos("proposalPhotos.photo").map(\.frame)
+            if let first = all.first(where: { $0.midY >= top + calm && $0.midY <= bottom - calm }) {
+                row = all.filter { abs($0.minY - first.minY) < 1 }.sorted { $0.minX < $1.minX }
+            }
+            if row.count >= 2 { break }
+        }
+        guard let start = row.first, let end = row.last, row.count >= 2 else {
+            shot("x-no-row-to-drag")
+            XCTFail("\(test): no row of two or more photos of the suggestion away from the bars")
+            return
+        }
+        print("UI_FACT \(test): a row of \(row.count) photos at y \(Int(start.midY))")
+        drag(from: CGPoint(x: start.minX + start.width * 0.2, y: start.midY),
+             to: CGPoint(x: end.minX + end.width * 0.8, y: end.midY))
+        let remove = app.buttons["proposalPhotos.remove"]
+        let ticked = UITestWait.until("\(test): \(row.count) photos ticked by the sideways drag", timeout: 5) {
+            remove.exists && remove.label.hasPrefix("\(row.count) ")
+        }
+        if !ticked { print("UI_FACT \(test): the bottom bar says '\(remove.exists ? remove.label : "nothing")'") }
+        XCTAssertTrue(UITestScreens.SuggestionPage.isShown(app), "\(test): a sideways drag over the photos left the suggestion's page")
+        shot("pg-05-suggestion-drag")
+
+        // From the left screen edge over the same row: the swipe back, not the drag to select.
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: 0, dy: start.midY))
+            .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.width * 0.8, dy: start.midY)),
+                   withVelocity: .default, thenHoldForDuration: 0)
+        print("UI_STEP_OK \(test): finger from the left edge at y \(Int(start.midY))")
+        let back = UITestWait.until("\(test): back from the suggestion's page", timeout: 5) {
+            !UITestScreens.SuggestionPage.isShown(app)
+        }
+        if !back {
+            print("UI_FACT \(test): the page stayed; the bottom bar says '\(remove.exists ? remove.label : "nothing")'")
+            shot("x-edge-swipe-stayed")
+            return
+        }
+        let listed = UITestWait.holds(timeout: 5) {
+            UITestScreens.Cards.cards(app).firstMatch.exists || app.tabBars.buttons[suggestions].isSelected
+        }
+        print("UI_FACT \(test): after the swipe back the suggestions show: \(listed)")
+        XCTAssertTrue(listed, "\(test): the swipe back from the edge did not lead to the suggestions")
+        shot("pg-06-edge-back")
     }
 }

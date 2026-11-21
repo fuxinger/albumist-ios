@@ -2,6 +2,12 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 21.11. Raster in „Unsortiert“ und in Vorschlägen nach der zweiten Prüfung (Design-Welle 3, noch in keinem
+  Build): Ziehen zum Auswählen findet die Fotos auch nach einem Tab-Wechsel, hakt unter einer angehefteten
+  Tagesüberschrift nichts ab, zieht über nachgeladene Fotos weiter und lässt den Wisch vom linken Rand
+  zurückgehen; ein Tippen gleich nach dem Ziehen oder Zoomen zählt; ein sehr großer Tag kommt seitenweise;
+  „Heute“ wechselt um Mitternacht; langes Drücken hebt das Foto auch bei sieben pro Reihe groß an; die Seite
+  läuft beim Auswählen mit bis zu 120 Hz weiter.
 - 21.11. Videos ohne Flackern und gekürzte Videos sofort richtig (Design-Welle 3, Prüfung von Review F, noch in
   keinem Build): Ein Video mit kleinem Standbild zeigt beim Öffnen nicht mehr kurz „nicht verfügbar“, sondern
   wartet mit der Miniatur, bis es spielt. Ein Video startet nicht mehr von selbst, wenn man es vorher angehalten,

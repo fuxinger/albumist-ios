@@ -75,6 +75,25 @@ public struct PhotoGridDrag: Equatable, Sendable {
         return change
     }
 
+    /// The drag over the grid's photos `old` (in its order when the range was made) over `new`
+    /// (in its order now: more photos loaded, the days made anew; review L3): the same photos
+    /// from the first to the one under the finger, where they are now. Nil when they are no
+    /// longer together in that order (one of them went, or one came between): there is no range
+    /// to keep, and the drag ends with its photos ticked as they are.
+    public func rebased<ID: Equatable>(from old: [ID], to new: [ID]) -> PhotoGridDrag? {
+        let range = self.range
+        guard range.lowerBound >= 0, range.upperBound < old.count else { return nil }
+        let photos = old[range]
+        // In place: what changed is before or after the range (more photos loaded below).
+        if range.upperBound < new.count, new[range] == photos { return self }
+        guard let first = new.firstIndex(of: photos[range.lowerBound]), first + range.count <= new.count,
+              new[first..<(first + range.count)] == photos else { return nil }
+        let shift = first - range.lowerBound
+        var moved = PhotoGridDrag(anchor: anchor + shift, anchorWasSelected: mode == .deselect)
+        moved.current = current + shift
+        return moved
+    }
+
     /// The selection, as positions, the drag makes now of `base` (the selection when it began).
     public func selection(from base: Set<Int>) -> Set<Int> {
         switch mode {
@@ -117,13 +136,51 @@ public struct PhotoGridDrag: Equatable, Sendable {
     }
 }
 
+/// The lift that ends a drag or a pinch, which UIKit may hand a photo's button too as a tap,
+/// before or right after the gesture's end (review L8 of design wave 3): it neither ticks nor
+/// opens a photo, as the drag ticked its first photo already and a pinch opens nothing. Only
+/// that lift: once no gesture runs, the next finger that touches the grid begins a tap of its
+/// own, however soon (a tap right after a drag ticks or unticks, one right after a pinch opens).
+public struct PhotoGridLift: Equatable, Sendable {
+    /// The gestures running (a drag and a pinch may run at once).
+    private var running = 0
+    /// A gesture ended and no finger touched since: a tap now is its lift.
+    private var lifting = false
+
+    public init() {}
+
+    public mutating func gestureBegan() {
+        running += 1
+    }
+
+    public mutating func gestureEnded() {
+        running = max(0, running - 1)
+        lifting = true
+    }
+
+    /// A finger touched the grid: once no gesture runs, what follows is no gesture's lift. A
+    /// finger that touches while one runs (a pinch's second finger) is part of it.
+    public mutating func touchedDown() {
+        if running == 0 { lifting = false }
+    }
+
+    /// Whether a tap on a photo now is a gesture's, not one of its own.
+    public var swallowsTap: Bool {
+        running > 0 || lifting
+    }
+}
+
 /// Which photo of a grid is under a finger, from the frames of the photos on screen.
 public enum PhotoGridHitTest {
     /// The position of the photo at (`x`, `y`) among `cells` (position and frame, in one space):
     /// the photo under it; in the gap between two photos of a row the nearer one; beside a row
     /// its first or last photo (a short last row of a day: its last). Nil between rows, on a
-    /// day's header and where no photo is: the drag keeps the photo it has.
-    public static func position(x: Double, y: Double, in cells: [(position: Int, frame: GridRect)]) -> Int? {
+    /// day's header and where no photo is: the drag keeps the photo it has. `covered`: what lies
+    /// over the photos there (a day's header pinned over the photos scrolling under it, review
+    /// L4): a point on it is on no photo, so the drag ticks nothing the user cannot see.
+    public static func position(x: Double, y: Double, in cells: [(position: Int, frame: GridRect)],
+                                covered: [GridRect] = []) -> Int? {
+        if covered.contains(where: { $0.minX <= x && x <= $0.maxX && $0.minY <= y && y <= $0.maxY }) { return nil }
         var best: (position: Int, distance: Double)?
         for cell in cells where cell.frame.minY <= y && y <= cell.frame.maxY {
             let distance = x < cell.frame.minX ? cell.frame.minX - x : (x > cell.frame.maxX ? x - cell.frame.maxX : 0)
@@ -149,6 +206,57 @@ public enum PhotoGridHitTest {
             }
         }
         return best?.position
+    }
+}
+
+/// What the photos of a grid (or its days' headers) on screen last reported of where they are,
+/// for its gestures (review L1 of design wave 3). SwiftUI reports a photo's frame in the grid
+/// only when it changes, so one that goes and comes back with nothing moved (its page left for
+/// another tab or page and shown again, or scrolled away and back while SwiftUI kept it) reports
+/// nothing anew: what it reported is kept while it is away, only the ones on screen count, and
+/// back on screen it counts again. Kept for the latest `kept` that went (at most twice as many
+/// before they are cleared), so scrolling through a large library keeps no more; a page left
+/// and shown again finds all of its photos, the latest that went.
+public struct PhotoGridOnScreen<Key: Hashable, Value> {
+    /// The photos that went, whose report is kept for when they are back.
+    public static var kept: Int { 1_000 }
+
+    /// What each one on screen reported last.
+    public private(set) var shown: [Key: Value] = [:]
+    /// What each one that went reported last, and when it went (counted in goings).
+    private var away: [Key: (value: Value, went: Int)] = [:]
+    private var goings = 0
+
+    public init() {}
+
+    /// How many that went are kept.
+    public var awayCount: Int { away.count }
+
+    /// `key` reports `value`: on screen it counts at once (also before SwiftUI says it appeared);
+    /// away it is kept for when it is back.
+    public mutating func report(_ key: Key, _ value: Value) {
+        if away[key] != nil {
+            away[key]?.value = value
+        } else {
+            shown[key] = value
+        }
+    }
+
+    /// `key` is on screen again: it counts with what it reported last, if that is kept.
+    public mutating func appeared(_ key: Key) {
+        guard let back = away.removeValue(forKey: key) else { return }
+        shown[key] = back.value
+    }
+
+    /// `key` went: it no longer counts, and what it reported is kept for a while.
+    public mutating func disappeared(_ key: Key) {
+        guard let value = shown.removeValue(forKey: key) ?? away[key]?.value else { return }
+        goings += 1
+        away[key] = (value, goings)
+        if away.count > 2 * Self.kept {
+            let oldest = goings - Self.kept
+            away = away.filter { $0.value.went > oldest }
+        }
     }
 }
 
@@ -227,6 +335,71 @@ public enum PhotoGridAutoScroll {
             pending = nil
         }
     }
+
+    /// How `ScrollPosition.scrollTo(y:)` counts, learned from the scroll view (review L5 of
+    /// design wave 3): SwiftUI's documentation does not say whether `y` is the scroll view's
+    /// content offset (minus the top inset at rest at the top, as `ScrollGeometry` reports it)
+    /// or counts from where the scroll view rests at the top. A step asked as the content offset
+    /// tells: the scroll view then reports the same, or less by the top inset. Until a step told
+    /// (and where the top inset is too small to tell, so both ways agree) `y` is taken as the
+    /// content offset; once known, for the app's life, the steps ask so the scroll view goes
+    /// where they mean, at most one step off on the way.
+    public struct Calibration: Equatable, Sendable {
+        public enum Convention: Equatable, Sendable {
+            /// `y` is the content offset.
+            case contentOffset
+            /// `y` is 0 where the scroll view rests at the top: the content offset plus the top inset.
+            case fromRestingTop
+        }
+
+        public private(set) var convention: Convention?
+        /// A step asked while the convention is not known, which can tell it.
+        private var probe: Probe?
+
+        private struct Probe: Equatable, Sendable {
+            var y: Double
+            var insetTop: Double
+        }
+
+        public init() {}
+
+        /// The `y` to ask for, so the scroll view goes to the content offset `offset`, with the top
+        /// inset `insetTop`.
+        public func y(for offset: Double, insetTop: Double) -> Double {
+            convention == .fromRestingTop ? offset + insetTop : offset
+        }
+
+        /// `y` was asked while the scroll view was at `from`, in content offsets `range`. While the
+        /// convention is not known it is a step that tells, when the two ways' answers are apart
+        /// from each other (a top inset of 2 pt or more) and from no move at all, and neither is
+        /// cut at an end of the content.
+        public mutating func asked(_ y: Double, from: Double, insetTop: Double, range: ClosedRange<Double>) {
+            guard convention == nil, probe == nil, insetTop >= 2 else { return }
+            let asOffset = y, fromTop = y - insetTop
+            guard fromTop >= range.lowerBound + 1, asOffset <= range.upperBound - 1,
+                  abs(asOffset - from) >= 2, abs(fromTop - from) >= 2 else { return }
+            probe = Probe(y: y, insetTop: insetTop)
+        }
+
+        /// The scroll view reports the content offset `offset`: at the step's `y` it takes the
+        /// content offset, less by the top inset it counts from the top; anything else (not moved
+        /// yet, moved by something else) waits for the next report.
+        public mutating func reported(_ offset: Double) {
+            guard let probe else { return }
+            if abs(offset - probe.y) < 1 {
+                convention = .contentOffset
+                self.probe = nil
+            } else if abs(offset - (probe.y - probe.insetTop)) < 1 {
+                convention = .fromRestingTop
+                self.probe = nil
+            }
+        }
+
+        /// The grid stopped scrolling by itself: a step not answered tells nothing.
+        public mutating func reset() {
+            probe = nil
+        }
+    }
 }
 
 /// Pinch to zoom in a photo grid (DS-06b): two fingers change the number of photos in a row in
@@ -267,6 +440,35 @@ public enum PhotoGridZoom {
     public static func side(width: Double, columns: Int) -> Double {
         guard width > 0, columns > 0 else { return 0 }
         return max(0, (width - spacing * Double(columns - 1)) / Double(columns))
+    }
+
+    /// The sides of a grid `width` points wide at each of its sizes (three, five and seven in a
+    /// row): the sides its thumbnails are asked for, where a photo's images may be kept.
+    public static func sides(width: Double) -> [Double] {
+        columns.map { side(width: width, columns: $0) }
+    }
+
+    /// The smallest a photo of a grid `gridWidth` points wide is lifted by its long press on its
+    /// short side, for a cell of `cell` points (review L9 of design wave 3): as large as at three
+    /// in a row (the grids' size before they zoomed, and the menu's lift then), never under
+    /// 110 pt (the grids' photos before), also at five and seven in a row, where the cell is much
+    /// smaller; the cell's own side where it is larger. The lift's floor
+    /// (`PhotoMenu.liftSize(cellSide:)`).
+    public static func liftSide(cell: Double, gridWidth: Double) -> Double {
+        max(cell, 110, side(width: gridWidth, columns: standard))
+    }
+
+    /// Of the images kept in memory of a photo (`width` × `height` pixels each: at the grid's
+    /// sizes, and the one a grid showed last), the one its long press lifts: the one with the most
+    /// pixels, the sharpest at any size; on a tie the first (the cell's own). Nil when none is
+    /// kept: the lift asks Photos for nothing of its own (review L9).
+    public static func sharpestKept(_ images: [(width: Double, height: Double)]) -> Int? {
+        var best: (index: Int, pixels: Double)?
+        for (index, image) in images.enumerated() {
+            let pixels = image.width * image.height
+            if best == nil || pixels > best!.pixels { best = (index, pixels) }
+        }
+        return best?.index
     }
 
     /// One pinch: a step each time the fingers spread (fewer photos) or pinch (more) by

@@ -74,8 +74,9 @@
   „…“ im Vorschlag, immer für den Vorschlag, wie er beim Tippen ist; ist er inzwischen weg, legt Albumist nichts an
   und sagt „Der Vorschlag hat sich geändert“. Ein Foto in „Unsortiert“, in Alben, in der Suche und im Vorschlag hebt
   sich mit dem Bild seiner Zelle ab, so groß, wie es scharf ist, mit „Ansehen“, „Zu Album hinzufügen …“ und
-  „Ignorieren“ (im Vorschlag „Aus Vorschlag entfernen“ mit Rückfrage). Beim Auswählen gibt es kein Menü; die Punkte
-  gibt es auch als VoiceOver-Aktionen.
+  „Ignorieren“ (im Vorschlag „Aus Vorschlag entfernen“ mit Rückfrage, nicht mehr, wenn es den Vorschlag inzwischen
+  nicht mehr gibt). Beim Auswählen gibt es kein Menü und nichts hebt sich ab; ein langes Drücken auf ein Foto hakt es
+  ab wie Tippen. Die Punkte gibt es auch als VoiceOver-Aktionen; „Nicht jetzt“ aus dem Menü sagt VoiceOver an.
 - 20.11. (Design-Welle 1, Entwurf für Fuchs, noch in keinem Build): die Bildschirme im fotozentrierten Look.
   - Tabs „Vorschläge · Unsortiert · Alben · Suche“; „Unsortiert“ mit drei Filtern.
   - Startseite: während der ersten Analyse ein Mosaik und die schon gefundenen Reisen, danach „Dein

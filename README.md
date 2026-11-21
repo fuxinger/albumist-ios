@@ -16,28 +16,28 @@ Originalfotos werden nie gelöscht, verändert oder kopiert.
 ```bash
 brew install xcodegen
 cd App && xcodegen generate
-open Sortly.xcodeproj          # Schema „Sortly“, Ziel: iPhone-Simulator
+open Albumist.xcodeproj          # Schema „Albumist“, Ziel: iPhone-Simulator
 ```
 Ohne Mac: GitHub Actions baut bei jedem Push auf einem macOS-Runner (`.github/workflows/ci.yml`)
-und legt eine Simulator-Version als `Sortly-simulator-app` ab (für Appetize.io).
+und legt eine Simulator-Version als `Albumist-simulator-app` ab (für Appetize.io).
 
 ## Tests
 ```bash
 swift test                     # Kernlogik, Datenbank, Analyse-Pipeline (Linux und macOS)
-SORTLY_STRESS_SEEDS=300 swift test --filter RandomLibraryTests   # 300 zufällige Mediatheken
-SORTLY_LOAD_TEST=1 swift test --filter LoadTests                  # 20.000 Fotos
-cd App && xcodebuild test -project Sortly.xcodeproj -scheme Sortly \
+ALBUMIST_STRESS_SEEDS=300 swift test --filter RandomLibraryTests   # 300 zufällige Mediatheken
+ALBUMIST_LOAD_TEST=1 swift test --filter LoadTests                  # 20.000 Fotos
+cd App && xcodebuild test -project Albumist.xcodeproj -scheme Albumist \
   -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO
 ```
 
 ## Projektstruktur
 | Pfad | Inhalt |
 |---|---|
-| `Sources/SortlyCore` | Plattformunabhängige Logik: Reisen, Orte, Vorschläge, Album-Abgleich, Plan, Ausführung, Rückgängig, Suche, Status |
-| `Sources/SortlyStore` | SQLite-Persistenz mit Migrationen |
-| `Sources/SortlyWorldMap` | Offline-Weltkarte (Natural Earth, gemeinfrei) |
-| `Sources/SortlyEngine` | Fortsetzbare Analyse-Pipeline, Bibliotheksstatus |
-| `Sources/SortlyTestSupport` | Fakes und Testdaten (nur für Tests) |
+| `Sources/AlbumistCore` | Plattformunabhängige Logik: Reisen, Orte, Vorschläge, Album-Abgleich, Plan, Ausführung, Rückgängig, Suche, Status |
+| `Sources/AlbumistStore` | SQLite-Persistenz mit Migrationen |
+| `Sources/AlbumistWorldMap` | Offline-Weltkarte (Natural Earth, gemeinfrei) |
+| `Sources/AlbumistEngine` | Fortsetzbare Analyse-Pipeline, Bibliotheksstatus |
+| `Sources/AlbumistTestSupport` | Fakes und Testdaten (nur für Tests) |
 | `App/` | iOS-App (SwiftUI, PhotoKit, Vision, StoreKit 2), Projekt via `App/project.yml` |
 | `Tests/` | Swift-Testing-Suites für Kern, Store und Engine |
 | `scripts/worldmap` | Generator für die Offline-Karte |

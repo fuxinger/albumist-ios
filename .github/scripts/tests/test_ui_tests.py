@@ -21,20 +21,20 @@ import ui_groups  # noqa: E402
 
 # Job 133263283907 (contrast pass): the runner never came up.
 AX_TIMEOUT = """\
-2026-11-16 12:02:56.651891+0000 SortlyUITests-Runner[63130:167102] [Default] Running tests...
-2026-11-16 12:04:02.313288+0000 SortlyUITests-Runner[63130:167102] [Default] Failed to initialize for UI testing: Error Domain=XCTDaemonErrorDomain Code=18 "Timed out waiting for AX loaded notification" UserInfo={NSLocalizedDescription=Timed out waiting for AX loaded notification}
+2026-11-16 12:02:56.651891+0000 AlbumistUITests-Runner[63130:167102] [Default] Running tests...
+2026-11-16 12:04:02.313288+0000 AlbumistUITests-Runner[63130:167102] [Default] Failed to initialize for UI testing: Error Domain=XCTDaemonErrorDomain Code=18 "Timed out waiting for AX loaded notification" UserInfo={NSLocalizedDescription=Timed out waiting for AX loaded notification}
 Testing failed:
-\tSortlyUITests-Runner (63130) encountered an error (The test runner failed to initialize for UI testing. (Underlying Error: Timed out waiting for AX loaded notification))
+\tAlbumistUITests-Runner (63130) encountered an error (The test runner failed to initialize for UI testing. (Underlying Error: Timed out waiting for AX loaded notification))
 
 ** TEST EXECUTE FAILED **
 """
 
 # Job 133298844234: the simulator service dropped the connection while installing the runner.
 SERVICE_INTERRUPTED = """\
-2026-11-16 12:48:24.530 xcodebuild[7567:28001] [MT] IDELaunchReport: 8462062ab5750b00:8462062ab5751bc0:Launching SortlyUITests Finished with error: Error returned in reply from CoreSimulatorService: Connection interrupted
+2026-11-16 12:48:24.530 xcodebuild[7567:28001] [MT] IDELaunchReport: 8462062ab5750b00:8462062ab5751bc0:Launching AlbumistUITests Finished with error: Error returned in reply from CoreSimulatorService: Connection interrupted
 *** If you believe this error represents a bug, please attach the result bundle at /Users/runner/work/sortly-ios/sortly-ios/build/A11yResults.xcresult
 Testing failed:
-\tSortlyUITests-Runner encountered an error (Failed to install or launch the test runner. (Underlying Error: Error returned in reply from CoreSimulatorService: Connection interrupted. Software caused connection abort))
+\tAlbumistUITests-Runner encountered an error (Failed to install or launch the test runner. (Underlying Error: Error returned in reply from CoreSimulatorService: Connection interrupted. Software caused connection abort))
 ** TEST FAILED **
 """
 
@@ -42,18 +42,18 @@ Testing failed:
 # restarted runner finished tests 2 to 4.
 RESTART = """\
 Test Suite 'AccessibilityUITests' started at 2026-11-16 13:19:00.000.
-Test Case '-[SortlyUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode]' started.
+Test Case '-[AlbumistUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode]' started.
     t =   212.31s Tap "Beispiel-Mediathek anlegen" Button
     t =   214.02s     Wait for app.albumist.ios to idle
 Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
-Test Case '-[SortlyUITests.AccessibilityUITests test2_EnglishMainScreens]' started.
+Test Case '-[AlbumistUITests.AccessibilityUITests test2_EnglishMainScreens]' started.
 A11Y_TEST_DONE english
-Test Case '-[SortlyUITests.AccessibilityUITests test2_EnglishMainScreens]' passed (558.843 seconds).
-Test Case '-[SortlyUITests.AccessibilityUITests test3_LargestTextDarkModeReduceMotion]' started.
+Test Case '-[AlbumistUITests.AccessibilityUITests test2_EnglishMainScreens]' passed (558.843 seconds).
+Test Case '-[AlbumistUITests.AccessibilityUITests test3_LargestTextDarkModeReduceMotion]' started.
 A11Y_AUDIT_ERROR xxxl plan lower attempt 1 Audit failed to complete in time
-Test Case '-[SortlyUITests.AccessibilityUITests test3_LargestTextDarkModeReduceMotion]' passed (539.909 seconds).
-Test Case '-[SortlyUITests.AccessibilityUITests test4_Landscape]' started.
-Test Case '-[SortlyUITests.AccessibilityUITests test4_Landscape]' passed (178.609 seconds).
+Test Case '-[AlbumistUITests.AccessibilityUITests test3_LargestTextDarkModeReduceMotion]' passed (539.909 seconds).
+Test Case '-[AlbumistUITests.AccessibilityUITests test4_Landscape]' started.
+Test Case '-[AlbumistUITests.AccessibilityUITests test4_Landscape]' passed (178.609 seconds).
 \t Executed 3 tests, with 0 failures (0 unexpected) in 1277.361 (1277.483) seconds
 ** TEST FAILED **
 """
@@ -61,8 +61,8 @@ Test Case '-[SortlyUITests.AccessibilityUITests test4_Landscape]' passed (178.60
 # Job 133066518887: real findings of the accessibility tests.
 A11Y_FINDING = """\
 A11Y_FAIL en overview | German word 'Fotos' in English UI | label 'Also not counted: 57 Fotos von zu Hause.' | 132,228 188x38
-/Users/runner/work/sortly-ios/sortly-ios/App/SortlyUITests/AccessibilityUITests.swift:355: error: -[SortlyUITests.AccessibilityUITests test2_EnglishMainScreens] : failed - en overview: 1 accessibility finding(s): German word 'Fotos'
-Test Case '-[SortlyUITests.AccessibilityUITests test2_EnglishMainScreens]' failed (432.008 seconds).
+/Users/runner/work/sortly-ios/sortly-ios/App/AlbumistUITests/AccessibilityUITests.swift:355: error: -[AlbumistUITests.AccessibilityUITests test2_EnglishMainScreens] : failed - en overview: 1 accessibility finding(s): German word 'Fotos'
+Test Case '-[AlbumistUITests.AccessibilityUITests test2_EnglishMainScreens]' failed (432.008 seconds).
 \t Executed 4 tests, with 2 failures (0 unexpected) in 1400.000 (1400.100) seconds
 ** TEST FAILED **
 """
@@ -71,37 +71,37 @@ Test Case '-[SortlyUITests.AccessibilityUITests test2_EnglishMainScreens]' faile
 # repeated, even when the simulator was part of the story.
 SERVICE_AND_ASSERTION = """\
 Error returned in reply from CoreSimulatorService: Connection interrupted
-/Users/runner/work/sortly-ios/sortly-ios/App/SortlyUITests/AccessibilityUITests.swift:148: error: -[SortlyUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode] : Failed to get matching snapshots: Timed out while evaluating UI query.
-Test Case '-[SortlyUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode]' failed (333.957 seconds).
+/Users/runner/work/sortly-ios/sortly-ios/App/AlbumistUITests/AccessibilityUITests.swift:148: error: -[AlbumistUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode] : Failed to get matching snapshots: Timed out while evaluating UI query.
+Test Case '-[AlbumistUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode]' failed (333.957 seconds).
 ** TEST FAILED **
 """
 
 # Job 133066518646: a flow assertion.
 FLOW_ASSERTION = """\
-Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' started.
-/Users/runner/work/sortly-ios/sortly-ios/App/SortlyUITests/SortlyFlowUITests.swift:60: error: -[SortlyUITests.SortlyFlowUITests test1_FullFlow] : failed - Missing: open trip for split
-Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' failed (985.922 seconds).
+Test Case '-[AlbumistUITests.AlbumistFlowUITests test1_FullFlow]' started.
+/Users/runner/work/sortly-ios/sortly-ios/App/AlbumistUITests/AlbumistFlowUITests.swift:60: error: -[AlbumistUITests.AlbumistFlowUITests test1_FullFlow] : failed - Missing: open trip for split
+Test Case '-[AlbumistUITests.AlbumistFlowUITests test1_FullFlow]' failed (985.922 seconds).
 ** TEST FAILED **
 """
 
 # Job 133221335842: the runner was stopped before it started a test.
 RUNNER_TERMINATED = """\
 Testing failed:
-\tSortlyUITests-Runner (15570) encountered an error (Test crashed with signal term while preparing to run tests.)
+\tAlbumistUITests-Runner (15570) encountered an error (Test crashed with signal term while preparing to run tests.)
 ** TEST FAILED **
 """
 
 # UI run 44202318875 attempt 2, job 134494213854 (flow-other): XCTest's daemon testmanagerd
 # crashed during test6 (SIGSEGV, com.apple.testmanagerd); the next class ran 0 tests.
 TESTMANAGERD_CRASH = """\
-Test Case '-[SortlyUITests.SortlyFlowUITests test5_Earlier]' passed (50.0 seconds).
-Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' started.
+Test Case '-[AlbumistUITests.AlbumistFlowUITests test5_Earlier]' passed (50.0 seconds).
+Test Case '-[AlbumistUITests.AlbumistFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' started.
 UI_STEP_OK progress moves in the foreground
-<unknown>:0: error: -[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs] : Failed to get matching snapshots: Lost connection to the application (pid 1951). (Underlying Error: Couldn’t communicate with a helper application. Try your operation again.)
-<unknown>:0: error: -[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs] : Critical process testmanagerd crashed in (null)
-Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' failed (229.078 seconds).
+<unknown>:0: error: -[AlbumistUITests.AlbumistFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs] : Failed to get matching snapshots: Lost connection to the application (pid 1951). (Underlying Error: Couldn’t communicate with a helper application. Try your operation again.)
+<unknown>:0: error: -[AlbumistUITests.AlbumistFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs] : Critical process testmanagerd crashed in (null)
+Test Case '-[AlbumistUITests.AlbumistFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' failed (229.078 seconds).
 \t Executed 8 tests, with 2 failures (0 unexpected) in 1871.445 (1871.476) seconds
-Test Case '-[SortlyUITests.SortlyLockedUITests test7_LockedPlanOffersTheFreeAlbumsLeft]' started.
+Test Case '-[AlbumistUITests.AlbumistLockedUITests test7_LockedPlanOffersTheFreeAlbumsLeft]' started.
 Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
 \t Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
 Test Suite 'Selected tests' failed at 2026-11-18 02:00:59.000.
@@ -112,28 +112,28 @@ TESTMANAGERD_BUNDLE = [
     "Couldn’t communicate with a helper application. Try your operation again. If that fails, quit and re",
     "result bundle: Critical process testmanagerd crashed in (null)",
 ]
-PASSED_ONE = "Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' passed (9.0 seconds).\n"
+PASSED_ONE = "Test Case '-[AlbumistUITests.AlbumistFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' passed (9.0 seconds).\n"
 
 # Every selected test skipped itself (XCTSkip): xcodebuild succeeds without having tested anything.
 SKIPPED_ONLY = """\
-Test Case '-[SortlyUITests.DeviceConditionUITests test11_LargeLibrary]' started.
-Test Case '-[SortlyUITests.DeviceConditionUITests test11_LargeLibrary]' skipped (0.012 seconds).
-Test Case '-[SortlyUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' started.
-Test Case '-[SortlyUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' skipped (0.010 seconds).
+Test Case '-[AlbumistUITests.DeviceConditionUITests test11_LargeLibrary]' started.
+Test Case '-[AlbumistUITests.DeviceConditionUITests test11_LargeLibrary]' skipped (0.012 seconds).
+Test Case '-[AlbumistUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' started.
+Test Case '-[AlbumistUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' skipped (0.010 seconds).
 \t Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.022 (0.030) seconds
 ** TEST SUCCEEDED **
 """
 
 # Job 133113879733: a compile error (xcodebuild test builds first).
 COMPILE_ERROR = """\
-/Users/runner/work/sortly-ios/sortly-ios/App/Sortly/Platform/SamplePhotos.swift:162:66: error: cannot infer key path type from context; consider explicitly specifying a root type
+/Users/runner/work/sortly-ios/sortly-ios/App/Albumist/Platform/SamplePhotos.swift:162:66: error: cannot infer key path type from context; consider explicitly specifying a root type
 Testing failed:
 ** TEST FAILED **
 """
 
 APP_TRAP = """\
-Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' started.
-Sortly/AppModel.swift:812: Fatal error: Unexpectedly found nil while unwrapping an Optional value
+Test Case '-[AlbumistUITests.AlbumistFlowUITests test1_FullFlow]' started.
+Albumist/AppModel.swift:812: Fatal error: Unexpectedly found nil while unwrapping an Optional value
 Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
 ** TEST FAILED **
 """
@@ -169,12 +169,12 @@ class DecideTests(unittest.TestCase):
 
     def test_runner_restart_with_app_crash_report_is_not_retried(self):
         log = RESTART.replace("Restarting after", "Error returned in reply from CoreSimulatorService: Connection interrupted\nRestarting after")
-        verdict, reasons = ui_tests.decide(65, log, ["/Users/runner/Library/Logs/DiagnosticReports/Sortly-2026-11-16-131900.ips"])
+        verdict, reasons = ui_tests.decide(65, log, ["/Users/runner/Library/Logs/DiagnosticReports/Albumist-2026-11-16-131900.ips"])
         self.assertEqual(verdict, "fail")
-        self.assertTrue(any("Sortly-2026-11-16-131900.ips" in r for r in reasons))
+        self.assertTrue(any("Albumist-2026-11-16-131900.ips" in r for r in reasons))
 
     def test_crash_report_wins_over_an_infra_signature(self):
-        verdict, _ = ui_tests.decide(65, SERVICE_INTERRUPTED, ["/tmp/SortlyUITests-Runner-2026-11-16.ips"])
+        verdict, _ = ui_tests.decide(65, SERVICE_INTERRUPTED, ["/tmp/AlbumistUITests-Runner-2026-11-16.ips"])
         self.assertEqual(verdict, "fail")
 
     def test_accessibility_finding_is_not_retried(self):
@@ -242,43 +242,43 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(ui_tests.decide(65, COMPILE_ERROR), ("fail", ["an error was recorded"]))
 
     def test_unknown_failure_is_not_retried(self):
-        log = "Test Case '-[SortlyUITests.SortlyFlowUITests test2_LargeTextDarkMode]' passed (54.787 seconds).\n** TEST FAILED **\n"
+        log = "Test Case '-[AlbumistUITests.AlbumistFlowUITests test2_LargeTextDarkMode]' passed (54.787 seconds).\n** TEST FAILED **\n"
         self.assertEqual(ui_tests.decide(65, log)[0], "fail")
 
     def test_result_bundle_must_agree(self):
         # The log only shows the simulator, but the bundle has a real issue: no repeat.
-        verdict, reasons = ui_tests.decide(65, SERVICE_INTERRUPTED, bundle=["result bundle: Crash: Sortly (4242)"])
+        verdict, reasons = ui_tests.decide(65, SERVICE_INTERRUPTED, bundle=["result bundle: Crash: Albumist (4242)"])
         self.assertEqual(verdict, "fail")
-        self.assertIn("result bundle: Crash: Sortly (4242)", reasons)
+        self.assertIn("result bundle: Crash: Albumist (4242)", reasons)
 
     def test_unreadable_result_bundle_blocks_the_repeat(self):
         verdict, _ = ui_tests.decide(65, AX_TIMEOUT, bundle=["result bundle not readable (no such file)"])
         self.assertEqual(verdict, "fail")
 
     def test_simulator_gone_after_the_pass_counts_as_infra(self):
-        log = "Test Case '-[SortlyUITests.SortlyFlowUITests test2_LargeTextDarkMode]' started.\n** TEST FAILED **\n"
+        log = "Test Case '-[AlbumistUITests.AlbumistFlowUITests test2_LargeTextDarkMode]' started.\n** TEST FAILED **\n"
         probe = ("An error was encountered processing the command (domain=com.apple.CoreSimulator.SimError, code=405):\n"
                  "Process spawn via launchd failed because device is not booted.\n")
         self.assertEqual(ui_tests.decide(65, log, probe=probe)[0], "retry")
 
 
 # Reviewer's adversarial cases (16.11.): each must NOT be repeated.
-R = "Restarting after unexpected exit, crash, or test timeout in SortlyFlowUITests.test1_FullFlow(); summary will include totals from previous launches.\n"
+R = "Restarting after unexpected exit, crash, or test timeout in AlbumistFlowUITests.test1_FullFlow(); summary will include totals from previous launches.\n"
 ADVERSARIAL = {
-    "runner segv, test-named line": "Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' started.\n" + R +
-        "Testing failed:\n\tSortlyFlowUITests.test1_FullFlow(): Test crashed with signal segv.\n** TEST FAILED **\n",
-    "runner abrt, Crash: line": "Test Case '-[SortlyUITests.AccessibilityUITests test3_X]' started.\n" + R +
-        "Testing failed:\n\ttest3_X(): Crash: SortlyUITests-Runner (1234) at specialized Array.subscript\n** TEST FAILED **\n",
-    "app crash (XCTest wording)": "Test Case '-[SortlyUITests.SortlyFlowUITests test2_X]' started.\n" + R +
+    "runner segv, test-named line": "Test Case '-[AlbumistUITests.AlbumistFlowUITests test1_FullFlow]' started.\n" + R +
+        "Testing failed:\n\tAlbumistFlowUITests.test1_FullFlow(): Test crashed with signal segv.\n** TEST FAILED **\n",
+    "runner abrt, Crash: line": "Test Case '-[AlbumistUITests.AccessibilityUITests test3_X]' started.\n" + R +
+        "Testing failed:\n\ttest3_X(): Crash: AlbumistUITests-Runner (1234) at specialized Array.subscript\n** TEST FAILED **\n",
+    "app crash (XCTest wording)": "Test Case '-[AlbumistUITests.AlbumistFlowUITests test2_X]' started.\n" + R +
         "Testing failed:\n\tAlbumist (app.albumist.ios) crashed in specialized AppModel.apply()\n** TEST FAILED **\n",
-    "test timeout": "Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' started.\n" + R +
+    "test timeout": "Test Case '-[AlbumistUITests.AlbumistFlowUITests test1_FullFlow]' started.\n" + R +
         "Testing failed:\n\ttest1_FullFlow(): Test exceeded execution time allowance of 10 minutes\n** TEST FAILED **\n",
-    "new-style failed line": "Test case 'SortlyFlowUITests.test1_FullFlow()' failed on 'iPhone 17 Pro' (985.9 seconds)\n" + R + "** TEST FAILED **\n",
-    "suite failed only (setUp error)": "Test Suite 'SortlyFlowUITests' failed at 2026-11-16.\nCoreSimulatorService: Connection interrupted\n** TEST FAILED **\n",
-    "issue outside test (<unknown>:0)": "<unknown>:0: error: SortlyUITests : Failed to launch app\nLost connection to testmanagerd\n** TEST FAILED **\n",
+    "new-style failed line": "Test case 'AlbumistFlowUITests.test1_FullFlow()' failed on 'iPhone 17 Pro' (985.9 seconds)\n" + R + "** TEST FAILED **\n",
+    "suite failed only (setUp error)": "Test Suite 'AlbumistFlowUITests' failed at 2026-11-16.\nCoreSimulatorService: Connection interrupted\n** TEST FAILED **\n",
+    "issue outside test (<unknown>:0)": "<unknown>:0: error: AlbumistUITests : Failed to launch app\nLost connection to testmanagerd\n** TEST FAILED **\n",
     "A11Y_FAIL tab-separated": "A11Y_FAIL\ten overview | x\nCoreSimulatorService: Connection interrupted\n** TEST FAILED **\n",
     "swift testing issue": "\u2718 Test foo() recorded an issue at X.swift:3\nCoreSimulatorService\n",
-    "hang: app never idles then runner killed": "Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' started.\n"
+    "hang: app never idles then runner killed": "Test Case '-[AlbumistUITests.AlbumistFlowUITests test1_FullFlow]' started.\n"
         "    t = 214.02s     Wait for app.albumist.ios to idle\n" + R + "** TEST FAILED **\n",
 }
 
@@ -305,22 +305,22 @@ def case(name, result, *messages):
 
 
 def bundle(*cases, top_messages=()):
-    return {"testNodes": [{"nodeType": "Test Plan", "name": "SortlyUI", "result": "Failed", "children": [
-        {"nodeType": "UI test bundle", "name": "SortlyUITests", "result": "Failed",
+    return {"testNodes": [{"nodeType": "Test Plan", "name": "AlbumistUI", "result": "Failed", "children": [
+        {"nodeType": "UI test bundle", "name": "AlbumistUITests", "result": "Failed",
          "children": [{"nodeType": "Failure Message", "name": m} for m in top_messages] + [
-             {"nodeType": "Test Suite", "name": "SortlyFlowUITests", "result": "Failed", "children": list(cases)}]}]}]}
+             {"nodeType": "Test Suite", "name": "AlbumistFlowUITests", "result": "Failed", "children": list(cases)}]}]}]}
 
 
 class BundleTests(unittest.TestCase):
     def test_passed_tests_and_an_infra_message_are_clean(self):
         tree = bundle(case("test2_LargeTextDarkMode()", "Passed"),
                       case("test1_FullFlow()", "Failed",
-                           "SortlyUITests-Runner encountered an error (Failed to install or launch the test runner. "
+                           "AlbumistUITests-Runner encountered an error (Failed to install or launch the test runner. "
                            "(Underlying Error: Error returned in reply from CoreSimulatorService: Connection interrupted))"))
         self.assertEqual(ui_tests.bundle_findings(tree), [])
 
     def test_crash_message_is_a_finding(self):
-        tree = bundle(case("test1_FullFlow()", "Failed", "Crash: Sortly (4242) at AppModel.apply()"))
+        tree = bundle(case("test1_FullFlow()", "Failed", "Crash: Albumist (4242) at AppModel.apply()"))
         self.assertEqual(len(ui_tests.bundle_findings(tree)), 1)
 
     def test_failed_test_without_a_message_is_a_finding(self):
@@ -335,8 +335,8 @@ class BundleTests(unittest.TestCase):
 
     def test_infra_quoted_in_a_test_failure_message_is_a_finding(self):
         # A test's own failure that quotes the simulator service is still the test's failure.
-        quoted = ("/Users/runner/work/App/SortlyUITests/SortlyFlowUITests.swift:60: error: "
-                  "-[SortlyUITests.SortlyFlowUITests test1_FullFlow] : failed - "
+        quoted = ("/Users/runner/work/App/AlbumistUITests/AlbumistFlowUITests.swift:60: error: "
+                  "-[AlbumistUITests.AlbumistFlowUITests test1_FullFlow] : failed - "
                   "Error returned in reply from CoreSimulatorService: Connection interrupted")
         self.assertEqual(len(ui_tests.bundle_findings(bundle(case("test1_FullFlow()", "Failed", quoted)))), 1)
         crashed = "Test crashed with signal abrt (CoreSimulatorService: Connection interrupted)"
@@ -376,16 +376,16 @@ class StrongRealTests(unittest.TestCase):
         self.assertEqual(ui_tests.decide(65, SERVICE_INTERRUPTED + line + "\n")[0], "fail")
 
     def test_error_of_a_test_quoting_the_service(self):
-        self.check("/Users/runner/work/App/SortlyUITests/AccessibilityUITests.swift:148: error: "
-                   "-[SortlyUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode] : " + self.SERVICE,
+        self.check("/Users/runner/work/App/AlbumistUITests/AccessibilityUITests.swift:148: error: "
+                   "-[AlbumistUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode] : " + self.SERVICE,
                    "an error was recorded")
 
     def test_failed_test_case_quoting_the_service(self):
-        self.check("Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' failed (12.0 seconds). " + self.SERVICE,
+        self.check("Test Case '-[AlbumistUITests.AlbumistFlowUITests test1_FullFlow]' failed (12.0 seconds). " + self.SERVICE,
                    "a test failed")
 
     def test_crash_signal_quoting_the_service(self):
-        self.check("SortlyUITests-Runner encountered an error (Test crashed with signal abrt. " + self.SERVICE + ")",
+        self.check("AlbumistUITests-Runner encountered an error (Test crashed with signal abrt. " + self.SERVICE + ")",
                    "a test crashed")
 
     def test_sigterm_before_the_tests_stays_infrastructure(self):
@@ -395,42 +395,42 @@ class StrongRealTests(unittest.TestCase):
 
 class SelectionTests(unittest.TestCase):
     def test_no_repeat_when_every_named_test_passed(self):
-        log = "Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' passed (12.0 seconds).\n"
-        self.assertIsNone(ui_tests.retry_arguments(["SortlyFlowUITests/test1_FullFlow"], [], log))
+        log = "Test Case '-[AlbumistUITests.AlbumistFlowUITests test1_FullFlow]' passed (12.0 seconds).\n"
+        self.assertIsNone(ui_tests.retry_arguments(["AlbumistFlowUITests/test1_FullFlow"], [], log))
         contrast = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
         self.assertIsNone(ui_tests.retry_arguments([contrast], [contrast], ""))
 
     def test_repeat_of_a_named_test_that_did_not_pass(self):
-        self.assertEqual(ui_tests.retry_arguments(["SortlyFlowUITests/test1_FullFlow"], [], AX_TIMEOUT),
-                         ["-only-testing:SortlyUITests/SortlyFlowUITests/test1_FullFlow"])
+        self.assertEqual(ui_tests.retry_arguments(["AlbumistFlowUITests/test1_FullFlow"], [], AX_TIMEOUT),
+                         ["-only-testing:AlbumistUITests/AlbumistFlowUITests/test1_FullFlow"])
 
     def test_retry_skips_the_tests_that_passed(self):
         arguments = ui_tests.retry_arguments(
             ["AccessibilityUITests"], ["AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"], RESTART)
         self.assertEqual(arguments, [
-            "-only-testing:SortlyUITests/AccessibilityUITests",
-            "-skip-testing:SortlyUITests/AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency",
-            "-skip-testing:SortlyUITests/AccessibilityUITests/test2_EnglishMainScreens",
-            "-skip-testing:SortlyUITests/AccessibilityUITests/test3_LargestTextDarkModeReduceMotion",
-            "-skip-testing:SortlyUITests/AccessibilityUITests/test4_Landscape",
+            "-only-testing:AlbumistUITests/AccessibilityUITests",
+            "-skip-testing:AlbumistUITests/AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency",
+            "-skip-testing:AlbumistUITests/AccessibilityUITests/test2_EnglishMainScreens",
+            "-skip-testing:AlbumistUITests/AccessibilityUITests/test3_LargestTextDarkModeReduceMotion",
+            "-skip-testing:AlbumistUITests/AccessibilityUITests/test4_Landscape",
         ])
 
     def test_class_and_skip_only_selections_always_start_the_repeat(self):
         # The log cannot tell whether a class holds tests that never started: the repeat runs
         # with the passed tests skipped, and if none is left it runs no test and fails.
-        log = "".join(f"Test Case '-[SortlyUITests.AccessibilityUITests test{i}]' passed (1.0 seconds).\n" for i in (1, 2))
+        log = "".join(f"Test Case '-[AlbumistUITests.AccessibilityUITests test{i}]' passed (1.0 seconds).\n" for i in (1, 2))
         self.assertEqual(ui_tests.retry_arguments(["AccessibilityUITests"], [], log), [
-            "-only-testing:SortlyUITests/AccessibilityUITests",
-            "-skip-testing:SortlyUITests/AccessibilityUITests/test1",
-            "-skip-testing:SortlyUITests/AccessibilityUITests/test2"])
-        self.assertEqual(ui_tests.retry_arguments([], ["SortlyFlowUITests/test1_FullFlow"], log)[0],
-                         "-skip-testing:SortlyUITests/SortlyFlowUITests/test1_FullFlow")
+            "-only-testing:AlbumistUITests/AccessibilityUITests",
+            "-skip-testing:AlbumistUITests/AccessibilityUITests/test1",
+            "-skip-testing:AlbumistUITests/AccessibilityUITests/test2"])
+        self.assertEqual(ui_tests.retry_arguments([], ["AlbumistFlowUITests/test1_FullFlow"], log)[0],
+                         "-skip-testing:AlbumistUITests/AlbumistFlowUITests/test1_FullFlow")
         self.assertEqual(ui_tests.decide(0, "** TEST SUCCEEDED **\n")[0], "fail")
 
     def test_retry_of_a_runner_that_never_started_repeats_everything(self):
-        self.assertEqual(ui_tests.retry_arguments([], ["AccessibilityUITests", "SortlyFlowUITests/test1_FullFlow"], AX_TIMEOUT),
-                         ["-skip-testing:SortlyUITests/AccessibilityUITests",
-                          "-skip-testing:SortlyUITests/SortlyFlowUITests/test1_FullFlow"])
+        self.assertEqual(ui_tests.retry_arguments([], ["AccessibilityUITests", "AlbumistFlowUITests/test1_FullFlow"], AX_TIMEOUT),
+                         ["-skip-testing:AlbumistUITests/AccessibilityUITests",
+                          "-skip-testing:AlbumistUITests/AlbumistFlowUITests/test1_FullFlow"])
 
     def test_finished_tests(self):
         self.assertEqual(ui_tests.finished_tests(RESTART), {
@@ -501,11 +501,11 @@ class SelectionTests(unittest.TestCase):
         verdict, reasons = ui_tests.decide(65, TESTMANAGERD_CRASH, bundle=TESTMANAGERD_BUNDLE)
         self.assertEqual((verdict, reasons[0]), ("retry", "XCTest daemon testmanagerd crashed"))
         # The repeat runs test6 and the test the restart left unfinished.
-        self.assertEqual(ui_tests.retry_arguments(["SortlyFlowUITests", "SortlyLockedUITests"], [], TESTMANAGERD_CRASH),
-                         ["-only-testing:SortlyUITests/SortlyFlowUITests", "-only-testing:SortlyUITests/SortlyLockedUITests",
-                          "-skip-testing:SortlyUITests/SortlyFlowUITests/test5_Earlier"])
+        self.assertEqual(ui_tests.retry_arguments(["AlbumistFlowUITests", "AlbumistLockedUITests"], [], TESTMANAGERD_CRASH),
+                         ["-only-testing:AlbumistUITests/AlbumistFlowUITests", "-only-testing:AlbumistUITests/AlbumistLockedUITests",
+                          "-skip-testing:AlbumistUITests/AlbumistFlowUITests/test5_Earlier"])
         # The app was lost in the same test, without an app crash report: still repeated, but named.
-        self.assertIn("app lost + daemon crash in SortlyFlowUITests/test6_AnalysisKeepsGoingThroughBackgroundAndTabs "
+        self.assertIn("app lost + daemon crash in AlbumistFlowUITests/test6_AnalysisKeepsGoingThroughBackgroundAndTabs "
                       "(no app crash report)", reasons)
         # Crashed again in the same test: red (likely app-caused); the repeat lost the simulator
         # alone: no result; the repeat fails in a test: red; passes: green.
@@ -546,10 +546,10 @@ class SelectionTests(unittest.TestCase):
         os.remove(marker)
         # The lines run_pass writes: with a test still running a hang, a finding, never repeated;
         # with none running the time ran out (infrastructure).
-        log = ("Test Case '-[SortlyUITests.A t1]' started.\nTest Case '-[SortlyUITests.A t1]' passed (1.0 seconds).\n"
-               "Test Case '-[SortlyUITests.A t2]' started.\n")
+        log = ("Test Case '-[AlbumistUITests.A t1]' started.\nTest Case '-[AlbumistUITests.A t1]' passed (1.0 seconds).\n"
+               "Test Case '-[AlbumistUITests.A t2]' started.\n")
         self.assertEqual(ui_tests.running_test(log), "A/t2")
-        self.assertIsNone(ui_tests.running_test(log + "Test Case '-[SortlyUITests.A t2]' failed (9.0 seconds).\n"))
+        self.assertIsNone(ui_tests.running_test(log + "Test Case '-[AlbumistUITests.A t2]' failed (9.0 seconds).\n"))
         verdict, reasons = ui_tests.decide(1, log + "UI_HANG pass first: A/t2 still running at the job's deadline; "
                                                     "xcodebuild stopped\n")
         self.assertEqual(verdict, "fail")
@@ -568,25 +568,25 @@ class SelectionTests(unittest.TestCase):
         self.addCleanup(folder.cleanup)
         path = os.path.join(folder.name, "log.txt")
         with open(path, "w", encoding="utf-8") as log:
-            log.write("Test Case '-[SortlyUITests.A t]' started.\n/x.swift:3: error: -[SortlyUITests.A t] : XCTAssertTrue failed\n"
-                      "Test Case '-[SortlyUITests.A t]' failed (1.0 seconds).\nPREVIEW_JPEG x: error: -[\nTest Case '-[Sort")
+            log.write("Test Case '-[AlbumistUITests.A t]' started.\n/x.swift:3: error: -[AlbumistUITests.A t] : XCTAssertTrue failed\n"
+                      "Test Case '-[AlbumistUITests.A t]' failed (1.0 seconds).\nPREVIEW_JPEG x: error: -[\nTest Case '-[Sort")
         watcher = ui_tests.HostGrants("U", path, grant=lambda: None)
         with contextlib.redirect_stdout(io.StringIO()) as out:
             watcher.check()
         lines = out.getvalue().splitlines()
-        self.assertEqual(lines, ["UI_LIVE /x.swift:3: error: -[SortlyUITests.A t] : XCTAssertTrue failed",
-                                 "UI_LIVE Test Case '-[SortlyUITests.A t]' failed (1.0 seconds)."])
+        self.assertEqual(lines, ["UI_LIVE /x.swift:3: error: -[AlbumistUITests.A t] : XCTAssertTrue failed",
+                                 "UI_LIVE Test Case '-[AlbumistUITests.A t]' failed (1.0 seconds)."])
 
     def test_a_testmanagerd_crash_does_not_hide_a_real_failure(self):
-        other = ("Test Case '-[SortlyUITests.SortlyFlowUITests test5_Earlier]' started.\n"
-                 "/x/SortlyFlowUITests.swift:12: error: -[SortlyUITests.SortlyFlowUITests test5_Earlier] : "
+        other = ("Test Case '-[AlbumistUITests.AlbumistFlowUITests test5_Earlier]' started.\n"
+                 "/x/AlbumistFlowUITests.swift:12: error: -[AlbumistUITests.AlbumistFlowUITests test5_Earlier] : "
                  "XCTAssertTrue failed\n"
-                 "Test Case '-[SortlyUITests.SortlyFlowUITests test5_Earlier]' failed (3.0 seconds).\n")
+                 "Test Case '-[AlbumistUITests.AlbumistFlowUITests test5_Earlier]' failed (3.0 seconds).\n")
         verdict, reasons = ui_tests.decide(65, other + TESTMANAGERD_CRASH.split("\n", 1)[1])
         self.assertEqual(verdict, "fail")
         self.assertIn("a test failed", reasons)
         # An app crash report is the app's side, also with the daemon crash.
-        self.assertEqual(ui_tests.decide(65, TESTMANAGERD_CRASH, ["/r/Sortly-2026-11-18-015619.ips"])[0], "fail")
+        self.assertEqual(ui_tests.decide(65, TESTMANAGERD_CRASH, ["/r/Albumist-2026-11-18-015619.ips"])[0], "fail")
         # A bundle finding other than the lost connection still counts.
         self.assertEqual(ui_tests.decide(65, TESTMANAGERD_CRASH, bundle=["result bundle: XCTAssertEqual failed"])[0], "fail")
 
@@ -614,8 +614,8 @@ class SelectionTests(unittest.TestCase):
 class FlakyTests(unittest.TestCase):
     """Every repeat and every test that passed only on it is recorded; nothing is repeated silently."""
 
-    RETRY_LOG = ("Test Case '-[SortlyUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode]' passed (300.0 seconds).\n"
-                 "Test Case '-[SortlyUITests.AccessibilityUITests test2_EnglishMainScreens]' failed (12.0 seconds).\n")
+    RETRY_LOG = ("Test Case '-[AlbumistUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode]' passed (300.0 seconds).\n"
+                 "Test Case '-[AlbumistUITests.AccessibilityUITests test2_EnglishMainScreens]' failed (12.0 seconds).\n")
 
     def test_no_repeat_no_record(self):
         record = ui_tests.flaky_record("flow-full", RESTART, [], None, None)
@@ -645,7 +645,7 @@ class FlakyTests(unittest.TestCase):
         # DeviceConditionUITests test07 (claude/test-speed) prints this when it tries a second album.
         line = ("UI_FLAKY_RETRY DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo slow plan for Trip was done "
                 "before the app was closed (31 s after the tap), retried with a second album\n")
-        log = "Test Case '-[SortlyUITests.DeviceConditionUITests test07_InterruptedPlanContinueAndUndo]' started.\n" + line
+        log = "Test Case '-[AlbumistUITests.DeviceConditionUITests test07_InterruptedPlanContinueAndUndo]' started.\n" + line
         record = ui_tests.flaky_record("device", log + line, [], None, None)  # printed twice: counted once
         self.assertEqual(record["flaky"], [{"test": "DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo",
                                             "first": ui_tests.INSIDE, "reason": line.split(" ", 2)[2].strip()}])
@@ -689,7 +689,7 @@ class FlakyTests(unittest.TestCase):
 
 
 class SweepStrictTests(unittest.TestCase):
-    """G5-10 (review of 18.11.2026): the tap-through sweep (SortlyFlowUITests test3) checked rows
+    """G5-10 (review of 18.11.2026): the tap-through sweep (AlbumistFlowUITests test3) checked rows
     strictly only in "Vorschläge"; on "Übersicht", "Mediathek", "Alben" and every screen one level
     down a row that did nothing was only a UI_SWEEP_NOOP line in the log. Every list it walks is
     strict now: each NOOP line is followed by a failure, or by `return 0`, which check() fails."""
@@ -697,7 +697,7 @@ class SweepStrictTests(unittest.TestCase):
     ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
 
     def swift(self):
-        with open(os.path.join(self.ROOT, "App", "SortlyUITests", "SortlyFlowUITests.swift"), encoding="utf-8") as f:
+        with open(os.path.join(self.ROOT, "App", "AlbumistUITests", "AlbumistFlowUITests.swift"), encoding="utf-8") as f:
             return f.read()
 
     @staticmethod
@@ -725,14 +725,14 @@ class SweepStrictTests(unittest.TestCase):
 class SweepSkipTests(unittest.TestCase):
     """Rows the tap-through sweep (UI test 3) leaves out appear in the run's UI summary (review 16.11.)."""
 
-    LOG = ("Test Case '-[SortlyUITests.SortlyFlowUITests test3_TapThroughEveryScreen]' started.\n"
+    LOG = ("Test Case '-[AlbumistUITests.AlbumistFlowUITests test3_TapThroughEveryScreen]' started.\n"
            "UI_SWEEP_OK Vorschläge › Reisen 2024 → Reisen 2024\n"
            "UI_SWEEP_SKIP Vorschläge › Länder und Orte (section header or footer text)\n"
            "UI_SWEEP_SKIP Vorschläge row 7 (no label, no text)\n"
            "UI_SWEEP_SKIP Mediathek › Alles rückgängig machen (changes the library)\n"
            "UI_SWEEP_SKIP Vorschläge › Länder und Orte (section header or footer text)\n"
            "UI_SWEEP_SKIP Suchen › Strand › photo (not hittable)\n"
-           "/x/SortlyFlowUITests.swift:9: error: -[SortlyUITests.SortlyFlowUITests test3] : UI_SWEEP_SKIP quoted (x)\n")
+           "/x/AlbumistFlowUITests.swift:9: error: -[AlbumistUITests.AlbumistFlowUITests test3] : UI_SWEEP_SKIP quoted (x)\n")
 
     def test_skip_lines_are_collected_once_each(self):
         self.assertEqual(ui_tests.sweep_skips(self.LOG), [
@@ -802,8 +802,8 @@ class SweepSkipTests(unittest.TestCase):
 class WatchdogTests(unittest.TestCase):
     """The watchdog stops a pass only before its first test, and only for a simulator that left "Booted"."""
 
-    STARTED_LOG = "Test Case '-[SortlyUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode]' started.\n"
-    STOPPED = ("2026-11-16 15:24:03.524929+0000 SortlyUITests-Runner[6264:25895] [Default] Running tests...\n"
+    STARTED_LOG = "Test Case '-[AlbumistUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode]' started.\n"
+    STOPPED = ("2026-11-16 15:24:03.524929+0000 AlbumistUITests-Runner[6264:25895] [Default] Running tests...\n"
                "UI_WATCHDOG simulator 900A5BAA-B5B5-4706-B7C3-D0C89A4F6B80 left Booted (state Shutdown) before the first test; "
                "pass stopped\n")
 
@@ -826,7 +826,7 @@ class WatchdogTests(unittest.TestCase):
                          ("retry", ["simulator shut down before the tests (watchdog)"]))
 
     def test_a_quoted_watchdog_line_is_not_infrastructure(self):
-        line = "SortlyFlowUITests.swift:60: error: -[SortlyUITests.SortlyFlowUITests test1_FullFlow] : UI_WATCHDOG simulator X left Booted"
+        line = "AlbumistFlowUITests.swift:60: error: -[AlbumistUITests.AlbumistFlowUITests test1_FullFlow] : UI_WATCHDOG simulator X left Booted"
         self.assertEqual(ui_tests.is_infra(line), [])
 
     def test_a_stopped_pass_with_a_real_line_is_not_repeated(self):
@@ -834,7 +834,7 @@ class WatchdogTests(unittest.TestCase):
 
     def test_bundle_of_a_stopped_pass(self):
         self.assertEqual(ui_tests.watchdog_bundle(["result bundle not readable (no such file)"]), [])
-        self.assertEqual(ui_tests.watchdog_bundle(["result bundle: Crash: Sortly (4242)"]), ["result bundle: Crash: Sortly (4242)"])
+        self.assertEqual(ui_tests.watchdog_bundle(["result bundle: Crash: Albumist (4242)"]), ["result bundle: Crash: Albumist (4242)"])
         verdict, _ = ui_tests.decide(-15, self.STOPPED, bundle=ui_tests.watchdog_bundle(["result bundle not readable (x)"]))
         self.assertEqual(verdict, "retry")
 
@@ -904,15 +904,15 @@ class GroupTests(unittest.TestCase):
                 for g in listed}
 
     def ui_tests(self):
-        """Every test method of the SortlyUITests target, as "Class/test", read from the files on
+        """Every test method of the AlbumistUITests target, as "Class/test", read from the files on
         disk the same way ui_groups.py reads them (multi-line declarations, extensions, inherited
         tests)."""
         import glob
         import ui_groups
         contents = {}
-        for path in sorted(glob.glob(os.path.join(self.ROOT, "App", "SortlyUITests", "*.swift"))):
+        for path in sorted(glob.glob(os.path.join(self.ROOT, "App", "AlbumistUITests", "*.swift"))):
             with open(path, encoding="utf-8") as f:
-                contents["App/SortlyUITests/" + os.path.basename(path)] = f.read()
+                contents["App/AlbumistUITests/" + os.path.basename(path)] = f.read()
         return sorted(ui_groups.all_tests(ui_groups.ui_files(ui_groups.DictTree(contents))))
 
     @staticmethod
@@ -974,11 +974,11 @@ class GroupTests(unittest.TestCase):
                 self.assertEqual(len(runs), 1, f"{test} runs in {runs or 'no group'}")
 
     def test_the_stress_run_is_not_part_of_the_ui_run(self):
-        # DeviceConditionUITests/test12 skips itself without SORTLY_STRESS_PHOTOS; only
+        # DeviceConditionUITests/test12 skips itself without ALBUMIST_STRESS_PHOTOS; only
         # ui-stress.yml (by hand, weekly and in every TestFlight run) sets it.
-        self.assertNotIn("SORTLY_STRESS_PHOTOS", self.workflow())
+        self.assertNotIn("ALBUMIST_STRESS_PHOTOS", self.workflow())
         stress = open(os.path.join(self.ROOT, ".github", "workflows", "ui-stress.yml"), encoding="utf-8").read()
-        self.assertIn("TEST_RUNNER_SORTLY_STRESS_PHOTOS", stress)
+        self.assertIn("TEST_RUNNER_ALBUMIST_STRESS_PHOTOS", stress)
         self.assertNotIn("pull_request", stress)
         self.assertNotIn("push:", stress)
         self.assertIn("toolchain.py xcode --runtime", stress)
@@ -989,7 +989,7 @@ class HostGrantTests(unittest.TestCase):
     """A test that reset the photo access asks the Mac to give it back (UI_HOST_GRANT_PHOTOS)."""
 
     def test_requests_are_counted_per_line(self):
-        log = "x\nUI_HOST_GRANT_PHOTOS\nTest Case '-[SortlyUITests.DeviceConditionUITests test09]' started.\nUI_HOST_GRANT_PHOTOS\n"
+        log = "x\nUI_HOST_GRANT_PHOTOS\nTest Case '-[AlbumistUITests.DeviceConditionUITests test09]' started.\nUI_HOST_GRANT_PHOTOS\n"
         self.assertEqual(ui_tests.host_grant_requests(log), 2)
 
     def test_the_answer_is_not_a_request(self):
@@ -1008,6 +1008,84 @@ class HostGrantTests(unittest.TestCase):
             grants.check()
             grants.check()
         self.assertEqual(len(granted), 2)
+
+    # Device test09 waited 190 s after each grant request for an end of the app that never came
+    # (9 of 9 requests in UI runs 44617747359, 44630953220 and job 136352444126). A request that
+    # names an answer file gets "granted" or "failed" there once the grant is done.
+    DEVICE = "/Users/runner/Library/Developer/CoreSimulator/Devices/U/data/Containers/Data/Application/X/tmp"
+
+    def test_a_request_with_an_answer_file_is_read_with_its_path(self):
+        log = f"UI_HOST_GRANT_PHOTOS {self.DEVICE}/uitest-host-answer-1A2B\nUI_HOST_GRANT_PHOTOS\n"
+        self.assertEqual(ui_tests.host_requests(log), [("grant", None, f"{self.DEVICE}/uitest-host-answer-1A2B"),
+                                                       ("grant", None, None)])
+        self.assertEqual(ui_tests.host_grant_requests(log), 2)
+        # A relative path or a second word is no request (the line is not the test's).
+        self.assertEqual(ui_tests.host_requests("UI_HOST_GRANT_PHOTOS tmp/a\nUI_HOST_GRANT_PHOTOS /a b\n"), [])
+
+    def test_the_watcher_answers_after_the_grant_with_its_result(self):
+        done = []
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "log.txt")
+            with open(path, "w") as log:
+                log.write("UI_HOST_GRANT_PHOTOS /D/a\nUI_HOST_GRANT_PHOTOS\nUI_HOST_GRANT_PHOTOS /D/b\n")
+            results = iter([True, True, False])
+            watcher = ui_tests.HostGrants("U", path, interval=0.01,
+                                          grant=lambda: done.append("grant") or next(results),
+                                          answer=lambda answer, text: done.append((answer, text)))
+            watcher.check()
+        self.assertEqual(done, ["grant", ("/D/a", "granted"), "grant", "grant", ("/D/b", "failed")])
+
+    def test_the_answer_is_written_only_into_a_test_file_of_this_simulator(self):
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"HOME": root}):
+            devices = os.path.join(root, "Library", "Developer", "CoreSimulator", "Devices")
+            folder = os.path.join(devices, "U", "data", "tmp")
+            os.makedirs(folder)
+            good = os.path.join(folder, "uitest-host-answer-0F-9")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(ui_tests.write_host_answer("U", good, "granted"))
+                with open(good, encoding="utf-8") as answer:
+                    self.assertEqual(answer.read(), "granted\n")
+                other = os.path.join(devices, "V", "tmp")
+                os.makedirs(other)
+                # A folder that only names this simulator: not under ~/Library/Developer/CoreSimulator.
+                fake = os.path.join(root, "elsewhere", "Devices", "U", "data", "tmp")
+                os.makedirs(fake)
+                for path in (os.path.join(other, "uitest-host-answer-1"),          # another simulator
+                             os.path.join(folder, "Albumist.sqlite"),                # not an answer file
+                             os.path.join(folder, "..", "uitest-host-answer-1"),   # climbs out
+                             os.path.join(folder, "missing", "uitest-host-answer-1"),
+                             os.path.join(fake, "uitest-host-answer-1"),           # outside, "/Devices/U/" in it
+                             "uitest-host-answer-1"):
+                    self.assertFalse(ui_tests.write_host_answer("U", path, "granted"), path)
+            self.assertEqual(sorted(os.listdir(folder)), ["uitest-host-answer-0F-9"])
+            self.assertEqual(os.listdir(other), [])
+            self.assertEqual(os.listdir(fake), [])
+
+    def test_the_answer_follows_no_link_out_of_the_simulator(self):
+        """A folder of the simulator that is a link to elsewhere, and a link planted at the name
+        of the half-written file: neither makes the Mac write outside the simulator's folder."""
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"HOME": root}):
+            folder = os.path.join(root, "Library", "Developer", "CoreSimulator", "Devices", "U", "data", "tmp")
+            os.makedirs(folder)
+            outside = os.path.join(root, "outside")
+            os.makedirs(outside)
+            victim = os.path.join(outside, "victim")
+            with open(victim, "w", encoding="utf-8") as f:
+                f.write("keep\n")
+            os.symlink(outside, os.path.join(folder, "link"))
+            os.symlink(victim, os.path.join(folder, ".uitest-host-answer-2.partial"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertFalse(ui_tests.write_host_answer("U", os.path.join(folder, "link", "uitest-host-answer-1"), "granted"))
+                self.assertTrue(ui_tests.write_host_answer("U", os.path.join(folder, "uitest-host-answer-2"), "granted"))
+            self.assertEqual(sorted(os.listdir(outside)), ["victim"])
+            with open(victim, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "keep\n")
+            answer = os.path.join(folder, "uitest-host-answer-2")
+            self.assertFalse(os.path.islink(answer))
+            with open(answer, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "granted\n")
+            # No half-written file is left behind (the planted link stays as it was).
+            self.assertEqual(sorted(os.listdir(folder)), [".uitest-host-answer-2.partial", "link", "uitest-host-answer-2"])
 
 
 class HostTerminateTests(unittest.TestCase):
@@ -1045,7 +1123,7 @@ class HostTerminateTests(unittest.TestCase):
     # (the app had ended by itself, the test launched it again, the Mac's late `simctl
     # terminate` hit the new one), and `simctl terminate` hung 20 s in test06. With the app's
     # process id the Mac ends exactly that process, SIGTERM then SIGKILL.
-    APP = "/Users/runner/Library/Developer/CoreSimulator/Devices/U/data/Containers/Bundle/Application/X/Sortly.app/Sortly"
+    APP = "/Users/runner/Library/Developer/CoreSimulator/Devices/U/data/Containers/Bundle/Application/X/Albumist.app/Albumist"
 
     def run_pid_end(self, alive_after, command=None):
         """`alive_after`: how many `ps` calls still see the app after the first look."""
@@ -1072,7 +1150,7 @@ class HostTerminateTests(unittest.TestCase):
         self.assertIn("ended by SIGTERM", out)
 
     def test_the_app_is_known_with_its_launch_arguments(self):
-        ended, kills, _ = self.run_pid_end(alive_after=0, command=self.APP + " -AppleLanguages (de) -SortlyUITestUnlocked")
+        ended, kills, _ = self.run_pid_end(alive_after=0, command=self.APP + " -AppleLanguages (de) -AlbumistUITestUnlocked")
         self.assertTrue(ended)
         self.assertEqual(kills, [["kill", "-TERM", "35745"]])
 
@@ -1086,7 +1164,7 @@ class HostTerminateTests(unittest.TestCase):
         # The id names the app of the last launch only; a new launch has another id, and an id
         # reused by anything else (or another simulator's app) is left alone.
         for other in ("/usr/libexec/something", self.APP.replace("/Devices/U/", "/Devices/V/"),
-                      self.APP.replace("Sortly.app/Sortly", "SortlyUITests-Runner.app/SortlyUITests-Runner")):
+                      self.APP.replace("Albumist.app/Albumist", "AlbumistUITests-Runner.app/AlbumistUITests-Runner")):
             with self.subTest(other):
                 ended, kills, out = self.run_pid_end(alive_after=0, command=other)
                 self.assertFalse(ended)
@@ -1198,17 +1276,17 @@ class HostTerminateTests(unittest.TestCase):
     def test_the_last_end_comes_well_before_the_test_stops_waiting(self):
         # Last possible start of a call, plus its timeout and the watcher's read interval.
         self.assertLess(ui_tests.TERMINATE_FRESH + ui_tests.TERMINATE_TIMEOUT + 2, ui_tests.TERMINATE_WAIT)
-        swift = open(os.path.join(self.ROOT, "App", "SortlyUITests", "UITestAppEnd.swift"), encoding="utf-8").read()
+        swift = open(os.path.join(self.ROOT, "App", "AlbumistUITests", "UITestAppEnd.swift"), encoding="utf-8").read()
         self.assertIn(f"app.wait(for: .notRunning, timeout: {ui_tests.TERMINATE_WAIT})", swift)
 
     def test_the_tests_know_the_helper_from_the_runner_environment(self):
-        env = ui_tests.runner_env({"PATH": "/usr/bin", "TEST_RUNNER_SORTLY_UI_QUICK": "1"})
-        self.assertEqual(env["TEST_RUNNER_SORTLY_HOST_HELPER"], "1")
-        self.assertEqual(env["TEST_RUNNER_SORTLY_UI_QUICK"], "1")
+        env = ui_tests.runner_env({"PATH": "/usr/bin", "TEST_RUNNER_ALBUMIST_UI_QUICK": "1"})
+        self.assertEqual(env["TEST_RUNNER_ALBUMIST_HOST_HELPER"], "1")
+        self.assertEqual(env["TEST_RUNNER_ALBUMIST_UI_QUICK"], "1")
         self.assertEqual(env["PATH"], "/usr/bin")
-        swift = open(os.path.join(self.ROOT, "App", "SortlyUITests", "UITestAppEnd.swift"), encoding="utf-8").read()
+        swift = open(os.path.join(self.ROOT, "App", "AlbumistUITests", "UITestAppEnd.swift"), encoding="utf-8").read()
         # xcodebuild hands TEST_RUNNER_X to the tests as X.
-        self.assertIn('environment["SORTLY_HOST_HELPER"] == "1"', swift)
+        self.assertIn('environment["ALBUMIST_HOST_HELPER"] == "1"', swift)
         self.assertIn('print("UI_HOST_TERMINATE_APP \\(', swift)
         self.assertTrue(ui_tests.HOST_TERMINATE.search("UI_HOST_TERMINATE_APP 1763500000"))
 
@@ -1217,7 +1295,7 @@ class HostTerminateTests(unittest.TestCase):
         # 44446270757) and in accessibility test2 (TestFlight run 44461253154, job
         # 135366070532, at the relaunch inside launch()). Every UI test file ends the app with
         # UITestAppEnd.end before it makes a new XCUIApplication or calls launch() again.
-        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        folder = os.path.join(self.ROOT, "App", "AlbumistUITests")
         for name in sorted(os.listdir(folder)):
             if not name.endswith(".swift") or name == "UITestAppEnd.swift":
                 continue
@@ -1236,7 +1314,7 @@ class HostTerminateTests(unittest.TestCase):
         # UITestWait.toForeground takes such a failed activation as expected (non-strict, only
         # that message), tries again, says each extra try in a counted UI_FLAKY_RETRY line that
         # names the test, and fails the test only when the app never came to the front.
-        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        folder = os.path.join(self.ROOT, "App", "AlbumistUITests")
         for name in sorted(os.listdir(folder)):
             if not name.endswith(".swift") or name == "UITestWait.swift":
                 continue
@@ -1260,7 +1338,7 @@ class HostTerminateTests(unittest.TestCase):
         # UITestWait.toBackground tries Home once more and then brings the Settings app to the
         # front, each extra try a counted UI_FLAKY_RETRY line that names the test. No UI test
         # presses Home anywhere else, so every move to the background gets that escalation.
-        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        folder = os.path.join(self.ROOT, "App", "AlbumistUITests")
         for name in sorted(os.listdir(folder)):
             if not name.endswith(".swift") or name == "UITestWait.swift":
                 continue
@@ -1274,10 +1352,12 @@ class HostTerminateTests(unittest.TestCase):
             wait = source.read()
         body = wait[wait.index("static func toBackground("):wait.index("static func testID(")]
         self.assertEqual(len(re.findall(r"\.press\(\.home\)", body)), 1)  # in the loop of ways
-        self.assertIn('("Home press", min(timeout, 20)), ("second Home press", 15), ("Settings app in front", 30)', body)
+        # The first press 8 s (20 s until 20.11.: it never had an effect on the CI simulator, in
+        # 13 of 13 presses, and the second one did within 1.4 s each time).
+        self.assertIn('("Home press", min(timeout, 8)), ("second Home press", 15), ("Settings app in front", 30)', body)
         # The time in the background counts from when iOS reported it, not from the first press:
         # after a late way the app stayed there 1 s only (second review of 5d730ac, 6d6baf1), and
-        # SortlyFlowUITests says "at least the old 8 s, counted once iOS has it there".
+        # AlbumistFlowUITests says "at least the old 8 s, counted once iOS has it there".
         self.assertIn("inBackgroundSince = since", body)
         self.assertIn("let wait = reached ? max(atLeast - Date().timeIntervalSince(inBackgroundSince), 1) : 0", body)
         self.assertNotRegex(body, r"atLeast - took\b")
@@ -1300,10 +1380,10 @@ class HostTerminateTests(unittest.TestCase):
         # file and the Mac fell back to `simctl terminate` by bundle id: the race of 945446e (a
         # late end hits the NEW launch) and simctl's hangs (device test08 of job 135412549414:
         # 114 s, "by XCTest after the Mac"). Every launch now goes through UITestAppEnd.launch,
-        # which ends the last launch's app, adds -SortlyUITestWatchMainLog when the arguments
+        # which ends the last launch's app, adds -AlbumistUITestWatchMainLog when the arguments
         # lack it and notes the launch (UITestLaunchRecord), so the next end knows the process
         # from any XCUIApplication. No UI test file launches the app itself.
-        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        folder = os.path.join(self.ROOT, "App", "AlbumistUITests")
         for sample, found in (("app.launch()", 1), ("app.launch( )", 1), ("app\n  .launch ()", 1),
                               ("// app.launch()", 0), ('print("app.launch()")', 0), ("UITestAppEnd.launch(app)", 0)):
             with self.subTest(sample=sample):
@@ -1353,16 +1433,16 @@ class HostTerminateTests(unittest.TestCase):
 
 
 # Device test 04 of UI run 44066730498: XCTest lost the app at a relaunch (no crash report).
-LOST_APP_LOG = """Test Case '-[SortlyUITests.DeviceConditionUITests test04_UnreadableICloudOfflineComplete]' started.
+LOST_APP_LOG = """Test Case '-[AlbumistUITests.DeviceConditionUITests test04_UnreadableICloudOfflineComplete]' started.
 UI_FACT app process 30001 started 11:03:22.5 UTC, its code ran from 11:03:23.4 UTC
 UI_FACT atlas offline Dein Reise-Atlas, 12 Länder · 0 Städte · 12 Reisen
 UI_FACT clock 11:06:36.3 launch
-<unknown>:0: error: -[SortlyUITests.DeviceConditionUITests test04_UnreadableICloudOfflineComplete] : Application 'app.albumist.ios' does not have a process ID
+<unknown>:0: error: -[AlbumistUITests.DeviceConditionUITests test04_UnreadableICloudOfflineComplete] : Application 'app.albumist.ios' does not have a process ID
 {record}UI_FACT main stall 2.6 s from 11:07:36.6 UTC
-Test Case '-[SortlyUITests.DeviceConditionUITests test04_UnreadableICloudOfflineComplete]' failed (372.873 seconds).
-Test Case '-[SortlyUITests.DeviceConditionUITests test06_DiskFullDuringAnalysisAndPlan]' started.
+Test Case '-[AlbumistUITests.DeviceConditionUITests test04_UnreadableICloudOfflineComplete]' failed (372.873 seconds).
+Test Case '-[AlbumistUITests.DeviceConditionUITests test06_DiskFullDuringAnalysisAndPlan]' started.
 UI_FACT app process 30003 started 11:09:36.0 UTC, its code ran from 11:09:37.0 UTC
-Test Case '-[SortlyUITests.DeviceConditionUITests test06_DiskFullDuringAnalysisAndPlan]' passed (60.000 seconds).
+Test Case '-[AlbumistUITests.DeviceConditionUITests test06_DiskFullDuringAnalysisAndPlan]' passed (60.000 seconds).
 ** TEST EXECUTE FAILED **
 """
 
@@ -1385,7 +1465,7 @@ class LostAppTests(unittest.TestCase):
 
     def test_a_crash_report_points_at_the_app(self):
         log = self.log("UI_FACT app process 30002 started 11:07:35.1 UTC, its code ran from 11:07:36.0 UTC\n")
-        self.assertEqual(ui_tests.lost_app_at_launch(log, ["/x/Sortly-2026-11-17-110700.ips"]),
+        self.assertEqual(ui_tests.lost_app_at_launch(log, ["/x/Albumist-2026-11-17-110700.ips"]),
                          ["XCTest lost the app at a launch, and a crash report was written (app side)"])
 
     def test_without_a_record_the_cause_stays_open(self):
@@ -1541,7 +1621,7 @@ class SleepRuleTests(unittest.TestCase):
     of a poll) says so."""
 
     ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
-    FOLDER = os.path.join(ROOT, "App", "SortlyUITests")
+    FOLDER = os.path.join(ROOT, "App", "AlbumistUITests")
     # sleep(s), usleep(µs), Thread.sleep(forTimeInterval:/until:), RunLoop's run(until:).
     SLEEP = re.compile(r"(?<![\w.])(u?sleep)\(|\b(Thread\.sleep)\(|\b(RunLoop\.\w+\.run)\(\s*until:")
     # Calls of sleep()/usleep() per file (code only). The count may only go down; lower it here
@@ -1550,8 +1630,8 @@ class SleepRuleTests(unittest.TestCase):
         "AccessibilityUITests.swift": 6,
         "DeviceConditionUITests.swift": 14,
         "SearchUITests.swift": 1,
-        "SortlyFlowUITests.swift": 51,
-        "SortlyLockedUITests.swift": 1,
+        "AlbumistFlowUITests.swift": 51,
+        "AlbumistLockedUITests.swift": 1,
         "UITestOnboarding.swift": 1,
         # The poll interval of the condition waits (holds, which until, screenAtRest and never use),
         # toBackground's own poll, the minimum time in the background, and atLeast: the rest of
@@ -1561,10 +1641,10 @@ class SleepRuleTests(unittest.TestCase):
     }
     # UITestWait.atLeast calls per file (a fixed minimum after a wait; second review of C2):
     # counted like the sleeps, so a new one is a decision, not a habit.
-    # SortlyFlowUITests 14 since 20.11.: test3's own album waits like applyRecommended's 2 s before
+    # AlbumistFlowUITests 14 since 20.11.: test3's own album waits like applyRecommended's 2 s before
     # the restart (fourth review of the tempo plan), so the restart does not cut the plan off.
     AT_LEAST = {"AccessibilityUITests.swift": 1, "DeviceConditionUITests.swift": 1, "ReleaseSmokeUITests.swift": 1,
-                "SortlyFlowUITests.swift": 14}
+                "AlbumistFlowUITests.swift": 14}
     # Long sleeps (3 s or more, or a computed length) without a "// pacing:" note, per file:
     # the ones still standing in for a state. None left since the condition waits of
     # UITestWait.swift; a new one fails test_a_long_sleep_is_pacing_and_says_so.

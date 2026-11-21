@@ -3,6 +3,6 @@
 DerivedData/
 *.xcuserstate
 xcuserdata/
-App/Sortly.xcodeproj/
+App/Albumist.xcodeproj/
 .DS_Store
 __pycache__/

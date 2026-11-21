@@ -75,9 +75,9 @@ def offenders_in(text):
 
 
 def offenders(root):
-    """(file, line, code) for every small system-grey text in App/Sortly."""
+    """(file, line, code) for every small system-grey text in App/Albumist."""
     found = []
-    for path in sorted(glob.glob(f"{root}/App/Sortly/**/*.swift", recursive=True)):
+    for path in sorted(glob.glob(f"{root}/App/Albumist/**/*.swift", recursive=True)):
         with open(path, encoding="utf-8") as file:
             text = file.read()
         for line, code in offenders_in(text):

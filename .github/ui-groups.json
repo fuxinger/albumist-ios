@@ -1,7 +1,7 @@
 {
   "_comment": [
     "The UI test groups of ui.yml, one job each (read by .github/scripts/ui_groups.py, which also makes the job matrix).",
-    "only / skip: 'Class' or 'Class/testMethod' of SortlyUITests, separated by spaces (-only-testing / -skip-testing).",
+    "only / skip: 'Class' or 'Class/testMethod' of AlbumistUITests, separated by spaces (-only-testing / -skip-testing).",
     "device: pro (the image's iPhone Pro) or se (the small iPhone), see .github/toolchain.json.",
     "flow-other is 'everything the other groups do not run', so a new test class always runs somewhere and no test runs twice",
     "(test_ui_tests.py GroupTests checks every UI test against the groups). Keep its skip list in step with the others.",
@@ -25,7 +25,7 @@
       "group": "device",
       "budget_min": 45,
       "title": "device conditions",
-      "_why": "The device-condition switches (App/Sortly/Platform/UITestSwitches.swift) on the Pro simulator. A test that resets the photo access asks the Mac to give it back (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07, 08 and 11 run in the group device-flows (tempo plan 20.11.: the longest group sets the run's time); test12 is the stress test and skips itself here (ui-stress.yml).",
+      "_why": "The device-condition switches (App/Albumist/Platform/UITestSwitches.swift) on the Pro simulator. A test that resets the photo access asks the Mac to give it back (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07, 08 and 11 run in the group device-flows (tempo plan 20.11.: the longest group sets the run's time); test12 is the stress test and skips itself here (ui-stress.yml).",
       "device": "pro",
       "only": "DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline",
       "skip": ""
@@ -37,7 +37,7 @@
       "_why": "Every other UI test except the accessibility tests (flow tests 1b-7, locked purchase, search). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
       "device": "pro",
       "only": "",
-      "skip": "SortlyFlowUITests/test1_FullFlow AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo"
+      "skip": "AlbumistFlowUITests/test1_FullFlow AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo"
     },
     {
       "group": "accessibility",
@@ -55,7 +55,7 @@
       "title": "full flow and video",
       "_why": "Onboarding, demo library, plan and the sorting-show video.",
       "device": "pro",
-      "only": "SortlyFlowUITests/test1_FullFlow",
+      "only": "AlbumistFlowUITests/test1_FullFlow",
       "skip": "",
       "video": true
     },

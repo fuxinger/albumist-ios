@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes Sources/SortlyCore/Time/CountryTimeZoneTable.swift: each country's time zones with the
+"""Writes Sources/AlbumistCore/Time/CountryTimeZoneTable.swift: each country's time zones with the
 places they stand for, for photos whose place is known only offline (review P1-15).
 
 Source: the IANA time zone database (public domain), zone.tab: one principal place per zone and
@@ -18,7 +18,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXTRA = os.path.join(ROOT, "tools", "country_time_zones_extra.txt")
-OUT = os.path.join(ROOT, "Sources", "SortlyCore", "Time", "CountryTimeZoneTable.swift")
+OUT = os.path.join(ROOT, "Sources", "AlbumistCore", "Time", "CountryTimeZoneTable.swift")
 
 
 def coordinate(text):

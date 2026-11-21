@@ -9,15 +9,15 @@ let strictSettings: [SwiftSetting] = [
 ]
 
 let package = Package(
-    name: "SortlyKit",
+    name: "AlbumistKit",
     platforms: [.iOS("26.0"), .macOS("15.0")],
     products: [
-        .library(name: "SortlyCore", targets: ["SortlyCore"]),
-        .library(name: "SortlyStore", targets: ["SortlyStore"]),
-        .library(name: "SortlyWorldMap", targets: ["SortlyWorldMap"]),
-        .library(name: "SortlyEngine", targets: ["SortlyEngine"]),
+        .library(name: "AlbumistCore", targets: ["AlbumistCore"]),
+        .library(name: "AlbumistStore", targets: ["AlbumistStore"]),
+        .library(name: "AlbumistWorldMap", targets: ["AlbumistWorldMap"]),
+        .library(name: "AlbumistEngine", targets: ["AlbumistEngine"]),
         .library(name: "SortlyMap", targets: ["SortlyMap"]),
-        .library(name: "SortlyTestSupport", targets: ["SortlyTestSupport"]),
+        .library(name: "AlbumistTestSupport", targets: ["AlbumistTestSupport"]),
     ],
     targets: [
         // Apple platforms ship SQLite as the `SQLite3` module; Linux needs a module map.
@@ -27,26 +27,26 @@ let package = Package(
             providers: [.apt(["libsqlite3-dev"])]
         ),
         .target(
-            name: "SortlyCore",
+            name: "AlbumistCore",
             swiftSettings: strictSettings
         ),
         .target(
-            name: "SortlyStore",
+            name: "AlbumistStore",
             dependencies: [
-                "SortlyCore",
+                "AlbumistCore",
                 .target(name: "CSQLite", condition: .when(platforms: [.linux])),
             ],
             swiftSettings: strictSettings
         ),
         .target(
-            name: "SortlyWorldMap",
-            dependencies: ["SortlyCore"],
-            resources: [.copy("Resources/world.sortlymap"), .copy("Resources/LICENSE-NaturalEarth.txt")],
+            name: "AlbumistWorldMap",
+            dependencies: ["AlbumistCore"],
+            resources: [.copy("Resources/world.albumistmap"), .copy("Resources/LICENSE-NaturalEarth.txt")],
             swiftSettings: strictSettings
         ),
         .target(
-            name: "SortlyEngine",
-            dependencies: ["SortlyCore", "SortlyStore"],
+            name: "AlbumistEngine",
+            dependencies: ["AlbumistCore", "AlbumistStore"],
             swiftSettings: strictSettings
         ),
         // "Deine Welt" (map concept 2.0, approved 20.11.2026): the map summary, its numbers and
@@ -57,26 +57,26 @@ let package = Package(
             swiftSettings: strictSettings
         ),
         .target(
-            name: "SortlyTestSupport",
-            dependencies: ["SortlyCore"],
+            name: "AlbumistTestSupport",
+            dependencies: ["AlbumistCore"],
             swiftSettings: strictSettings
         ),
         // Files of the UI tests built here as well so Linux tests them: test12's pause check,
         // and which app process the end of the app is about (UITestLaunchRecord).
         .target(
-            name: "SortlyUITestLogic",
-            path: "App/SortlyUITests",
+            name: "AlbumistUITestLogic",
+            path: "App/AlbumistUITests",
             sources: ["PauseCountCheck.swift", "UITestLaunchRecord.swift"],
             swiftSettings: strictSettings
         ),
         .testTarget(
-            name: "SortlyUITestLogicTests",
-            dependencies: ["SortlyUITestLogic"],
+            name: "AlbumistUITestLogicTests",
+            dependencies: ["AlbumistUITestLogic"],
             swiftSettings: strictSettings
         ),
         .testTarget(
-            name: "SortlyCoreTests",
-            dependencies: ["SortlyCore", "SortlyWorldMap", "SortlyTestSupport"],
+            name: "AlbumistCoreTests",
+            dependencies: ["AlbumistCore", "AlbumistWorldMap", "AlbumistTestSupport"],
             swiftSettings: strictSettings
         ),
         .testTarget(
@@ -85,13 +85,13 @@ let package = Package(
             swiftSettings: strictSettings
         ),
         .testTarget(
-            name: "SortlyStoreTests",
-            dependencies: ["SortlyStore", "SortlyCore", "SortlyTestSupport"],
+            name: "AlbumistStoreTests",
+            dependencies: ["AlbumistStore", "AlbumistCore", "AlbumistTestSupport"],
             swiftSettings: strictSettings
         ),
         .testTarget(
-            name: "SortlyEngineTests",
-            dependencies: ["SortlyEngine", "SortlyStore", "SortlyCore", "SortlyWorldMap", "SortlyTestSupport"],
+            name: "AlbumistEngineTests",
+            dependencies: ["AlbumistEngine", "AlbumistStore", "AlbumistCore", "AlbumistWorldMap", "AlbumistTestSupport"],
             swiftSettings: strictSettings
         ),
     ],

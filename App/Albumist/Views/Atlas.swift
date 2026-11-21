@@ -1,0 +1,798 @@
+import Photos
+import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+import AlbumistCore
+import AlbumistWorldMap
+
+// MARK: - Data
+
+/// Country outlines for drawing, decoded once from the offline map and kept in memory, and
+/// the disputed areas painted as unvisited land over them (`AtlasShapes`).
+@MainActor
+final class AtlasOutlines {
+    static let shared = AtlasOutlines()
+    typealias Country = AtlasShape
+    private(set) var countries: [Country] = []
+    private var loading: Task<[Country], Never>?
+
+    func load(from map: OfflineWorldMap?) async -> [Country] {
+        if !countries.isEmpty { return countries }
+        if let loading { return await loading.value }
+        let task = Task.detached(priority: .userInitiated) { () -> [Country] in
+            guard let map = map ?? (try? WorldMapResource.load()) else { return [] }
+            return AtlasShapes.make(from: map, minimumStepDegrees: 0.3)
+        }
+        loading = task
+        countries = await task.value
+        loading = nil
+        return countries
+    }
+}
+
+enum AtlasStyle {
+    /// Visited countries use the app tint; the newest one in the reveal animation is orange.
+    static let visited = Theme.accent
+    static let latest = Color.orange
+    static let land = Color(uiColor: .systemGray5)
+
+    static func countryName(_ code: String) -> String {
+        Locale.current.localizedString(forRegionCode: code) ?? code
+    }
+
+    /// Where a trip went: flag and country, or a disputed area's own name without a flag
+    /// (decision Fuchs 18.11.2026).
+    static func tripCountry(_ trip: TravelAtlas.TripSummary) -> String {
+        trip.areaName ?? "\(TravelAtlas.flag(trip.countryCode)) \(countryName(trip.countryCode))"
+    }
+}
+
+// MARK: - Map
+
+/// One country of the map as drawn. Where disputed areas lie in it (`AtlasShapes`), a visit
+/// fills only `outside` and `disputed` stays land: an area is never a side's country (decision
+/// Fuchs 18.11.2026). Cut out instead of painted over, so no line of the visited colour shows
+/// round the area's coast (second review of bundle-i).
+struct AtlasCountryPath {
+    var code: String
+    var whole: Path
+    var outside: Path
+    var disputed: Path?
+}
+
+/// The country shapes of the map for a few sizes, made once: the map is drawn again with
+/// every step of the reveal, every change of the screen and every share picture, and making
+/// the shapes of all countries (and cutting out the disputed areas) is the expensive part of
+/// drawing it.
+final class AtlasPathCache: @unchecked Sendable {
+    static let shared = AtlasPathCache()
+    private let lock = NSLock()
+    private var bySize: [String: [AtlasCountryPath]] = [:]
+    /// The keys, oldest first: at the seventh size the oldest goes, not all of them.
+    private var order: [String] = []
+
+    func paths(for outlines: [AtlasOutlines.Country], size: CGSize, make: (AtlasOutlines.Country) -> Path) -> [AtlasCountryPath] {
+        // The outlines are loaded once and never change; their count tells "not loaded yet".
+        let key = String(format: "%.2fx%.2f/%ld", size.width, size.height, outlines.count)
+        if let known = lock.withLock({ bySize[key] }) { return known }
+        let made = Self.countries(outlines, paths: outlines.map(make))
+        lock.withLock {
+            if bySize[key] == nil { order.append(key) }
+            bySize[key] = made
+            while order.count > 6 { bySize[order.removeFirst()] = nil }
+        }
+        return made
+    }
+
+    static func countries(_ outlines: [AtlasOutlines.Country], paths: [Path]) -> [AtlasCountryPath] {
+        var areas: [String: Path] = [:]
+        for (shape, path) in zip(outlines, paths) where shape.isNeutral {
+            for code in shape.neutralOver { areas[code] = areas[code].map { $0.union(path, eoFill: true) } ?? path }
+        }
+        return zip(outlines, paths).filter { !$0.0.isNeutral }.map { shape, path in
+            guard !shape.code.isEmpty, let area = areas[shape.code] else {
+                return AtlasCountryPath(code: shape.code, whole: path, outside: path, disputed: nil)
+            }
+            return AtlasCountryPath(code: shape.code, whole: path, outside: path.subtracting(area, eoFill: true),
+                                    disputed: path.intersection(area, eoFill: true))
+        }
+    }
+}
+
+/// Flat world map in system colors, like the map in the Photos app. `highlighted` may grow
+/// during the reveal animation.
+struct AtlasMap: View {
+    var outlines: [AtlasOutlines.Country]
+    var highlighted: Set<String>
+    /// The most recently revealed country is drawn in orange.
+    var latest: String? = nil
+    /// Called with the visited country under the finger; nil = the map is not tappable.
+    var onTapCountry: ((String) -> Void)? = nil
+    /// The map's size, for finding the country under the finger. Kept in a box that SwiftUI
+    /// does not watch: as `@State`, each size the map reported drew it again. In landscape the
+    /// atlas screen drew the map 9,644 times in one 352 s stall of the main thread, right after
+    /// it opened (UI run 44055738268, accessibility test 4); this write was the only change the
+    /// map makes by itself.
+    @State private var measured = MeasuredSize()
+
+    /// Spelled out: the private `measured` would make the memberwise one private, and the app's
+    /// tests draw the map on its own (`AtlasRenderingTests`).
+    init(outlines: [AtlasOutlines.Country], highlighted: Set<String>, latest: String? = nil,
+         onTapCountry: ((String) -> Void)? = nil) {
+        self.outlines = outlines
+        self.highlighted = highlighted
+        self.latest = latest
+        self.onTapCountry = onTapCountry
+    }
+
+    /// A plain reference: writing it changes nothing on screen.
+    private final class MeasuredSize {
+        var size: CGSize = .zero
+    }
+
+    /// The latitudes the map shows (Antarctica and the far north left out).
+    private static let north = 83.0, south = -56.0
+
+    private static func path(_ country: AtlasOutlines.Country, in size: CGSize) -> Path {
+        func point(_ c: GeoCoordinate) -> CGPoint {
+            CGPoint(x: (c.longitude + 180) / 360 * size.width,
+                    y: (north - min(max(c.latitude, south), north)) / (north - south) * size.height)
+        }
+        var path = Path()
+        for ring in country.rings {
+            guard let first = ring.first else { continue }
+            path.move(to: point(first))
+            for c in ring.dropFirst() { path.addLine(to: point(c)) }
+            path.closeSubpath()
+        }
+        return path
+    }
+
+    /// Every country's shape at this size, made once per size (`AtlasPathCache`).
+    private func countryPaths(in size: CGSize) -> [AtlasCountryPath] {
+        AtlasPathCache.shared.paths(for: outlines, size: size) { Self.path($0, in: size) }
+    }
+
+    /// The country screen a tap at `location` opens (`AtlasShapes.tappedCode`): the visited
+    /// country there or within 12 points (small countries), nothing in a disputed area.
+    private func country(at location: CGPoint) -> String? {
+        let size = measured.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        let point = GeoCoordinate(latitude: Self.north - Double(location.y / size.height) * (Self.north - Self.south),
+                                  longitude: Double(location.x / size.width) * 360 - 180)
+        return AtlasShapes.tappedCode(at: point, in: outlines, visited: highlighted, slackDegrees: 12 * 360 / Double(size.width))
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            var land = Path(), visited = Path(), recent = Path()
+            MainThreadWatch.shared.section("atlas map paths") {
+                for country in countryPaths(in: size) {
+                    if !country.code.isEmpty, country.code == latest { recent.addPath(country.outside) }
+                    else if highlighted.contains(country.code) { visited.addPath(country.outside) }
+                    else { land.addPath(country.whole); continue }
+                    if let disputed = country.disputed { land.addPath(disputed) }
+                }
+            }
+            let fill = FillStyle(eoFill: true)
+            context.fill(land, with: .color(AtlasStyle.land), style: fill)
+            context.fill(visited, with: .color(AtlasStyle.visited), style: fill)
+            context.fill(recent, with: .color(AtlasStyle.latest), style: fill)
+        }
+        .aspectRatio(360 / 139, contentMode: .fit)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { measured.size = $0 }
+        .onTapGesture(coordinateSpace: .local) { location in
+            guard let onTapCountry, let code = country(at: location) else { return }
+            onTapCountry(code)
+        }
+        .allowsHitTesting(onTapCountry != nil)
+        .accessibilityHidden(true) // the country list below is the accessible way in
+    }
+}
+
+// MARK: - Screen
+
+/// "Dein Reise-Atlas": countries fill in the order of the first visit.
+struct AtlasView: View {
+    @Environment(AppModel.self) private var model
+    @State private var outlines: [AtlasOutlines.Country] = []
+    @State private var revealed = 0
+    @State private var story: String?
+    @State private var storyScope: PhotoStory.Scope = .trips
+    @State private var writing = false
+    /// The atlas shared, captured when "Teilen" is tapped: a refresh meanwhile (it empties the
+    /// atlas of each year for a moment) does not change the card that is shared.
+    @State private var sharing: SharedAtlas?
+    /// nil = all years.
+    @State private var year: Int?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// `nil` while the atlas of each year is made, the first time a year is chosen after the
+    /// facts changed (`AppModel.travelAtlas(year:)`, a fraction of a second).
+    private var atlas: TravelAtlas? {
+        guard let year else { return model.travelAtlas() }
+        return model.travelAtlas(year: year)
+    }
+
+    var body: some View {
+        let atlas = atlas
+        let order = atlas?.countriesByFirstVisit ?? []
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                if model.atlasYears.count > 1 { yearPicker }
+                if let atlas {
+                    AtlasContent(atlas: atlas, outlines: outlines, revealed: min(revealed, order.count))
+                    if SmartAssistant.isAvailable && !model.facts.isEmpty {
+                        storySection(atlas)
+                    }
+                } else {
+                    // Not "0 Länder" for a year still being made.
+                    ProgressView()
+                        .accessibilityLabel(Text("Jahr wird geladen"))
+                        .frame(maxWidth: .infinity, minHeight: 240)
+                }
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.bottom, 40)
+        }
+        .background(Theme.background)
+        .navigationTitle("Reise-Atlas")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    if let atlas { sharing = SharedAtlas(atlas: atlas, sortedPhotos: model.progress.fully) }
+                } label: { Image(systemName: "square.and.arrow.up") }
+                    .accessibilityLabel("Reise-Atlas teilen")
+                    .disabled(order.isEmpty)
+            }
+        }
+        .onChange(of: year) {
+            // Switching the year shows the result at once (no fill animation), also a year whose
+            // atlas is still being made.
+            revealed = .max
+        }
+        .sheet(item: $sharing) { shared in
+            ShareCardSheet(atlas: shared.atlas, sortedPhotos: shared.sortedPhotos, map: model.worldMap)
+        }
+        .task {
+            outlines = await AtlasOutlines.shared.load(from: model.worldMap)
+            guard revealed == 0 else { return }
+            // At once with Reduce Motion, and in UI runs: the fill redraws the map with every
+            // country, and the tests read the screen meanwhile.
+            if reduceMotion || UITestSupport.isRunning { revealed = order.count; return }
+            // Fill one country after another; long lists speed up.
+            let step = order.count > 40 ? 0.06 : (order.count > 15 ? 0.12 : 0.25)
+            for index in 1...max(order.count, 1) {
+                try? await Task.sleep(for: .seconds(step))
+                withAnimation(.easeOut(duration: 0.25)) { revealed = index }
+            }
+        }
+    }
+}
+
+/// The atlas and the sorted count as they were when "Teilen" was tapped (`AtlasView.sharing`).
+struct SharedAtlas: Identifiable {
+    let id = UUID()
+    var atlas: TravelAtlas
+    var sortedPhotos: Int
+}
+
+extension AtlasView {
+    /// "Alle Jahre" plus every year with travel photos, for a yearly review ("Mein Reisejahr").
+    /// At the largest text sizes a menu: chips that big leave one and a half on screen.
+    @ViewBuilder
+    var yearPicker: some View {
+        if typeSize.isAccessibilitySize {
+            Menu {
+                Picker("Jahr", selection: $year) {
+                    Text("Alle Jahre").tag(Int?.none)
+                    ForEach(model.atlasYears, id: \.self) { Text(verbatim: String($0)).tag(Int?.some($0)) }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                MenuChoiceLabel(text: year.map { Text(verbatim: String($0)) } ?? Text("Alle Jahre"))
+            }
+            .accessibilityLabel(Text("Jahr"))
+            .accessibilityValue(year.map { Text(verbatim: String($0)) } ?? Text("Alle Jahre"))
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.Spacing.s) {
+                    yearChip(nil)
+                    ForEach(model.atlasYears, id: \.self) { yearChip($0) }
+                }
+            }
+            .scrollClipDisabled()
+        }
+    }
+
+    private func yearChip(_ value: Int?) -> some View {
+        let selected = value == year
+        return Button {
+            withAnimation(.snappy) { year = value }
+        } label: {
+            Group {
+                if let value { Text(verbatim: String(value)) } else { Text("Alle Jahre") }
+            }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(selected ? Theme.accent : Theme.card, in: Capsule())
+            .foregroundStyle(selected ? Theme.onAccent : Color.primary)
+            // The capsule stays as it is; the tap area is 44 pt (design review W9).
+            .minimumHitTarget()
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    func storySection(_ atlas: TravelAtlas) -> some View {
+        let years = PhotoStory.availableYears(model.facts)
+        Card {
+            HStack {
+                Text("Deine Foto-Geschichte").font(.headline).accessibilityAddTraits(.isHeader)
+                Spacer()
+                Picker("Geschichte über", selection: $storyScope) {
+                    Text("Reisen").tag(PhotoStory.Scope.trips)
+                    Text("Alles").tag(PhotoStory.Scope.all)
+                    ForEach(years.prefix(10), id: \.self) { year in
+                        Text(verbatim: String(year)).tag(PhotoStory.Scope.year(year))
+                    }
+                }
+                .pickerStyle(.menu)
+                .onChange(of: storyScope) { story = nil }
+            }
+            if let story {
+                Text(story)
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .transition(.opacity)
+                ShareLink(item: story) { Label("Text teilen", systemImage: "square.and.arrow.up") }
+                    .font(.subheadline)
+            }
+            Button {
+                Task { await tell() }
+            } label: {
+                if writing {
+                    ProgressView().frame(maxWidth: .infinity)
+                        .accessibilityLabel(Text("Geschichte wird erzählt"))
+                } else {
+                    Label(story == nil ? "Erzähl meine Geschichte" : "Neu erzählen", systemImage: "apple.intelligence")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(writing)
+            Text("Geschrieben von Apple Intelligence auf deinem Gerät, nur aus Zahlen, Orten und Themen.")
+                .font(.footnote).foregroundStyle(.noteText)
+        }
+    }
+
+    func tell() async {
+        writing = true
+        defer { writing = false }
+        let facts = model.facts, scope = storyScope
+        let lines = await Task.detached(priority: .userInitiated) { PhotoStory.facts(scope, facts: facts) }.value
+        let text = await SmartAssistant.travelStory(facts: lines)
+        withAnimation { story = text ?? String(localized: "Die Geschichte konnte gerade nicht geschrieben werden. Versuch es gleich noch einmal.") }
+    }
+}
+
+/// The atlas content without scrolling (also used for rendering tests).
+struct AtlasContent: View {
+    var atlas: TravelAtlas
+    var outlines: [AtlasOutlines.Country]
+    var revealed: Int
+    /// A country tapped on the map or in the list opens its photos, pushed onto the stack's
+    /// path (`AppScreen`), not with `navigationDestination(item:)`.
+    @Environment(Navigator.self) private var navigator: Navigator?
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .largeTitle) private var numberSize: CGFloat = 56
+
+    var body: some View {
+        let order = atlas.countriesByFirstVisit
+        let shown = Array(order.prefix(revealed))
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            Card {
+                AtlasMap(outlines: outlines, highlighted: Set(shown), latest: revealed < order.count ? shown.last : nil) {
+                    Navigator.push(.country(code: $0, year: atlas.year), on: navigator)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(shown.count.formatted())
+                            .font(.system(size: numberSize, weight: .bold))
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                        Text(shown.count == 1 ? "Land" : "Länder").font(.title2.weight(.semibold))
+                    }
+                    // Locale percent with two significant digits: one country is not "0 %" (N11).
+                    Text("\(atlas.worldShare.formatted(TravelAtlas.worldShareStyle)) der Welt · \(atlas.continents.count) von 7 Kontinenten")
+                        .font(.subheadline).foregroundStyle(.noteText)
+                    if atlas.year != nil && !atlas.newCountryCodes.isEmpty {
+                        Label {
+                            Text("\(atlas.newCountryCodes.count) zum ersten Mal besucht")
+                        } icon: {
+                            Image(systemName: "sparkles")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: Theme.Spacing.m), GridItem(.flexible())], spacing: Theme.Spacing.m) {
+                tile("building.2.fill", atlas.cityCount.formatted(), atlas.cityCount == 1 ? "Stadt" : "Städte")
+                tile("airplane", atlas.tripCount.formatted(), atlas.tripCount == 1 ? "Reise" : "Reisen")
+                if atlas.year == nil, let year = atlas.sinceYear { tile("calendar", String(year), "unterwegs seit") }
+                if let days = atlas.longestTripDays {
+                    tile("clock.fill", "\(days)", days == 1 ? "Tag längste Reise" : "Tage längste Reise",
+                         detail: atlas.longestTrip.flatMap { $0.days == days ? AtlasStyle.tripCountry($0) : nil })
+                }
+            }
+
+            if let city = atlas.favoriteTripCity {
+                Card {
+                    Label { Text("Lieblingsziel: \(city)") } icon: { Image(systemName: "heart.fill").foregroundStyle(.pink) }
+                        .font(.headline)
+                }
+            }
+
+            if !shown.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(shown.enumerated()), id: \.element) { index, code in
+                        // Pushed by value: the country may push its suggestion (`AppScreen`).
+                        PushLink(.country(code: code, year: atlas.year), chevron: false) {
+                            countryRow(code)
+                                .padding(.vertical, 10)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("atlas.country")
+                        .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
+                        if index < shown.count - 1 { Divider() }
+                    }
+                }
+                .padding(.horizontal, Theme.Spacing.l)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            }
+        }
+    }
+
+    /// Flag, name, year (or "Neu") and arrow in one line. At the accessibility text sizes the
+    /// name gets the whole width under flag and arrow, and the year its own line, as the areas
+    /// of the overview do: in one line the name broke mid-word over six lines and the year
+    /// into "20" and "11" (review P3-11 / G3-01). VoiceOver reads name, then year, either way.
+    @ViewBuilder
+    private func countryRow(_ code: String) -> some View {
+        let flag = Text(TravelAtlas.flag(code)).font(.title2).accessibilityHidden(true)
+        let name = Text(AtlasStyle.countryName(code))
+        let chevron = Image(systemName: "chevron.right")
+            .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+        if typeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                HStack {
+                    flag
+                    Spacer()
+                    chevron
+                }
+                name
+                firstVisit(code)
+            }
+        } else {
+            HStack(spacing: Theme.Spacing.m) {
+                flag
+                name
+                Spacer()
+                firstVisit(code)
+                chevron
+            }
+        }
+    }
+
+    /// "Neu" for a country first seen this year, otherwise the year of the first visit; never
+    /// broken over two lines.
+    @ViewBuilder
+    private func firstVisit(_ code: String) -> some View {
+        if atlas.newCountryCodes.contains(code) {
+            Text("Neu").font(.caption.weight(.semibold))
+                .lineLimit(1).fixedSize()
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Theme.accent.opacity(0.15), in: Capsule())
+                .foregroundStyle(Theme.accent)
+        } else if let date = atlas.firstVisits[code] {
+            Text(verbatim: String(Calendar.current.component(.year, from: date)))
+                .monospacedDigit().foregroundStyle(.secondary)
+                .lineLimit(1).fixedSize()
+        }
+    }
+
+    private func tile(_ symbol: String, _ value: String, _ label: LocalizedStringKey, detail: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Image(systemName: symbol).foregroundStyle(Theme.accent).font(.subheadline)
+            Text(value).font(.title2.weight(.bold)).monospacedDigit()
+            Text(label).font(.footnote).foregroundStyle(.noteText)
+            if let detail {
+                // Where the longest trip went: flag and country.
+                Text(verbatim: detail).font(.footnote.weight(.semibold)).compactLineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Spacing.l)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Overview teaser
+
+struct AtlasTeaser: View {
+    @Environment(AppModel.self) private var model
+    @State private var outlines: [AtlasOutlines.Country] = []
+    /// Opens the atlas. The overview pushes it, so it stays open while the teaser goes away
+    /// for a moment (the atlas is worked out again during a run).
+    var onOpen: () -> Void
+
+    var body: some View {
+        let atlas = model.travelAtlas()
+        if !atlas.countryCodes.isEmpty {
+            Button {
+                onOpen()
+            } label: {
+                Card {
+                    AtlasMap(outlines: outlines, highlighted: atlas.countryCodes)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Dein Reise-Atlas").font(.headline)
+                            Text(Counted.join([String(localized: "\(atlas.countryCodes.count) Länder"), String(localized: "\(atlas.cityCount) Städte"),
+                                               String(localized: "\(atlas.tripCount) Reisen")]))
+                                .font(.subheadline).foregroundStyle(.noteText)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .task { outlines = await AtlasOutlines.shared.load(from: model.worldMap) }
+        }
+    }
+}
+
+// MARK: - Share image (story format 1080 × 1920)
+
+/// Light, bold share image with a real photo from the favorite destination on top.
+/// Always rendered in light mode so it looks the same for everyone who receives it.
+struct ShareCard: View {
+    var atlas: TravelAtlas
+    var sortedPhotos: Int
+    var outlines: [AtlasOutlines.Country]
+    var cover: UIImage? = nil
+
+    var body: some View {
+        let order = atlas.countriesByFirstVisit
+        VStack(alignment: .leading, spacing: 0) {
+            if let cover, let city = atlas.favoriteTripCity {
+                ZStack(alignment: .bottomLeading) {
+                    Image(uiImage: cover).resizable().scaledToFill()
+                        .frame(width: 720, height: 460).clipped()
+                    LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Lieblingsziel").font(.system(size: 24, weight: .semibold)).opacity(0.9)
+                        Text(verbatim: city).font(.system(size: 60, weight: .bold)).lineLimit(1).minimumScaleFactor(0.5)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 52).padding(.bottom, 36)
+                }
+                .frame(width: 720, height: 460)
+            }
+            VStack(alignment: .leading, spacing: 20) {
+                Group {
+                    if let year = atlas.year {
+                        Text("Mein Reisejahr \(String(year))")
+                    } else {
+                        Text("Mein Reise-Atlas")
+                    }
+                }
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(AtlasStyle.visited)
+                if order.isEmpty {
+                    Text(sortedPhotos.formatted()).font(.system(size: 120, weight: .bold)).monospacedDigit()
+                    Text("Fotos sortiert").font(.system(size: 38, weight: .semibold))
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(order.count.formatted()).font(.system(size: 116, weight: .bold)).monospacedDigit()
+                                .minimumScaleFactor(0.5).lineLimit(1)
+                            Text(order.count == 1 ? "Land" : "Länder").font(.system(size: 42, weight: .semibold))
+                        }
+                        if atlas.year != nil && !atlas.newCountryCodes.isEmpty {
+                            Text("davon \(atlas.newCountryCodes.count) zum ersten Mal · \(atlas.continents.count) von 7 Kontinenten")
+                                .font(.system(size: 24, weight: .medium)).foregroundStyle(.secondary)
+                        } else {
+                            Text("\(atlas.worldShare.formatted(TravelAtlas.worldShareStyle)) der Welt · \(atlas.continents.count) von 7 Kontinenten")
+                                .font(.system(size: 24, weight: .medium)).foregroundStyle(.secondary)
+                        }
+                    }
+                    AtlasMap(outlines: outlines, highlighted: atlas.countryCodes)
+                        .padding(.vertical, cover == nil ? 24 : 4)
+                    flags(order)
+                    HStack(spacing: 40) {
+                        stat(atlas.cityCount, atlas.cityCount == 1 ? "Stadt" : "Städte")
+                        stat(atlas.tripCount, atlas.tripCount == 1 ? "Reise" : "Reisen")
+                        if let days = atlas.longestTripDays, days > 1 {
+                            VStack(alignment: .leading, spacing: 4) {
+                                stat(days, "Tage am Stück")
+                                if let trip = atlas.longestTrip, trip.days == days {
+                                    Text(verbatim: AtlasStyle.tripCountry(trip))
+                                        .font(.system(size: 22, weight: .semibold))
+                                }
+                            }
+                        }
+                    }
+                    if cover == nil, let city = atlas.favoriteTripCity {
+                        Label { Text("Lieblingsziel: \(city)") } icon: { Image(systemName: "heart.fill").foregroundStyle(.pink) }
+                            .font(.system(size: 26, weight: .semibold))
+                    }
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 10) {
+                    Image(systemName: "rectangle.stack.fill").foregroundStyle(AtlasStyle.visited)
+                    Text("\(AppInfo.name) · Fotos sortiert, alles auf dem Gerät")
+                }
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 52)
+            .padding(.top, cover == nil ? 110 : 40)
+            .padding(.bottom, 56)
+        }
+        .frame(width: 720, height: 1280, alignment: .topLeading)
+        .background(Color.white)
+        .environment(\.colorScheme, .light)
+    }
+
+    /// One row of flags; the rest is summarized as "+N".
+    private func flags(_ order: [String]) -> some View {
+        let limit = order.count > 11 ? 10 : 11
+        let shown = order.prefix(limit).map(TravelAtlas.flag).joined(separator: " ")
+        return HStack(spacing: 10) {
+            Text(verbatim: shown).font(.system(size: 36)).lineLimit(1)
+            if order.count > limit {
+                Text("+\(order.count - limit)").font(.system(size: 26, weight: .semibold)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func stat(_ value: Int, _ label: LocalizedStringKey) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value.formatted()).font(.system(size: 44, weight: .bold)).monospacedDigit()
+            Text(label).font(.system(size: 20, weight: .medium)).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Preview of the share image before anything leaves the app; the photo can be turned off.
+struct ShareCardSheet: View {
+    var atlas: TravelAtlas
+    var sortedPhotos: Int
+    var map: OfflineWorldMap?
+    @Environment(\.dismiss) private var dismiss
+    @State private var outlines: [AtlasOutlines.Country] = []
+    @State private var cover: UIImage?
+    @State private var showPhoto = true
+
+    private var image: ShareCardImage {
+        ShareCardImage(atlas: atlas, sortedPhotos: sortedPhotos, map: map, cover: showPhoto ? cover : nil)
+    }
+
+    var body: some View {
+        NavigationRoot {
+            VStack(spacing: Theme.Spacing.l) {
+                GeometryReader { proxy in
+                    let scale = min(proxy.size.width / 720, proxy.size.height / 1280)
+                    ShareCard(atlas: atlas, sortedPhotos: sortedPhotos, outlines: outlines, cover: showPhoto ? cover : nil)
+                        .scaleEffect(scale, anchor: .topLeading)
+                        .frame(width: 720 * scale, height: 1280 * scale, alignment: .topLeading)
+                        .clipShape(RoundedRectangle(cornerRadius: 24 * scale * 2, style: .continuous))
+                        // The preview is a picture of the image that gets shared, scaled down
+                        // to fit: one element for VoiceOver. On the GeometryReader this did not
+                        // hide the card's own texts, which the audit then measured at 10 pt.
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Text("Vorschau des Teilen-Bilds"))
+                        .accessibilityAddTraits(.isImage)
+                        .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                if cover != nil {
+                    Toggle("Foto vom Lieblingsziel zeigen", isOn: $showPhoto.animation())
+                }
+                ShareLink(item: image, preview: SharePreview(Text("Mein Reise-Atlas"), image: Image(systemName: "map.fill"))) {
+                    Label("Teilen", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+            .padding(Theme.Spacing.l)
+            .background(Theme.background)
+            .navigationTitle("Reise-Atlas teilen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Fertig") { dismiss() } }
+            }
+            .task {
+                outlines = await AtlasOutlines.shared.load(from: map)
+                if let id = atlas.favoriteTripCover { cover = await ShareCardImage.loadCover(id) }
+            }
+        }
+        .presentationDetents([.large])
+    }
+}
+
+/// Rendered to PNG only when the user actually shares.
+struct ShareCardImage: Transferable {
+    var atlas: TravelAtlas
+    var sortedPhotos: Int
+    var map: OfflineWorldMap?
+    var cover: UIImage?
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: .png) { card in
+            try await card.pngData()
+        }
+    }
+
+    @MainActor
+    func pngData(scale: CGFloat = 1.5) async throws -> Data {
+        let outlines = await AtlasOutlines.shared.load(from: map)
+        let renderer = ImageRenderer(content: ShareCard(atlas: atlas, sortedPhotos: sortedPhotos, outlines: outlines, cover: cover))
+        renderer.scale = scale  // 720 × 1280 pt × 1.5 = 1080 × 1920 px
+        let png = MainThreadWatch.shared.section("share image") { renderer.uiImage?.pngData() }
+        guard let data = png else { throw CocoaError(.fileWriteUnknown) }
+        return data
+    }
+
+    /// Loads the cover photo in good quality from the device only (no iCloud download).
+    /// Nonisolated: PhotoKit may call the result handler on a background queue.
+    /// A cover Photos does not hand over within 15 s (Photos stuck) is left out: the card is
+    /// shared without it instead of the share button waiting for good (app-speed, 18.11.2026).
+    /// The fetch before it is bounded too, on the lane of pictures on screen
+    /// (`PhotoKitLibrary.fetchAssets`).
+    nonisolated static func loadCover(_ id: AssetID) async -> UIImage? {
+        guard let asset = try? await PhotoKitLibrary.fetchAssets([id], what: "fetchCover", lane: .thumbnail).assets.first else { return nil }
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .exact
+        options.isNetworkAccessAllowed = false
+        let once = CoverAnswer()
+        return await withCheckedContinuation { continuation in
+            let request = PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 1080, height: 1080),
+                                                                contentMode: .aspectFill, options: options) { image, _ in
+                if once.first() { continuation.resume(returning: image) }
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 15) {
+                guard once.first() else { return }
+                PHImageManager.default().cancelImageRequest(request)
+                continuation.resume(returning: nil)
+            }
+        }
+    }
+}
+
+/// The cover request is answered once: by Photos or by the time limit, whichever comes first.
+private final class CoverAnswer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var answered = false
+
+    func first() -> Bool {
+        lock.withLock {
+            guard !answered else { return false }
+            answered = true
+            return true
+        }
+    }
+}

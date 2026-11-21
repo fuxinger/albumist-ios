@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Packs the committed code for an outside review (ChatGPT, Gemini …) into one ZIP:
-# PRUEFAUFTRAG.md (the review prompt) at the top, the code in sortly/ (source, tests, docs);
+# PRUEFAUFTRAG.md (the review prompt) at the top, the code in albumist/ (source, tests, docs);
 # leaves out the 4.6 MB world map data and images.
 # Usage: tools/make_review_zip.sh <output.zip>
 set -euo pipefail
 out=${1:?output zip path}
 cd "$(git rev-parse --show-toplevel)"
 rm -f "$out"
-git archive --format=zip --prefix=sortly/ -o "$out" HEAD -- . \
-  ':(exclude)Sources/SortlyWorldMap/Resources' \
-  ':(exclude)App/Sortly/Resources/Assets.xcassets' \
+git archive --format=zip --prefix=albumist/ -o "$out" HEAD -- . \
+  ':(exclude)Sources/AlbumistWorldMap/Resources' \
+  ':(exclude)App/Albumist/Resources/Assets.xcassets' \
   ':(exclude)docs/launch/name-candidates.txt'
 python3 - "$out" <<'PY'
 import subprocess, sys, zipfile

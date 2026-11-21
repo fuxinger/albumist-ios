@@ -1,0 +1,203 @@
+import Foundation
+
+extension StepState {
+    /// Reason of the steps the user chose to leave undone ("So lassen" after an interruption).
+    public static let leftByUserReason = "left by user"
+    /// After an interruption it was not clear whether photos were already added; nothing is
+    /// added again without a new preview (audit 2, 1.1, 1.2).
+    public static let unclearReason = "outcome unclear after interruption"
+    /// A step left out because the user deleted the album for this suggestion meanwhile.
+    public static let deletedByUserReason = "album deleted by the user meanwhile"
+    /// The user answered "Don't Allow" when iOS asked whether Albumist may delete albums.
+    public static let deletionDeclinedReason = "deletion declined in Photos"
+    /// Photos took the deletion without an error, but the albums or folders were still there
+    /// afterwards (seen on an iPhone right after creating a large album, 15.11.).
+    public static let deletionNotAppliedReason = "deletion not applied by Photos"
+    /// Photos took the deletion, but the album list afterwards could not show whether the
+    /// album is gone (plugin review N6). What it held stays written down for an undo.
+    public static let deletionUnverifiedReason = "deletion could not be verified"
+    /// An undo was to bring back a deleted album, but the album is still there.
+    public static let stillThereReason = "album is still there"
+
+    /// A deletion that happened, or may have happened: an undo brings the album back if it
+    /// is gone by then.
+    var deletionMayHaveHappened: Bool {
+        switch self {
+        case .succeeded: true
+        case .failed(let reason): reason == Self.deletionUnverifiedReason
+        default: false
+        }
+    }
+
+    /// Reasons of steps that were skipped only because an earlier step of the same plan
+    /// failed; they can run once that step works.
+    static let dependencyReasons: Set<String> = [
+        "parent folder was not created", "target album was not created", "target folder was not created",
+    ]
+
+    /// Failed, skipped because an earlier step failed, or left undone by the user: a retry
+    /// may run it again. A deliberate skip (an album kept because it holds the user's photos)
+    /// is not retried.
+    public var canBeRetried: Bool {
+        switch self {
+        case .failed: true
+        case .skipped(let reason): reason == Self.leftByUserReason || Self.dependencyReasons.contains(reason)
+        default: false
+        }
+    }
+}
+
+/// "Erneut versuchen" for a plan that did not finish everything (I16): a new plan with only
+/// the steps that did not happen. What the first run created is referred to by its real id
+/// now, what it could not create is created again, and a step that already succeeded never
+/// runs twice. Albums the user deleted since then are respected: nothing is added to them.
+public struct RetryPlanner: Sendable {
+    public init() {}
+
+    /// - Parameter answered: ids of new albums whose create request returned in this launch
+    ///   (`PhotoLibraryWriting.createAnswered`): such an album is there or never comes.
+    public func retryPlan(for executed: ChangePlan, current: CollectionInventory, answered: Set<CollectionID> = [],
+                          id: AlbumistID = AlbumistID(), now: Date = Date()) -> ChangePlan? {
+        guard executed.reverts == nil else { return nil }
+        let retried = executed.steps.filter { $0.state.canBeRetried }
+        guard !retried.isEmpty else { return nil }
+        let made = { (key: String) in Self.made(key, executed, current) }
+
+        // Planned keys that this retry creates again (their create step did not happen).
+        var recreated = Set<String>()
+        for step in retried {
+            switch step.operation {
+            case .createFolder(let key, _, _), .createAlbum(let key, _, _):
+                // Created by the first run although its check failed, or landed after its
+                // request got no answer: that one is used, no second album is made (audit 2,
+                // 1.7; app-speed review).
+                if made(key) != nil { continue }
+                // It may still land: not made a second time now (nor what goes into it); the
+                // app says from when it can be tried again (`waitsForLateCreate`).
+                if Self.lateCreate(key, executed, answered: answered, now: now) != nil { continue }
+                recreated.insert(key)
+            default: break
+            }
+        }
+
+        /// A planned key becomes the album the first run created, if it still exists; it
+        /// stays planned if this retry creates it; otherwise (deleted by the user since) the
+        /// step that needs it is dropped.
+        enum Resolution<Ref> { case ref(Ref), drop }
+        func folder(_ ref: FolderRef) -> Resolution<FolderRef> {
+            guard case .planned(let key) = ref else { return .ref(ref) }
+            if recreated.contains(key) { return .ref(ref) }
+            if let id = made(key) { return .ref(.existing(id)) }
+            return .drop
+        }
+        func album(_ ref: AlbumRef) -> Resolution<AlbumRef> {
+            guard case .planned(let key) = ref else { return .ref(ref) }
+            if recreated.contains(key) { return .ref(ref) }
+            if let id = made(key) { return .ref(.existing(id)) }
+            return .drop
+        }
+
+        var steps: [PlanStep] = []
+        var touched = Set<CollectionID>()
+        func append(_ op: PlannedOperation, _ source: AlbumistID?) {
+            steps.append(PlanStep(id: "\(id.rawValue)-\(steps.count)-\(StableHash.hex(String(describing: op)).prefix(12))",
+                                  operation: op, sourceID: source))
+        }
+        for step in retried {
+            switch step.operation {
+            case let .createFolder(key, title, parent):
+                guard recreated.contains(key), case .ref(let p) = folder(parent) else { continue }
+                if case .existing(let pid) = p { touched.insert(pid) }
+                append(.createFolder(key: key, title: title, parent: p), step.sourceID)
+            case let .createAlbum(key, title, parent):
+                guard recreated.contains(key), case .ref(let p) = folder(parent) else { continue }
+                if case .existing(let pid) = p { touched.insert(pid) }
+                append(.createAlbum(key: key, title: title, parent: p), step.sourceID)
+            case let .addAssets(ref, assets):
+                guard case .ref(let a) = album(ref) else { continue }
+                // Photos the first run already added (and the user kept) are not added again.
+                var wanted = assets
+                if case .existing(let albumID) = a, let members = current[albumID]?.assetIDs {
+                    wanted = assets.filter { !members.contains($0) }
+                }
+                guard !wanted.isEmpty else { continue }
+                if case .existing(let albumID) = a { touched.insert(albumID) }
+                append(.addAssets(album: a, assets: wanted), step.sourceID)
+            case let .renameCollection(cid, from, to):
+                guard current[cid] != nil else { continue }
+                touched.insert(cid)
+                append(.renameCollection(cid, from: from, to: to), step.sourceID)
+            case let .moveCollection(cid, from, to):
+                guard current[cid] != nil, case .ref(let target) = folder(to) else { continue }
+                touched.insert(cid)
+                append(.moveCollection(cid, from: from, to: target), step.sourceID)
+            case let .removeAssets(cid, assets):
+                guard let members = current[cid]?.assetIDs else { continue }
+                let still = assets.filter { members.contains($0) }
+                guard !still.isEmpty else { continue }
+                touched.insert(cid)
+                append(.removeAssets(album: cid, assets: still), step.sourceID)
+            case let .deleteCollection(cid, title):
+                guard current[cid] != nil else { continue }
+                append(.deleteCollection(cid, title: title), step.sourceID)
+            }
+        }
+        guard !steps.isEmpty else { return nil }
+
+        var baseline: [CollectionID: String] = [:]
+        for cid in touched { if let c = current[cid] { baseline[cid] = c.fingerprint } }
+        var plan = ChangePlan(
+            id: id,
+            createdAt: now,
+            confirmedAt: nil,
+            status: .draft,
+            baseline: baseline,
+            baselineCollectionIDs: Set(current.collections.keys),
+            steps: steps,
+            conflicts: [],
+            notes: [],
+            resolvedKeys: [:]
+        )
+        plan.retries = executed.id
+        // An album that landed after its request got no answer counts like one the first run made.
+        let landed = executed.steps.compactMap { step -> CollectionID? in
+            guard let key = step.operation.plannedKey, let id = made(key), executed.resolvedKeys[key] != id else { return nil }
+            return id
+        }
+        // Albums the first run made or verifiably extended were counted against the free
+        // albums with it; filling them up now uses no further one (plugin review N4: an
+        // existing album the first run had partly filled was counted a second time).
+        plan.albumsFromRetriedPlan = Set(executed.resolvedKeys.values).union(executed.extendedAlbums).union(landed)
+        if let guards = executed.deleteGuards {
+            let deleting = Set(steps.compactMap { if case .deleteCollection(let cid, _) = $0.operation { return cid }; return nil })
+            plan.deleteGuards = guards.filter { deleting.contains($0.key) }
+        }
+        return plan
+    }
+
+    /// Until when "Fehlendes erneut versuchen" has to wait: a new album or folder the plan asked
+    /// for whose request got no answer is not in Photos and may still land
+    /// (`ChangeExecutor.lateCreateWait`). Nil when nothing has to wait.
+    public func waitsForLateCreate(_ executed: ChangePlan, current: CollectionInventory, answered: Set<CollectionID> = [],
+                                   now: Date = Date()) -> Date? {
+        guard executed.reverts == nil else { return nil }
+        return executed.steps.filter { $0.state.canBeRetried }.compactMap { step -> Date? in
+            guard let key = step.operation.plannedKey, Self.made(key, executed, current) == nil else { return nil }
+            return Self.lateCreate(key, executed, answered: answered, now: now)
+        }.max()
+    }
+
+    /// The album or folder the first run made for `key`, if it is still there: the id Photos
+    /// returned, or the one written down inside the change or of a request that got no answer
+    /// (it landed: Albumist's own).
+    static func made(_ key: String, _ executed: ChangePlan, _ current: CollectionInventory) -> CollectionID? {
+        if let id = executed.resolvedKeys[key], current[id] != nil { return id }
+        if let id = executed.record?.maybeCreated[key], current[id] != nil { return id }
+        return nil
+    }
+
+    static func lateCreate(_ key: String, _ executed: ChangePlan, answered: Set<CollectionID>, now: Date) -> Date? {
+        guard let record = executed.record, let maybe = record.maybeCreated[key] else { return nil }
+        return record.lateCreateWaitsUntil(key, answered: answered.contains(maybe), now: now)
+    }
+}

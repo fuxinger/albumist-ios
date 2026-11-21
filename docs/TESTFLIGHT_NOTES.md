@@ -17,6 +17,20 @@ Buildnummer und der Commit werden automatisch angehängt.
   (Beschluss 17.11.).
 
 <!-- testflight:start -->
+Danke fürs Testen! Dieser Build macht die App bei großen Mediatheken ruhiger. Bitte achte besonders auf:
+
+- Update ohne Verlust: Die Daten der App ziehen beim ersten Start in eine Datei mit dem neuen Namen um. Danach sollten deine Analyse, deine Vorschläge, deine Alben von Albumist und „Rückgängig“ genau wie vorher da sein. Fängt die App von vorn an zu analysieren oder fehlt etwas, melde das bitte sofort.
+- Große Mediatheken: Übersicht, Atlas und „Dein Zuhause“ rechnen jetzt im Hintergrund. Scrollen und Tippen sollten auch während einer Analyse flüssig bleiben. Atlas und „Dein Zuhause“ zeigen dafür manchmal kurz, dass sie laden.
+- Atlas teilen: „Teilen“ schickt die Karte so, wie sie beim Tippen aussah, auch wenn die Übersicht gerade neu lädt.
+- „Seit wann wohnst du dort?“: Der gewählte Ort zeigt einen Kreisel, solange das Datum vorgeschlagen wird.
+
+Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
+<!-- testflight:end -->
+
+## Frühere Builds
+
+### Build 40 (20.11.2026)
+
 Danke fürs Testen! Dieser Build bringt weitere Korrekturen aus der großen Prüfung. Bitte achte besonders auf:
 
 - Monatsalben nach Ortszeit: Fotos zählen jetzt zu dem Tag und Monat, den die Uhr am Aufnahmeort zeigte, wie in Apple Fotos. Ein Silvesterfoto aus New York landet also im Dezember, nicht im Januar.
@@ -35,9 +49,6 @@ Danke fürs Testen! Dieser Build bringt weitere Korrekturen aus der großen Prü
 - Weniger warten: Ein neuer Analyse-Lauf liest nur die Fotos neu, die sich geändert haben.
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
-<!-- testflight:end -->
-
-## Frühere Builds
 
 - Build nach PR #11 (19.11.2026): Alben-Tab ohne doppelte Alben, Fotoansicht schneller, größte Schrift ganz lesbar, Suche ohne „nicht erkannt“ neben einem Vorschlag, Englisch korrigiert.
 - Build 38 (19.11.2026, erster Upload ohne Klick): Orte nach der Stadt, Ortsnamen ohne Warten, Ring „Sortiert“ bis 100 %, keine Dokumente als Vorschau, Namensfeld wie in iOS, Pause und Reisen, umstrittene Gebiete, Gleicher Name, Fotos mit Zukunftsdatum, Umkreis-Suche, Akku im Diagnosebericht.

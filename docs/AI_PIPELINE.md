@@ -41,7 +41,7 @@ mindestens 0,35). Themenalben entstehen standardmäßig erst ab 15 Fotos mit Stu
 Fotos ohne GPS werden nur zeitlich zugeordnet und als „nur vorgeschlagen“ markiert.
 
 ## Trainings- bzw. Beispielstrategie
-Kein Training. Die Logik wird mit synthetischen Bibliotheken getestet (`SortlyTestSupport`).
+Kein Training. Die Logik wird mit synthetischen Bibliotheken getestet (`AlbumistTestSupport`).
 Für spätere Tests mit echten Bildern werden nur frei lizenzierte Bilder (CC0/gemeinfrei)
 mit Lizenzliste verwendet.
 

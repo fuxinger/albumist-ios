@@ -41,19 +41,19 @@ FPS = ui_groups.Groups(HEAD).fingerprints()
 NAMES = ["device", "full", "other", "small"]
 TITLES = {"device": "device conditions", "full": "full flow", "other": "other flows", "small": "small iPhone"}
 # A test-only commit after HEAD: a longer wait in FlowUITests.swift (groups full, other, small).
-TEST_ONLY = repo(**{"App__SortlyUITests__FlowUITests.swift":
+TEST_ONLY = repo(**{"App__AlbumistUITests__FlowUITests.swift":
                     FLOW.replace("func test2_Other() throws {}", "func test2_Other() throws { sleep(20) }")})
 TEST_ONLY_FPS = ui_groups.Groups(TEST_ONLY).fingerprints()
 # A commit after HEAD that only changes comments and indentation in the same file: not a fix.
-COMMENT_ONLY = repo(**{"App__SortlyUITests__FlowUITests.swift":
+COMMENT_ONLY = repo(**{"App__AlbumistUITests__FlowUITests.swift":
                        FLOW.replace("    func test2_Other", "    // waits 20 s, measured in run 1\n  func test2_Other")})
 COMMENT_ONLY_FPS = ui_groups.Groups(COMMENT_ONLY).fingerprints()
-# The same app where the device group reads the quick switch (SORTLY_UI_QUICK, test02 skips).
-QUICK_DEVICE = DEVICE.replace("func test02_Cold() {", 'func test02_Cold() {\n        if env["SORTLY_UI_QUICK"] == "1" { return }')
-QUICK = repo(**{"App__SortlyUITests__DeviceUITests.swift": QUICK_DEVICE})
+# The same app where the device group reads the quick switch (ALBUMIST_UI_QUICK, test02 skips).
+QUICK_DEVICE = DEVICE.replace("func test02_Cold() {", 'func test02_Cold() {\n        if env["ALBUMIST_UI_QUICK"] == "1" { return }')
+QUICK = repo(**{"App__AlbumistUITests__DeviceUITests.swift": QUICK_DEVICE})
 QUICK_FULL, QUICK_FAST = ui_groups.Groups(QUICK).fingerprints(), ui_groups.Groups(QUICK).fingerprints(quick=True)
 NOW = datetime(2026, 11, 20, tzinfo=timezone.utc)
-FAILED_LOG = "Test Case '-[SortlyUITests.DeviceUITests test01_Hot]' failed (3.0 seconds).\n"
+FAILED_LOG = "Test Case '-[AlbumistUITests.DeviceUITests test01_Hot]' failed (3.0 seconds).\n"
 
 
 def name(group, app=APP, tests=None, prefix=""):
@@ -308,7 +308,7 @@ class RedFromTheLogTests(unittest.TestCase):
         self.assertEqual(self.entries({11: stamp + "UI_RESULT device fail\n" + stamp + "UI_RESULT device pass\n"}),
                          "none")
         # An assertion echoed while its test (continueAfterFailure) still ran, then a cancel: red.
-        self.assertEqual(self.entries({11: stamp + "UI_LIVE /x.swift:3: error: -[SortlyUITests.DeviceUITests test01_Hot] : "
+        self.assertEqual(self.entries({11: stamp + "UI_LIVE /x.swift:3: error: -[AlbumistUITests.DeviceUITests test01_Hot] : "
                                            "XCTAssertTrue failed\n" + stamp + "##[error]The operation was canceled.\n"}),
                          "red")
         # A failure echoed while the pass ran (UI_LIVE), then a cancel: red.
@@ -330,7 +330,7 @@ class RedFromTheLogTests(unittest.TestCase):
         self.assertEqual(self.entries({11: "UI_VERDICT device first: fail (a test failed)\n"}), "red")
         self.assertEqual(self.entries({11: "UI_RESULT device fail\n"}), "red")
         # Cancelled while a test ran, no result in the log: no result.
-        cancelled = "Test Case '-[SortlyUITests.DeviceUITests test01_Hot]' started.\n##[error]The operation was canceled.\n"
+        cancelled = "Test Case '-[AlbumistUITests.DeviceUITests test01_Hot]' started.\n##[error]The operation was canceled.\n"
         self.assertEqual(self.entries({11: cancelled}), "none")
         # ui_tests.py's own result line decides: a testmanagerd crash in every pass shows a
         # failed test case but is no result.
@@ -596,7 +596,7 @@ class CommandTests(unittest.TestCase):
         code, log = self.gate(red + [run(9, "b" * 40, here, workflow="testflight.yml")], verifier=verifier)
         self.assertEqual(code, 0, log)
         self.assertIn("::warning title=UI red cleared by a shared change::device: red for this app in run 1", log)
-        own = FakeVerifier(VERIFIER.commits, changed={"a" * 40: ["App/SortlyUITests/DeviceUITests.swift"]})
+        own = FakeVerifier(VERIFIER.commits, changed={"a" * 40: ["App/AlbumistUITests/DeviceUITests.swift"]})
         self.assertNotIn("red cleared", self.gate(red + [run(9, "b" * 40, here, workflow="testflight.yml")],
                                                    verifier=own)[1])
 
@@ -652,7 +652,7 @@ class MergeContentTests(unittest.TestCase):
         # The fixture lists the stress test in no group by name, so its key follows every group's.
         self.assertEqual(ui_evidence.content_differences(HEAD, TEST_ONLY),
                          [f"the test code of {g}" for g in ("full", "other", "small")] + ["the stress pass's test code"])
-        app = repo(**{"App__Sortly__App__AlbumistApp.swift": "@main struct AlbumistApp { let x = 1 }"})
+        app = repo(**{"App__Albumist__App__AlbumistApp.swift": "@main struct AlbumistApp { let x = 1 }"})
         self.assertEqual(ui_evidence.content_differences(HEAD, app)[0], "the app")
 
     def git(self, folder, *args):
@@ -674,7 +674,7 @@ class MergeContentTests(unittest.TestCase):
             self.git(folder, "init", "-q", "-b", "main")
             self.commit(folder, HEAD.contents, "base")
             self.git(folder, "checkout", "-q", "-b", "branch")
-            self.commit(folder, {"App/Sortly/App/Feature.swift": "struct Feature {}"}, "branch work")
+            self.commit(folder, {"App/Albumist/App/Feature.swift": "struct Feature {}"}, "branch work")
             self.git(folder, "checkout", "-q", "main")
             self.commit(folder, {"docs/NOTES.md": "# notes"}, "docs on main")
             self.git(folder, "checkout", "-q", "branch")
@@ -683,13 +683,13 @@ class MergeContentTests(unittest.TestCase):
             self.assertIn("UI_MERGE_CONTENT same app and test fingerprints", log.getvalue())
             # main changes the app: the branch's greens no longer stand for the merge.
             self.git(folder, "checkout", "-q", "main")
-            self.commit(folder, {"Sources/SortlyCore/Core.swift": "public struct Core { let y = 2 }"}, "app on main")
+            self.commit(folder, {"Sources/AlbumistCore/Core.swift": "public struct Core { let y = 2 }"}, "app on main")
             self.git(folder, "checkout", "-q", "branch")
             with contextlib.redirect_stdout(io.StringIO()) as log:
                 self.assertEqual(ui_evidence.merge_content("main", cwd=folder), 1)
             self.assertIn("::error title=UI merge content::merging into main changes the app", log.getvalue())
             # A conflict is no merge content at all.
-            self.commit(folder, {"Sources/SortlyCore/Core.swift": "public struct Core { let z = 3 }"}, "conflict")
+            self.commit(folder, {"Sources/AlbumistCore/Core.swift": "public struct Core { let z = 3 }"}, "conflict")
             with contextlib.redirect_stdout(io.StringIO()) as log:
                 self.assertEqual(ui_evidence.merge_content("main", cwd=folder), 1)
             self.assertIn("does not merge cleanly", log.getvalue())
@@ -722,7 +722,7 @@ class StressEvidenceTests(unittest.TestCase):
         self.assertNotEqual(ui_evidence.stress_fingerprint(groups, "10000", "16"), small)
         docs = ui_groups.Groups(repo(**{"docs__NOTES.md": "# notes"}))
         self.assertEqual(ui_evidence.stress_keys(docs), STRESS)
-        device = ui_groups.Groups(repo(**{"App__SortlyUITests__DeviceUITests.swift": DEVICE + "\n// x\nfunc more() {}\n"}))
+        device = ui_groups.Groups(repo(**{"App__AlbumistUITests__DeviceUITests.swift": DEVICE + "\n// x\nfunc more() {}\n"}))
         self.assertNotEqual(ui_evidence.stress_keys(device)["stress-10000-15"], small)
         self.assertTrue(ui_evidence.is_stress("stress-10000-15"))
         self.assertFalse(ui_evidence.is_stress("device"))

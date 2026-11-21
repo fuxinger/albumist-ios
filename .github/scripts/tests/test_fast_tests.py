@@ -2,8 +2,8 @@
 can be repeated (no unseeded randomness), and a test file is named after what it tests, not after
 the review round that asked for it.
 
-No script: the rules read the Swift files of the test targets (Tests/, App/SortlyTests,
-App/SortlyUITests) directly. CI runs them with the other script tests ("check" in ci.yml).
+No script: the rules read the Swift files of the test targets (Tests/, App/AlbumistTests,
+App/AlbumistUITests) directly. CI runs them with the other script tests ("check" in ci.yml).
 """
 import os
 import pathlib
@@ -12,7 +12,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = pathlib.Path(HERE).parents[2]
-TEST_DIRS = ("Tests", "App/SortlyTests", "App/SortlyUITests")
+TEST_DIRS = ("Tests", "App/AlbumistTests", "App/AlbumistUITests")
 
 # Randomness the test cannot repeat: the system generator, directly or behind shuffled(),
 # randomElement() and T.random(in:) without `using:` (review P5-14 c: a red run could not be

@@ -85,7 +85,7 @@ BLOBS = {
         {"test": "DeviceConditionUITests.test07", "first": ui_tests.INSIDE, "reason": "slow plan"}]}),
     "u2": artifact_zip({"group": "stress", "boot": [], "retries": [], "flaky": []}),
     "u3": artifact_zip({"group": "flow-other", "boot": [], "retries": [{"reasons": ["AX"], "result": "pass"}], "flaky": [
-        {"test": "SortlyFlowUITests.test4", "first": "failed", "reason": "AX"}]}),
+        {"test": "AlbumistFlowUITests.test4", "first": "failed", "reason": "AX"}]}),
 }
 
 
@@ -183,7 +183,7 @@ class CollectTests(unittest.TestCase):
         self.assertIn("2 of 2 runs read", out)
         self.assertIn("| device | 0 | 1 | 0 | 1 | 1 |", out)
         self.assertIn("| flow-other | 1 | 0 | 1 | 0 | 0 |", out)
-        self.assertIn("| SortlyFlowUITests.test4 | 1 | passed only on the repeat |", out)
+        self.assertIn("| AlbumistFlowUITests.test4 | 1 | passed only on the repeat |", out)
         self.assertIn("| DeviceConditionUITests.test07 | 1 | retried inside the test |", out)
         self.assertIn("::notice title=UI history (3 days)::6 group job(s) not green (3 test red, 1 no result, "
                       "1 machinery, 1 cancelled); 2 flaky test(s), 1 simulator repeat(s), over 2 of 2 runs", err)

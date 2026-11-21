@@ -2,6 +2,7 @@
 
 Usage: python3 .github/scripts/toolchain.py xcode [--runtime]
        python3 .github/scripts/toolchain.py xcodegen
+       python3 .github/scripts/toolchain.py swiftlint
 
 Every Mac job calls this instead of picking "the newest Xcode" (which on image xcode-27-arm64
 20261112 is a beta, and a beta build is refused by App Store Connect). It:
@@ -16,6 +17,12 @@ Every Mac job calls this instead of picking "the newest Xcode" (which on image x
 .github/toolchain.json) into $RUNNER_TEMP/xcodegen and puts it on $GITHUB_PATH, instead of
 `brew install xcodegen` (whatever Homebrew has that day). A download that does not match the
 checksum stops the job.
+
+`swiftlint` installs the pinned SwiftLint the same way, from .github/lint-tools.json (a file of
+its own: SwiftLint only reads the code, it does not build the app, so a new version must not
+count in the app fingerprint of the UI runs the way toolchain.json does). It is the statically
+linked Linux binary of the release, run in the swift container of the Linux jobs (ci.yml,
+"SwiftLint report"), which has the libsourcekitdInProc.so it loads.
 """
 from __future__ import annotations
 
@@ -33,6 +40,8 @@ import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pick_simulator import pins  # noqa: E402
+
+LINT_TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint-tools.json")
 
 
 def xcode_problem(version_output: str, pin: dict) -> str | None:
@@ -67,9 +76,10 @@ def fail(message: str) -> int:
     return 1
 
 
-def install_xcodegen(pin: dict, dest: str, fetch=None) -> str:
-    """Downloads the pinned XcodeGen zip, checks its sha256, unpacks it into dest and returns the
-    directory of the xcodegen binary. Raises ValueError on a wrong checksum."""
+def install_zip(pin: dict, dest: str, binary: str, name: str, fetch=None) -> str:
+    """Downloads the pinned release zip, checks its sha256, unpacks it into dest and returns the
+    directory of `binary` (its path inside the zip). Raises ValueError on a wrong checksum or a
+    path that would leave dest."""
     def download(url):
         last = None
         for attempt in range(3):
@@ -83,32 +93,58 @@ def install_xcodegen(pin: dict, dest: str, fetch=None) -> str:
     data = (fetch or download)(pin["url"])
     digest = hashlib.sha256(data).hexdigest()
     if digest != pin["sha256"]:
-        raise ValueError(f"XcodeGen {pin['version']} download has sha256 {digest}, pinned is {pin['sha256']}")
+        raise ValueError(f"{name} {pin['version']} download has sha256 {digest}, pinned is {pin['sha256']}")
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         for member in archive.namelist():
             target = os.path.realpath(os.path.join(dest, member))
             if not target.startswith(os.path.realpath(dest) + os.sep):
-                raise ValueError(f"unexpected path in the XcodeGen zip: {member}")
+                raise ValueError(f"unexpected path in the {name} zip: {member}")
         archive.extractall(dest)
-    binary = os.path.join(dest, "xcodegen", "bin", "xcodegen")
-    os.chmod(binary, 0o755)
-    return os.path.dirname(binary)
+    path = os.path.join(dest, binary)
+    if not os.path.isfile(path):
+        raise ValueError(f"the {name} zip has no {binary}")
+    os.chmod(path, 0o755)
+    return os.path.dirname(path)
+
+
+def install_xcodegen(pin: dict, dest: str, fetch=None) -> str:
+    """The pinned XcodeGen; returns the directory of the xcodegen binary."""
+    return install_zip(pin, dest, "xcodegen/bin/xcodegen", "XcodeGen", fetch)
+
+
+def install_swiftlint(pin: dict, dest: str, fetch=None) -> str:
+    """The pinned SwiftLint; returns the directory of its binary (pin["binary"])."""
+    return install_zip(pin, dest, pin["binary"], "SwiftLint", fetch)
+
+
+def lint_pins(path: str = LINT_TOOLS) -> dict:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def install_and_check(pin: dict, install, folder: str, command: str, name: str) -> int:
+    """Installs, checks `<command> --version` against the pin and puts the folder on GITHUB_PATH."""
+    try:
+        folder = install(pin, folder)
+    except ValueError as error:
+        return fail(str(error))
+    version = subprocess.run([os.path.join(folder, command), "--version"], capture_output=True, text=True).stdout
+    print(version.strip())
+    if pin["version"] not in version:
+        return fail(f"{command} --version says {version.strip()!r}, pinned {name} is {pin['version']}")
+    with open(os.environ.get("GITHUB_PATH", os.devnull), "a", encoding="utf-8") as out:
+        out.write(folder + "\n")
+    return 0
 
 
 def main(argv: list[str]) -> int:
+    temp = os.environ.get("RUNNER_TEMP", "/tmp")
     if argv and argv[0] == "xcodegen":
-        pin = pins()["xcodegen"]
-        try:
-            folder = install_xcodegen(pin, os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "xcodegen"))
-        except ValueError as error:
-            return fail(str(error))
-        version = subprocess.run([os.path.join(folder, "xcodegen"), "--version"], capture_output=True, text=True).stdout
-        print(version.strip())
-        if pin["version"] not in version:
-            return fail(f"xcodegen --version says {version.strip()!r}, pinned is {pin['version']}")
-        with open(os.environ.get("GITHUB_PATH", os.devnull), "a", encoding="utf-8") as out:
-            out.write(folder + "\n")
-        return 0
+        return install_and_check(pins()["xcodegen"], install_xcodegen, os.path.join(temp, "xcodegen"), "xcodegen", "XcodeGen")
+    if argv and argv[0] == "swiftlint":
+        pin = lint_pins()["swiftlint"]
+        return install_and_check(pin, install_swiftlint, os.path.join(temp, "swiftlint"), os.path.basename(pin["binary"]),
+                                 "SwiftLint")
     if not argv or argv[0] != "xcode":
         print(__doc__)
         return 2

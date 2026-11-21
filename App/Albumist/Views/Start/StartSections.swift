@@ -362,9 +362,17 @@ struct StartProposalCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSuggestionMenuFlow) private var openFlow
 
+    // Built from small parts, each with its own type: Xcode gave up on one expression with a
+    // condition and several trailing closures in the list's card (CI 44847306162).
     var body: some View {
+        photoCard
+            .accessibilityIdentifier(identifier)
+    }
+
+    /// The card with its one button, and the long press's menu and lifted card.
+    private var photoCard: some View {
         PhotoCard(coverIDs: covers, title: Text(verbatim: text.title), subtitle: text.styledSubtitle,
-                  hidesPreview: text.hidesPreview, aspectRatio: style == .large ? 2 : 3.0 / 2.0, style: style,
+                  hidesPreview: text.hidesPreview, aspectRatio: aspectRatio, style: style,
                   placeholderSymbol: proposal.kind.area.symbol, onOpen: onOpen) {
             button
         } menu: {
@@ -372,7 +380,16 @@ struct StartProposalCard: View {
         } preview: {
             menuPreview
         }
-        .accessibilityIdentifier("suggestion.card.\(made ? "made" : text.action.kind)")
+    }
+
+    /// Wide on a large card, 3:2 in a row.
+    private var aspectRatio: CGFloat {
+        style == .large ? 2 : 3.0 / 2.0
+    }
+
+    /// For UI tests: `suggestion.card.create` (`add`, `name`, `look`), `suggestion.card.made`.
+    private var identifier: String {
+        "suggestion.card.\(made ? "made" : text.action.kind)"
     }
 
     /// The long press (design wave 2, DS-06a; draft E4): the card's word first, doing what its

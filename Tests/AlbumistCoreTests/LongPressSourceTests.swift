@@ -44,8 +44,13 @@ struct LongPressSourceTests {
     /// several trailing closures, CI 44847306162).
     @Test func startCardsHaveTheMenuAndTheLiftedCard() throws {
         let card = try Self.body(["struct StartProposalCard"], in: Self.start)
-        let shown = Self.squeezed(try Self.body(["struct StartProposalCard", "var body: some View"], in: Self.start))
+        let body = Self.squeezed(try Self.body(["struct StartProposalCard", "var body: some View"], in: Self.start))
+        #expect(body == "{photoCard.accessibilityIdentifier(identifier)}", "the body is short: \(body)")
+        let shown = Self.squeezed(try Self.body(["struct StartProposalCard", "private var photoCard: some View"], in: Self.start))
         #expect(shown.contains("}menu:{menuItems}preview:{menuPreview}"), "\(shown)")
+        #expect(shown.contains("aspectRatio:aspectRatio,") && !shown.contains("?"), "no condition in the card's call: \(shown)")
+        #expect(card.contains("private var aspectRatio: CGFloat"))
+        #expect(card.contains("private var identifier: String"))
         #expect(card.contains("private var menuItems: SuggestionMenuItems"))
         #expect(card.contains("private var menuPreview: SuggestionPreview"))
         let items = Self.squeezed(try Self.body(["struct StartProposalCard", "private var menuItems"], in: Self.start))

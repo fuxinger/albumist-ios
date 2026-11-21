@@ -118,8 +118,6 @@ final class PhotoGridGestureState {
         }
     }
 
-    // MARK: Drag to select
-
     // MARK: The photos the grid shows
 
     /// The grid shows `shown` now (each of its bodies hands it over; nothing is made here).

@@ -75,7 +75,6 @@ struct PhotoGridGestureTests {
         }
     }
 
-    /// Positions outside the grid's photos (a page that shrank meanwhile) change nothing.
     /// A running drag follows the photos the grid shows now (review L3): more photos loaded after
     /// them keep the range where it is and let it grow into them; new photos before it move it
     /// with its photos; when its photos are no longer together in that order (one of them went,
@@ -106,6 +105,7 @@ struct PhotoGridGestureTests {
         #expect(drag.rebased(from: old, to: []) == nil)
     }
 
+    /// Positions outside the grid's photos (a page that shrank meanwhile) change nothing.
     @Test func positionsBeyondThePhotosChangeNothing() {
         var selection: Set<String> = ["a"]
         PhotoGridDrag.apply(PhotoGridDrag.Change(marked: [1...5], restored: [7...9]), mode: .select, to: &selection,

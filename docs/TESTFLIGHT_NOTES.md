@@ -19,6 +19,7 @@ Buildnummer und der Commit werden automatisch angehängt.
 <!-- testflight:start -->
 Danke fürs Testen! Dieser Build macht die App bei großen Mediatheken ruhiger. Bitte achte besonders auf:
 
+- Update ohne Verlust: Die Daten der App ziehen beim ersten Start in eine Datei mit dem neuen Namen um. Danach sollten deine Analyse, deine Vorschläge, deine Alben von Albumist und „Rückgängig“ genau wie vorher da sein. Fängt die App von vorn an zu analysieren oder fehlt etwas, melde das bitte sofort.
 - Große Mediatheken: Übersicht, Atlas und „Dein Zuhause“ rechnen jetzt im Hintergrund. Scrollen und Tippen sollten auch während einer Analyse flüssig bleiben. Atlas und „Dein Zuhause“ zeigen dafür manchmal kurz, dass sie laden.
 - Atlas teilen: „Teilen“ schickt die Karte so, wie sie beim Tippen aussah, auch wenn die Übersicht gerade neu lädt.
 - „Seit wann wohnst du dort?“: Der gewählte Ort zeigt einen Kreisel, solange das Datum vorgeschlagen wird.

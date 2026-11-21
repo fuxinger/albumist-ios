@@ -94,6 +94,7 @@ struct LibraryView: View {
         }
         .sheet(isPresented: $showSettings) {
             NavigationRoot { SettingsView() }
+                .sheetSize(.page)
         }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {
@@ -103,6 +104,7 @@ struct LibraryView: View {
                     selecting = false
                 }
             }
+            .sheetSize(.page)
         }
         .refreshable { await model.refreshDerived() }
     }

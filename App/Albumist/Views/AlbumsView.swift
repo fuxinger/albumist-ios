@@ -394,6 +394,7 @@ struct AlbumScreen: View {
         }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {}
+                .sheetSize(.page)
         }
         // "Widerrufen" after "Ignorieren" from a photo's long press, as in "Unsortiert".
         .safeAreaInset(edge: .bottom) { IgnoreUndoBar() }

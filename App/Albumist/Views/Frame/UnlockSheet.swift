@@ -21,7 +21,6 @@ struct UnlockSheet: View {
     var onUnlocked: () -> Void = {}
     @Environment(Purchases.self) private var purchases
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .largeTitle) private var iconSide: CGFloat = 68
     /// The App Store's sheet for an offer code.
     @State private var redeeming = false
@@ -85,9 +84,6 @@ struct UnlockSheet: View {
                 }
             }
         }
-        // Half the screen as in the draft; the whole screen at the accessibility text sizes.
-        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
-        .presentationDragIndicator(.visible)
         // The price comes from StoreKit; a start without network is made up for here.
         .task { await purchases.loadProductIfNeeded() }
         .offerCodeRedemption(isPresented: $redeeming) { _ in

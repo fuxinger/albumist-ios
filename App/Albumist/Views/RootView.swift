@@ -177,6 +177,7 @@ struct MainTabs: View {
             UnlockSheet(reason: .quickCreate) {
                 Task { await model.continueQuickCreate(after: request) }
             }
+            .sheetSize(.short)
         }
         // The App Store rating question: a moment after the user left the result of a plan that
         // made new albums, never at a start (`ReviewPrompt`, `ReviewPromptPolicy`).

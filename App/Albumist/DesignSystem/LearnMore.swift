@@ -44,6 +44,7 @@ struct LearnMore: View {
         }
         .sheet(isPresented: $showsFull) {
             LearnMoreSheet(title: title, full: full)
+                .sheetSize(.short)
         }
     }
 }
@@ -79,6 +80,5 @@ private struct LearnMoreSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
     }
 }

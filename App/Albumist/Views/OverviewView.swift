@@ -102,13 +102,16 @@ struct OverviewView: View {
         }
         .sheet(isPresented: $showSettings) {
             NavigationRoot { SettingsView() }
+                .sheetSize(.page)
         }
         .sheet(isPresented: $showSorted) {
             SortedSheet(ring: shownRing, subject: subjectText, explanation: whatSortedMeans,
                         areas: primaryAreasText, notCounted: shownRing.flatMap { notCountedText($0.notCounted, besidesRing: true) })
+                .sheetSize(.short)
         }
         .sheet(isPresented: $showAnalysis) {
             AnalysisSummarySheet()
+                .sheetSize(.short)
         }
         // What iOS knows about the notifications, for "Bescheid sagen, wenn fertig" (3B); again
         // when Albumist comes back from the Settings app.
@@ -904,9 +907,9 @@ private struct SortedSheet: View {
             }
             .sheet(isPresented: $showSettings) {
                 NavigationRoot { SettingsView() }
+                    .sheetSize(.page)
             }
         }
-        .presentationDetents([.medium, .large])
     }
 
     @ViewBuilder
@@ -968,7 +971,6 @@ private struct AnalysisSummarySheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
     }
 
     @ViewBuilder

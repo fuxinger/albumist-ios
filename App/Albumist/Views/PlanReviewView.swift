@@ -1178,6 +1178,7 @@ struct UnlockCard: View {
         .sheet(isPresented: $buying) {
             // Closes by itself once Albumist is unlocked; the preview then offers its button.
             UnlockSheet(reason: .preview(needed: albumsInPlan))
+                .sheetSize(.short)
         }
         // The price comes from StoreKit: loaded before the sheet asks for it.
         .task { await purchases.loadProductIfNeeded() }

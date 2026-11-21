@@ -79,10 +79,10 @@ private struct SuggestionMenuFlows: ViewModifier {
         content
             .environment(\.openSuggestionMenuFlow, flows)
             .sheet(item: $flows.adjusting) { proposal in
-                adjustSheet(proposal)
+                adjustSheet(proposal).sheetSize(.short)
             }
             .sheet(item: $flows.reshaping) { proposal in
-                workshopSheet(proposal)
+                workshopSheet(proposal).sheetSize(.page)
             }
             .confirmationDialog("Keine Reise?", isPresented: asking, titleVisibility: .visible,
                                 presenting: flows.askingNotATrip) { proposal in
@@ -96,7 +96,6 @@ private struct SuggestionMenuFlows: ViewModifier {
     /// in "Titel" there (no name field of a page to share it with).
     private func adjustSheet(_ proposal: AlbumProposal) -> some View {
         NavigationRoot { AdjustProposalView(proposal: proposal) }
-            .presentationDetents([.medium, .large])
     }
 
     /// The trip workshop (I07). A split or merged trip leaves the suggestions by itself; its

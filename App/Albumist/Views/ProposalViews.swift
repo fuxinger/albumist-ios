@@ -752,10 +752,11 @@ struct ProposalDetailView: View {
         .sheet(isPresented: $showAdjust) {
             // A place only the user can name: "Titel" in "Anpassen" is this name field.
             NavigationRoot { AdjustProposalView(proposal: proposal, name: proposal.requiresUserName ? $name : nil) }
-                .presentationDetents([.medium, .large])
+                .sheetSize(.short)
         }
         .sheet(isPresented: $showWorkshop, onDismiss: { if reshaped { dismiss() } }) {
             NavigationRoot { TripWorkshopView(proposal: proposal) { reshaped = true } }
+                .sheetSize(.page)
         }
         // Swiped away while the change was being stored: told after the sheet closed, the trip
         // view still closes instead of staying on the trip that goes.

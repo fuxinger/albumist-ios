@@ -92,8 +92,8 @@ struct PhotoViewer: View {
             // Dark inside the viewer only; the sheets below keep the app's own appearance.
             .environment(\.colorScheme, .dark)
             .accessibilityAction(.escape) { closeNow() }
-            .sheet(item: $info) { facts in details(facts) }
-            .sheet(isPresented: addingBinding) { addSheet }
+            .sheet(item: $info) { facts in details(facts).sheetSize(.short) }
+            .sheet(isPresented: addingBinding) { addSheet.sheetSize(.page) }
             // Said here, over the photo: the app's own alert cannot show over this full-screen
             // view and came up after it had closed (review D2, N1).
             .alert("Das hat nicht geklappt", isPresented: shareFailed) {
@@ -326,7 +326,6 @@ struct PhotoViewer: View {
 
     private func details(_ facts: AssetFacts) -> some View {
         AssetDetailView(facts: facts) { addingToAlbum = [facts.id] }
-            .presentationDetents([.medium, .large])
             // A half-height sheet is see-through glass in iOS 26: over the black viewer
             // the light text lost its contrast ("Taken", UI run 43773339053). Solid.
             .presentationBackground(Theme.background)

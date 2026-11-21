@@ -59,7 +59,7 @@ struct AnalysisProgressCard: View {
             spoken.accessibilitySpeechAnnouncementPriority = .low
             AccessibilityNotification.Announcement(spoken).post()
         }
-        .sheet(isPresented: $showDetails) { AnalysisDetailsSheet() }
+        .sheet(isPresented: $showDetails) { AnalysisDetailsSheet().sheetSize(.short) }
     }
 
     // MARK: Parts
@@ -675,7 +675,6 @@ struct AnalysisDetailsSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
     }
 
     /// "Schritt 4 von 6 · Fertig gegen 23:40 · 46 % · bisher 18 Min."

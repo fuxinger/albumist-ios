@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import UIKit
 import AlbumistCore
 
 /// A second copy of the free-album count in the keychain (plugin review N4). The user
@@ -25,16 +26,22 @@ enum LedgerKeychain {
         let read: @Sendable () -> FreeAlbumLedger?
         let write: @Sendable (FreeAlbumLedger) -> Void
         let queue: DispatchQueue
+        /// The app's copy asks iOS for time to finish a queued write (`save`).
+        let asksForTime: Bool
 
         init(queue: DispatchQueue = DispatchQueue(label: "app.albumist.ios.ledgerKeychain", qos: .userInitiated),
+             asksForTime: Bool = false,
              read: @escaping @Sendable () -> FreeAlbumLedger?, write: @escaping @Sendable (FreeAlbumLedger) -> Void) {
             self.queue = queue
+            self.asksForTime = asksForTime
             self.read = read
             self.write = write
         }
 
         /// The app's keychain item.
-        static var device: Copy { Copy(read: { LedgerKeychain.loadNow() }, write: { LedgerKeychain.saveNow($0) }) }
+        static var device: Copy {
+            Copy(asksForTime: true, read: { LedgerKeychain.loadNow() }, write: { LedgerKeychain.saveNow($0) })
+        }
 
         /// Queues the read now, ahead of every write asked for after this call (a count made
         /// while the keychain answers must not be what the read sees, or the merge would drop
@@ -57,9 +64,31 @@ enum LedgerKeychain {
             func get() -> FreeAlbumLedger? { lock.withLock { ledger } }
         }
 
-        /// Queued after every read and write asked for before it; returns at once.
+        /// Queued after every read and write asked for before it; returns at once. The write
+        /// merges with what the keychain holds then (second review of 10e2331: a write queued
+        /// before `Purchases` merged the keychain's count in carried a ledger without it, and an
+        /// app ended between that write and the merge lost the keychain-only count). The copy
+        /// only ever grows. The app asks iOS for time until the write is done (a plan that
+        /// finishes in the background is suspended right after; before, the write was synchronous).
+        @MainActor
         func save(_ ledger: FreeAlbumLedger) {
-            queue.async { write(ledger) }
+            let done = asksForTime ? LedgerKeychain.askForTime() : {}
+            queue.async { [read, write] in
+                write(ledger.merged(with: read() ?? FreeAlbumLedger()))
+                done()
+            }
+        }
+    }
+
+    /// Background time for one keychain write; the returned function ends it (on the main queue).
+    @MainActor
+    private static func askForTime() -> @Sendable () -> Void {
+        let task = UIApplication.shared.beginBackgroundTask(withName: "Gratis-Alben speichern")
+        guard task != .invalid else { return {} }
+        return {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { UIApplication.shared.endBackgroundTask(task) }
+            }
         }
     }
 

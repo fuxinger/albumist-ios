@@ -98,6 +98,16 @@ struct HangKindTests {
         #expect(short.hasSuffix(" in Albumist.AnalysisProgressCard.header.getter : some"))
     }
 
+    /// Second review: a long tail kept the cut longer than the limit, and " in " inside
+    /// "(extension in SwiftUI)" was taken for the function a closure is in.
+    @Test func aLongTailIsCutToo() {
+        let symbol = "closure #1 () -> Swift.Int " + String(repeating: "a", count: 60)
+            + " in Albumist.SomeView." + String(repeating: "b", count: 160)
+        #expect(HangKind.shortSymbol(symbol).count <= 141)
+        let extensionOnly = "(extension in SwiftUI):SwiftUI.View." + String(repeating: "c", count: 160)
+        #expect(HangKind.shortSymbol(extensionOnly) == String(extensionOnly.prefix(140)) + "…")
+    }
+
     @Test func aShortSymbolStaysAsItIs() {
         #expect(HangKind.shortSymbol("AppModel.tick(run:)") == "AppModel.tick(run:)")
         let long = String(repeating: "x", count: 200)

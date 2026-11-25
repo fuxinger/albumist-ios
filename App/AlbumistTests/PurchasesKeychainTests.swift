@@ -27,7 +27,7 @@ struct PurchasesKeychainTests {
         }
 
         /// One copy, so one queue, as in the app.
-        private(set) lazy var copy = LedgerKeychain.Copy(read: { [unowned self] in
+        private(set) lazy var copy = LedgerKeychain.Copy(read: { [self] in
             if slow {
                 answer.wait()
                 answer.signal()
@@ -36,7 +36,7 @@ struct PurchasesKeychainTests {
                 readOnMain.append(Thread.isMainThread)
                 return stored
             }
-        }, write: { [unowned self] ledger in
+        }, write: { [self] ledger in
             lock.withLock {
                 stored = ledger
                 written.append(ledger)
@@ -64,7 +64,9 @@ struct PurchasesKeychainTests {
         let keychain = Keychain(holding: nil)
         let purchases = Purchases(defaults: freshDefaults(), keychain: keychain.copy)
         await purchases.keychainRead()
-        #expect(keychain.reads == [false])
+        #expect(keychain.reads.first == false)
+        #expect(!keychain.reads.contains(true))
+        await keychain.drained()
     }
 
     /// Deleted and installed again: the defaults are empty, the keychain knows 7 used albums.
@@ -76,6 +78,23 @@ struct PurchasesKeychainTests {
         #expect(purchases.remainingFreeAlbums == Purchases.freeAlbumLimit - 7)
         #expect(!purchases.allows(albums: Purchases.freeAlbumLimit - 6))
         #expect(purchases.allows(albums: Purchases.freeAlbumLimit - 7))
+        await keychain.drained()
+        #expect(keychain.current == purchases.ledger)
+    }
+
+    /// Second review of 10e2331: a count written before the merge (a plan settled at launch)
+    /// must not replace what only the keychain knew, even if the app ends before the merge.
+    @Test func aWriteBeforeTheMergeKeepsTheKeychainsCount() async {
+        let keychain = Keychain(holding: FreeAlbumLedger(startingWithUsed: 5), slow: true)
+        let purchases = Purchases(defaults: freshDefaults(), keychain: keychain.copy)
+        purchases.recordUsage(plan: AlbumistID(), albums: 1)
+        keychain.answer.signal()
+        // The read and the write ran; the merge on the main actor has not (the app could end here).
+        await keychain.drained()
+        let copy = keychain.current ?? FreeAlbumLedger()
+        #expect(copy.used == 6)
+        await purchases.keychainRead()
+        await keychain.drained()
     }
 
     /// A plan counted while the keychain still answers: its write is queued after the read, so
@@ -98,6 +117,7 @@ struct PurchasesKeychainTests {
         let relaunched = Purchases(defaults: defaults, keychain: keychain.copy)
         await relaunched.keychainRead()
         #expect(relaunched.albumsUsed == 6)
+        await keychain.drained()
     }
 
     @Test func withoutAKeychainCopyNothingWaits() async {

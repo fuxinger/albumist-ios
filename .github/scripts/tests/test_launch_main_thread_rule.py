@@ -31,7 +31,7 @@ class LaunchMainThreadRuleTests(unittest.TestCase):
             line = keychain[keychain.rfind("\n", 0, call.start()) + 1:keychain.find("\n", call.end())]
             if "static func" in line:
                 continue
-            self.assertIn("static var device", line, line)
+            self.assertIn("Copy(asksForTime: true, read: { LedgerKeychain.loadNow() }", line, line)
 
     def test_a_plan_waits_for_the_keychain_before_it_checks_the_free_albums(self):
         model = code_only(read("App", "Albumist", "Model", "AppModel.swift"))

@@ -111,7 +111,7 @@ struct SearchTabSourceTests {
         let modifier = Self.squeezed(try Self.body(["private struct SearchFieldModifier", "func body(content: Content)"], in: Self.search))
         #expect(modifier == "{ifhost!=MainTabs.searchField.host{content}"
                 + "elseifMainTabs.searchField==.tabViewKeepingSearch{\(Self.field).searchFocused($focused)"
-                + ".onChange(of:focused){_,nowininput.isFocused=now}.onChange(of:input.isFocused){_,nowinif!now{focused=false}}}"
+                + ".onChange(of:input.keyboardAway){focused=false}}"
                 + "elseifMainTabs.searchField==.tabViewOpeningKeyboard{\(Self.field).tabViewSearchActivation(.searchTabSelection)}"
                 + "else{\(Self.field).onAppear{ifinput.text.isEmpty{input.isPresented=true}}}}", "\(modifier)")
         let type = Self.squeezed(try Self.body(["private struct SearchFieldModifier"], in: Self.search))
@@ -176,7 +176,11 @@ struct SearchTabSourceTests {
     /// field's focus bound with `.searchFocused`, and the query, the hits and the scroll position
     /// stay, as after a look at another tab; ending the search there emptied the field (Apple:
     /// dismissing a search clears its text). With the other two placements the search ends, so
-    /// neither its field nor the keyboard stays up over "Vorschläge".
+    /// neither its field nor the keyboard stays up over "Vorschläge". The keyboard is taken away
+    /// by a request, a counter the route raises (review Q3 of round 3), not by a mirrored focus:
+    /// had the binding not seen the field of the tab bar focused, the mirror was false already,
+    /// nothing changed, and the keyboard stayed. Asking a field without focus to give it up costs
+    /// nothing.
     @Test func aRouteLeavesTheSearchAsItsPlacementSays() throws {
         let body = Self.squeezed(try Self.body(["struct MainTabs", "var body: some View"], in: Self.root))
         let route = try #require(body.range(of: ".onChange(of:model.route,initial:true){_,targetin"), "\(body)")
@@ -186,9 +190,14 @@ struct SearchTabSourceTests {
         #expect(leaves.upperBound <= chosen.lowerBound, "the search is left after the tab changed")
         #expect(!body.contains("search.isPresented"), "the tabs end the search themselves, whatever the placement: \(body)")
         let input = try Self.body(["final class SearchInput"], in: Self.search)
-        #expect(input.contains("    var isFocused = false\n"), "\(input)")
+        #expect(input.contains("    private(set) var keyboardAway = 0\n"), "\(input)")
+        #expect(!input.contains("isFocused"), "the keyboard follows a mirrored focus: \(input)")
         let left = Self.squeezed(try Self.body(["final class SearchInput", "func leftInCode()"], in: Self.search))
-        #expect(left == "{ifMainTabs.searchField==.tabViewKeepingSearch{isFocused=false}else{isPresented=false}}", "\(left)")
+        #expect(left == "{ifMainTabs.searchField==.tabViewKeepingSearch{keyboardAway&+=1}else{isPresented=false}}", "\(left)")
+        // Raised there only, and only the field's modifier answers it.
+        let code = Self.squeezed(try Self.code(Self.search))
+        #expect(code.components(separatedBy: "keyboardAway&+=1").count - 1 == 1, "\(code)")
+        #expect(code.components(separatedBy: "input.keyboardAway").count - 1 == 1, "\(code)")
         // Its comment says what becomes of the query in each placement.
         let comment = try Self.docComment(above: "func leftInCode()", in: Self.search)
         for word in ["only the keyboard", "the query", "stay", "ends", "empties"] {

@@ -393,9 +393,12 @@ extension SearchView {
 final class SearchInput {
     var text = ""
     var isPresented = false
-    /// The field has the keyboard: with `.tabViewKeepingSearch` mirrored from the field's focus
-    /// (`SearchFieldModifier`); set to false, the keyboard goes and the search stays.
-    var isFocused = false
+    /// Raised to take the keyboard away with `.tabViewKeepingSearch` (`leftInCode`); the field's
+    /// modifier answers each raise by giving its focus up, and the search stays. A request, not a
+    /// state (review Q3 of H14's round 3): a focus mirrored from the field was false already if
+    /// the binding had not seen the field iOS 26 draws in the tab bar's place focused, so nothing
+    /// changed and the keyboard stayed. Asking a field without focus to give it up costs nothing.
+    private(set) var keyboardAway = 0
 
     /// A route (Siri, Shortcuts, Spotlight, a notification) leaves the search tab in code
     /// (`MainTabs`; review T2 of H14's round 2). With `.tabViewKeepingSearch` only the keyboard
@@ -405,7 +408,7 @@ final class SearchInput {
     /// field nor the keyboard stays up over "Vorschläge", and the field empties.
     func leftInCode() {
         if MainTabs.searchField == .tabViewKeepingSearch {
-            isFocused = false
+            keyboardAway &+= 1
         } else {
             isPresented = false
         }
@@ -450,7 +453,8 @@ extension View {
 private struct SearchFieldModifier: ViewModifier {
     @Bindable var input: SearchInput
     var host: SearchInput.Host
-    /// The field's focus with `.tabViewKeepingSearch`, mirrored in `input.isFocused`.
+    /// The field's focus with `.tabViewKeepingSearch`: given up when a route asks
+    /// (`SearchInput.keyboardAway`).
     @FocusState private var focused: Bool
 
     @ViewBuilder func body(content: Content) -> some View {
@@ -460,12 +464,12 @@ private struct SearchFieldModifier: ViewModifier {
             // Only the field: it becomes active when it is tapped, and the search stays as it is
             // while another tab is chosen (Apple's default activation). Never focused by hand:
             // iOS 26 shows the field in the bar, and the starting points are the empty page's.
-            // Its focus is mirrored, so a route takes only the keyboard away (`leftInCode`).
+            // Its focus is bound, so a route takes only the keyboard away when it asks
+            // (`leftInCode`), whatever the binding saw of the field's focus before.
             content
                 .searchable(text: $input.text, isPresented: $input.isPresented, prompt: SearchView.prompt)
                 .searchFocused($focused)
-                .onChange(of: focused) { _, now in input.isFocused = now }
-                .onChange(of: input.isFocused) { _, now in if !now { focused = false } }
+                .onChange(of: input.keyboardAway) { focused = false }
         } else if MainTabs.searchField == .tabViewOpeningKeyboard {
             // The tab's selection and the field's activation go together (`.searchTabSelection`):
             // the keyboard comes every time the tab is chosen, also over an earlier query, and

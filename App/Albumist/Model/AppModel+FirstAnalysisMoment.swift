@@ -199,8 +199,8 @@ extension AppModel {
     }
 
     /// The run works, `since` its start; `showedBar`: the card showed it as a full analysis. Told
-    /// with each report, as the resume position is written, so a leg that iOS ends with the app
-    /// still counts at the next launch.
+    /// with each report the tick takes, right after `receive` wrote the resume position, so a leg
+    /// that iOS ends with the app still counts at the next launch.
     func firstAnalysisLegRuns(since start: ContinuousClock.Instant, showedBar: Bool) {
         FirstAnalysisMomentStore.shared.legRuns(Self.leg(since: start, showedBar: showedBar))
     }

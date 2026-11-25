@@ -1474,7 +1474,6 @@ final class AppModel {
                     ?? (carried != nil ? analysis.resumed?.secondsThen ?? carried?.secondsLeft : nil),
                 caughtUp: held != nil ? analysis.resumed?.caughtUp : nil)
         }
-        firstAnalysisLegRuns(since: runClockStart, showedBar: runShowedBar) // Design W3 H13: the first 100 % (DS-08), with the resume position (X9)
         glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
                      itemsPerSecond: estimator.rate, total: progress.total)
         keepRunningInBackgroundIfLong()
@@ -1600,6 +1599,7 @@ final class AppModel {
             }
         }
         if let progress = taken.progress { receive(progress, at: now) }
+        if taken.progress != nil { firstAnalysisLegRuns(since: runClockStart, showedBar: runShowedBar) } // Design W3 H13: the first 100 % (DS-08), X9
         // Hot iPhone, battery nearly empty: as the pipeline said last, after its reports.
         if taken.waiting != analysis.waiting { analysis.waiting = taken.waiting }
         // "Schon fertig": the early suggestions are read once they are saved (the report that

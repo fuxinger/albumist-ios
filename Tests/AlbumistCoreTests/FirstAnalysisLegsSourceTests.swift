@@ -16,9 +16,10 @@ struct FirstAnalysisLegsSourceTests {
 
     /// The legs of the first analysis count together for its first completion (verification review
     /// X9, `FirstAnalysisLegs`): the model tells where a run starts (with its clock, after the
-    /// resume position was read), while it works (with each report, as the resume position is
-    /// written) and as it ends, before "Analyse fertig" is decided, which is decided on what the
-    /// legs counted, for every follower of `celebrate` alike.
+    /// resume position was read), while it works (with each report the tick takes, right after
+    /// `receive` wrote the resume position; not in `receive` itself, which SwiftLint's
+    /// `function_body_length` holds at 50 lines) and as it ends, before "Analyse fertig" is
+    /// decided, which is decided on what the legs counted, for every follower of `celebrate` alike.
     @Test func theModelCountsTheLegsOfTheFirstAnalysis() throws {
         let model = try Source.code(Source.model)
         let run = try Source.body(["func startAnalysisNow("], in: model)
@@ -30,10 +31,13 @@ struct FirstAnalysisLegsSourceTests {
         let started = try #require(card.range(of: "firstAnalysisLegStarted()"), "no leg starts with the run: \(card)")
         #expect(clock.upperBound < started.lowerBound, "\(card)")
         let receive = try Source.body(["private func receive("], in: model)
-        let marker = try #require(receive.range(of: "AnalysisMarker.unfinished = .init("), "\(receive)")
-        let runs = try #require(receive.range(of: "firstAnalysisLegRuns(since: runClockStart, showedBar: runShowedBar)"),
-                                "the legs are not kept with the resume position: \(receive)")
-        #expect(marker.upperBound < runs.lowerBound, "\(receive)")
+        #expect(receive.contains("AnalysisMarker.unfinished = .init("), "\(receive)")
+        let tick = try Source.body(["private func tickNow(run: Int)"], in: model)
+        let received = try #require(tick.range(of: "if let progress = taken.progress { receive(progress, at: now) }"), "\(tick)")
+        let runs = try #require(tick.range(of: "if taken.progress != nil { firstAnalysisLegRuns(since: runClockStart, showedBar: runShowedBar) }"),
+                                "the legs are not kept with the resume position: \(tick)")
+        #expect(received.upperBound < runs.lowerBound, "\(tick)")
+        #expect(model.components(separatedBy: "firstAnalysisLegRuns(").count - 1 == 1, "told from another place too")
         let leg = try #require(run.range(of: "let leg = firstAnalysisLeg(ended: end.isFinished, since: runClockStart, showedBar: runShowedBar)"),
                                "the end is decided without the legs: \(run)")
         let decided = try #require(run.range(of: "let celebrate = AnalysisCardState.celebratesFinish(isComplete: end.isFinished,"), "\(run)")

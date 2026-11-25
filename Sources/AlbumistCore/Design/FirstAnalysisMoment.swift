@@ -8,11 +8,13 @@ import Foundation
 ///
 /// "Reaches 100 %" means the user sees it happen: the first run in the app that finishes the
 /// analysis after a wait long enough to celebrate (`AnalysisCardState.celebratesFinish`: the
-/// "Analyse fertig" card it rides on), with Albumist on screen as it ends (not in the background:
-/// Control Center or a call banner in front only make the card wait). Finished in the background,
-/// or completed for the first time overnight (`completedAway`), or left before the card showed
-/// it, the user comes back to "Analyse fertig" and the notification as before, and the moment is
-/// gone for good: a 100 % that happened without them is not replayed hours later.
+/// "Analyse fertig" card it rides on; for the first completion on this installation the legs of
+/// a first analysis that ran in several runs count together, `FirstAnalysisLegs`, verification
+/// review X9), with Albumist on screen as it ends (not in the background: Control Center or a
+/// call banner in front only make the card wait). Finished in the background, or completed for
+/// the first time overnight (`completedAway`), or left before the card showed it, the user comes
+/// back to "Analyse fertig" and the notification as before, and the moment is gone for good: a
+/// 100 % that happened without them is not replayed hours later.
 ///
 /// A first analysis too quick for "Analyse fertig" (a small part of the library, a few photos
 /// shared) leaves it owed for `owedAfterQuickFinish`, seven days from that first completion

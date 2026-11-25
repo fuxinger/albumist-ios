@@ -213,7 +213,8 @@ final class PhotoGridUITests: XCTestCase {
             return index > first && onScreen(frame) && frame.midY <= bottom - calm
                 && frame.minY >= start.maxY && frame.minX >= start.minX + 1.5 * start.width
         }
-        let fromPoint = CGPoint(x: start.minX + start.width * 0.2, y: start.midY)
+        // In the middle of the first photo, well away from the screen's left edge (review W6).
+        let fromPoint = CGPoint(x: start.minX + start.width * 0.5, y: start.midY)
         func toPoint(_ index: Int) -> CGPoint { CGPoint(x: all[index].minX + all[index].width * 0.8, y: all[index].midY) }
         guard let last = candidates.first(where: { abs(toPoint($0).y - fromPoint.y) < 0.8 * abs(toPoint($0).x - fromPoint.x) }) else {
             shot("x-no-range")
@@ -261,7 +262,7 @@ final class PhotoGridUITests: XCTestCase {
             return
         }
         let rowEnd = rowStart + 2
-        drag(from: CGPoint(x: all[rowStart].minX + all[rowStart].width * 0.2, y: all[rowStart].midY),
+        drag(from: CGPoint(x: all[rowStart].minX + all[rowStart].width * 0.5, y: all[rowStart].midY),
              to: CGPoint(x: all[rowEnd].minX + all[rowEnd].width * 0.8, y: all[rowEnd].midY))
         UITestWait.until("\(test): \(ticked - 3) ausgewählt after dragging back over three", timeout: 5) { selectedCount(ticked - 3).exists }
         let afterUntick = photos("library.photo")
@@ -397,7 +398,7 @@ final class PhotoGridUITests: XCTestCase {
             return
         }
         print("UI_FACT \(test): a row of \(row.count) photos at y \(Int(start.midY))")
-        drag(from: CGPoint(x: start.minX + start.width * 0.2, y: start.midY),
+        drag(from: CGPoint(x: start.minX + start.width * 0.5, y: start.midY),
              to: CGPoint(x: end.minX + end.width * 0.8, y: end.midY))
         let remove = app.buttons["proposalPhotos.remove"]
         let ticked = UITestWait.until("\(test): \(row.count) photos ticked by the sideways drag", timeout: 5) {

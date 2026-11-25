@@ -152,19 +152,7 @@ struct PhotoGrid: View {
                 }
                 .clipped()
                 .matchedTransitionSource(id: id, in: zoom)
-                .overlay(alignment: .bottomTrailing) {
-                    if selecting {
-                        // On the photo, which does not grow with the text: it stops growing
-                        // where it would cover a photo of seven in a row.
-                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                            .font(.title3)
-                            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(.white, isSelected ? Theme.accent : Color.black.opacity(0.25))
-                            .padding(5)
-                            .accessibilityHidden(true)
-                    }
-                }
+                .overlay(alignment: .bottomTrailing) { tick(isSelected) }
                 .opacity(selecting && !isSelected ? 0.85 : 1)
                 .contentShape(Rectangle())
         }
@@ -201,6 +189,22 @@ struct PhotoGrid: View {
             PhotoGridPlace(position: entry.position, frame: proxy.frame(in: .named(PhotoGridPlace.space)))
         } action: { reported in
             gestures.place(id, reported)
+        }
+    }
+
+    /// A photo's tick while the grid selects.
+    @ViewBuilder
+    private func tick(_ isSelected: Bool) -> some View {
+        if selecting {
+            // On the photo, which does not grow with the text: it stops growing where it would
+            // cover a photo of seven in a row.
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.title3)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, isSelected ? Theme.accent : Color.black.opacity(0.25))
+                .padding(5)
+                .accessibilityHidden(true)
         }
     }
 

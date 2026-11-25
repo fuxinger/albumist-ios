@@ -857,15 +857,20 @@ struct ProposalDetailView: View {
                 Button {
                     Task { await suggestTitle() }
                 } label: {
-                    if suggesting {
-                        ProgressView().controlSize(.small)
-                            .accessibilityLabel(Text("Name wird vorgeschlagen"))
-                    } else {
-                        Label("Namen vorschlagen", systemImage: "apple.intelligence")
+                    // 44 pt to tap on the label, where the button takes the tap; leading, so
+                    // nothing moves (review S3 of H14).
+                    Group {
+                        if suggesting {
+                            ProgressView().controlSize(.small)
+                                .accessibilityLabel(Text("Name wird vorgeschlagen"))
+                        } else {
+                            Label("Namen vorschlagen", systemImage: "apple.intelligence")
+                        }
                     }
+                    .frame(minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .font(.subheadline.weight(.semibold))
-                .frame(minHeight: 44)
                 .disabled(suggesting || busy)
             }
             if proposal.isSensitive {

@@ -45,24 +45,52 @@ struct HitTargetSourceTests {
 
     /// A frame written by hand with a minimum of 44 pt (`.frame(minHeight: 44`, `minWidth: 44`)
     /// promises what `minimumHitTarget()` does. After a control, at the end of a chain that
-    /// starts with the control, it only grows the layout ("OK" under the recount note and "Namen
+    /// starts with the control, also through a name of the file that makes one
+    /// (`suggestTitleButton`), it only grows the layout ("OK" under the recount note and "Namen
     /// vorschlagen" did, review S3 of H14); on the label, with a content shape, the tap is taken
     /// there.
     @Test func noHandWrittenFrameOf44AroundAControl() throws {
         var around: [String] = []
         var read = 0
         for path in AppSource.swiftFiles(under: "App/Albumist") {
-            let code = AppSource.code(try AppSource.read(path))
-            let name = URL(fileURLWithPath: path).lastPathComponent
-            for site in AppSource.callSites(of: "frame(", in: code) where Self.promises44(site.arguments) {
-                read += 1
-                guard let head = Self.chainHead(of: site.offset, in: code), Self.controls.contains(head) else { continue }
-                let line = code.unicodeScalars.prefix(site.offset).filter { $0 == "\n" }.count + 1
-                around.append("\(name):\(line): \(head)")
-            }
+            let scan = Self.framesOf44(in: AppSource.code(try AppSource.read(path)))
+            read += scan.read
+            around += scan.aroundControls.map { "\(URL(fileURLWithPath: path).lastPathComponent):\($0)" }
         }
         #expect(read >= 20, "the scan reads too few frames: \(read)")
         #expect(around.isEmpty, "a 44 pt frame after a control only grows the layout, put it on the label: \(around)")
+    }
+
+    /// A chain that starts with a name of its file is read through that name to the view it makes
+    /// (review T7 of H14's round 2: `suggestTitleButton.frame(minHeight: 44)` passed, its head
+    /// being a name, not "Button"): a property's or a function's first view, also through another
+    /// name; a name the file does not declare as a view, and a stack, stay as they are.
+    @Test func aChainThatStartsWithANameIsReadThroughIt() {
+        let file = """
+        var body: some View {
+            VStack {
+                suggestButton.frame(minHeight: 44)
+                rowLabel.frame(minHeight: 44)
+                helper(1).frame(minWidth: 44)
+                wrapped.frame(minHeight: 44)
+                configuration.label.frame(minHeight: 44)
+            }
+        }
+        private var suggestButton: some View {
+            Button { go() } label: { Text("a") }
+                .font(.body)
+        }
+        @ViewBuilder private var rowLabel: some View {
+            if on { HStack { Text("b") } } else { Text("c") }
+        }
+        private func helper(_ value: Int) -> some View {
+            Menu { Button("x") {} } label: { Text("d") }
+        }
+        private var wrapped: some View { suggestButton.padding() }
+        """
+        let scan = Self.framesOf44(in: AppSource.code(file))
+        #expect(scan.read == 5)
+        #expect(scan.aroundControls == ["3: suggestButton (Button)", "5: helper (Menu)", "6: wrapped (Button)"], "\(scan.aroundControls)")
     }
 
     /// The reading of a chain: back from `.frame(` over modifiers, arguments and closures (also a
@@ -132,6 +160,31 @@ struct HitTargetSourceTests {
 
     // MARK: Reading frames
 
+    /// The frames of 44 pt in `code` (`promises44`), how many, and those at the end of a chain
+    /// that starts with a control, as "line: control".
+    static func framesOf44(in code: String) -> (read: Int, aroundControls: [String]) {
+        var read = 0
+        var around: [String] = []
+        for site in AppSource.callSites(of: "frame(", in: code) where promises44(site.arguments) {
+            read += 1
+            guard let head = chainHead(of: site.offset, in: code) else { continue }
+            let view = view(startingWith: head, in: code)
+            guard controls.contains(view) else { continue }
+            let line = code.unicodeScalars.prefix(site.offset).filter { $0 == "\n" }.count + 1
+            around.append("\(line): " + (view == head ? view : "\(head) (\(view))"))
+        }
+        return (read, around)
+    }
+
+    /// The view a chain that starts with `head` makes: `head` when it names a type, else the
+    /// first view of the file's `var head: some View` or `func head(`, read as a sheet's content
+    /// is (`SheetSizeSourceTests.shownView`, also through another name of the file); a name the
+    /// file does not declare as a view stays itself (review T7 of H14's round 2).
+    static func view(startingWith head: String, in file: String) -> String {
+        guard head.first?.isLowercase == true else { return head }
+        return SheetSizeSourceTests.shownView(in: head, file: file) ?? head
+    }
+
     /// The arguments of a `frame(` ask for 44 pt to tap: a minimum height or width of 44.
     static func promises44(_ arguments: String) -> Bool {
         let parts = arguments.split(separator: ",").map { $0.filter { !$0.isWhitespace } }
@@ -167,7 +220,11 @@ struct HitTargetSourceTests {
         }
         return nil
     }
+}
 
+/// How the guards read the code around a call: the control whose label holds it, and the small
+/// scanners both readings share (apart from the struct's tests, SwiftLint's type body length).
+extension HitTargetSourceTests {
     // MARK: Reading labels
 
     /// The control whose label holds the code at `offset`, or nil when no enclosing block is a

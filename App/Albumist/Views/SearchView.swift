@@ -11,9 +11,10 @@ struct SearchView: View {
     /// puts the field: on the tab view as Apple's search tab, or on this page as until wave 3.
     let input: SearchInput
     @State private var result = SearchResult()
-    /// The text `result` belongs to; the field runs ahead while a search is pending.
-    @State private var resultQuery = ""
-    @State private var searching = false
+    /// The text `result` belongs to (the field runs ahead while a search is pending), the facts it
+    /// was made from, and whether a search runs: coming back to the tab searches again only for a
+    /// search that did not finish, new facts or a new text (`SearchAnswer`, review T3 of H14).
+    @State private var answer = SearchAnswer()
     /// Completions for the word being typed, from the user's own library.
     @State private var suggestions: [SearchSuggestion] = []
     /// Starting points for the empty field, from the user's own library.
@@ -61,7 +62,7 @@ struct SearchView: View {
                     startingPoints
                 } else {
                     if !suggestions.isEmpty { suggestionList }
-                    if let rewrite = model.lastSearchRewrite, !searching {
+                    if let rewrite = model.lastSearchRewrite, !answer.searching {
                         Label("Verstanden als: \(rewrite)", systemImage: "apple.intelligence")
                             .font(.footnote).foregroundStyle(.noteText)
                     }
@@ -75,7 +76,7 @@ struct SearchView: View {
                     if result.isRelaxed { relaxedNote }
                     if result.ids.isEmpty {
                         // The previous answer stays while the next one is computed (no flicker).
-                        if resultQuery.isEmpty {
+                        if answer.text.isEmpty {
                             // The first answer is worked out: calm tiles where the hits will be
                             // (design wave 3, DS-18: no spinner).
                             waitingTiles(count: 6)
@@ -122,10 +123,13 @@ struct SearchView: View {
         .task(id: query) {
             let text = query
             guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
-                result = SearchResult(); resultQuery = ""; suggestions = []; searching = false
+                result = SearchResult(); answer.emptied(); suggestions = []
                 return
             }
-            searching = true
+            // The task starts again each time the search tab comes back: the finished answer for
+            // this text from these facts stays, with the pages shown, and nothing is asked again.
+            let facts = model.factsVersion
+            guard answer.starts(text, facts: facts) else { return }
             // Completions right away; the search itself waits until typing pauses.
             let completions = await model.searchSuggestions(for: text)
             suggestions = completions
@@ -135,9 +139,8 @@ struct SearchView: View {
             guard !Task.isCancelled else { return }
             // A word the completions continue is still being typed, never "nicht erkannt" (P3-13).
             result = found.beside(completions, for: text)
-            resultQuery = text
-            shown = Self.page
-            searching = false
+            // A new text shows its hits from the first page; the same one keeps the pages shown.
+            if answer.shows(text, facts: facts) { shown = Self.page }
         }
     }
 
@@ -307,7 +310,7 @@ extension SearchView {
                 ContentUnavailableView("Keine Fotos", systemImage: "magnifyingglass",
                                        description: Text("Zu „\(missing.label)“ gibt es keine Fotos in deiner Mediathek."))
             case .noMatch:
-                ContentUnavailableView.search(text: resultQuery)
+                ContentUnavailableView.search(text: answer.text)
             case nil:
                 EmptyView()
             }
@@ -385,6 +388,23 @@ extension SearchView {
 final class SearchInput {
     var text = ""
     var isPresented = false
+    /// The field has the keyboard: with `.tabViewKeepingSearch` mirrored from the field's focus
+    /// (`SearchFieldModifier`); set to false, the keyboard goes and the search stays.
+    var isFocused = false
+
+    /// A route (Siri, Shortcuts, Spotlight, a notification) leaves the search tab in code
+    /// (`MainTabs`; review T2 of H14's round 2). With `.tabViewKeepingSearch` only the keyboard
+    /// goes: the query, the hits and the scroll position stay, as after a look at another tab
+    /// (ending the search would empty the field: Apple, dismissing a search clears its text).
+    /// With `.tabViewOpeningKeyboard` and `.pageFocusingField` the search ends, so neither its
+    /// field nor the keyboard stays up over "Vorschläge", and the field empties.
+    func leftInCode() {
+        if MainTabs.searchField == .tabViewKeepingSearch {
+            isFocused = false
+        } else {
+            isPresented = false
+        }
+    }
 
     /// Where the field sits, and so how the search behaves: the place decides more than the look
     /// (review S1 of H14). `MainTabs.searchField` chooses one.
@@ -425,16 +445,22 @@ extension View {
 private struct SearchFieldModifier: ViewModifier {
     @Bindable var input: SearchInput
     var host: SearchInput.Host
+    /// The field's focus with `.tabViewKeepingSearch`, mirrored in `input.isFocused`.
+    @FocusState private var focused: Bool
 
     @ViewBuilder func body(content: Content) -> some View {
         if host != MainTabs.searchField.host {
             content
         } else if MainTabs.searchField == .tabViewKeepingSearch {
             // Only the field: it becomes active when it is tapped, and the search stays as it is
-            // while another tab is chosen (Apple's default activation). No focus by hand: iOS 26
-            // shows the field in the bar, and the starting points are the empty page's.
+            // while another tab is chosen (Apple's default activation). Never focused by hand:
+            // iOS 26 shows the field in the bar, and the starting points are the empty page's.
+            // Its focus is mirrored, so a route takes only the keyboard away (`leftInCode`).
             content
                 .searchable(text: $input.text, isPresented: $input.isPresented, prompt: SearchView.prompt)
+                .searchFocused($focused)
+                .onChange(of: focused) { _, now in input.isFocused = now }
+                .onChange(of: input.isFocused) { _, now in if !now { focused = false } }
         } else if MainTabs.searchField == .tabViewOpeningKeyboard {
             // The tab's selection and the field's activation go together (`.searchTabSelection`):
             // the keyboard comes every time the tab is chosen, also over an earlier query, and

@@ -6,7 +6,9 @@ import Testing
 /// new photos alone, never twice for one finish, and not beside the first 100 %, which says
 /// "Analyse fertig: 100 %" itself (DS-08). Decided where the notification is decided (review S2
 /// of H14): after the run's wait, with what `FinishMoment.afterWait` showed, here written out as
-/// `FinishMomentTests` shows it (`shownInFront`, `notified`, `overtaken`).
+/// `FinishMomentTests` shows it (`shownInFront`, `notified`, `overtaken`). A notification counts
+/// only where iOS shows it: Albumist in the background, not only inactive, and its notifications
+/// allowed (review T1 of H14's round 2).
 @Suite("Analyse fertig for VoiceOver")
 struct FinishAnnouncementTests {
     /// The end of a long run that finished the analysis (`celebratesFinish`), before its wait.
@@ -21,17 +23,31 @@ struct FinishAnnouncementTests {
 
     /// After the wait, Albumist in front: the finish card, no notification.
     private static func shownInFront(_ rule: inout FinishAnnouncement) {
-        rule.afterWait(card: true, notification: false)
+        rule.afterWait(card: true, notification: false, inBackground: false, notificationsAllowed: true)
     }
 
-    /// After the wait, Albumist not in front: the card for later, and the notification.
+    /// After the wait, Albumist in the background with its notifications allowed: the card for
+    /// later, and the notification, which iOS shows.
     private static func notified(_ rule: inout FinishAnnouncement) {
-        rule.afterWait(card: true, notification: true)
+        rule.afterWait(card: true, notification: true, inBackground: true, notificationsAllowed: true)
+    }
+
+    /// After the wait, Albumist inactive (Control Centre or Notification Centre pulled down, the
+    /// app switcher, Siri, a system alert, the moment of leaving): the notification goes out, but
+    /// iOS hands it to Albumist, whose `willPresent` shows nothing.
+    private static func notifiedWhileInactive(_ rule: inout FinishAnnouncement) {
+        rule.afterWait(card: true, notification: true, inBackground: false, notificationsAllowed: true)
+    }
+
+    /// After the wait, Albumist in the background, its notifications turned off: the notification
+    /// goes out, and iOS shows nothing.
+    private static func notifiedWithNotificationsOff(_ rule: inout FinishAnnouncement) {
+        rule.afterWait(card: true, notification: true, inBackground: true, notificationsAllowed: false)
     }
 
     /// After the wait, a newer run started meanwhile, or nothing was owed: nothing shows.
     private static func overtaken(_ rule: inout FinishAnnouncement) {
-        rule.afterWait(card: false, notification: false)
+        rule.afterWait(card: false, notification: false, inBackground: false, notificationsAllowed: true)
     }
 
     /// The first sight of the card, with VoiceOver on. Always while Albumist is on screen (the
@@ -181,6 +197,44 @@ struct FinishAnnouncementTests {
         Self.longRunEnded(&rule)
         Self.shownInFront(&rule)
         #expect(!Self.seen(&rule, saidByFirstMoment: true))
+        #expect(!Self.seen(&rule))
+    }
+
+    /// Review T1 of H14's round 2: a long run ends while Albumist is inactive (Control Centre
+    /// pulled down, the app switcher, Siri, or the moment of leaving in S2's case (a)). Its
+    /// notification went out, but iOS showed nothing: the card owes it and says it once
+    /// Albumist is active again. Before, the notification counted as said, and nobody said it.
+    /// A check that ends after it in the background shows the card again without a second
+    /// notification (`FinishMoment` sends one per finish): still owed, said once.
+    @Test func aNotificationSentWhileInactiveLeavesTheCardOwing() {
+        var rule = FinishAnnouncement()
+        Self.longRunEnded(&rule)
+        Self.notifiedWhileInactive(&rule)
+        #expect(rule.owed)
+        #expect(Self.seen(&rule))
+        #expect(!Self.seen(&rule))
+        Self.longRunEnded(&rule)
+        Self.notifiedWhileInactive(&rule)
+        Self.checkEnded(&rule)
+        rule.afterWait(card: true, notification: false, inBackground: true, notificationsAllowed: true)
+        #expect(rule.owed)
+        #expect(Self.seen(&rule))
+        #expect(!Self.seen(&rule))
+    }
+
+    /// With Albumist's notifications turned off the notification goes out and iOS shows nothing:
+    /// the card owes the finish (before H14 nobody said it then either). Allowed again (back from
+    /// the Settings app), the next finish is the notification's.
+    @Test func withNotificationsOffTheCardOwesIt() {
+        var rule = FinishAnnouncement()
+        Self.longRunEnded(&rule)
+        Self.notifiedWithNotificationsOff(&rule)
+        #expect(rule.owed)
+        #expect(Self.seen(&rule))
+        #expect(!Self.seen(&rule))
+        Self.longRunEnded(&rule)
+        Self.notified(&rule)
+        #expect(!rule.owed)
         #expect(!Self.seen(&rule))
     }
 }

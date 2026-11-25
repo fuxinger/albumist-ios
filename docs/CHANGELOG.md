@@ -2,6 +2,13 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. Suche, Blätter und „Analyse fertig“ nach der Prüfung der Welle-3-Arbeit (Design-Welle 3, H14, noch in
+  keinem Build): Öffnet eine Mitteilung oder Siri einen anderen Tab, verschwindet nur die Tastatur — Suchtext,
+  Treffer und die Stelle in der Liste bleiben. Zurück auf dem Such-Tab sucht Albumist nicht noch einmal:
+  „Verstanden als“ bleibt stehen, die geladenen Treffer bleiben, und eine ganze Frage geht nicht zweimal an Apple
+  Intelligence. VoiceOver sagt „Analyse fertig“ jetzt auch dann, wenn die Analyse endete, während das
+  Kontrollzentrum offen war oder Siri gefragt wurde, und wenn Mitteilungen ausgeschaltet sind: gesagt wird es
+  genau einmal.
 - 25.11. Raster in „Unsortiert“ und in Vorschlägen nach der Nachprüfung (Design-Welle 3, H10, noch in keinem
   Build): Das Weiterlaufen am Rand lernt, wie die Seite scrollt, auch wenn sie ihre Schritte ein oder zwei Bilder
   später meldet (dafür hält sie je Weiterlaufen höchstens vier Bilder an); endet beim Ziehen der Bereich, während

@@ -2302,16 +2302,30 @@ final class AlbumistFlowUITests: XCTestCase {
         // says so once the check has ended.
         if UITestScreens.Analysis.checkAgain(app, "check again") {
             let idle = waitStable("check finished", timeout: 120) { analysisIdle }
+            // Said as what it is: the check did not end, so no sheet was asked for (review T8 of
+            // H14's round 2: the failure read "The sheet is not open").
+            XCTAssertTrue(idle, "The check did not finish within 120 s after \"Neu prüfen\"")
             let opened = idle && UITestScreens.Analysis.openSheet(app)
             // Sheets in a fitting size (DS-12b): at the standard text size a short sheet like
             // "Analyse" opens half high, its "Fertig" in the lower part of the screen. Measured
             // as soon as the sheet is open, whatever its line says (review S6 of H14: waiting for
             // the line skipped the check without a word when the line came late).
             let sheetDone = app.buttons["analysis.summary.done"]
-            XCTAssertTrue(sheetDone.exists, "The sheet \"Analyse\" is not open with its \"Fertig\" after \"Neu prüfen\" (opened: \(opened))")
+            if idle {
+                XCTAssertTrue(sheetDone.exists, "The sheet \"Analyse\" is not open with its \"Fertig\" after \"Neu prüfen\" (opened: \(opened))")
+            }
             if sheetDone.exists {
-                let top = sheetDone.frame.minY
-                print("UI_FACT sheet Analyse: Fertig at y \(Int(top)) of \(Int(app.frame.height))")
+                // Once the sheet stands still: two equal reads half a second apart, so a sheet
+                // still sliding up is not measured on its way (review T8).
+                var last: CGFloat?
+                let still = UITestWait.holds(timeout: 5) {
+                    let now = sheetDone.frame.minY
+                    defer { last = now }
+                    return now == last
+                }
+                let top = last ?? sheetDone.frame.minY
+                print("UI_FACT sheet Analyse: Fertig at y \(Int(top)) of \(Int(app.frame.height)) (still \(still))")
+                XCTAssertTrue(still, "The sheet \"Analyse\" was still moving after 5 s")
                 XCTAssertGreaterThan(top, app.frame.height * 0.4, "The sheet \"Analyse\" does not open half high at the standard text size")
             }
             let said = opened && anything("keine neuen Fotos").waitForExistence(timeout: 5)

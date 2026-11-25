@@ -109,7 +109,7 @@ final class FrameUITests: XCTestCase {
             // The search (DS-12a): Apple's search tab, a round button at the trailing end of the
             // bar (or, behind `MainTabs.searchField`, a fourth tab in the row). That it is there
             // and after "Alben" is asserted; its shape and gap are said for the screenshots until
-            // the owner has chosen between the two.
+            // the owner has chosen among the three placements.
             let search = UITestScreens.Search.button(app)
             let searchShown = search.waitForExistence(timeout: 5)
             XCTAssertTrue(searchShown, "The tab bar (\(language)) has no search button")

@@ -39,6 +39,22 @@ struct UITestTabsSourceTests {
         squeezed(try #require(AppSource.body(of: path, in: try screensCode()), "\(path) is not in UITestScreens' files"))
     }
 
+    /// Every file of the screens is read by the guards: the list comes from the folder, so a new
+    /// `UITestScreens+….swift` is read by itself (review T9 of H14's round 2: five paths by hand
+    /// left a sixth file unread by every guard), and these five are there.
+    @Test func everyFileOfTheScreensIsRead() throws {
+        let read = UITestScreensSource.paths
+        #expect(read == ["App/AlbumistUITests/UITestScreens.swift",
+                         "App/AlbumistUITests/UITestScreens+Analysis.swift",
+                         "App/AlbumistUITests/UITestScreens+Search.swift",
+                         "App/AlbumistUITests/UITestScreens+StartPage.swift",
+                         "App/AlbumistUITests/UITestScreens+UnsortedAndAlbums.swift"], "\(read)")
+        let folder = AppSource.swiftFiles(under: Self.folder)
+            .filter { URL(fileURLWithPath: $0).lastPathComponent.hasPrefix("UITestScreens") }
+        #expect(Set(read) == Set(folder), "these files of the screens are read by no guard: \(Set(folder).subtracting(read))")
+        #expect(try Self.screensCode().contains("enum Search"), "the files are not read as one text")
+    }
+
     /// Every class asks `UITestScreens.tabButton`: its own `tabButton` only hands the name on
     /// (review S7 of H14: only one of six copies left the search).
     @Test func everyClassTakesTheOneTabButton() throws {
@@ -63,6 +79,8 @@ struct UITestTabsSourceTests {
         let expands = try #require(body.range(of: "expandTabBar(app){ready()}"), "\(body)")
         #expect(ready.upperBound <= leaves.lowerBound && leaves.upperBound <= expands.lowerBound, "\(body)")
         #expect(!body.contains(".tap()"), "\(body)")
+        // Only getting out matters here: the field's own way out first (review T4 of H14).
+        #expect(body.contains(#"Search.leave(app,"tab\(name)")}"#), "\(body)")
     }
 
     /// No tap into the tab bar: on an open bar its middle is another tab ("Unsortiert"), and in
@@ -84,25 +102,92 @@ struct UITestTabsSourceTests {
     /// Leaving the search waits for all three named tabs, hittable, not for "Vorschläge" alone,
     /// which a folded button may be named after (review S4 of H14). The way out is a button
     /// beside the field first (its own "Schließen"), then one elsewhere (a photo opened from the
-    /// results), then the one button left in the tab bar (the folded tabs, which choose a tab).
+    /// results), then the one button left in the tab bar (the folded tabs, which choose a tab);
+    /// asked to, the folded tabs come first (review T4 of H14). The ways tapped are given back.
     @Test func leavingWaitsForAllThreeTabsAndLooksBesideTheFieldFirst() throws {
         let back = try Self.screensBody(["enum Search", "static func tabsBack(_ app: XCUIApplication) -> Bool"])
         #expect(back.contains("[Tabs.german,Tabs.english].contains"), "\(back)")
         #expect(back.contains("[tabs.suggestions,tabs.unsorted,tabs.albums].allSatisfy"), "\(back)")
         #expect(back.contains("tab.exists&&tab.isHittable"), "\(back)")
-        let leave = try Self.screensBody(["enum Search", "static func leave(_ app: XCUIApplication, _ what: String) -> Bool"])
-        #expect(leave.contains("guardapp.searchFields.firstMatch.exists,!tabsBack(app)else{returntrue}"), "\(leave)")
-        #expect(leave.contains("guardletway=wayOut(app,what)else{returnfalse}way.tap()ifUITestWait.holds(timeout:5,{tabsBack(app)})"),
+        let plain = try Self.screensBody(["enum Search", "static func leave(_ app: XCUIApplication, _ what: String) -> Bool"])
+        #expect(plain == "{leave(app,what,foldedTabsFirst:false).back}", "\(plain)")
+        let leave = try Self.screensBody(["enum Search", Self.leaveWithWays])
+        #expect(leave.contains("guardapp.searchFields.firstMatch.exists,!tabsBack(app)else{return(true,ways)}"), "\(leave)")
+        #expect(leave.contains("guardletway=wayOut(app,what,foldedTabsFirst:foldedTabsFirst)else{return(false,ways)}"
+                               + "ways.append(way.said)way.button.tap()ifUITestWait.holds(timeout:5,{tabsBack(app)}){return(true,ways)}"),
                 "\(leave)")
-        let way = try Self.screensBody(["enum Search", "private static func wayOut(_ app: XCUIApplication, _ what: String) -> XCUIElement?"])
-        let steps = ["letbeside=named.first(where:{row.intersects($0.frame)})",
-                     "letelsewhere=named.first",
+        let way = try Self.screensBody(["enum Search", Self.wayOut])
+        let steps = ["ifletbeside=named.first(where:{row.intersects($0.frame)})",
+                     "ifletelsewhere=named.first(where:{closeLabels.contains($0.label)&&!row.intersects($0.frame)})",
                      "letleft=app.tabBars.buttons.allElementsBoundByIndex.filter{$0.isHittable&&!labels.contains($0.label)}",
                      "ifleft.count==1,letfolded=left.first"]
         let found = steps.map { way.range(of: $0) }
         #expect(!found.contains(nil), "\(way)")
         let order = found.compactMap { $0?.lowerBound }
         #expect(order == order.sorted(), "the way out is not looked for beside the field first: \(way)")
+        #expect(way.contains("iffoldedTabsFirst{ways.insert(way,at:0)}else{ways.append(way)}"), "\(way)")
+    }
+
+    /// The declaration of `leave` that says the ways it took, and of `wayOut`.
+    static let leaveWithWays = "static func leave(_ app: XCUIApplication, _ what: String, foldedTabsFirst: Bool) -> (back: Bool, ways: [String])"
+    static let wayOut = "private static func wayOut(_ app: XCUIApplication, _ what: String, foldedTabsFirst: Bool)"
+
+    /// The search button is the tab bar's, or one in the tab bar's row (iOS may draw the search
+    /// tab as a round button of its own beside the bar) while neither the keyboard nor a dialog
+    /// is up: never a "Suchen" of the page or of a dialog. A dialog's buttons are never a way out
+    /// of the search, and elsewhere than beside the field only "Schließen" is (a photo opened from
+    /// the results), never "Abbrechen" (the rest of review S10 of H14).
+    @Test func theSearchHelpersTakeNothingOfThePageOrADialog() throws {
+        let button = try Self.screensBody(["enum Search", "static func button(_ app: XCUIApplication) -> XCUIElement"])
+        #expect(button.contains("guard!app.keyboards.firstMatch.exists,!app.alerts.firstMatch.exists,!app.sheets.firstMatch.existselse{returnnil}"
+                                + "returnapp.buttons.matching(NSPredicate(format:\"labelIN%@\",labels)).allElementsBoundByIndex"
+                                + ".first(where:{inTabBarRow($0,app)})"), "\(button)")
+        let row = try Self.screensBody(["enum Search", "private static func inTabBarRow(_ element: XCUIElement, _ app: XCUIApplication) -> Bool"])
+        #expect(row == "{letbar=app.tabBars.firstMatchguardbar.exists,element.existselse{returnfalse}"
+                + "letmid=element.frame.midYreturnmid>=bar.frame.minY&&mid<=bar.frame.maxY}", "\(row)")
+        let named = try Self.screensBody(["enum Search", "private static func leaveButtons(_ app: XCUIApplication) -> [XCUIElement]"])
+        #expect(named == "{letdialogs=(app.alerts.allElementsBoundByIndex+app.sheets.allElementsBoundByIndex).map(\\.frame)"
+                + "returnapp.buttons.matching(NSPredicate(format:\"labelIN%@\",leaveLabels)).allElementsBoundByIndex"
+                + ".filter{buttoninbutton.isHittable&&!dialogs.contains{$0.intersects(button.frame)}}}", "\(named)")
+        let way = try Self.screensBody(["enum Search", Self.wayOut])
+        #expect(way.contains("letnamed=leaveButtons(app)"), "\(way)")
+        let search = try Self.screensBody(["enum Search"])
+        #expect(search.contains(#"staticletcloseLabels=["Schließen","Close"]"#), "\(search)")
+        #expect(search.contains(#"staticletleaveLabels=["Schließen","Abbrechen","Close","Cancel"]"#), "\(search)")
+    }
+
+    /// What the field kept is seen after leaving the search as a user looks at another tab
+    /// (review T4 and T5 of H14): `SearchUITests` waits up to 5 s for the keyboard to go after the
+    /// return key, leaves by the folded tabs first ("Schließen" ends the search and empties the
+    /// field), and says the ways it took in the same `UI_FACT` line as the text. The sweep and
+    /// `tabButton` keep the field's own way out first, where only getting out matters.
+    @Test func theSearchTestLeavesByTheFoldedTabsAndSaysSo() throws {
+        let code = try Self.code("App/AlbumistUITests/SearchUITests.swift")
+        let test = Self.squeezed(try #require(AppSource.body(of: ["func testSearchUnderstandsRealQueries()"], in: code)))
+        let gone = try #require(test.range(of: #"field.typeText("\n")_=UITestWait.holds(timeout:5){!app.keyboards.firstMatch.exists}"#), "\(test)")
+        let leaves = try #require(test.range(of: #"letleft=UITestScreens.Search.leave(app,"search",foldedTabsFirst:true)"#), "\(test)")
+        #expect(gone.upperBound <= leaves.lowerBound, "\(test)")
+        #expect(test.contains("XCTAssertTrue(left.back,"), "\(test)")
+        #expect(test.contains(#"print("UI_FACTsearchchosenagain:field\(shown),text\"\(query)\",leftby\(left.ways),"#), "\(test)")
+        let flow = try Self.code("App/AlbumistUITests/AlbumistFlowUITests.swift")
+        #expect(flow.contains(#"UITestScreens.Search.leave(app, "sweep")"#), "the sweep does not leave the search")
+        #expect(flow.contains(#"UITestScreens.Search.leave(app, "sweep, back to the start page")"#), "the sweep does not leave the search")
+        #expect(!flow.contains("foldedTabsFirst"), "the sweep leaves by the folded tabs first")
+    }
+
+    /// The default never brings the keyboard with the search tab: the accessibility walk waits up
+    /// to a second for it, as flow test 1 does, not five seconds once per walk and language; and
+    /// the frame test's comment counts three placements, not two (review T6 of H14).
+    @Test func theWalkWaitsASecondForAKeyboardTheDefaultNeverBrings() throws {
+        let walk = Self.squeezed(try Self.code("App/AlbumistUITests/AccessibilityUITests.swift"))
+        let tab = try #require(walk.range(of: #"tap(searchTabButton(),"\(tag)searchtab")"#), "no search step in the walk")
+        let check = try #require(walk.range(of: #"check("\(tag)search",english:english)"#, range: tab.upperBound..<walk.endIndex))
+        let wait = String(walk[tab.upperBound..<check.lowerBound])
+        #expect(wait.contains("_=UITestWait.holds(timeout:1){app.keyboards.firstMatch.exists}"), "\(wait)")
+        #expect(!wait.contains("waitForExistence(timeout:5)"), "\(wait)")
+        let frame = try AppSource.read("App/AlbumistUITests/FrameUITests.swift")
+        #expect(!frame.contains("between the two"), "the frame test still counts two placements")
+        #expect(frame.contains("among the three placements"), "the frame test does not count three placements")
     }
 
     /// What iOS shows is printed as the search is left, and when no way out or no tab is found:
@@ -114,8 +199,8 @@ struct UITestTabsSourceTests {
         for said in ["tab bar", "folded", "search field", "keyboard", "beside the field"] {
             #expect(facts.contains(said), "the facts do not say \(said): \(facts)")
         }
-        let leave = try Self.screensBody(["enum Search", "static func leave(_ app: XCUIApplication, _ what: String) -> Bool"])
-        let way = try Self.screensBody(["enum Search", "private static func wayOut(_ app: XCUIApplication, _ what: String) -> XCUIElement?"])
+        let leave = try Self.screensBody(["enum Search", Self.leaveWithWays])
+        let way = try Self.screensBody(["enum Search", Self.wayOut])
         let tab = try Self.screensBody(["static func tabButton(_ app: XCUIApplication, _ name: String) -> XCUIElement"])
         for (name, body) in [("leave", leave), ("wayOut", way)] {
             #expect(body.contains("UI_FACT") && body.contains("facts(app)"), "\(name): \(body)")
@@ -125,16 +210,25 @@ struct UITestTabsSourceTests {
 
     /// Flow test 6 measures the sheet "Analyse" as soon as it is open, whatever its line says,
     /// and fails without its "Fertig" (review S6 of H14: inside `if said` the check was skipped
-    /// without a word when the line came late), then checks that it opened half high.
+    /// without a word when the line came late), then checks that it opened half high, once the
+    /// sheet stands still: two equal reads of its "Fertig" half a second apart (review T8 of
+    /// round 2: read at once, a sheet still sliding up could pass). A check that did not finish
+    /// fails as such, not as a sheet that is not open.
     @Test func flowTest6MeasuresTheSheetWhateverItsLineSays() throws {
         let flow = try Self.code("App/AlbumistUITests/AlbumistFlowUITests.swift")
-        let test6 = try #require(AppSource.body(of: ["func test6_AnalysisKeepsGoingThroughBackgroundAndTabs("], in: flow))
-        let opened = try #require(test6.range(of: "let opened = idle && UITestScreens.Analysis.openSheet(app)"), "\(test6)")
-        let there = try #require(test6.range(of: "XCTAssertTrue(sheetDone.exists,"), "a missing Fertig is not a failure")
-        let high = try #require(test6.range(of: "XCTAssertGreaterThan(top, app.frame.height * 0.4,"))
-        let line = try #require(test6.range(of: "anything(\"keine neuen Fotos\")"))
-        #expect(opened.upperBound < there.lowerBound && there.upperBound < high.lowerBound, "\(test6)")
-        #expect(high.upperBound < line.lowerBound, "the sheet is measured only after its line")
-        #expect(!test6.contains("if said"), "the measure still waits for the line")
+        let test6 = Self.squeezed(try #require(AppSource.body(of: ["func test6_AnalysisKeepsGoingThroughBackgroundAndTabs("], in: flow)))
+        let steps = [#"XCTAssertTrue(idle,"Thecheckdidnotfinish"#,
+                     "letopened=idle&&UITestScreens.Analysis.openSheet(app)",
+                     "ifidle{XCTAssertTrue(sheetDone.exists,",
+                     "ifsheetDone.exists{varlast:CGFloat?letstill=UITestWait.holds(timeout:5){letnow=sheetDone.frame.minY"
+                         + "defer{last=now}returnnow==last}lettop=last??sheetDone.frame.minY",
+                     "XCTAssertTrue(still,",
+                     "XCTAssertGreaterThan(top,app.frame.height*0.4,",
+                     #"anything("keineneuenFotos")"#]
+        let found = steps.map { test6.range(of: $0) }
+        #expect(!found.contains(nil), "\(zip(steps, found).filter { $0.1 == nil }.map(\.0)): \(test6)")
+        let order = found.compactMap { $0?.lowerBound }
+        #expect(order == order.sorted(), "flow test 6 does not finish the check, open, measure the sheet still and then read its line in turn")
+        #expect(!test6.contains("ifsaid"), "the measure still waits for the line")
     }
 }

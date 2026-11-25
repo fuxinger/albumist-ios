@@ -36,21 +36,16 @@ extension AppModel {
         return open
     }
 
-    /// The sections of the start page for this visit. `analysedOnce`, `showsMosaic`, `rebuilding`
-    /// and `analysing` come from the page above (`analysedOnce`, `showsScanShow`,
-    /// `suggestionsRebuilding`, `analysisMayBringSuggestions`): read there, so the analysis'
-    /// frequent changes redraw the ring card and not every suggestion's card. `starterSetLimit`:
-    /// how many albums "Dein Startpaket" may hold now (`StartPage.starterSetLimit`).
-    func startPage(visit: StartVisit, libraryHint: Bool, starterSet: [AlbumProposal], starterSetLimit: Int,
-                   analysedOnce: Bool, showsMosaic: Bool, rebuilding: Bool, analysing: Bool) -> StartPage {
+    /// The sections of the start page for this visit, with what the page knows itself (`page`).
+    func startPage(_ page: StartPageState) -> StartPage {
         StartPage.make(.init(
             proposals: proposals, open: startOpenIDs,
             areas: OrganizationArea.available.filter { settings.enabledAreas.contains($0) },
-            analysedOnce: analysedOnce, showsMosaic: showsMosaic, starterSet: starterSet.map(\.id),
-            starterSetLimit: starterSetLimit,
-            nothingMadeYet: history.isEmpty && acceptedProposals.isEmpty, libraryHint: libraryHint,
-            rebuilding: rebuilding, analysing: analysing, interruptedPlan: interruptedPlan != nil,
-            inYourAlbums: suggestionsInYourAlbums, visit: visit))
+            analysedOnce: page.analysedOnce, showsMosaic: page.showsMosaic, starterSet: page.starterSet.map(\.id),
+            starterSetLimit: page.starterSetLimit,
+            nothingMadeYet: history.isEmpty && acceptedProposals.isEmpty, libraryHint: page.libraryHint,
+            rebuilding: page.rebuilding, analysing: page.analysing, interruptedPlan: interruptedPlan != nil,
+            inYourAlbums: suggestionsInYourAlbums, visit: page.visit))
     }
 
     /// Suggestions whose album is one of the user's already: the same albums as the ring
@@ -67,4 +62,23 @@ extension AppModel {
     var lastAlbumsMade: Date? {
         history.compactMap { $0.finalizedAt ?? $0.confirmedAt }.max()
     }
+}
+
+/// What the start page knows itself when it asks for its sections (`AppModel.startPage`).
+/// `analysedOnce`, `showsMosaic`, `rebuilding` and `analysing` come from the page above
+/// (`analysedOnce`, `showsScanShow`, `suggestionsRebuilding`, `analysisMayBringSuggestions`):
+/// read there, so the analysis' frequent changes redraw the ring card and not every
+/// suggestion's card.
+struct StartPageState {
+    var visit: StartVisit
+    /// The card for an empty library is shown.
+    var libraryHint: Bool
+    /// "Dein Startpaket" now (`AppModel.starterSet(limit:)`).
+    var starterSet: [AlbumProposal]
+    /// How many albums "Dein Startpaket" may hold now (`StartPage.starterSetLimit`).
+    var starterSetLimit: Int
+    var analysedOnce: Bool
+    var showsMosaic: Bool
+    var rebuilding: Bool
+    var analysing: Bool
 }

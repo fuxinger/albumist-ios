@@ -103,9 +103,9 @@ struct StartSections: View {
 
     private func makePage(for visit: StartVisit) -> StartPage {
         let limit = starterSetLimit
-        return model.startPage(visit: visit, libraryHint: libraryHint, starterSet: model.starterSet(limit: limit),
-                               starterSetLimit: limit, analysedOnce: analysedOnce, showsMosaic: showsMosaic,
-                               rebuilding: rebuilding, analysing: analysing)
+        return model.startPage(StartPageState(visit: visit, libraryHint: libraryHint, starterSet: model.starterSet(limit: limit),
+                                              starterSetLimit: limit, analysedOnce: analysedOnce, showsMosaic: showsMosaic,
+                                              rebuilding: rebuilding, analysing: analysing))
     }
 
     /// "Dein Startpaket": the preview of the set, each album picked for the preview only.

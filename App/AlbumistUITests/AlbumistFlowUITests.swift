@@ -53,26 +53,13 @@ final class AlbumistFlowUITests: XCTestCase {
     /// The search tab (`Tab(role: .search)`): the system's round button at the bar's end
     /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
-        UITestScreens.Search.button(app, tabButton: tabButton)
+        UITestScreens.Search.button(app)
     }
 
-    /// A tab bar button; the iOS 26 tab bar shrinks while scrolling, so it is expanded first.
-    /// While the search is active iOS folds the other tabs into one button beside its field
-    /// (DS-12a): the search is left first.
+    /// A tab bar button (`UITestScreens.tabButton`: leaves an active search first, brings a bar
+    /// that scrolled away back).
     private func tabButton(_ name: String) -> XCUIElement {
-        let button = app.tabBars.buttons[name]
-        if !button.exists, app.searchFields.firstMatch.exists {
-            UITestScreens.Search.leave(app, "tab \(name)")
-        }
-        var tries = 0
-        while !(button.exists && button.isHittable) && tries < 3 {
-            // Minimized bar: scroll back up first, then tap the bar itself to expand it.
-            if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            // The tab bar has expanded (at most the second the fixed pause gave it); the loop checks.
-            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
-            tries += 1
-        }
-        return button
+        UITestScreens.tabButton(app, name)
     }
 
     /// The tab bar can be tapped (it is hidden while photos are selected, as in Photos).
@@ -1015,8 +1002,9 @@ final class AlbumistFlowUITests: XCTestCase {
         // Search (the system names the search tab itself)
         if tap(searchTabButton(), "search tab") {
             let field = app.searchFields.firstMatch
-            // The field with the keyboard that comes with it, up to the second of the old pause
-            // (then the five below, as before).
+            // The field, and the keyboard where the tab brings it (`MainTabs.searchField`; by
+            // default it comes with the tap below), up to the second of the old pause (then the
+            // five below, as before).
             _ = UITestWait.holds(timeout: 1) { field.exists && app.keyboards.firstMatch.exists }
             shot("19-search-empty")
             if field.waitForExistence(timeout: 5) {

@@ -58,17 +58,10 @@ final class DeviceConditionUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
-    /// A tab bar button; the iOS 26 tab bar shrinks while scrolling, so it is expanded first.
+    /// A tab bar button (`UITestScreens.tabButton`: leaves an active search first, brings a bar
+    /// that scrolled away back).
     private func tabButton(_ name: String) -> XCUIElement {
-        let button = app.tabBars.buttons[name]
-        var tries = 0
-        while !(button.exists && button.isHittable) && tries < 3 {
-            if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            // The tab bar has expanded (at most the second the fixed pause gave it); the loop checks.
-            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
-            tries += 1
-        }
-        return button
+        UITestScreens.tabButton(app, name)
     }
 
     @discardableResult
@@ -1544,7 +1537,7 @@ final class DeviceConditionUITests: XCTestCase {
             _ = UITestWait.holds(timeout: 5) { !atlasBar.exists }
         }
         // The search: the system's round button at the bar's end, never another tab.
-        let searchTab = UITestScreens.Search.button(app, tabButton: tabButton)
+        let searchTab = UITestScreens.Search.button(app)
         searchTab.tap()
         let field = app.searchFields.firstMatch
         if field.waitForExistence(timeout: 10) {

@@ -158,8 +158,15 @@ struct CameraProbeView: View {
     func layoutChanged() {
         switch step {
         case .still: if results[index] == nil { show() }
-        case .flight: if run == nil || run?.phase == .starting { show() }
+        case .flight: if Self.reshowsFlightOnLayout(phase: run?.phase, abandoned: flightAbandoned) { show() }
         }
+    }
+
+    /// A new size starts the flight's wait over only before take-off; never after a flight was
+    /// given up (it waits for "Nochmal fliegen").
+    nonisolated static func reshowsFlightOnLayout(phase: CameraProbeFlightRun.Phase?, abandoned: Bool) -> Bool {
+        guard !abandoned else { return false }
+        return phase == nil || phase == .starting
     }
 
     func step(by delta: Int) {

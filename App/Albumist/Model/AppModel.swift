@@ -1750,6 +1750,7 @@ final class AppModel {
     /// The clock or the time zone was changed (`significantTimeChangeNotification`): the
     /// finish time is a clock time, so it is measured anew (review minor).
     func timeChanged() {
+        searchRevision &+= 1 // Design W3 H14: a search reads the day ("heute", "letzte Woche"; Q1)
         guard analysis.isRunning, let last = lastTickClock else { return }
         let now = (ContinuousClock.now, Date())
         lastTickClock = now
@@ -3528,6 +3529,7 @@ final class AppModel {
 
     private func libraryInputsChanged() {
         libraryInputs += 1
+        searchRevision &+= 1 // Design W3 H14: a search for "Unsortiert" reads these too (Q1)
         if libraryBucketsShown && !movingInLibrary { makeLibraryBuckets() }
     }
 
@@ -3724,10 +3726,22 @@ final class AppModel {
     private let searchIndexStore = SearchIndexStore()
     /// The names of places the index was made with.
     @ObservationIgnored private var searchIndexPlaceNames: [NamedPlace] = []
+    /// The revision of everything a search reads, which the search page's answer keys on
+    /// (`SearchAnswer`, review Q1 of H14's round 3): raised where the index is emptied (the facts,
+    /// the albums, the home, the names of places), where the library's inputs change (the facts,
+    /// the photos' states, the settings and the part of the library, which a search for
+    /// "Unsortiert" reads too), and at a new day or clock (`timeChanged`: "heute", "letzte
+    /// Woche"). Not observed: the page asks as its task starts, never while it stays open.
+    @ObservationIgnored private var searchRevision = 0 // Design W3 H14: the search page's answer keys on it (Q1)
 
     private func resetSearchIndex() {
         searchIndexStore.invalidate()
+        searchRevision &+= 1 // Design W3 H14: what the index is made from changed (Q1)
     }
+
+    /// The revision as a search reads now: the names of places are compared as the index is asked
+    /// for (`searchIndex()`), so a name typed since counts before the revision is read.
+    func searchRevisionNow() async -> Int { _ = await searchIndex(); return searchRevision } // Design W3 H14: asked by the search page (Q1)
 
     func searchIndex() async -> SearchIndex {
         // The names the user gave places, as their suggestions show them (`userTitles`): read

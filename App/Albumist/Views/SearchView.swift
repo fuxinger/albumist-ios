@@ -11,9 +11,10 @@ struct SearchView: View {
     /// puts the field: on the tab view as Apple's search tab, or on this page as until wave 3.
     let input: SearchInput
     @State private var result = SearchResult()
-    /// The text `result` belongs to (the field runs ahead while a search is pending), the facts it
-    /// was made from, and whether a search runs: coming back to the tab searches again only for a
-    /// search that did not finish, new facts or a new text (`SearchAnswer`, review T3 of H14).
+    /// The text `result` belongs to (the field runs ahead while a search is pending), the revision
+    /// of what a search reads it was made with, and whether a search runs: coming back to the tab
+    /// searches again only for a search that did not finish, a change of anything a search reads
+    /// or a new text (`SearchAnswer`, reviews T3 and Q1 of H14).
     @State private var answer = SearchAnswer()
     /// Completions for the word being typed, from the user's own library.
     @State private var suggestions: [SearchSuggestion] = []
@@ -127,9 +128,13 @@ struct SearchView: View {
                 return
             }
             // The task starts again each time the search tab comes back: the finished answer for
-            // this text from these facts stays, with the pages shown, and nothing is asked again.
-            let facts = model.factsVersion
-            guard answer.starts(text, facts: facts) else { return }
+            // this text stays, with the pages shown, and nothing is asked again, unless something a
+            // search reads changed since (`AppModel.searchRevisionNow`: new facts, an ignored
+            // photo, an album, a place's name, the home, the day). Asked only here, as the page
+            // comes back or the text changes: what is done on the page leaves its hits as they are.
+            let revision = await model.searchRevisionNow()
+            guard !Task.isCancelled else { return }
+            guard answer.starts(text, revision: revision) else { return }
             // Completions right away; the search itself waits until typing pauses.
             let completions = await model.searchSuggestions(for: text)
             suggestions = completions
@@ -140,7 +145,7 @@ struct SearchView: View {
             // A word the completions continue is still being typed, never "nicht erkannt" (P3-13).
             result = found.beside(completions, for: text)
             // A new text shows its hits from the first page; the same one keeps the pages shown.
-            if answer.shows(text, facts: facts) { shown = Self.page }
+            if answer.shows(text, revision: revision) { shown = Self.page }
         }
     }
 

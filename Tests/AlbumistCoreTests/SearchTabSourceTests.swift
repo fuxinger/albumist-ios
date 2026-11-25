@@ -201,10 +201,12 @@ struct SearchTabSourceTests {
 
     /// Coming back to the search tab does not search again (review T3 of H14's round 2): the
     /// page's task starts again each time its page appears, so it asks `SearchAnswer` at its top,
-    /// right after the empty check, with the text and the facts' revision (`model.factsVersion`),
-    /// and does nothing when the answer on the page is the finished one for both: no second
-    /// question to Apple Intelligence, no "Verstanden als" going away and back, the pages of hits
-    /// shown stay. Only a new text shows the hits from the first page again.
+    /// right after the empty check, with the text and the revision of everything a search reads
+    /// (`model.searchRevisionNow()`, review Q1 of round 3: not only the photos' facts), and does
+    /// nothing when the answer on the page is the finished one for both: no second question to
+    /// Apple Intelligence, no "Verstanden als" going away and back, the pages of hits shown stay.
+    /// Only a new text shows the hits from the first page again. The task's id is the text alone:
+    /// a change is searched when the tab is chosen again, never while the page stays open.
     @Test func comingBackToTheTabDoesNotSearchAgain() throws {
         let type = try Self.body(["struct SearchView"], in: Self.search)
         #expect(type.contains("@State private var answer = SearchAnswer()"), "\(type)")
@@ -214,10 +216,20 @@ struct SearchTabSourceTests {
         let rest = String(page[task.upperBound...])
         #expect(rest.hasPrefix("lettext=queryguard!text.trimmingCharacters(in:.whitespaces).isEmptyelse{"
                 + "result=SearchResult();answer.emptied();suggestions=[]return}"
-                + "letfacts=model.factsVersionguardanswer.starts(text,facts:facts)else{return}"), "\(rest)")
-        #expect(rest.contains("result=found.beside(completions,for:text)ifanswer.shows(text,facts:facts){shown=Self.page}}"), "\(rest)")
+                + "letrevision=awaitmodel.searchRevisionNow()guard!Task.isCancelledelse{return}"
+                + "guardanswer.starts(text,revision:revision)else{return}"), "\(rest)")
+        #expect(rest.contains("result=found.beside(completions,for:text)ifanswer.shows(text,revision:revision){shown=Self.page}}"), "\(rest)")
+        #expect(!rest.contains("factsVersion"), "the answer keys on the photos' facts alone: \(rest)")
+        // The revision is asked by this task only, and is no task's id: no search of its own while
+        // the page stays open (during an analysis it would ask Apple Intelligence again and again).
+        let view = Self.squeezed(try Self.code(Self.search))
+        #expect(view.components(separatedBy: "searchRevision").count - 1 == 1, "\(view)")
+        #expect(page.components(separatedBy: ".task(id:").count - 1 == 2, "\(page)")
+        #expect(page.contains(".task(id:model.factsVersion){") && page.contains(".task(id:query){"), "\(page)")
         #expect(page.components(separatedBy: "shown=Self.page").count - 1 == 1, "\(page)")
         #expect(page.contains("ifletrewrite=model.lastSearchRewrite,!answer.searching{"), "\(page)")
+        // The core's two calls with the revision, nothing of the facts' revision.
+        #expect(!view.contains("facts:facts"), "\(view)")
         #expect(page.contains("ifanswer.text.isEmpty{"), "\(page)")
         let parts = Self.squeezed(try Self.body(["extension SearchView"], in: Self.search))
         #expect(parts.contains("ContentUnavailableView.search(text:answer.text)"), "\(parts)")

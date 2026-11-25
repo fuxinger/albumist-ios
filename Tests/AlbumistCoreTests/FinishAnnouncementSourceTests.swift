@@ -35,8 +35,9 @@ struct FinishAnnouncementSourceTests {
     /// that ended as the user left was said twice (owed in front, then the notification), and a
     /// check that ended in front after a finish overtaken in the background said nothing. Before
     /// the wait, next to `FinishMoment.runEnded`, the end of a run only tells that a new finish
-    /// began, which no notification has said yet. Two marked lines in `AppModel.swift`, nothing
-    /// else of H14 there.
+    /// began, which no notification has said yet. Two marked lines in `AppModel.swift` for it, and
+    /// five of the search's revision (review Q1 of round 3, pinned in `SearchTabSourceTests`):
+    /// nothing else of H14 there.
     @Test func theModelDecidesWhereTheNotificationIsDecided() throws {
         let raw = try AppSource.read(Self.model)
         let model = try Self.code(Self.model)
@@ -67,7 +68,7 @@ struct FinishAnnouncementSourceTests {
             let line = try #require(raw.split(separator: "\n").first { $0.contains(call) }, "\(call)")
             #expect(line.contains(Self.mark), "unmarked: \(line)")
         }
-        #expect(raw.components(separatedBy: Self.mark).count - 1 == 2, "more of H14 in AppModel.swift")
+        #expect(raw.components(separatedBy: Self.mark).count - 1 == 2 + 5, "more of H14 in AppModel.swift")
     }
 
     /// The store lives outside the card (one per app), so the card made anew keeps what the end

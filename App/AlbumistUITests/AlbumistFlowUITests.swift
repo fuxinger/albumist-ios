@@ -2205,11 +2205,21 @@ final class AlbumistFlowUITests: XCTestCase {
 
         // Trial year: chosen in the settings, shown on the overview, taken back there.
         let year = Calendar.current.component(.year, from: Date())
+        // A system alert can be in front here: "Neu prüfen" is a run the user started, and that is
+        // when the app asks for notifications. In UI runs 44886315629 and 44897908649 (flow-other)
+        // the tap on "Einstellungen" opened nothing for 20 s while the Mac was not busy; the
+        // notification question is answered here as everywhere ("Nicht erlauben"), any other
+        // alert is named in the log, and a tap that opened nothing is tried once more.
+        UITestWait.clearSystemAlert("before the trial-year settings")
         if tap(app.buttons["Einstellungen"], "settings for trial year") {
-            // On a busy Mac (UI run 44886315629, flow-other 44 min, Home presses needed twice) the
-            // picker was not there 15 s after the tap: the settings open is now waited for and
-            // said by name, and the picker has 30 s.
-            UITestWait.appears(app.navigationBars["Einstellungen"], "settings open for the trial year", timeout: 20)
+            let settingsBar = app.navigationBars["Einstellungen"]
+            if !UITestWait.holds(timeout: 10, { settingsBar.exists }) {
+                print("UI_FACT settings did not open 10 s after the tap for the trial year, trying again")
+                UITestWait.clearSystemAlert("after a settings tap that opened nothing")
+                shot("x-settings-not-open-trial-year")
+                if app.buttons["Einstellungen"].exists { app.buttons["Einstellungen"].tap() }
+            }
+            UITestWait.appears(settingsBar, "settings open for the trial year", timeout: 20)
             let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Albumist arbeitet mit")).firstMatch
             if tap(picker, "trial year picker", timeout: 30) {
                 let onlyYear = app.buttons["Nur \(year)"]

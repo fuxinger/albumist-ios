@@ -54,7 +54,7 @@ struct UITestTabsSourceTests {
         let body = try Self.screensBody(["static func tabButton(_ app: XCUIApplication, _ name: String) -> XCUIElement"])
         let ready = try #require(body.range(of: "funcready()->Bool{button.exists&&button.isHittable}"), "\(body)")
         let leaves = try #require(body.range(of: "if!ready(),app.searchFields.firstMatch.exists{Search.leave(app,"), "\(body)")
-        let expands = try #require(body.range(of: "expandTabBar(app,until:ready)"), "\(body)")
+        let expands = try #require(body.range(of: "expandTabBar(app){ready()}"), "\(body)")
         #expect(ready.upperBound <= leaves.lowerBound && leaves.upperBound <= expands.lowerBound, "\(body)")
         #expect(!body.contains(".tap()"), "\(body)")
     }

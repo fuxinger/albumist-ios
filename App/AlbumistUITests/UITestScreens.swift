@@ -67,7 +67,7 @@ enum UITestScreens {
         if !ready(), app.searchFields.firstMatch.exists {
             Search.leave(app, "tab \(name)")
         }
-        expandTabBar(app, until: ready)
+        expandTabBar(app) { ready() }
         if !ready() { print("UI_FACT tab \(name) cannot be tapped; the tab bar shows \(Search.barFacts(app))") }
         return button
     }

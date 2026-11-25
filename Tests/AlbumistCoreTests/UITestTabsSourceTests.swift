@@ -3,12 +3,13 @@ import Testing
 import AlbumistTestSupport
 
 /// The UI tests' helpers for the tabs and the search (design wave 3, H14; review S4, S7 and S10
-/// of H14), read as source: they build only on a Mac. One `tabButton` for every class
-/// (`UITestScreens.tabButton`), which leaves an active search before it looks for a tab and
-/// never taps into the bar; `Search.leave` waits for all three named tabs and looks for the way
-/// out beside the field first; what iOS shows is printed (`UI_FACT`), so the first run on iOS
-/// 27.2 tells what the helpers rest on. They work with every `MainTabs.searchField`: by default
-/// choosing the search tab brings no keyboard, and leaving the search is choosing another tab.
+/// of H14), and the sheet check of flow test 6 (review S6), read as source: they build only on
+/// a Mac. One `tabButton` for every class (`UITestScreens.tabButton`), which leaves an active
+/// search before it looks for a tab and never taps into the bar; `Search.leave` waits for all
+/// three named tabs and looks for the way out beside the field first; what iOS shows is printed
+/// (`UI_FACT`), so the first run on iOS 27.2 tells what the helpers rest on. They work with
+/// every `MainTabs.searchField`: by default choosing the search tab brings no keyboard, and
+/// leaving the search is choosing another tab.
 @Suite("UI test helpers for the tabs and the search")
 struct UITestTabsSourceTests {
     static let folder = "App/AlbumistUITests"
@@ -114,5 +115,20 @@ struct UITestTabsSourceTests {
             #expect(body.contains("UI_FACT") && body.contains("facts(app)"), "\(name): \(body)")
         }
         #expect(tab.contains("UI_FACT") && tab.contains("Search.barFacts(app)"), "\(tab)")
+    }
+
+    /// Flow test 6 measures the sheet "Analyse" as soon as it is open, whatever its line says,
+    /// and fails without its "Fertig" (review S6 of H14: inside `if said` the check was skipped
+    /// without a word when the line came late), then checks that it opened half high.
+    @Test func flowTest6MeasuresTheSheetWhateverItsLineSays() throws {
+        let flow = try Self.code("App/AlbumistUITests/AlbumistFlowUITests.swift")
+        let test6 = try #require(AppSource.body(of: ["func test6_AnalysisKeepsGoingThroughBackgroundAndTabs("], in: flow))
+        let opened = try #require(test6.range(of: "let opened = idle && UITestScreens.Analysis.openSheet(app)"), "\(test6)")
+        let there = try #require(test6.range(of: "XCTAssertTrue(sheetDone.exists,"), "a missing Fertig is not a failure")
+        let high = try #require(test6.range(of: "XCTAssertGreaterThan(top, app.frame.height * 0.4,"))
+        let line = try #require(test6.range(of: "anything(\"keine neuen Fotos\")"))
+        #expect(opened.upperBound < there.lowerBound && there.upperBound < high.lowerBound, "\(test6)")
+        #expect(high.upperBound < line.lowerBound, "the sheet is measured only after its line")
+        #expect(!test6.contains("if said"), "the measure still waits for the line")
     }
 }

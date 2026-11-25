@@ -2297,16 +2297,20 @@ final class AlbumistFlowUITests: XCTestCase {
         // says so once the check has ended.
         if UITestScreens.Analysis.checkAgain(app, "check again") {
             let idle = waitStable("check finished", timeout: 120) { analysisIdle }
-            let said = idle && UITestScreens.Analysis.openSheet(app) && anything("keine neuen Fotos").waitForExistence(timeout: 5)
-            print(said ? "UI_STEP_OK check says no new photos" : "UI_STEP_MISSING check says no new photos")
+            let opened = idle && UITestScreens.Analysis.openSheet(app)
             // Sheets in a fitting size (DS-12b): at the standard text size a short sheet like
-            // "Analyse" opens half high, its "Fertig" in the lower part of the screen.
+            // "Analyse" opens half high, its "Fertig" in the lower part of the screen. Measured
+            // as soon as the sheet is open, whatever its line says (review S6 of H14: waiting for
+            // the line skipped the check without a word when the line came late).
             let sheetDone = app.buttons["analysis.summary.done"]
-            if said, sheetDone.exists {
+            XCTAssertTrue(sheetDone.exists, "The sheet \"Analyse\" is not open with its \"Fertig\" after \"Neu prüfen\" (opened: \(opened))")
+            if sheetDone.exists {
                 let top = sheetDone.frame.minY
                 print("UI_FACT sheet Analyse: Fertig at y \(Int(top)) of \(Int(app.frame.height))")
                 XCTAssertGreaterThan(top, app.frame.height * 0.4, "The sheet \"Analyse\" does not open half high at the standard text size")
             }
+            let said = opened && anything("keine neuen Fotos").waitForExistence(timeout: 5)
+            print(said ? "UI_STEP_OK check says no new photos" : "UI_STEP_MISSING check says no new photos")
             shot("64-check-again")
             UITestScreens.Analysis.closeSheet(app)
         }

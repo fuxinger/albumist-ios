@@ -388,55 +388,87 @@ final class MainThreadWatch: @unchecked Sendable {
             if slept >= 1.5 {
                 note("UI_PROCESS_STALL the watch slept \(Self.text(slept)) s instead of \(Self.tick) s from \(Self.clock(Date().timeIntervalSince1970 - slept)) UTC (the whole process got no time)")
             }
-            lock.lock()
-            let pending = askedAt
-            if pending == nil {
-                askedAt = now
-                askedWall = Date().timeIntervalSince1970
-                seenInStall = []
-                nextStuckReport = 10
-                nextStackAt = 2
-                stacksInPing = 0
-                workInPing = [:]
-                inactiveInStall = !active
-                hangStack = nil
-                hangSections = []
-                starvedInPing = 0
-            } else if slept >= Self.tick + 0.05 {
-                starvedInPing += slept - Self.tick
-            }
-            let needsHangStack = pending != nil && hangStack == nil
-            let waited = pending.map { Self.seconds(from: $0, to: now) } ?? 0
-            let path = sections.isEmpty ? "unmarked" : sections.map { $0.name }.joined(separator: ">")
-            if waited >= 0.5 {
-                if !seenInStall.contains(path) && seenInStall.count < 4 { seenInStall.append(path) }
-            }
-            if waited >= Self.hangLimit - 2 * Self.tick {
-                if !hangSections.contains(path) && hangSections.count < 4 { hangSections.append(path) }
-            }
-            let stuck = pending != nil && waited >= nextStuckReport
-            if stuck { nextStuckReport *= 2 }
-            let since = askedWall
-            let names = seenInStall.joined(separator: ", ")
-            let current = sections.last.map { "\($0.name) running for \(Self.text(Self.seconds(from: $0.began, to: now))) s" } ?? "no marked section"
-            let inactive = inactiveInStall
-            lock.unlock()
-            if needsHangStack, waited >= Self.hangLimit - 2 * Self.tick, let stack = captureMainStack() {
+            let ping = pinged(now: now, slept: slept)
+            if ping.needsHangStack, ping.waited >= Self.hangLimit - 2 * Self.tick, let stack = captureMainStack() {
                 lock.lock()
-                if askedAt == pending { hangStack = stack }
+                if askedAt == ping.pending { hangStack = stack }
                 lock.unlock()
             }
-            if pending != nil, waited >= nextStackAt, stacksInPing < Self.maxStacks {
+            if ping.pending != nil, ping.waited >= nextStackAt, stacksInPing < Self.maxStacks {
                 nextStackAt = nextStackAt < 5 ? 5 : nextStackAt + 5
                 stacksInPing += 1
-                reportStack(waited: waited, since: since)
+                reportStack(waited: ping.waited, since: ping.since)
             }
-            if stuck {
-                note("UI_MAIN_STALL the main thread has not answered for \(Self.text(waited)) s, since \(Self.clock(since)) UTC, in \(names) (now \(current))\(Self.tag(inactive))")
+            if ping.stuck {
+                note("UI_MAIN_STALL the main thread has not answered for \(Self.text(ping.waited)) s, since "
+                    + "\(Self.clock(ping.since)) UTC, in \(ping.names) (now \(ping.current))\(Self.tag(ping.inactive))")
             }
-            if pending == nil {
+            if ping.pending == nil {
                 DispatchQueue.main.async { [self] in answered() }
             }
+        }
+    }
+
+    /// What one ping of the watch found, read under the lock in `pinged`.
+    private struct Ping {
+        let pending: UInt64?
+        let waited: Double
+        let since: Double
+        let names: String
+        let current: String
+        let inactive: Bool
+        let stuck: Bool
+        let needsHangStack: Bool
+    }
+
+    /// Asks the main thread anew, or looks at how long the open question has gone unanswered, and
+    /// keeps the sections the stall ran through. Everything here needs the lock, so it stays together.
+    private func pinged(now: UInt64, slept: Double) -> Ping {
+        lock.lock()
+        defer { lock.unlock() }
+        let pending = askedAt
+        if pending == nil {
+            askAnew(now: now)
+        } else if slept >= Self.tick + 0.05 {
+            starvedInPing += slept - Self.tick
+        }
+        let waited = pending.map { Self.seconds(from: $0, to: now) } ?? 0
+        rememberSection(waited: waited)
+        let stuck = pending != nil && waited >= nextStuckReport
+        if stuck { nextStuckReport *= 2 }
+        let current = sections.last.map { "\($0.name) running for \(Self.text(Self.seconds(from: $0.began, to: now))) s" }
+        return Ping(pending: pending,
+                    waited: waited,
+                    since: askedWall,
+                    names: seenInStall.joined(separator: ", "),
+                    current: current ?? "no marked section",
+                    inactive: inactiveInStall,
+                    stuck: stuck,
+                    needsHangStack: pending != nil && hangStack == nil)
+    }
+
+    /// Asks the main thread a new question and forgets what the last stall gathered. Needs the lock.
+    private func askAnew(now: UInt64) {
+        askedAt = now
+        askedWall = Date().timeIntervalSince1970
+        seenInStall = []
+        nextStuckReport = 10
+        nextStackAt = 2
+        stacksInPing = 0
+        workInPing = [:]
+        inactiveInStall = !active
+        hangStack = nil
+        hangSections = []
+        starvedInPing = 0
+    }
+
+    /// Keeps the marked sections a stall ran through, up to four, for the stall and the hang line.
+    /// Needs the lock.
+    private func rememberSection(waited: Double) {
+        let path = sections.isEmpty ? "unmarked" : sections.map { $0.name }.joined(separator: ">")
+        if waited >= 0.5, !seenInStall.contains(path), seenInStall.count < 4 { seenInStall.append(path) }
+        if waited >= Self.hangLimit - 2 * Self.tick, !hangSections.contains(path), hangSections.count < 4 {
+            hangSections.append(path)
         }
     }
 

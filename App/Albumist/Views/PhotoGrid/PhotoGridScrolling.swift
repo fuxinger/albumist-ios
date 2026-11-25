@@ -69,13 +69,22 @@ final class PhotoGridScroller {
     @ObservationIgnored private var safeArea = PhotoGridSafeEdges()
     /// The offsets asked for while the grid scrolls by itself.
     @ObservationIgnored private var target = PhotoGridAutoScroll.Target()
-    /// How `scrollTo(y:)` counts, learned once for the app from the first step of scrolling by
-    /// itself that can tell (SwiftUI's way, the same on every page).
+    /// How `scrollTo(y:)` counts, learned for the app from a probe of scrolling by itself and
+    /// checked again in each run (SwiftUI's way, the same on every page; review L5, W4).
     private static var calibration = PhotoGridAutoScroll.Calibration()
+    /// This scroll view scrolls by itself: only its reports answer the steps asked (the lesson is
+    /// the app's, every grid's).
+    @ObservationIgnored private var scrollsByItself = false
 
     /// The offset the scroll view reported last.
     var offset: Double {
         Double(geometry?.contentOffset.y ?? 0)
+    }
+
+    /// The scroll view's height, also what of it lies under the bars; nil before it reported
+    /// itself. The grid reads in it which of its photos are on screen (review W1).
+    var height: Double? {
+        geometry.map { Double($0.containerSize.height) }
     }
 
     /// The part of the scroll view inside its content insets, from top to bottom in its own space
@@ -103,16 +112,18 @@ final class PhotoGridScroller {
         self.geometry = geometry
         let offset = Double(geometry.contentOffset.y)
         target.reported(offset)
-        Self.calibration.reported(offset)
+        if scrollsByItself { Self.calibration.reported(offset) }
     }
 
     func reported(safeArea: PhotoGridSafeEdges) {
         self.safeArea = safeArea
     }
 
-    /// One frame's step of scrolling by itself, `step` points (negative: up), within the content.
+    /// One frame's step of scrolling by itself, `step` points (negative: up), within the content;
+    /// none while a probe of how `scrollTo(y:)` counts waits for its report (review W4).
     func scroll(by step: Double) {
-        guard let geometry else { return }
+        guard let geometry, Self.calibration.mayAsk() else { return }
+        scrollsByItself = true
         let insetTop = Double(geometry.contentInsets.top)
         let top = -insetTop
         let bottom = max(top, Double(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height))
@@ -124,6 +135,7 @@ final class PhotoGridScroller {
 
     /// The finger left the edge or lifted: the next steps go on from where the scroll view is.
     func endAutoScroll() {
+        scrollsByItself = false
         target.reset()
         Self.calibration.reset()
     }

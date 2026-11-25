@@ -136,12 +136,14 @@ struct PhotoMenuItems: View {
 /// A photo larger, as the long press lifts it out of its grid (review C of design wave 2, M2):
 /// the image its cell shows, from the thumbnails' memory, at once, whole, in its own
 /// proportions, as large as it is sharp (`PhotoMenu.liftSize`: never smaller than the cell, at
-/// most 320 × 427 pt). So never an empty surface where the cell shows a photo, never a blurry
-/// enlargement, nothing loaded from iCloud, and no lift counted as a cover (`CoverStats` counts
-/// the cards' covers). In a grid that zooms (`gridWidth`) at least as large as at three in a
-/// row, also at five and seven in a row, from the sharpest image kept of it at the grid's sizes
-/// (review L9 of design wave 3); nothing is asked of Photos for the lift. Gone from memory (a
-/// memory warning) while its cell still shows it: that large, asked for again as the cell asks.
+/// most 320 × 427 pt). So never an empty surface where the cell shows a photo, nothing loaded
+/// from iCloud, and no lift counted as a cover (`CoverStats` counts the cards' covers). In a
+/// grid that zooms (`gridWidth`) at least as large as at three in a row, also at five and seven
+/// in a row (review L9 of design wave 3), from the sharpest image of it in memory at the grid's
+/// sizes. Nothing is asked of Photos for the lift, so it can be an enlargement: at seven in a
+/// row with only the cell's 52-pt thumbnail in memory, that image at the 123.7 pt of three in a
+/// row on the 375-pt iPhone, about 2.4 times its size (review W8). Gone from memory (a memory
+/// warning) while its cell still shows it: that large, asked for again as the cell asks.
 /// Worked out in its own body, when SwiftUI draws the preview, not in the cell's; gets
 /// everything handed in (the system draws it apart from the screen).
 /// Decorative: the menu says what can be done with it.

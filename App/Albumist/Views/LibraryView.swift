@@ -29,9 +29,10 @@ struct LibraryView: View {
     /// area they are of: while an area's days are made anew its days before stay.
     @State private var days = InboxDays()
     @State private var daysBucket: InboxBucket?
-    /// Today's number on the iPhone's clock, for "Heute" and "Gestern": read anew at midnight (iOS
-    /// says a significant time changed then, as for a new time zone) and when the app is back on
-    /// screen, so a tab left open overnight makes its days anew (review L11).
+    /// Today's number on the iPhone's clock, for "Heute" and "Gestern", and the clock's zone, on
+    /// which photos without a zone of their own are read: read anew at midnight and at a new time
+    /// zone (iOS says a significant time changed) and when the app is back on screen, so a tab
+    /// left open overnight or taken to another zone makes its days anew (review L11, W10).
     @State private var today = Self.today()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -209,12 +210,12 @@ struct LibraryView: View {
     /// What the shown area's days are made of: the area, its photos as the model handed them
     /// over (the same array, not equal contents: comparing 100,000 photos at every draw would
     /// cost what grouping them off the main thread saves), the app's language, and which day is
-    /// "Heute".
+    /// "Heute" on which clock.
     private struct DaysKey: Equatable {
         var bucket: InboxBucket
         var members: [LibraryBuckets.Item]?
         var words: ProposalWords
-        var today: Int
+        var today: Today
 
         static func == (a: DaysKey, b: DaysKey) -> Bool {
             guard a.bucket == b.bucket, a.words == b.words, a.today == b.today else { return false }
@@ -233,9 +234,17 @@ struct LibraryView: View {
         return a.withUnsafeBufferPointer { pa in b.withUnsafeBufferPointer { pb in pa.baseAddress == pb.baseAddress } }
     }
 
-    /// Today's number on the iPhone's clock (`LocalTime.day`): the days say "Heute" and "Gestern".
-    private static func today() -> Int {
-        LocalTime.day(LocalTime.wallClock(Date(), in: .current))
+    /// Which day is today on the iPhone's clock (`LocalTime.day`), and the clock's zone by its
+    /// identifier: the days say "Heute" and "Gestern", and a photo without a zone of its own is on
+    /// the day the iPhone's clock gives it (review W10: a new zone can keep the day's number).
+    private struct Today: Equatable {
+        var day: Int
+        var zone: String
+    }
+
+    private static func today() -> Today {
+        let zone = TimeZone.current
+        return Today(day: LocalTime.day(LocalTime.wallClock(Date(), in: zone)), zone: zone.identifier)
     }
 
     /// Groups the area's photos by day off the main thread. Given up when a newer area comes

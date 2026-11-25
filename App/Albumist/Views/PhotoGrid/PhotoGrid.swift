@@ -64,8 +64,10 @@ struct PhotoGrid: View {
         let settle = self.settle
         let pinned = pinsHeaders && !typeSize.isAccessibilitySize
         // What it shows, for a drag that runs while more photos load or the days change (review
-        // L3): handed over, nothing made here.
-        let _ = gestures.show(PhotoGridShown(sections, below: limit))
+        // L3), and how it lays its photos out and pins its headers, for what is on screen (the
+        // frames of another layout are stale, review W1): handed over, nothing made here.
+        let _ = gestures.show(PhotoGridShown(sections, below: limit), layout: PhotoGridLayout(columns: columns, width: Double(width)),
+                              pinsHeaders: pinned)
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: CGFloat(PhotoGridZoom.spacing)), count: columns),
                   spacing: CGFloat(PhotoGridZoom.spacing),
                   pinnedViews: pinned ? [.sectionHeaders] : []) {
@@ -109,8 +111,8 @@ struct PhotoGrid: View {
     }
 
     /// A day's header, and where it is for the gestures: pinned, where it is pinned over the
-    /// photos scrolling under it, which a finger on it does not reach (review L4); kept while it
-    /// is away, as the photos' places are.
+    /// photos scrolling under it, which a finger on it does not reach (review L4); on screen as
+    /// the photos are, by where it lies (review W1).
     private func header(_ section: PhotoGridSection, pinned: Bool) -> some View {
         PhotoGridHeader(section: section, pinned: pinned)
             .onGeometryChange(for: CGRect.self) { proxy in
@@ -118,8 +120,6 @@ struct PhotoGrid: View {
             } action: { frame in
                 gestures.header(section.id, frame)
             }
-            .onAppear { gestures.headerAppeared(section.id) }
-            .onDisappear { gestures.headerDisappeared(section.id) }
     }
 
     /// One photo: a tap opens it, or ticks it while the grid selects; its long press lifts it
@@ -191,16 +191,17 @@ struct PhotoGrid: View {
         .photoMenu(id, place: place, side: side, gridWidth: width, selecting: selecting, available: available) { item in
             perform(item, id)
         }
-        // Where it is, for the fingers of the gestures. Away (scrolled off, or the page left for
-        // another tab or page) it does not count, but its place is kept: back, it reports
-        // nothing new when nothing moved (review L1).
+        // Where it is, for the fingers of the gestures: a frame in the grid, which scrolling does
+        // not move, so what it reported stays true while it is away (scrolled off, the page left
+        // for another tab or page) until the grid lays its photos out anew. Whether it is on
+        // screen is read from that frame, never from SwiftUI's word that its cell appeared or
+        // went: "Auswählen" and "Fertig" give it a new cell, and SwiftUI promises no order of
+        // the two words (review L1, W1).
         .onGeometryChange(for: PhotoGridPlace.self) { proxy in
             PhotoGridPlace(position: entry.position, frame: proxy.frame(in: .named(PhotoGridPlace.space)))
         } action: { reported in
             gestures.place(id, reported)
         }
-        .onAppear { gestures.appeared(id) }
-        .onDisappear { gestures.disappeared(id) }
     }
 
     /// The photo's date and time on the clock where it was taken, as its day's header says it

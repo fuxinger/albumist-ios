@@ -10,13 +10,18 @@ import AlbumistCore
 /// `PhotoGridAutoScroll`, `PhotoGridZoom`).
 @MainActor
 final class PhotoGridGestureState {
-    /// The photos on screen: their place in the grid's order and their frames in the grid, as
-    /// each photo reports them (`PhotoGrid.cell`); kept while a photo is away, so the photos of
-    /// a page shown again, which report nothing new, are found (review L1).
+    /// Where the grid's photos are: their place in the grid's order and their frames in the grid,
+    /// as each photo reported them last (`PhotoGrid.cell`). On screen is what lies in the part of
+    /// the grid the scroll view shows, read from the frames, never from SwiftUI's word that a cell
+    /// appeared or went (review W1); a page shown again, whose photos report nothing new, finds
+    /// them (review L1).
     private var photos = PhotoGridOnScreen<AssetID, PhotoGridPlace>()
-    /// The days' headers on screen and their frames in the grid, by day: pinned, one lies over
-    /// the photos scrolling under it, and a finger on it is on none of them (review L4).
+    /// Where the days' headers are, by day: pinned, one lies over the photos scrolling under it,
+    /// and a finger on it is on none of them (review L4).
     private var headers = PhotoGridOnScreen<Int, CGRect>()
+    /// The grid pins its days' headers over the photos scrolling under them ("Unsortiert", not at
+    /// the accessibility sizes): only then a header lies over photos.
+    private var pinsHeaders = false
     /// The photos the grid shows now, as each of its bodies hands them over (`show`), and their
     /// order, made when a gesture asks and again only when they changed (`order()`).
     private var shown = PhotoGridShown([])
@@ -83,48 +88,58 @@ final class PhotoGridGestureState {
         photos.report(id, place)
     }
 
-    func appeared(_ id: AssetID) {
-        photos.appeared(id)
-    }
-
-    func disappeared(_ id: AssetID) {
-        photos.disappeared(id)
-    }
-
     func header(_ day: Int, _ frame: CGRect) {
         headers.report(day, frame)
     }
 
-    func headerAppeared(_ day: Int) {
-        headers.appeared(day)
+    /// Where the user looks, in the grid's space, for a finger at `inGrid` in the grid and at
+    /// `inScrollView` in the scroll view: the part of the grid the scroll view shows, and where
+    /// its bars end at the top (a pinned header lies there). Nil before the scroll view reported
+    /// itself, and without one: then every photo laid out counts.
+    private func seen(at inGrid: CGPoint, _ inScrollView: CGPoint, in scroller: PhotoGridScroller?) -> Seen? {
+        guard let scroller,
+              let visible = PhotoGridHitTest.visiblePart(gridY: Double(inGrid.y), scrollViewY: Double(inScrollView.y),
+                                                         height: scroller.height)
+        else { return nil }
+        return Seen(visible: visible, barsEnd: visible.lowerBound + (scroller.seenArea?.lowerBound ?? 0))
     }
 
-    func headerDisappeared(_ day: Int) {
-        headers.disappeared(day)
+    private struct Seen {
+        var visible: ClosedRange<Double>
+        var barsEnd: Double
     }
 
-    /// What lies over the photos: the headers on screen (a pinned one over the photos under it).
-    private var covered: [GridRect] {
-        headers.shown.values.map(GridRect.init)
-    }
-
-    /// The photos on screen of the grid whose photos are `ids`, in its order, with their frames.
-    /// A photo that reports a place in another order (the days changed and it is about to go)
-    /// is left out.
-    private func cells(in ids: [AssetID]) -> [(position: Int, frame: GridRect)] {
-        photos.shown.compactMap { id, place in
-            guard place.position >= 0, place.position < ids.count, ids[place.position] == id else { return nil }
-            return (position: place.position, frame: GridRect(place.frame))
+    /// What lies over the photos: the days' headers pinned at the top of what the user sees, only
+    /// where the grid pins them. A header in its own place lies over no photo; one that reported
+    /// before the days moved, and is no longer where it said, lies lower down, or under the one
+    /// pinned at the top, which reported after it (`PhotoGridOnScreen`).
+    private func covered(_ seen: Seen?) -> [GridRect] {
+        guard pinsHeaders else { return [] }
+        return headers.onScreen(seen?.visible, frame: { GridRect($0) }).map { GridRect($0.value) }.filter { header in
+            guard let seen else { return true }
+            return header.minY <= seen.barsEnd + header.height
         }
     }
 
-    // MARK: Drag to select
+    /// The photos on screen of the grid whose photos are `ids`, in its order, with their frames.
+    /// A photo that reported a place in another order (the days changed, and it went or moved
+    /// before it could report) does not count.
+    private func cells(in ids: [AssetID], _ seen: Seen?) -> [(position: Int, frame: GridRect)] {
+        photos.onScreen(seen?.visible, frame: { GridRect($0.frame) }) { id, place in
+            place.position >= 0 && place.position < ids.count && ids[place.position] == id
+        }.map { (position: $0.value.position, frame: GridRect($0.value.frame)) }
+    }
 
     // MARK: The photos the grid shows
 
-    /// The grid shows `shown` now (each of its bodies hands it over; nothing is made here).
-    func show(_ shown: PhotoGridShown) {
+    /// The grid shows `shown` now, lays its photos out as `layout` (the frames of another layout
+    /// are stale, review W1) and pins its headers or not (each of its bodies hands it over;
+    /// nothing is made here).
+    func show(_ shown: PhotoGridShown, layout: PhotoGridLayout, pinsHeaders: Bool) {
         self.shown = shown
+        photos.laidOut(layout)
+        headers.laidOut(layout)
+        self.pinsHeaders = pinsHeaders
     }
 
     /// The photos the grid shows now in its order: made again only when they changed, so a drag
@@ -172,17 +187,18 @@ final class PhotoGridGestureState {
     func endDrag() {
         ticker.stop()
         drag?.scroller?.endAutoScroll()
-        if drag != nil || waiting != nil { lift.gestureEnded() }
+        if drag != nil || waiting != nil { lift.gestureEnded(at: CACurrentMediaTime()) }
         drag = nil
         waiting = nil
     }
 
     /// Whether a tap on a photo now is the lift that ends a drag or a pinch (UIKit may hand it to
     /// the photo's button too, before or right after the gesture's end): it neither ticks nor
-    /// opens a photo of its own. A tap after the next finger touched is a tap again
-    /// (`PhotoGridLift`).
+    /// opens a photo of its own. A tap after the next finger touched is a tap again, and so is an
+    /// activation without a touch half a second after the end (`PhotoGridLift`), on the screen's
+    /// clock, which never jumps.
     var swallowsTap: Bool {
-        lift.swallowsTap
+        lift.swallowsTap(at: CACurrentMediaTime())
     }
 
     /// A finger touched the grid (either gesture's recognizer tells).
@@ -195,8 +211,9 @@ final class PhotoGridGestureState {
     private func start(_ touch: PhotoGridTouch, at points: [CGPoint]) {
         guard let pending = waiting else { return }
         let ids = order()
-        let onScreen = cells(in: ids)
-        let covered = self.covered
+        let seen = self.seen(at: touch.inGrid, touch.inScrollView, in: pending.scroller)
+        let onScreen = cells(in: ids, seen)
+        let covered = self.covered(seen)
         let found = points.lazy.compactMap { point in
             PhotoGridHitTest.position(x: Double(point.x), y: Double(point.y), in: onScreen, covered: covered)
         }.first
@@ -212,12 +229,18 @@ final class PhotoGridGestureState {
     }
 
     /// The finger is at `point` in the grid: the range runs to the photo under it; between rows
-    /// and on a header (also one pinned over photos) it keeps the photo it has.
+    /// and on a header in its own place it keeps the photo it has. On a header pinned over photos
+    /// it runs to the first row below the header, which the page brings out while it scrolls up
+    /// under the finger (review W2).
     private func extend(to point: CGPoint) {
         follow()
-        guard var current = drag,
-              let position = PhotoGridHitTest.position(x: Double(point.x), y: Double(point.y), in: cells(in: current.ids),
-                                                       covered: covered)
+        guard var current = drag else { return }
+        // The finger is where it was in the scroll view: while the page scrolls by itself the
+        // part of the grid it shows moves with `point`.
+        let seen = self.seen(at: point, current.inScrollView, in: current.scroller)
+        let covered = self.covered(seen)
+        guard let position = PhotoGridHitTest.position(x: Double(point.x), y: Double(point.y), in: cells(in: current.ids, seen),
+                                                       covered: covered, onCovered: .rowBelow)
         else { return }
         let change = current.range.move(to: position)
         drag = current
@@ -286,15 +309,15 @@ final class PhotoGridGestureState {
     func beginPinch(_ touch: PhotoGridTouch, columns: Int, scroller: PhotoGridScroller?) {
         endPinch()
         lift.gestureBegan()
-        let all = photos.shown.map { (position: $0.value.position, frame: GridRect($0.value.frame)) }
+        let ids = order()
+        let onScreen = cells(in: ids, seen(at: touch.inGrid, touch.inScrollView, in: scroller))
         var photo: AssetID?
         var pointInPhoto = 0.5
-        if let position = PhotoGridHitTest.nearest(x: Double(touch.inGrid.x), y: Double(touch.inGrid.y), in: all),
-           let held = photos.shown.first(where: { $0.value.position == position }) {
-            photo = held.key
-            let frame = held.value.frame
-            if frame.height > 0 {
-                pointInPhoto = min(max(Double((touch.inGrid.y - frame.minY) / frame.height), 0), 1)
+        if let position = PhotoGridHitTest.nearest(x: Double(touch.inGrid.x), y: Double(touch.inGrid.y), in: onScreen),
+           let held = onScreen.first(where: { $0.position == position }) {
+            photo = ids[position]
+            if held.frame.height > 0 {
+                pointInPhoto = min(max((Double(touch.inGrid.y) - held.frame.minY) / held.frame.height, 0), 1)
             }
         }
         zooming = Zooming(steps: PhotoGridZoom.Pinch(columns: columns), photo: photo, pointInPhoto: pointInPhoto,
@@ -316,7 +339,7 @@ final class PhotoGridGestureState {
     }
 
     func endPinch() {
-        if zooming != nil { lift.gestureEnded() }
+        if zooming != nil { lift.gestureEnded(at: CACurrentMediaTime()) }
         zooming = nil
     }
 }

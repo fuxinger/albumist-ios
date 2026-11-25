@@ -75,7 +75,6 @@ struct PhotoGridGestureTests {
         }
     }
 
-    /// Positions outside the grid's photos (a page that shrank meanwhile) change nothing.
     /// A running drag follows the photos the grid shows now (review L3): more photos loaded after
     /// them keep the range where it is and let it grow into them; new photos before it move it
     /// with its photos; when its photos are no longer together in that order (one of them went,
@@ -106,6 +105,7 @@ struct PhotoGridGestureTests {
         #expect(drag.rebased(from: old, to: []) == nil)
     }
 
+    /// Positions outside the grid's photos (a page that shrank meanwhile) change nothing.
     @Test func positionsBeyondThePhotosChangeNothing() {
         var selection: Set<String> = ["a"]
         PhotoGridDrag.apply(PhotoGridDrag.Change(marked: [1...5], restored: [7...9]), mode: .select, to: &selection,
@@ -113,31 +113,31 @@ struct PhotoGridGestureTests {
         #expect(selection == ["a", "b", "c"])
     }
 
-    // MARK: A gesture's lift (review L8)
+    // MARK: A gesture's lift (review L8, W3)
 
     /// The lift that ends a drag or a pinch is no tap (UIKit may hand it to the photo's button
     /// too, before or right after the gesture's end); a tap after the next finger touched down is
     /// one of its own, however soon: a tap right after a drag ticks, one right after a pinch opens.
     @Test func onlyTheLiftOfTheGestureThatEndedIsNoTap() {
         var lift = PhotoGridLift()
-        #expect(!lift.swallowsTap, "a plain tap")
+        #expect(!lift.swallowsTap(at: 0), "a plain tap")
         // A drag: its finger touches down, then it begins.
         lift.touchedDown()
         lift.gestureBegan()
-        #expect(lift.swallowsTap, "a tap while it runs")
-        lift.gestureEnded()
-        #expect(lift.swallowsTap, "its own lift")
-        #expect(lift.swallowsTap, "its lift, however late, until a finger touches again")
+        #expect(lift.swallowsTap(at: 1), "a tap while it runs")
+        lift.gestureEnded(at: 2)
+        #expect(lift.swallowsTap(at: 2), "its own lift")
+        #expect(lift.swallowsTap(at: 2.3), "its lift, a few frames later")
         lift.touchedDown()
-        #expect(!lift.swallowsTap, "a tap right after the drag ticks or unticks")
+        #expect(!lift.swallowsTap(at: 2.3), "a tap right after the drag ticks or unticks")
         // A pinch: its second finger touches down while it runs, which is no tap of its own.
         lift.gestureBegan()
         lift.touchedDown()
-        #expect(lift.swallowsTap)
-        lift.gestureEnded()
-        #expect(lift.swallowsTap, "the lift of its fingers")
+        #expect(lift.swallowsTap(at: 3))
+        lift.gestureEnded(at: 4)
+        #expect(lift.swallowsTap(at: 4.1), "the lift of its fingers")
         lift.touchedDown()
-        #expect(!lift.swallowsTap, "a tap right after the pinch opens")
+        #expect(!lift.swallowsTap(at: 4.1), "a tap right after the pinch opens")
     }
 
     /// A drag and a pinch at once: a tap is their lift until both ended and a finger touched again.
@@ -145,17 +145,35 @@ struct PhotoGridGestureTests {
         var lift = PhotoGridLift()
         lift.gestureBegan()
         lift.gestureBegan()
-        lift.gestureEnded()
+        lift.gestureEnded(at: 1)
         lift.touchedDown()
-        #expect(lift.swallowsTap, "the other one still runs")
-        lift.gestureEnded()
-        #expect(lift.swallowsTap)
+        #expect(lift.swallowsTap(at: 2), "the other one still runs")
+        lift.gestureEnded(at: 3)
+        #expect(lift.swallowsTap(at: 3.1))
         lift.touchedDown()
-        #expect(!lift.swallowsTap)
+        #expect(!lift.swallowsTap(at: 3.1))
         // An end without a beginning leaves nothing running.
-        lift.gestureEnded()
+        lift.gestureEnded(at: 5)
         lift.touchedDown()
-        #expect(!lift.swallowsTap)
+        #expect(!lift.swallowsTap(at: 5))
+    }
+
+    /// An activation that comes without a touch (VoiceOver's double tap, Switch Control's
+    /// "Tippen") a while after a drag or a pinch is a tap of its own: the lift UIKit hands the
+    /// button comes with the gesture's end, within half a second of it (review W3).
+    @Test func anActivationWithoutATouchLaterIsATapOfItsOwn() {
+        var lift = PhotoGridLift()
+        lift.gestureBegan()
+        lift.gestureEnded(at: 10)
+        #expect(lift.swallowsTap(at: 10), "right after the end: its lift")
+        #expect(lift.swallowsTap(at: 10 + PhotoGridLift.window - 0.01))
+        #expect(!lift.swallowsTap(at: 11), "no touch down and a second later: a tap of its own")
+        #expect(!lift.swallowsTap(at: 10 + PhotoGridLift.window))
+        // After a touch down: at once.
+        lift.gestureBegan()
+        lift.gestureEnded(at: 20)
+        lift.touchedDown()
+        #expect(!lift.swallowsTap(at: 20.01))
     }
 
     // MARK: The photo under the finger
@@ -201,6 +219,39 @@ struct PhotoGridGestureTests {
         #expect(PhotoGridHitTest.position(x: 50, y: 50, in: Self.cells, covered: [between]) == 0)
     }
 
+    /// While a drag runs, a finger on a day's header that lies over photos (pinned at the top
+    /// while the page scrolls up under it) is on the first row below the header, at the finger's
+    /// place across, so the range goes on with the rows that come out below it (review W2). A drag
+    /// that begins there still waits (`noPhotoUnderAPinnedHeader`), and a header in its own place
+    /// between the days, over no photo, is on none.
+    @Test func aRunningDragOnAPinnedHeaderGoesOnBelowIt() {
+        func running(_ x: Double, _ y: Double, _ covered: [GridRect]) -> Int? {
+            PhotoGridHitTest.position(x: x, y: y, in: Self.cells, covered: covered, onCovered: .rowBelow)
+        }
+        // Pinned over the first row, from 40 to 90: that row reaches below its bottom.
+        let pinned = GridRect(x: 0, y: 40, width: 304, height: 50)
+        #expect(running(50, 60, [pinned]) == 0)
+        #expect(running(250, 45, [pinned]) == 2)
+        #expect(running(150, 90, [pinned]) == 1, "its edge")
+        // Its bottom in the gap below the first row: the next day's first row.
+        let low = GridRect(x: 0, y: 0, width: 304, height: 120)
+        #expect(running(50, 110, [low]) == 3)
+        #expect(running(280, 20, [low]) == 4, "beside a short row: its last photo")
+        // Pushed up by the next day's header, in its own place from 100 to 150: below the pushed
+        // one the next day's first row; the next one lies over no photo.
+        let pushed = GridRect(x: 0, y: 50, width: 304, height: 50)
+        let next = GridRect(x: 0, y: 100, width: 304, height: 50)
+        #expect(running(150, 70, [pushed, next]) == 4)
+        #expect(running(150, 120, [pushed, next]) == nil, "a header in its own place")
+        // Over the last row, with no row below it: no photo.
+        #expect(running(50, 200, [GridRect(x: 0, y: 140, width: 304, height: 120)]) == nil)
+        // Off the header the photos count as before.
+        #expect(running(150, 95, [pinned]) == 1)
+        #expect(running(50, 160, [pinned]) == 3)
+        // Where a drag begins: no photo.
+        #expect(PhotoGridHitTest.position(x: 50, y: 60, in: Self.cells, covered: [pinned]) == nil)
+    }
+
     /// Two fingers always hold a photo, the one whose place the zoom keeps: the one under them,
     /// else the nearest (between rows, on a header, beside the grid); on a tie the earlier one.
     @Test func twoFingersHoldTheNearestPhoto() {
@@ -214,65 +265,137 @@ struct PhotoGridGestureTests {
         #expect(PhotoGridHitTest.nearest(x: 50, y: 50, in: []) == nil, "no photo on screen")
     }
 
-    // MARK: What is on screen (review L1)
+    // MARK: What is on screen (review L1, W1)
 
-    /// A photo that went (scrolled away, or its page left for another tab or page) no longer
-    /// counts, but what it reported is kept: back on screen it counts again with it, also when it
-    /// reports nothing new because nothing moved (SwiftUI reports a frame only when it changes).
-    @Test func aPhotoBackOnScreenCountsWithWhatItReported() {
-        var screen = PhotoGridOnScreen<String, Int>()
-        screen.report("a", 1)
-        screen.report("b", 2)
-        #expect(screen.shown == ["a": 1, "b": 2])
-        // The tab is left: every photo goes.
-        screen.disappeared("a")
-        screen.disappeared("b")
-        #expect(screen.shown.isEmpty)
-        // Back: they appear and report nothing new.
-        screen.appeared("a")
-        screen.appeared("b")
-        #expect(screen.shown == ["a": 1, "b": 2])
+    /// Three rows of three 100-pt photos, 2 pt apart, at three in a row on a 304-pt grid.
+    static let layout = PhotoGridLayout(columns: 3, width: 304)
+
+    static func frame(row: Int, column: Int) -> GridRect {
+        GridRect(x: Double(column) * 102, y: Double(row) * 102, width: 100, height: 100)
     }
 
-    /// What a photo reports while it is away is kept for when it is back; a photo that appears
-    /// before it reported anything counts once it reports; one that never reported is not there.
-    @Test func whatAPhotoReportsAwayCountsWhenItIsBack() {
-        var screen = PhotoGridOnScreen<String, Int>()
-        screen.report("a", 1)
-        screen.disappeared("a")
-        screen.report("a", 5)
-        #expect(screen.shown.isEmpty, "away, it does not count")
-        screen.appeared("a")
-        #expect(screen.shown == ["a": 5])
-        screen.appeared("b")
-        #expect(screen.shown == ["a": 5])
-        screen.report("b", 2)
-        #expect(screen.shown == ["a": 5, "b": 2])
-        screen.disappeared("c")
-        screen.appeared("c")
-        #expect(screen.shown == ["a": 5, "b": 2])
+    /// The keys on screen in the part `visible` of the grid (nil: all laid out).
+    static func found(_ screen: PhotoGridOnScreen<String, GridRect>, _ visible: ClosedRange<Double>? = nil) -> Set<String> {
+        Set(screen.onScreen(visible) { $0 }.map(\.key))
     }
 
-    /// Scrolling through a large library keeps at most twice `kept` photos that went, and always
-    /// the latest `kept` of them: the page left right after a long scroll finds its photos again.
-    @Test func whatWentIsKeptBounded() {
-        var screen = PhotoGridOnScreen<Int, Int>()
-        // 100 photos on screen at a time, 20,000 scrolled through.
-        for id in 0..<20_000 {
-            screen.report(id, id)
-            if id >= 100 { screen.disappeared(id - 100) }
-            #expect(screen.awayCount <= 2 * PhotoGridOnScreen<Int, Int>.kept)
+    /// "Auswählen" and "Fertig" give every photo on screen a new cell: the new one reports where
+    /// it is and appears, the old one goes, in an order SwiftUI does not promise (review W1). The
+    /// grid no longer hears SwiftUI's word that a cell appeared or went, only the frames: in all
+    /// six orders the photo is found, before, between and after the three.
+    @Test func aRebuiltCellIsFoundInEveryOrder() {
+        enum Event: CaseIterable { case newReports, newAppears, oldGoes }
+        let all = Event.allCases
+        let orders = all.flatMap { a in all.filter { $0 != a }.flatMap { b in all.filter { $0 != a && $0 != b }.map { [a, b, $0] } } }
+        #expect(orders.count == 6)
+        for order in orders {
+            var screen = PhotoGridOnScreen<String, GridRect>()
+            screen.laidOut(Self.layout)
+            screen.report("a", Self.frame(row: 0, column: 0))
+            #expect(Self.found(screen, 0...300) == ["a"])
+            for event in order {
+                switch event {
+                case .newReports: screen.report("a", Self.frame(row: 0, column: 0))
+                // What SwiftUI says of the cells reaches no gesture.
+                case .newAppears, .oldGoes: break
+                }
+                #expect(Self.found(screen, 0...300) == ["a"], "\(order)")
+            }
+            #expect(screen.count == 1, "one report per photo")
         }
-        #expect(screen.shown.count == 100)
-        // The page is left and shown again.
-        for id in 19_900..<20_000 { screen.disappeared(id) }
-        #expect(screen.shown.isEmpty)
-        for id in 19_900..<20_000 { screen.appeared(id) }
-        #expect(screen.shown.count == 100)
-        #expect(screen.shown[19_950] == 19_950)
-        // Long gone: not kept, not shown when something says it appeared.
-        screen.appeared(5)
-        #expect(screen.shown[5] == nil)
+    }
+
+    /// Whether a photo is on screen is where its frame lies, not what SwiftUI said: a photo whose
+    /// cell went without a word that it came back (a swipe back that was called off) is found
+    /// while its frame is in the part of the grid the scroll view shows, and one that is said to
+    /// be there but lies outside that part (scrolled away) is not, without any new report.
+    @Test func aPhotoIsOnScreenWhereItsFrameIs() {
+        var screen = PhotoGridOnScreen<String, GridRect>()
+        screen.laidOut(Self.layout)
+        for (index, key) in ["a", "b", "c", "d", "e", "f", "g", "h", "i"].enumerated() {
+            screen.report(key, Self.frame(row: index / 3, column: index % 3))
+        }
+        #expect(Self.found(screen, 0...150) == ["a", "b", "c", "d", "e", "f"], "the first row and the top of the second")
+        #expect(Self.found(screen, 210...500) == ["g", "h", "i"])
+        #expect(Self.found(screen, 400...900).isEmpty, "scrolled past them")
+        #expect(Self.found(screen).count == 9, "no scroll view to read: every photo laid out")
+        // The part shown, from a finger at 250 in the grid and at 50 in a scroll view 120 high.
+        #expect(PhotoGridHitTest.visiblePart(gridY: 250, scrollViewY: 50, height: 120) == 200...320)
+        #expect(PhotoGridHitTest.visiblePart(gridY: 250, scrollViewY: 50, height: nil) == nil)
+        #expect(PhotoGridHitTest.visiblePart(gridY: 250, scrollViewY: 50, height: 0) == nil)
+    }
+
+    /// A photo that went (scrolled away, or its page left for another tab or page) and comes back
+    /// with nothing moved reports nothing anew (SwiftUI reports a frame only when it changes): it
+    /// is found with what it reported (review L1).
+    @Test func aPhotoBackOnScreenCountsWithWhatItReported() {
+        var screen = PhotoGridOnScreen<String, GridRect>()
+        screen.laidOut(Self.layout)
+        screen.report("a", Self.frame(row: 0, column: 0))
+        screen.report("b", Self.frame(row: 0, column: 1))
+        // The tab is left and shown again: the grid's body runs, its layout is the same.
+        screen.laidOut(Self.layout)
+        #expect(Self.found(screen, 0...300) == ["a", "b"])
+    }
+
+    /// Another number in a row or another width lays out every photo anew: what was reported
+    /// before is stale and dropped, and the photos on screen report their new frames. The first
+    /// width the grid measures (from 0) changes no frame, and drops nothing.
+    @Test func reportsOfAnotherLayoutAreStale() {
+        var screen = PhotoGridOnScreen<String, GridRect>()
+        screen.laidOut(PhotoGridLayout(columns: 3, width: 0))
+        screen.report("a", Self.frame(row: 0, column: 0))
+        screen.laidOut(Self.layout)
+        #expect(Self.found(screen) == ["a"], "the first width")
+        screen.laidOut(PhotoGridLayout(columns: 3, width: 0))
+        screen.laidOut(Self.layout)
+        #expect(Self.found(screen) == ["a"], "a width not measured for a moment")
+        // A pinch to five in a row: only what reports anew is found.
+        screen.laidOut(PhotoGridLayout(columns: 5, width: 304))
+        #expect(Self.found(screen).isEmpty)
+        screen.report("b", GridRect(x: 0, y: 0, width: 59, height: 59))
+        #expect(Self.found(screen) == ["b"])
+        // Another width.
+        screen.laidOut(PhotoGridLayout(columns: 5, width: 390))
+        #expect(Self.found(screen).isEmpty)
+    }
+
+    /// Of two reports at one place the later one counts: the earlier one is of a photo that went
+    /// before it could report its move (a day's header grew while it was away), and the photo
+    /// there now reported after it. Reports that do not count (a photo no longer at the place it
+    /// reported in the grid's order) replace nothing.
+    @Test func ofTwoReportsAtOnePlaceTheLaterOneCounts() {
+        var screen = PhotoGridOnScreen<String, GridRect>()
+        screen.laidOut(Self.layout)
+        screen.report("old", Self.frame(row: 1, column: 0))
+        screen.report("left", Self.frame(row: 1, column: 1))
+        screen.report("new", GridRect(x: 0, y: 140, width: 100, height: 100))
+        #expect(Self.found(screen) == ["new", "left"])
+        // Touching or 2 pt apart is no overlap.
+        #expect(!Self.frame(row: 0, column: 0).overlaps(Self.frame(row: 0, column: 1)))
+        #expect(!GridRect(x: 0, y: 0, width: 100, height: 100).overlaps(GridRect(x: 100, y: 0, width: 100, height: 100)))
+        #expect(Self.frame(row: 0, column: 0).overlaps(GridRect(x: 50, y: 50, width: 100, height: 100)))
+        let counted = screen.onScreen(nil, frame: { $0 }, where: { key, _ in key != "new" }).map(\.key)
+        #expect(Set(counted) == ["old", "left"])
+    }
+
+    /// Scrolling through a large library keeps at most twice `kept` reports, always the latest
+    /// `kept` of them: the photos on screen, which reported last, are found after the page was
+    /// left and shown again.
+    @Test func whatWentIsKeptBounded() {
+        var screen = PhotoGridOnScreen<Int, GridRect>()
+        screen.laidOut(Self.layout)
+        // 20,000 photos scrolled through, three in a row.
+        for id in 0..<20_000 {
+            screen.report(id, GridRect(x: Double(id % 3) * 102, y: Double(id / 3) * 102, width: 100, height: 100))
+            #expect(screen.count <= 2 * PhotoGridOnScreen<Int, GridRect>.kept)
+        }
+        // The last rows on screen, after the page was away.
+        screen.laidOut(Self.layout)
+        let top = Double(19_900 / 3) * 102
+        let shown = Set(screen.onScreen(top...(top + 3_500)) { $0 }.map(\.key))
+        #expect(shown == Set(19_899..<20_000), "\(shown.count)")
+        #expect(screen.onScreen(0...700) { $0 }.isEmpty, "long gone: not kept")
     }
 
     // MARK: Scrolling by itself
@@ -374,7 +497,7 @@ struct PhotoGridGestureTests {
         #expect(fromTop.y(for: 520, insetTop: 100) == 620)
         #expect(fromTop.y(for: 2_000, insetTop: 100) == 2_100, "the last rows are reached")
         #expect(fromTop.y(for: -100, insetTop: 100) == 0, "the top")
-        // Learned once: a later step changes nothing.
+        // One probe a run: a later step of the same run changes nothing.
         fromTop.asked(700, from: 520, insetTop: 100, range: range)
         fromTop.reported(700)
         #expect(fromTop.convention == .fromRestingTop)
@@ -405,6 +528,134 @@ struct PhotoGridGestureTests {
         calibration.asked(510, from: 500, insetTop: 100, range: range)
         calibration.reported(510)
         #expect(calibration.convention == .contentOffset, "the next step that can tell")
+    }
+
+    /// A probe waits alone for its answer (review W4): nothing else is asked in the two frames
+    /// after it, so no later step's report can pass where the other way would have put it. Not
+    /// answered by then, it is dropped and teaches nothing, and the steps go on. (`mayAsk()`
+    /// counts a frame, so it is called outside `#expect`.)
+    @Test func aProbeWaitsAloneForItsAnswer() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        var asks = calibration.mayAsk()
+        #expect(asks)
+        calibration.asked(980, from: 1_000, insetTop: 100, range: range)
+        calibration.reported(1_000)
+        let frames = (1...3).map { _ in calibration.mayAsk() }
+        #expect(frames == [false, false, true], "two frames ask nothing; then it is dropped, the steps go on")
+        calibration.reported(980)
+        #expect(calibration.convention == nil, "a dropped probe teaches nothing")
+        // The next step that can tell, with nothing else on its way, probes again.
+        calibration.asked(960, from: 980, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(!asks)
+        calibration.reported(960)
+        #expect(calibration.convention == .contentOffset)
+        asks = calibration.mayAsk()
+        #expect(asks, "answered: the steps go on at once")
+    }
+
+    /// A probe is taken only when no other step is on its way (review W4): that step's report
+    /// can land where one of the two ways would put the probe.
+    @Test func aProbeIsTakenOnlyWhenNoOtherStepIsOnItsWay() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        // A step too small to tell, on its way.
+        calibration.asked(700.5, from: 700, insetTop: 100, range: range)
+        // The next frame's step could tell, but the one before has not been reported: no probe,
+        // and it holds nothing back.
+        var asks = calibration.mayAsk()
+        #expect(asks)
+        calibration.asked(800, from: 700, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(asks, "no probe waits")
+        // The step before lands where counting from the top would have put this one.
+        calibration.reported(700.5)
+        #expect(calibration.convention == nil, "no probe, no lesson")
+        calibration.reported(800)
+        // Nothing on its way now: the next step that can tell probes.
+        calibration.asked(820, from: 800, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(!asks)
+        calibration.reported(820)
+        #expect(calibration.convention == .contentOffset)
+    }
+
+    /// No lesson stands unchecked (review W4): each run of scrolling by itself probes once more,
+    /// and a probe that lands where the other way puts it flips the lesson; one that lands where
+    /// the lesson puts it keeps it. One probe a run: the rest of the run is not held back.
+    @Test func eachRunChecksTheLessonAndFlipsAWrongOne() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        // A wrong lesson: the probe's report came from something else that moved the scroll view.
+        calibration.asked(510, from: 500, insetTop: 100, range: range)
+        calibration.reported(410)
+        #expect(calibration.convention == .fromRestingTop)
+        // The rest of the run: a step's report where the other way puts it changes nothing yet.
+        calibration.asked(calibration.y(for: 430, insetTop: 100), from: 410, insetTop: 100, range: range)
+        var asks = calibration.mayAsk()
+        #expect(asks, "no probe: nothing waits")
+        calibration.reported(530)
+        #expect(calibration.convention == .fromRestingTop, "one probe a run")
+        calibration.reset()
+        // The next run's first step that can tell is a probe: the scroll view goes to `y` as the
+        // content offset.
+        let y = calibration.y(for: 550, insetTop: 100)
+        #expect(y == 650)
+        calibration.asked(y, from: 530, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(!asks)
+        calibration.reported(650)
+        #expect(calibration.convention == .contentOffset, "flipped")
+        #expect(calibration.y(for: 670, insetTop: 100) == 670)
+        calibration.reset()
+        // A lesson that holds stays.
+        calibration.asked(670, from: 650, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(!asks)
+        calibration.reported(670)
+        #expect(calibration.convention == .contentOffset)
+        asks = calibration.mayAsk()
+        #expect(asks)
+    }
+
+    /// The review's case (W4): the probe's own report never comes (two steps applied in one
+    /// update, a report merged with the next) while the page scrolls on. Whatever the step and
+    /// whichever way `scrollTo(y:)` counts, what is learned is that way.
+    @Test func aMissedAnswerTeachesNothingWrong() {
+        typealias Convention = PhotoGridAutoScroll.Calibration.Convention
+        for truth in [Convention.contentOffset, .fromRestingTop] {
+            for step in [-25.0, -20, -12.5, -10, -5, 5, 10, 12.5, 20, 25] {
+                for missed in [Set<Int>(), [0], [0, 3, 4]] {
+                    let learned = Self.scrollByItself(truth: truth, step: step, missed: missed)
+                    #expect(learned == truth, "\(truth), \(step) a frame, missed \(missed.sorted())")
+                }
+            }
+        }
+    }
+
+    /// Scrolls a scroll view that takes `scrollTo(y:)` the way `truth` says by itself, frame by
+    /// frame as `PhotoGridScroller.scroll(by:)` does, `step` points a frame from 2,000 (under
+    /// 100 pt of bars); it reports where it is after each step, except after the frames in
+    /// `missed`. What the calibration learned.
+    private static func scrollByItself(truth: PhotoGridAutoScroll.Calibration.Convention, step: Double,
+                                       missed: Set<Int>) -> PhotoGridAutoScroll.Calibration.Convention? {
+        let insetTop = 100.0, range = -insetTop...5_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        var target = PhotoGridAutoScroll.Target()
+        var reported = 2_000.0
+        for frame in 0..<24 {
+            guard calibration.mayAsk(),
+                  let wanted = target.next(by: step, offset: reported, range: range) else { continue }
+            let y = calibration.y(for: wanted, insetTop: insetTop)
+            calibration.asked(y, from: reported, insetTop: insetTop, range: range)
+            let landed = min(max(truth == .contentOffset ? y : y - insetTop, range.lowerBound), range.upperBound)
+            guard !missed.contains(frame) else { continue }
+            reported = landed
+            target.reported(landed)
+            calibration.reported(landed)
+        }
+        return calibration.convention
     }
 
     // MARK: Pinch to zoom

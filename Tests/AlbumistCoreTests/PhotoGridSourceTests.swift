@@ -97,20 +97,22 @@ struct PhotoGridSourceTests {
     /// The lift that ends a drag or a pinch (UIKit may hand it to the photo's button too) is no
     /// tap: the drag ticked its first photo already, and a pinch opens nothing. Only that lift
     /// (`PhotoGridLift`, review L8): both gestures tell of each finger that touches the grid, and
-    /// a tap after it is one of its own, however soon after a drag or a pinch.
+    /// a tap after it is one of its own, however soon after a drag or a pinch; so is an
+    /// activation without a touch half a second or more after the gesture's end (VoiceOver's
+    /// double tap, review W3), read on the screen's monotonic clock.
     @Test func aPhotoOpensAndTicksAsBefore() throws {
         let cell = try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.grid)
         let tap = Self.squeezed(cell)
         #expect(tap.contains("returnButton{guard!gestures.swallowsTapelse{return}guardselectingelse{open(id)return}"
                              + "ifisSelected{selection.remove(id)}else{selection.insert(id)}}"), "\(tap)")
         let lift = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "var swallowsTap: Bool"], in: Self.state))
-        #expect(lift == "{lift.swallowsTap}", "\(lift)")
+        #expect(lift == "{lift.swallowsTap(at:CACurrentMediaTime())}", "\(lift)")
         let state = try Self.code(Self.state)
-        #expect(!state.contains("Date()"), "a time window swallows the taps after the lift too")
+        #expect(!state.contains("Date()"), "the wall clock can jump")
         let end = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func endDrag("], in: Self.state))
-        #expect(end.contains("ifdrag!=nil||waiting!=nil{lift.gestureEnded()}"), "\(end)")
+        #expect(end.contains("ifdrag!=nil||waiting!=nil{lift.gestureEnded(at:CACurrentMediaTime())}"), "\(end)")
         let endPinch = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func endPinch("], in: Self.state))
-        #expect(endPinch.contains("ifzooming!=nil{lift.gestureEnded()}"), "\(endPinch)")
+        #expect(endPinch.contains("ifzooming!=nil{lift.gestureEnded(at:CACurrentMediaTime())}"), "\(endPinch)")
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
         #expect(view.components(separatedBy: "touchedDown:{gestures.touchedDown()}").count - 1 == 2, "\(view)")
         for recognizer in ["final class PhotoGridSelectRecognizer", "final class PhotoGridPinchRecognizer"] {
@@ -160,36 +162,82 @@ struct PhotoGridSourceTests {
 
     // MARK: Drag to select
 
-    /// A photo that goes (scrolled away, or its page left for another tab or page) keeps what it
-    /// reported and counts again once it is back (`PhotoGridOnScreen`): SwiftUI reports its frame
-    /// in the grid only when it changes, so the photos of a page shown again report nothing, and
-    /// a photo forgotten when it went would not be found by drag and pinch (review L1).
+    /// Whether a photo is on screen is read from the frames themselves (`PhotoGridOnScreen`,
+    /// review W1): each photo and each day's header reports where it is in the grid, a frame that
+    /// scrolling does not move, and nothing listens to SwiftUI's word that a cell appeared or
+    /// went, whose order ("Auswählen" and "Fertig" rebuild every cell on screen) and pairing (a
+    /// swipe back that is called off) SwiftUI does not promise. Each body hands over how the grid
+    /// lays its photos out, so the frames of another layout are dropped; the gestures count what
+    /// lies in the part of the grid the scroll view shows and is still at its place in the grid's
+    /// order, so the photos of a page shown again are found with what they reported (review L1).
     @Test func aPhotoIsFoundAgainAfterThePageWasAway() throws {
         let cell = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.grid))
-        #expect(cell.contains("gestures.place(id,reported)}.onAppear{gestures.appeared(id)}.onDisappear{gestures.disappeared(id)}"),
+        #expect(cell.hasSuffix(".onGeometryChange(for:PhotoGridPlace.self){proxyinPhotoGridPlace(position:entry.position,"
+                               + "frame:proxy.frame(in:.named(PhotoGridPlace.space)))}action:{reportedingestures.place(id,reported)}}"),
                 "\(cell)")
-        #expect(!cell.contains("forget"), "\(cell)")
+        let header = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func header("], in: Self.grid))
+        for code in [cell, header] {
+            #expect(!code.contains(".onAppear") && !code.contains(".onDisappear") && !code.contains("forget"), "\(code)")
+        }
+        let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
+        #expect(view.contains("let_=gestures.show(PhotoGridShown(sections,below:limit),"
+                              + "layout:PhotoGridLayout(columns:columns,width:Double(width)),pinsHeaders:pinned)"), "\(view)")
         let state = try Self.code(Self.state)
         #expect(state.contains("private var photos = PhotoGridOnScreen<AssetID, PhotoGridPlace>()"))
-        #expect(!state.contains("places["), "a dictionary of its own that forgets or grows")
+        for gone in ["func appeared(", "func disappeared(", "func headerAppeared(", "func headerDisappeared(", "places["] {
+            #expect(!state.contains(gone), "\(gone)")
+        }
+        let show = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func show("], in: Self.state))
+        #expect(show.contains("photos.laidOut(layout)headers.laidOut(layout)"), "\(show)")
+        // What lies in the part of the grid the scroll view shows, still at its place in the order.
+        let cells = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func cells("], in: Self.state))
+        #expect(cells.contains("photos.onScreen(seen?.visible,frame:{GridRect($0.frame)})"), "\(cells)")
+        #expect(cells.contains("place.position>=0&&place.position<ids.count&&ids[place.position]==id"), "\(cells)")
+        let seen = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func seen("], in: Self.state))
+        #expect(seen.contains("PhotoGridHitTest.visiblePart(gridY:Double(inGrid.y),scrollViewY:Double(inScrollView.y),"
+                              + "height:scroller.height)"), "\(seen)")
+        let height = Self.squeezed(try Self.body(["final class PhotoGridScroller", "var height:"], in: Self.scrolling))
+        #expect(height == "{geometry.map{Double($0.containerSize.height)}}", "\(height)")
+        // Where a drag begins, where it goes and where it scrolls on by itself, and the photo a
+        // pinch holds: on screen, in each case where the finger is.
+        let start = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func start("], in: Self.state))
+        #expect(start.contains("letseen=self.seen(at:touch.inGrid,touch.inScrollView,in:pending.scroller)"), "\(start)")
+        let extend = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func extend("], in: Self.state))
+        #expect(extend.contains("letseen=self.seen(at:point,current.inScrollView,in:current.scroller)"), "\(extend)")
+        let pinch = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func beginPinch("], in: Self.state))
+        #expect(pinch.contains("letonScreen=cells(in:ids,seen(at:touch.inGrid,touch.inScrollView,in:scroller))"), "\(pinch)")
+        #expect(pinch.contains("PhotoGridHitTest.nearest(x:Double(touch.inGrid.x),y:Double(touch.inGrid.y),in:onScreen)"), "\(pinch)")
     }
 
     /// A day's header pinned over the photos scrolling under it hides them: each header reports
-    /// where it is in the grid (pinned: where it is pinned), kept as the photos are, and a finger
-    /// on one is on no photo where a drag begins and where it goes
-    /// (`PhotoGridHitTest.position(…covered:)`), so it ticks nothing the user cannot see (review L4).
+    /// where it is in the grid (pinned: where it is pinned), kept as the photos' frames are, and a
+    /// finger on one is on no photo where a drag begins (`PhotoGridHitTest.position(…covered:)`),
+    /// so it ticks nothing the user cannot see (review L4); a running drag goes on with the first
+    /// row below it, while the page scrolls up under the finger (review W2). Only where the grid
+    /// pins its headers, and only one at the top of what the user sees, where SwiftUI pins it: a
+    /// header in its own place lies over no photo, and one reported before the days moved is not
+    /// there any more.
     @Test func aPinnedHeaderHidesThePhotosUnderIt() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
         #expect(view.contains("}header:{header(section,pinned:pinned)}"), "\(view)")
         let header = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func header("], in: Self.grid))
-        #expect(header.contains("PhotoGridHeader(section:section,pinned:pinned).onGeometryChange(for:CGRect.self){proxyin"
-                                + "proxy.frame(in:.named(PhotoGridPlace.space))}action:{frameingestures.header(section.id,frame)}"
-                                + ".onAppear{gestures.headerAppeared(section.id)}.onDisappear{gestures.headerDisappeared(section.id)}"),
+        #expect(header == "{PhotoGridHeader(section:section,pinned:pinned).onGeometryChange(for:CGRect.self){proxyin"
+                          + "proxy.frame(in:.named(PhotoGridPlace.space))}action:{frameingestures.header(section.id,frame)}}",
                 "\(header)")
         let state = try Self.code(Self.state)
         #expect(state.contains("private var headers = PhotoGridOnScreen<Int, CGRect>()"))
+        let covered = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func covered("], in: Self.state))
+        #expect(covered.hasPrefix("{guardpinsHeaderselse{return[]}"), "\(covered)")
+        #expect(covered.contains("headers.onScreen(seen?.visible,frame:{GridRect($0)})"), "\(covered)")
+        #expect(covered.contains("header.minY<=seen.barsEnd+header.height"), "\(covered)")
+        let seen = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func seen("], in: Self.state))
+        #expect(seen.contains("barsEnd:visible.lowerBound+(scroller.seenArea?.lowerBound??0)"), "\(seen)")
         let hits = state.components(separatedBy: "PhotoGridHitTest.position(").count - 1
-        #expect(hits == 2 && state.components(separatedBy: "covered: covered)").count - 1 == hits, "\(hits)")
+        #expect(hits == 2 && state.components(separatedBy: "covered: covered").count - 1 == hits, "\(hits)")
+        let start = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func start("], in: Self.state))
+        #expect(start.contains("in:onScreen,covered:covered)}"), "a drag that begins on a header waits: \(start)")
+        let extend = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func extend("], in: Self.state))
+        #expect(extend.contains("covered:covered,onCovered:.rowBelow)"), "a running drag goes on below it: \(extend)")
     }
 
     /// A running drag follows the photos the grid shows now (review L3): the grid hands them to
@@ -199,11 +247,11 @@ struct PhotoGridSourceTests {
     /// tick on, and when the range cannot be kept the drag ends, its photos ticked as they are.
     @Test func aDragFollowsThePhotosTheGridShowsNow() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
-        #expect(view.contains("let_=gestures.show(PhotoGridShown(sections,below:limit))"), "\(view)")
+        #expect(view.contains("let_=gestures.show(PhotoGridShown(sections,below:limit),"), "\(view)")
         let dragged = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func dragged("], in: Self.grid))
         #expect(dragged.contains("gestures.beginDrag(touch,selection:$selection,scroller:scroller)"), "\(dragged)")
         let extend = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func extend("], in: Self.state))
-        #expect(extend.hasPrefix("{follow()guardvarcurrent=drag,"), "\(extend)")
+        #expect(extend.hasPrefix("{follow()guardvarcurrent=dragelse{return}"), "\(extend)")
         let follow = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func follow("], in: Self.state))
         #expect(follow.contains("guardletrange=current.range.rebased(from:current.ids,to:now)else{endDrag()return}"), "\(follow)")
         let step = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func scrollStep("], in: Self.state))
@@ -265,14 +313,17 @@ struct PhotoGridSourceTests {
         #expect(state.contains("self?.scrollStep(seconds) ?? false"))
         let scroll = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func scroll(by"], in: Self.scrolling))
         #expect(scroll.contains("guardletwanted=target.next(by:step,offset:offset,range:top...bottom)else{return}"), "\(scroll)")
-        // What `scrollTo(y:)` takes is learned from the scroll view, not assumed (review L5).
+        // What `scrollTo(y:)` takes is learned from the scroll view, not assumed (review L5), and
+        // checked in each run: while a probe waits for its answer, a frame asks nothing (review W4).
+        #expect(scroll.hasPrefix("{guardletgeometry,Self.calibration.mayAsk()else{return}scrollsByItself=true"), "\(scroll)")
         #expect(scroll.contains("lety=Self.calibration.y(for:wanted,insetTop:insetTop)"
                                 + "Self.calibration.asked(y,from:offset,insetTop:insetTop,range:top...bottom)"
                                 + "position.scrollTo(y:CGFloat(y))"), "\(scroll)")
+        // The lesson is the app's: only the scroll view that scrolls by itself answers its steps.
         let reported = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func reported(_ geometry"], in: Self.scrolling))
-        #expect(reported.contains("Self.calibration.reported(offset)"), "\(reported)")
+        #expect(reported.hasSuffix("ifscrollsByItself{Self.calibration.reported(offset)}}"), "\(reported)")
         let ended = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func endAutoScroll("], in: Self.scrolling))
-        #expect(ended == "{target.reset()Self.calibration.reset()}", "\(ended)")
+        #expect(ended == "{scrollsByItself=falsetarget.reset()Self.calibration.reset()}", "\(ended)")
         #expect(try Self.code(Self.scrolling).contains("private static var calibration = PhotoGridAutoScroll.Calibration()"))
     }
 
@@ -306,7 +357,7 @@ struct PhotoGridSourceTests {
         let handled = Self.squeezed(try Self.body(["struct PhotoGridPinch", "func handleUIGestureRecognizerAction("], in: Self.recognizers))
         #expect(handled.contains("case.began:recognizer.stopScrolling()"), "\(handled)")
         let state = try Self.code(Self.state)
-        #expect(state.contains("PhotoGridHitTest.nearest(x: Double(touch.inGrid.x), y: Double(touch.inGrid.y), in: all)"))
+        #expect(state.contains("PhotoGridHitTest.nearest(x: Double(touch.inGrid.x), y: Double(touch.inGrid.y), in: onScreen)"))
         #expect(state.contains("PhotoGridZoom.Pinch(columns: columns)"))
         let pinched = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func pinched("], in: Self.grid))
         #expect(pinched.contains("PhotoGridZoom.anchor(fingerY:zoom.fingerY,visibleHeight:zoom.visibleHeight,side:side,"
@@ -432,15 +483,22 @@ struct PhotoGridSourceTests {
     /// "Heute" and "Gestern" follow midnight (review L11): the day that is today is kept and read
     /// anew when iOS says a significant time changed (midnight, a new time zone, a carrier's
     /// correction) and when the app is back on screen, so a tab left open overnight makes its
-    /// days anew.
+    /// days anew. With the day the iPhone's zone (review W10): photos without a zone of their own
+    /// are read on its clock, so a new zone makes the days anew also where the day number stays.
     @Test func todayAndYesterdayFollowMidnight() throws {
         let library = try Self.code(Self.library)
         #expect(library.contains("@State private var today = Self.today()"))
         #expect(library.contains("@Environment(\\.scenePhase) private var scenePhase"))
         let view = Self.squeezed(try Self.body(["struct LibraryView", "var body: some View"], in: Self.library))
+        #expect(view.contains(".task(id:DaysKey(bucket:bucket,members:members,words:model.proposalWords,today:today))"), "\(view)")
         #expect(view.contains(".onReceive(NotificationCenter.default.publisher(for:UIApplication.significantTimeChangeNotification))"
                               + "{_intoday=Self.today()}"), "\(view)")
         #expect(view.contains(".onChange(of:scenePhase){_,phaseinifphase==.active{today=Self.today()}}"), "\(view)")
+        let today = Self.squeezed(try Self.body(["struct LibraryView", "private static func today() -> Today"], in: Self.library))
+        #expect(today == "{letzone=TimeZone.currentreturnToday(day:LocalTime.day(LocalTime.wallClock(Date(),in:zone)),"
+                + "zone:zone.identifier)}", "\(today)")
+        let key = Self.squeezed(try Self.body(["struct LibraryView", "private struct DaysKey"], in: Self.library))
+        #expect(key.contains("vartoday:Today") && key.contains("a.today==b.today"), "\(key)")
     }
 
     /// The tab's own loading is calm (DS-18): words, no spinner, with the identifiers the UI

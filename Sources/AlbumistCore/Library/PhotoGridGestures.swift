@@ -15,6 +15,14 @@ public struct GridRect: Equatable, Sendable {
         maxX = x + width
         maxY = y + height
     }
+
+    public var height: Double { maxY - minY }
+
+    /// Whether it and `other` lie over each other by more than a sliver (a point each way):
+    /// neighbours that touch or lie 2 pt apart do not.
+    public func overlaps(_ other: GridRect) -> Bool {
+        min(maxX, other.maxX) - max(minX, other.minX) > 1 && min(maxY, other.maxY) - max(minY, other.minY) > 1
+    }
 }
 
 /// Drag to select in a photo grid (design wave 3, DS-06b), as in Photos: while the grid
@@ -140,12 +148,18 @@ public struct PhotoGridDrag: Equatable, Sendable {
 /// before or right after the gesture's end (review L8 of design wave 3): it neither ticks nor
 /// opens a photo, as the drag ticked its first photo already and a pinch opens nothing. Only
 /// that lift: once no gesture runs, the next finger that touches the grid begins a tap of its
-/// own, however soon (a tap right after a drag ticks or unticks, one right after a pinch opens).
+/// own, however soon (a tap right after a drag ticks or unticks, one right after a pinch opens),
+/// and so does an activation that comes later without a touch (VoiceOver's double tap, Switch
+/// Control): the lift comes with the gesture's end, within `window` of it (review W3).
 public struct PhotoGridLift: Equatable, Sendable {
+    /// How long after a gesture's end a tap may still be its lift, in seconds: UIKit hands the
+    /// lift to the button with the end, or a frame or two after it.
+    public static let window = 0.5
     /// The gestures running (a drag and a pinch may run at once).
     private var running = 0
-    /// A gesture ended and no finger touched since: a tap now is its lift.
-    private var lifting = false
+    /// When the last gesture ended (seconds on a clock that never jumps), while no finger touched
+    /// the grid since.
+    private var ended: Double?
 
     public init() {}
 
@@ -153,34 +167,63 @@ public struct PhotoGridLift: Equatable, Sendable {
         running += 1
     }
 
-    public mutating func gestureEnded() {
+    /// A gesture ended at `time`.
+    public mutating func gestureEnded(at time: Double) {
         running = max(0, running - 1)
-        lifting = true
+        ended = time
     }
 
     /// A finger touched the grid: once no gesture runs, what follows is no gesture's lift. A
     /// finger that touches while one runs (a pinch's second finger) is part of it.
     public mutating func touchedDown() {
-        if running == 0 { lifting = false }
+        if running == 0 { ended = nil }
     }
 
-    /// Whether a tap on a photo now is a gesture's, not one of its own.
-    public var swallowsTap: Bool {
-        running > 0 || lifting
+    /// Whether a tap on a photo at `time` is a gesture's, not one of its own: while one runs, and
+    /// within `window` of the last one's end before a finger touched again.
+    public func swallowsTap(at time: Double) -> Bool {
+        if running > 0 { return true }
+        guard let ended else { return false }
+        return time - ended < Self.window
     }
 }
 
 /// Which photo of a grid is under a finger, from the frames of the photos on screen.
 public enum PhotoGridHitTest {
+    /// What a finger on what lies over the photos (a day's header pinned over the photos
+    /// scrolling under it) is on.
+    public enum Covered: Sendable {
+        /// No photo: the drag ticks nothing the user cannot see, and one that begins there waits
+        /// for the finger to reach a photo (review L4).
+        case noPhoto
+        /// The first row below it, at the finger's place across: a running drag goes on with the
+        /// rows that come out below the header while the page scrolls up under the finger
+        /// (review W2). One that lies over no photo (a header in its own place) is on none.
+        case rowBelow
+    }
+
     /// The position of the photo at (`x`, `y`) among `cells` (position and frame, in one space):
     /// the photo under it; in the gap between two photos of a row the nearer one; beside a row
     /// its first or last photo (a short last row of a day: its last). Nil between rows, on a
     /// day's header and where no photo is: the drag keeps the photo it has. `covered`: what lies
-    /// over the photos there (a day's header pinned over the photos scrolling under it, review
-    /// L4): a point on it is on no photo, so the drag ticks nothing the user cannot see.
+    /// over the photos there (a day's header pinned over the photos scrolling under it); a point
+    /// on it is on what `onCovered` says.
     public static func position(x: Double, y: Double, in cells: [(position: Int, frame: GridRect)],
-                                covered: [GridRect] = []) -> Int? {
-        if covered.contains(where: { $0.minX <= x && x <= $0.maxX && $0.minY <= y && y <= $0.maxY }) { return nil }
+                                covered: [GridRect] = [], onCovered: Covered = .noPhoto) -> Int? {
+        let over = covered.filter { $0.minX <= x && x <= $0.maxX && $0.minY <= y && y <= $0.maxY }
+        guard !over.isEmpty else { return under(x: x, y: y, in: cells) }
+        guard onCovered == .rowBelow,
+              let bottom = over.filter({ header in cells.contains { $0.frame.overlaps(header) } }).map(\.maxY).max(),
+              let top = cells.lazy.filter({ $0.frame.maxY > bottom }).map(\.frame.minY).min()
+        else { return nil }
+        // The first row below it: of the photos that reach below its bottom, the highest ones.
+        let row = cells.filter { $0.frame.maxY > bottom && $0.frame.minY - top < 0.5 }
+        guard let first = row.first else { return nil }
+        return under(x: x, y: (first.frame.minY + first.frame.maxY) / 2, in: row)
+    }
+
+    /// The photo at (`x`, `y`) among `cells`, nothing lying over them.
+    private static func under(x: Double, y: Double, in cells: [(position: Int, frame: GridRect)]) -> Int? {
         var best: (position: Int, distance: Double)?
         for cell in cells where cell.frame.minY <= y && y <= cell.frame.maxY {
             let distance = x < cell.frame.minX ? cell.frame.minX - x : (x > cell.frame.maxX ? x - cell.frame.maxX : 0)
@@ -189,6 +232,16 @@ public enum PhotoGridHitTest {
             }
         }
         return best?.position
+    }
+
+    /// The part of a grid that its scroll view shows, from top to bottom in the grid's space, for
+    /// a finger at `gridY` in the grid and at `scrollViewY` in the scroll view (its own space,
+    /// which moves with it), in a scroll view `height` points high (review W1). Nil while the
+    /// height is not known: every photo laid out counts then.
+    public static func visiblePart(gridY: Double, scrollViewY: Double, height: Double?) -> ClosedRange<Double>? {
+        guard let height, height > 0 else { return nil }
+        let top = gridY - scrollViewY
+        return top...(top + height)
     }
 
     /// The position of the photo two fingers hold at (`x`, `y`), whose place a zoom keeps: the
@@ -209,54 +262,94 @@ public enum PhotoGridHitTest {
     }
 }
 
-/// What the photos of a grid (or its days' headers) on screen last reported of where they are,
-/// for its gestures (review L1 of design wave 3). SwiftUI reports a photo's frame in the grid
-/// only when it changes, so one that goes and comes back with nothing moved (its page left for
-/// another tab or page and shown again, or scrolled away and back while SwiftUI kept it) reports
-/// nothing anew: what it reported is kept while it is away, only the ones on screen count, and
-/// back on screen it counts again. Kept for the latest `kept` that went (at most twice as many
-/// before they are cleared), so scrolling through a large library keeps no more; a page left
-/// and shown again finds all of its photos, the latest that went.
+/// How a grid lays its photos out (review W1 of design wave 3): photos in a row and the grid's
+/// width in points (0 while it was not measured yet). Each photo's frame changes with either.
+public struct PhotoGridLayout: Equatable, Sendable {
+    public var columns: Int
+    public var width: Double
+
+    public init(columns: Int, width: Double) {
+        self.columns = columns
+        self.width = width
+    }
+}
+
+/// What of a photo grid is on screen, for its gestures: where its photos (or its days' headers)
+/// are, from the frames each one reported last (review W1 of design wave 3). On screen is what
+/// lies in the part of the grid the scroll view shows now, read from the frames themselves, never
+/// from SwiftUI's word that a view appeared or went: SwiftUI promises neither the order of those
+/// words (a rebuilt cell may appear before the old one goes, and "Auswählen" and "Fertig" rebuild
+/// every photo on screen) nor that they come in pairs (a swipe back that is called off).
+///
+/// - A frame in the grid's own space does not move while the page scrolls, and SwiftUI reports
+///   it anew whenever it changes: what a photo reported stays true while it is away (its page
+///   left for another tab or page and shown again, review L1) until the grid lays its photos out
+///   anew (`laidOut`). Then every report of before is dropped, and the photos on screen report
+///   their new frames.
+/// - One report per photo, the latest. Of two photos' reports at one place the later one counts:
+///   the other is of a photo that went before it could report its move (a day's header grew
+///   while it was away), and the photo there now reported after it.
+/// - Kept for the latest `kept` reports (at most twice as many before the older ones are
+///   cleared): scrolling through a large library keeps no more, and the photos on screen, which
+///   reported last, are always among them.
 public struct PhotoGridOnScreen<Key: Hashable, Value> {
-    /// The photos that went, whose report is kept for when they are back.
+    /// The reports kept: many more than the photos on one screen, even at seven in a row.
     public static var kept: Int { 1_000 }
 
-    /// What each one on screen reported last.
-    public private(set) var shown: [Key: Value] = [:]
-    /// What each one that went reported last, and when it went (counted in goings).
-    private var away: [Key: (value: Value, went: Int)] = [:]
-    private var goings = 0
+    private var reports: [Key: (value: Value, made: Int)] = [:]
+    /// Reports made so far, which orders them.
+    private var made = 0
+    private var layout: PhotoGridLayout?
 
     public init() {}
 
-    /// How many that went are kept.
-    public var awayCount: Int { away.count }
+    /// How many reports are kept.
+    public var count: Int { reports.count }
 
-    /// `key` reports `value`: on screen it counts at once (also before SwiftUI says it appeared);
-    /// away it is kept for when it is back.
+    /// The grid lays its photos out as `layout` (each of its bodies says so): another number in a
+    /// row or another width makes every report of before stale, and it is dropped. The grid's
+    /// first width (from 0, not measured yet) changes nothing: its photos were laid out at that
+    /// width already, and report nothing anew.
+    public mutating func laidOut(_ layout: PhotoGridLayout) {
+        let width = layout.width > 0 ? layout.width : (self.layout?.width ?? 0)
+        let now = PhotoGridLayout(columns: layout.columns, width: width)
+        if let before = self.layout,
+           before.columns != now.columns || (before.width > 0 && abs(before.width - now.width) > 0.5) {
+            reports = [:]
+        }
+        self.layout = now
+    }
+
+    /// `key` reports `value`: where it is (its frame among it), in the layout now.
     public mutating func report(_ key: Key, _ value: Value) {
-        if away[key] != nil {
-            away[key]?.value = value
-        } else {
-            shown[key] = value
+        made += 1
+        reports[key] = (value, made)
+        if reports.count > 2 * Self.kept {
+            let oldest = made - Self.kept
+            reports = reports.filter { $0.value.made > oldest }
         }
     }
 
-    /// `key` is on screen again: it counts with what it reported last, if that is kept.
-    public mutating func appeared(_ key: Key) {
-        guard let back = away.removeValue(forKey: key) else { return }
-        shown[key] = back.value
-    }
-
-    /// `key` went: it no longer counts, and what it reported is kept for a while.
-    public mutating func disappeared(_ key: Key) {
-        guard let value = shown.removeValue(forKey: key) ?? away[key]?.value else { return }
-        goings += 1
-        away[key] = (value, goings)
-        if away.count > 2 * Self.kept {
-            let oldest = goings - Self.kept
-            away = away.filter { $0.value.went > oldest }
+    /// What is on screen: of the reports that count (`counts`; a photo still at the place in the
+    /// grid's order it reported, say), the ones whose frame (`frame`) meets `visible` (the part
+    /// of the grid the scroll view shows, from top to bottom in the grid's space; nil: all of
+    /// them), less each one a later report at the same place replaced.
+    public func onScreen(_ visible: ClosedRange<Double>?, frame: (Value) -> GridRect,
+                         where counts: (Key, Value) -> Bool = { _, _ in true }) -> [(key: Key, value: Value)] {
+        var seen: [(key: Key, value: Value, frame: GridRect, made: Int)] = []
+        for (key, report) in reports {
+            let box = frame(report.value)
+            if let visible, box.maxY < visible.lowerBound || box.minY > visible.upperBound { continue }
+            guard counts(key, report.value) else { continue }
+            seen.append((key, report.value, box, report.made))
         }
+        seen.sort { $0.made > $1.made }
+        var shown: [(key: Key, value: Value, frame: GridRect)] = []
+        shown.reserveCapacity(seen.count)
+        for report in seen where !shown.contains(where: { $0.frame.overlaps(report.frame) }) {
+            shown.append((report.key, report.value, report.frame))
+        }
+        return shown.map { (key: $0.key, value: $0.value) }
     }
 }
 
@@ -339,11 +432,17 @@ public enum PhotoGridAutoScroll {
     /// How `ScrollPosition.scrollTo(y:)` counts, learned from the scroll view (review L5 of
     /// design wave 3): SwiftUI's documentation does not say whether `y` is the scroll view's
     /// content offset (minus the top inset at rest at the top, as `ScrollGeometry` reports it)
-    /// or counts from where the scroll view rests at the top. A step asked as the content offset
-    /// tells: the scroll view then reports the same, or less by the top inset. Until a step told
-    /// (and where the top inset is too small to tell, so both ways agree) `y` is taken as the
-    /// content offset; once known, for the app's life, the steps ask so the scroll view goes
-    /// where they mean, at most one step off on the way.
+    /// or counts from where the scroll view rests at the top. A step tells: the scroll view
+    /// reports `y`, or less by the top inset. Until a step told (and where the top inset is too
+    /// small to tell, so both ways agree) `y` is taken as the content offset; once known, the
+    /// steps ask so the scroll view goes where they mean.
+    ///
+    /// Only a probe teaches, and no lesson stands unchecked (review W4): a step is a probe when
+    /// it can tell and no other step is on its way (whose report could land where one of the two
+    /// ways puts it), and nothing else is asked until its report came or `patience` frames
+    /// passed (then it is dropped and teaches nothing, so no later step's report passes where the
+    /// other way would have put it). Each run of scrolling by itself probes until one probe is
+    /// answered: a lesson is learned, kept, or flipped where the probe lands the other way.
     public struct Calibration: Equatable, Sendable {
         public enum Convention: Equatable, Sendable {
             /// `y` is the content offset.
@@ -352,13 +451,28 @@ public enum PhotoGridAutoScroll {
             case fromRestingTop
         }
 
-        public private(set) var convention: Convention?
-        /// A step asked while the convention is not known, which can tell it.
-        private var probe: Probe?
+        /// The frames after a probe that ask nothing while it waits for its report; at the next
+        /// one it is dropped. The scroll view takes a step with the next frame and reports it.
+        public static let patience = 2
 
-        private struct Probe: Equatable, Sendable {
+        public private(set) var convention: Convention?
+        /// The last step asked, until a report answers it (lands where one of the two ways puts it).
+        private var last: Step?
+        /// A probe of this run of scrolling by itself was answered.
+        private var checked = false
+
+        private struct Step: Equatable, Sendable {
             var y: Double
             var insetTop: Double
+            /// It teaches when answered, and nothing else is asked while it waits.
+            var probe: Bool
+            /// The frames it has waited, as a probe.
+            var frames = 0
+
+            /// Where the scroll view goes if `scrollTo(y:)` counts the way `convention` says.
+            func landing(_ convention: Convention) -> Double {
+                convention == .contentOffset ? y : y - insetTop
+            }
         }
 
         public init() {}
@@ -369,35 +483,53 @@ public enum PhotoGridAutoScroll {
             convention == .fromRestingTop ? offset + insetTop : offset
         }
 
-        /// `y` was asked while the scroll view was at `from`, in content offsets `range`. While the
-        /// convention is not known it is a step that tells, when the two ways' answers are apart
-        /// from each other (a top inset of 2 pt or more) and from no move at all, and neither is
-        /// cut at an end of the content.
+        /// A frame of scrolling by itself begins (once a frame, before its step): whether its step
+        /// may be asked. Not while a probe waits for its report, for `patience` frames; at the
+        /// next frame it is dropped.
+        public mutating func mayAsk() -> Bool {
+            guard var step = last, step.probe else { return true }
+            step.frames += 1
+            if step.frames > Self.patience { step.probe = false }
+            last = step
+            return !step.probe
+        }
+
+        /// `y` is asked while the scroll view is at `from`, in content offsets `range`. A probe
+        /// when the run has no answered probe yet, the step before was answered, and the step can
+        /// tell: the two ways' landings are apart from each other (a top inset of 2 pt or more)
+        /// and from no move at all, and neither is cut at an end of the content.
         public mutating func asked(_ y: Double, from: Double, insetTop: Double, range: ClosedRange<Double>) {
-            guard convention == nil, probe == nil, insetTop >= 2 else { return }
             let asOffset = y, fromTop = y - insetTop
-            guard fromTop >= range.lowerBound + 1, asOffset <= range.upperBound - 1,
-                  abs(asOffset - from) >= 2, abs(fromTop - from) >= 2 else { return }
-            probe = Probe(y: y, insetTop: insetTop)
+            let tells = insetTop >= 2 && fromTop >= range.lowerBound + 1 && asOffset <= range.upperBound - 1
+                && abs(asOffset - from) >= 2 && abs(fromTop - from) >= 2
+            last = Step(y: y, insetTop: insetTop, probe: tells && !checked && last == nil)
         }
 
-        /// The scroll view reports the content offset `offset`: at the step's `y` it takes the
-        /// content offset, less by the top inset it counts from the top; anything else (not moved
-        /// yet, moved by something else) waits for the next report.
+        /// The scroll view reports the content offset `offset`. Where one of the two ways puts the
+        /// last step, it answered it, and a probe teaches that way; anything else (not moved yet,
+        /// moved by something else) waits for the next report.
         public mutating func reported(_ offset: Double) {
-            guard let probe else { return }
-            if abs(offset - probe.y) < 1 {
-                convention = .contentOffset
-                self.probe = nil
-            } else if abs(offset - (probe.y - probe.insetTop)) < 1 {
-                convention = .fromRestingTop
-                self.probe = nil
+            guard let step = last else { return }
+            let answer: Convention
+            if abs(offset - step.landing(.contentOffset)) < 1 {
+                answer = .contentOffset
+            } else if abs(offset - step.landing(.fromRestingTop)) < 1 {
+                answer = .fromRestingTop
+            } else {
+                return
             }
+            if step.probe {
+                convention = answer
+                checked = true
+            }
+            last = nil
         }
 
-        /// The grid stopped scrolling by itself: a step not answered tells nothing.
+        /// The grid stopped scrolling by itself: a step not answered tells nothing, and the next
+        /// run probes again.
         public mutating func reset() {
-            probe = nil
+            last = nil
+            checked = false
         }
     }
 }

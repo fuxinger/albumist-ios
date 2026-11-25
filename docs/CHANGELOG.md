@@ -2,6 +2,10 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. Raster in „Unsortiert“ und in Vorschlägen nach der Prüfung der zweiten Runde (Design-Welle 3, noch in
+  keinem Build): Ziehen zum Auswählen findet die Fotos auch gleich nach „Auswählen“ und „Fertig“ und hakt über einer
+  angehefteten Tagesüberschrift weiter ab; VoiceOvers Doppeltippen nach Ziehen oder Zoom zählt wieder; das
+  Weiterlaufen am Rand prüft bei jedem Mal, wie die Seite scrollt; in einer neuen Zeitzone entstehen die Tage neu.
 - 25.11. Fotos und Videos nach der zweiten Prüfung (Design-Welle 3, noch in keinem Build): Die Dauer eines in
   Fotos gekürzten Videos folgt in den sichtbaren Zellen auch dann, wenn das Video nicht mehr im Speicher war oder
   eine Speicherwarnung kam: die Zellen fragen Fotos gemeinsam neu, und keine Zelle verliert ihre Dauer, nur weil

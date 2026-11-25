@@ -125,8 +125,8 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
     }
 
     /// The frames after a probe (or the last step before it, review Y1) that ask nothing while
-    /// it waits for its report; at the next one it is dropped. The scroll view takes a step with
-    /// the next frame and reports it.
+    /// it waits for its report; at the next one its wait ends (`mayAsk()`). The scroll view takes
+    /// a step with the next frame and reports it.
     public static let patience = 2
 
     public private(set) var convention: Convention?

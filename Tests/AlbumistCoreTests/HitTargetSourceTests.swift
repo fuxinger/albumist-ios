@@ -220,7 +220,11 @@ struct HitTargetSourceTests {
         }
         return nil
     }
+}
 
+/// How the guards read the code around a call: the control whose label holds it, and the small
+/// scanners both readings share (apart from the struct's tests, SwiftLint's type body length).
+extension HitTargetSourceTests {
     // MARK: Reading labels
 
     /// The control whose label holds the code at `offset`, or nil when no enclosing block is a

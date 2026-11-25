@@ -251,9 +251,15 @@ struct SortingShow: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Fotos werden einsortiert"))
-        .accessibilityValue(Text("\(landed.count) von \(albums.count) Alben fertig, \(counted) \(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert"))
+        .accessibilityValue(spokenProgress)
         .accessibilityAddTraits(.updatesFrequently)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+    }
+
+    /// What VoiceOver says of the header: the albums done and the photos sorted, the number
+    /// grouped as the screen's language writes it.
+    private var spokenProgress: Text {
+        Text("\(landed.count) von \(albums.count) Alben fertig, \(counted) \(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert")
     }
 
     /// The pile thins out as photos find their albums. Only photos that are sharp on the device
@@ -315,8 +321,20 @@ struct SortingShow: View {
     /// How many photos fly into one album.
     private var flightCount: Int { albums.count == 1 ? 5 : 3 }
 
-    // MARK: Choreography
+    // MARK: Plan → albums
 
+    /// The albums of the show, in plan order (`SortingShowAlbum.cast`, `AppModel.sortingShowAlbums`).
+    static func albums(from cast: [SortingShowAlbum]) -> [Album] {
+        cast.map {
+            Album(id: $0.lastStep, title: $0.title ?? String(localized: "Album"), assets: $0.assets,
+                  shown: $0.flying, cover: $0.cover, hidesPreview: $0.hidesPreview)
+        }
+    }
+}
+
+// MARK: Choreography
+
+extension SortingShow {
     private func run() async {
         let started = Date()
         // When the strip may move again: a move never starts while the last one is still
@@ -485,15 +503,5 @@ struct SortingShow: View {
         let side = CGFloat(stage.cover) * displayScale
         _ = await CoverLoader.load(CoverLoader.Request(ids: Array(album.cover.prefix(CoverLoader.attempts)),
                                                        pixels: CGSize(width: side, height: side)))
-    }
-
-    // MARK: Plan → albums
-
-    /// The albums of the show, in plan order (`SortingShowAlbum.cast`, `AppModel.sortingShowAlbums`).
-    static func albums(from cast: [SortingShowAlbum]) -> [Album] {
-        cast.map {
-            Album(id: $0.lastStep, title: $0.title ?? String(localized: "Album"), assets: $0.assets,
-                  shown: $0.flying, cover: $0.cover, hidesPreview: $0.hidesPreview)
-        }
     }
 }

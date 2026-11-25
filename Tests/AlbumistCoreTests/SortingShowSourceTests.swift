@@ -103,7 +103,7 @@ struct SortingShowSourceTests {
         #expect(!show.contains("AssetThumbnail(") && !pieces.contains("AssetThumbnail("), "a photo that may be blurry")
         let pile = try Self.body(["struct SortingShow", "var pile: some View"], in: show)
         #expect(pile.contains("photos.image($0, sharpAt: pixels) != nil"), "\(pile)")
-        let launch = try Self.body(["struct SortingShow", "func launch("], in: show)
+        let launch = try Self.body(["extension SortingShow", "func launch("], in: show)
         #expect(launch.contains("photos.image(id, sharpAt: pixels)"), "\(launch)")
         #expect(launch.contains("if flies {"), "\(launch)")
     }
@@ -119,9 +119,9 @@ struct SortingShowSourceTests {
                                 "the pile's photos are not loaded: \(body)")
         let task = try #require(body[..<load.lowerBound].range(of: ".task(id:", options: .backwards), "\(body)")
         #expect(!body[task.lowerBound..<load.lowerBound].contains("flies"), "the pile waits for flights: \(body)")
-        let launch = try Self.body(["struct SortingShow", "func launch("], in: show)
+        let launch = try Self.body(["extension SortingShow", "func launch("], in: show)
         #expect(launch.contains("if flies {"), "\(launch)")
-        let prefetch = try Self.body(["struct SortingShow", "func prefetch("], in: show)
+        let prefetch = try Self.body(["extension SortingShow", "func prefetch("], in: show)
         #expect(prefetch.contains("if flies {"), "\(prefetch)")
         #expect(show.matches(of: /\bflies\b/).count == 3, "`flies` decides something else than the flights")
         let pile = try Self.body(["struct SortingShow", "var pile: some View"], in: show)
@@ -145,7 +145,7 @@ struct SortingShowSourceTests {
         let load = try Self.body(["final class ShowPhotos", "func load("], in: pieces)
         #expect(load.contains("register()"), "\(load)")
         let show = try Self.code(Self.show)
-        let land = try Self.body(["struct SortingShow", "func land("], in: show)
+        let land = try Self.body(["extension SortingShow", "func land("], in: show)
         #expect(land.contains("photos.release(albums[index].shown, keeping: Set(pilePhotos))"), "\(land)")
         let body = try Self.body(["struct SortingShow", "var body: some View"], in: show)
         #expect(body.contains(".task(id: PileLoad(side: stage.photo, generation: photos.generation))"),
@@ -238,7 +238,7 @@ struct SortingShowSourceTests {
         #expect(Self.count(".sensoryFeedback(", in: show) == 1, "the show has another haptic")
         #expect(show.contains(".sensoryFeedback(.impact(flexibility: .soft, intensity: 0.6), trigger: landings)"))
         #expect(!(try Self.code(Self.pieces)).contains("sensoryFeedback"), "a piece of the show has a haptic")
-        let land = try Self.body(["struct SortingShow", "func land("], in: show)
+        let land = try Self.body(["extension SortingShow", "func land("], in: show)
         #expect(land.contains("if quietly { return }"), "\(land)")
         #expect(land.contains("if index < 3 || index == albums.count - 1 { landings += 1 }"), "\(land)")
         #expect(Self.count("landings += 1", in: show) == 1)
@@ -268,7 +268,7 @@ struct SortingShowSourceTests {
     /// times the screen's scale, square): it finds them kept and shows them at once.
     @Test func theCoverLoadsAheadAtTheSizeItIsDrawn() throws {
         let show = try Self.code(Self.show)
-        let prefetch = try Self.body(["struct SortingShow", "func prefetch("], in: show)
+        let prefetch = try Self.body(["extension SortingShow", "func prefetch("], in: show)
         #expect(prefetch.contains("let side = CGFloat(stage.cover) * displayScale"), "\(prefetch)")
         #expect(prefetch.contains("CoverLoader.Request(ids: Array(album.cover.prefix(CoverLoader.attempts))"), "\(prefetch)")
         #expect(prefetch.contains("pixels: CGSize(width: side, height: side)"), "\(prefetch)")
@@ -339,11 +339,14 @@ struct SortingShowSourceTests {
         let header = try Self.body(["struct SortingShow", "var header: some View"], in: show)
         for text in ["Text(\"\\(totalPhotos) \\(SortingShowWords.number(totalPhotos, locale: locale)) Fotos einsortiert\")",
                      "Text(\"\\(counted) \\(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert\")",
-                     ".accessibilityValue(Text(\"\\(landed.count) von \\(albums.count) Alben fertig, \\(counted) "
-                         + "\\(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert\"))"] {
+                     ".accessibilityValue(spokenProgress)"] {
             #expect(header.contains(text), "missing: \(text)")
         }
         #expect(!header.contains(".formatted("), "the header formats a number of its own: \(header)")
+        let spoken = try Self.body(["struct SortingShow", "private var spokenProgress: Text"], in: show)
+        #expect(spoken.contains("Text(\"\\(landed.count) von \\(albums.count) Alben fertig, \\(counted) "
+                                    + "\\(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert\")"), "\(spoken)")
+        #expect(!spoken.contains(".formatted("), "the spoken value formats a number of its own: \(spoken)")
     }
 
     /// UI test 2 reads the show's exact words: its value ends in ", 0 Fotos einsortiert" while
@@ -364,7 +367,7 @@ struct SortingShowSourceTests {
         let switches = try Self.code("App/Albumist/Platform/UITestSwitches.swift")
         #expect(switches.contains("static let holdsShowEnd = flag(\"-AlbumistUITestShowHold\")"), "no switch that holds the show's end")
         let show = try Self.code(Self.show)
-        let run = try Self.body(["struct SortingShow", "private func run() async"], in: show)
+        let run = try Self.body(["extension SortingShow", "private func run() async"], in: show)
         #expect(run.contains("try? await Task.sleep(for: .seconds(UITestSupport.holdsShowEnd ? 15 : 0.5))"), "\(run)")
         var readers: [String: Int] = [:]
         for path in AppSource.swiftFiles(under: "App/Albumist") {

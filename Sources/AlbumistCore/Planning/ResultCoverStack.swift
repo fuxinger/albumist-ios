@@ -85,43 +85,15 @@ public struct ResultCoverStack: Hashable, Sendable {
         guard PlanReceipt.Kind(plan) == .created, let found = Self.albums(of: plan, expected: expected) else { return }
         let (group, counted) = found
 
-        // The photos of each album in plan order, its suggestion, and what is personal.
-        var order: [String] = []
-        var seen = Set<String>()
-        var media: [String: [AssetID]] = [:]
-        var sources: [String: AlbumistID] = [:]
-        var personalAlbums = Set<String>()
-        var personalPhotos = Set<AssetID>()
-        for step in plan.steps {
-            let album: String
-            var added: [AssetID] = []
-            switch step.operation {
-            case .createAlbum(let key, _, _):
-                album = "planned:" + key
-            case .addAssets(let ref, let assets):
-                album = Self.id(of: ref)
-                added = expected ? assets : plan.confirmedMedia(of: step)
-                media[album, default: []].append(contentsOf: added)
-            default:
-                continue
-            }
-            if seen.insert(album).inserted { order.append(album) }
-            guard let source = step.sourceID else { continue }
-            if sources[album] == nil { sources[album] = source }
-            if personalSources.contains(source) {
-                personalAlbums.insert(album)
-                personalPhotos.formUnion(added)
-            }
-        }
-
+        let albumsOfPlan = PlanAlbums(plan, expected: expected, personalSources: personalSources)
         var used = Set<AssetID>()
         var made: [Card] = []
-        for album in order where counted.contains(album) && !personalAlbums.contains(album) {
+        for album in albumsOfPlan.order where counted.contains(album) && !albumsOfPlan.personalAlbums.contains(album) {
             guard made.count < Self.tried else { break }
-            let photos = Set(media[album] ?? []).subtracting(personalPhotos).subtracting(used)
+            let photos = Set(albumsOfPlan.media[album] ?? []).subtracting(albumsOfPlan.personalPhotos).subtracting(used)
             guard !photos.isEmpty else { continue }
             // The cover its card showed, when the album holds it.
-            let cover = sources[album].flatMap { covers[$0] }.flatMap { photos.contains($0) ? $0 : nil }
+            let cover = albumsOfPlan.sources[album].flatMap { covers[$0] }.flatMap { photos.contains($0) ? $0 : nil }
             let candidates = PreviewPicker.coverCandidates(photos, cover: cover, dates: dates, ranks: ranks,
                                                            favorites: favorites, count: Self.candidatesPerCard)
             guard !candidates.isEmpty else { continue }
@@ -131,6 +103,40 @@ public struct ResultCoverStack: Hashable, Sendable {
         guard !made.isEmpty else { return }
         albums = group
         cards = made
+    }
+
+    /// The photos of each album of a plan in plan order, its suggestion, and what is personal.
+    private struct PlanAlbums {
+        var order: [String] = []
+        var media: [String: [AssetID]] = [:]
+        var sources: [String: AlbumistID] = [:]
+        var personalAlbums = Set<String>()
+        var personalPhotos = Set<AssetID>()
+
+        init(_ plan: ChangePlan, expected: Bool, personalSources: Set<AlbumistID>) {
+            var seen = Set<String>()
+            for step in plan.steps {
+                let album: String
+                var added: [AssetID] = []
+                switch step.operation {
+                case .createAlbum(let key, _, _):
+                    album = "planned:" + key
+                case .addAssets(let ref, let assets):
+                    album = ResultCoverStack.id(of: ref)
+                    added = expected ? assets : plan.confirmedMedia(of: step)
+                    media[album, default: []].append(contentsOf: added)
+                default:
+                    continue
+                }
+                if seen.insert(album).inserted { order.append(album) }
+                guard let source = step.sourceID else { continue }
+                if sources[album] == nil { sources[album] = source }
+                if personalSources.contains(source) {
+                    personalAlbums.insert(album)
+                    personalPhotos.formUnion(added)
+                }
+            }
+        }
     }
 
     /// The covers that lie on the stack once loaded: card by card in plan order, the photo each
@@ -283,11 +289,19 @@ public enum ResultCoverFan {
         }
     }
 
+    /// A box around the fan, in points from the main cover's middle.
+    public struct Box: Hashable, Sendable {
+        public var minX: Double
+        public var minY: Double
+        public var maxX: Double
+        public var maxY: Double
+    }
+
     /// The box the turned covers fill, from the main cover's middle (without their shadow).
-    public static func bounds(_ covers: Int) -> (minX: Double, minY: Double, maxX: Double, maxY: Double) {
+    public static func bounds(_ covers: Int) -> Box {
         let slots = slots(covers)
-        guard !slots.isEmpty else { return (0, 0, 0, 0) }
-        var box = (minX: Double.infinity, minY: Double.infinity, maxX: -Double.infinity, maxY: -Double.infinity)
+        guard !slots.isEmpty else { return Box(minX: 0, minY: 0, maxX: 0, maxY: 0) }
+        var box = Box(minX: .infinity, minY: .infinity, maxX: -.infinity, maxY: -.infinity)
         for slot in slots {
             let turn = abs(slot.angle) * .pi / 180
             let halfWidth = (cardWidth * cos(turn) + cardHeight * sin(turn)) / 2

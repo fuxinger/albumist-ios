@@ -30,6 +30,7 @@ extension AppModel {
         // Without facts every photo would count as an ordinary one (`PreviewRank`): no cover until
         // they say which are sensitive documents.
         guard !facts.isEmpty else { return [:] }
+        await makeDatesAndRanksOffMain() // Design W3 H13: the history never makes the two tables on the main actor
         let dates = creationDates, ranks = previewRanks
         return await Task.detached(priority: .userInitiated) {
             var covers: [AlbumistID: PlanCovers.Mosaic] = [:]
@@ -48,6 +49,7 @@ extension AppModel {
     /// before the first facts of a launch, as the history's.
     func receiptCovers(for plan: ChangePlan) async -> [String: PlanCovers.Cover]? {
         guard !facts.isEmpty else { return nil }
+        await makeDatesAndRanksOffMain() // Design W3 H13: the receipt never makes the two tables on the main actor
         let dates = creationDates, ranks = previewRanks
         return await Task.detached(priority: .userInitiated) {
             PlanCovers.albums(of: plan, dates: dates, ranks: ranks)

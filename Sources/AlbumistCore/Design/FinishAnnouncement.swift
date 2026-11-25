@@ -24,10 +24,14 @@ import Foundation
 ///   VoiceOver on later brings no old "fertig"). The card is seen only while Albumist is on
 ///   screen (`AppModel.claimFinishMoment`), so whether it is active is not asked (review S8).
 /// - Not beside the first 100 %, which says "Analyse fertig: 100 %" itself.
+/// - A notification says it only where iOS shows it (review T1 of H14's round 2): Albumist in
+///   the background as the moment decides, not only inactive (in front of Control Centre, the
+///   app switcher, Siri or a system alert iOS hands it to Albumist, whose `willPresent` shows
+///   nothing), and its notifications allowed. Otherwise the card owes it.
 public struct FinishAnnouncement: Sendable, Equatable {
     /// The card shows a finish no notification said, and was not seen yet.
     public private(set) var owed = false
-    /// The notification said the newest finish: its card stays silent.
+    /// iOS showed the notification of the newest finish: its card stays silent.
     public private(set) var notified = false
 
     public init() {}
@@ -42,9 +46,11 @@ public struct FinishAnnouncement: Sendable, Equatable {
 
     /// After the wait, with what `FinishMoment.afterWait` showed: `card`, the finish card (in
     /// the app, or for when the user comes back); `notification`, the notification "Analyse
-    /// fertig" went out with it.
-    public mutating func afterWait(card: Bool, notification: Bool) {
-        if notification {
+    /// fertig" went out with it. iOS shows it only when `inBackground` (Albumist was in the
+    /// background as the moment decided, not only inactive) and `notificationsAllowed`;
+    /// otherwise nobody heard it, and the card owes it.
+    public mutating func afterWait(card: Bool, notification: Bool, inBackground: Bool, notificationsAllowed: Bool) {
+        if notification && inBackground && notificationsAllowed {
             notified = true
             owed = false
         } else if card && !notified {

@@ -83,7 +83,8 @@ struct FinishAnnouncementSourceTests {
         let ended = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "func runEnded("], in: card))
         #expect(ended == "{rule.runEnded(finished:finished,celebrates:celebrates)}", "\(ended)")
         let shown = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "func afterWait(_ shown: FinishMoment.Shown)"], in: card))
-        #expect(shown == "{rule.afterWait(card:shown.card,notification:shown.notification)}", "\(shown)")
+        #expect(shown == "{rule.afterWait(card:shown.card,notification:shown.notification,"
+                + "inBackground:UIApplication.shared.applicationState==.background,notificationsAllowed:notificationsAllowed)}", "\(shown)")
         let seen = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "func cardSeen()"], in: card))
         let question = "guardrule.cardSeen(voiceOver:UIAccessibility.isVoiceOverRunning,"
             + "saidByFirstMoment:FirstAnalysisMomentStore.shared.moment.shows(at:Date()))else{return}"
@@ -92,6 +93,37 @@ struct FinishAnnouncementSourceTests {
         let quiet = try #require(seen.range(of: "spoken.accessibilitySpeechAnnouncementPriority=.low"), "\(seen)")
         let said = try #require(seen.range(of: "AccessibilityNotification.Announcement(spoken).post()"), "\(seen)")
         #expect(asks.upperBound <= words.lowerBound && words.upperBound <= quiet.lowerBound && quiet.upperBound <= said.lowerBound, "\(seen)")
+    }
+
+    /// A notification counts as said only where iOS shows it (review T1 of H14's round 2): with
+    /// Albumist in the background as the moment decides, read in the same step as the model's
+    /// `appActive` (inactive is not enough: in front of Control Centre, the app switcher, Siri or
+    /// a system alert iOS hands the notification to Albumist, whose `willPresent` shows nothing),
+    /// and with its notifications allowed. That is cached, read from iOS as the store is made and
+    /// each time Albumist becomes active (back from the Settings app, after iOS's question), so
+    /// the decision after the wait does not wait for iOS; until iOS answers it counts as not
+    /// allowed (said twice rather than never). Only `.authorized` shows the notification at once:
+    /// Albumist asks for alerts and sound, never for quiet (provisional) notifications.
+    @Test func aNotificationCountsOnlyWhereIOSShowsIt() throws {
+        let raw = try AppSource.read(Self.card)
+        #expect(raw.contains("\nimport UserNotifications\n"), "the card's file does not import UserNotifications")
+        let card = try Self.code(Self.card)
+        let store = try Self.body(["final class FinishAnnouncementStore"], in: card)
+        #expect(store.contains("private var notificationsAllowed = false"), "\(store)")
+        #expect(store.contains("private var observers: [any NSObjectProtocol] = []"), "\(store)")
+        let made = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "private init()"], in: card))
+        #expect(made == "{readNotificationSettings()observers=[NotificationCenter.default.addObserver("
+                + "forName:UIApplication.didBecomeActiveNotification,object:nil,queue:.main){[weakself]_in"
+                + "MainActor.assumeIsolated{self?.readNotificationSettings()}},]}", "\(made)")
+        let read = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "private func readNotificationSettings()"], in: card))
+        #expect(read == "{Task{notificationsAllowed=awaitSelf.notificationsAllowedNow()}}", "\(read)")
+        let now = Self.squeezed(try Self.body(["final class FinishAnnouncementStore",
+                                               "nonisolated private static func notificationsAllowedNow() async -> Bool"], in: card))
+        #expect(now == "{awaitUNUserNotificationCenter.current().notificationSettings().authorizationStatus==.authorized}", "\(now)")
+        // What the rule rests on: in front, Albumist's notifications show nothing.
+        let platform = try Self.code("App/Albumist/Platform/ContinuedAnalysis.swift")
+        let present = Self.squeezed(try Self.body(["final class NotificationRouter", "willPresent notification: UNNotification"], in: platform))
+        #expect(present == "{[]}", "notifications show in front of Albumist: \(present)")
     }
 
     /// The finished card says it as its check mark is claimed, once per run (the claim is), also

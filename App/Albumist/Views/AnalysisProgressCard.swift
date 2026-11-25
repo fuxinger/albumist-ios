@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 import AlbumistCore
 import AlbumistEngine
 
@@ -636,8 +637,22 @@ struct AnalysisFinishedView: View {
 final class FinishAnnouncementStore {
     static let shared = FinishAnnouncementStore()
     private var rule = FinishAnnouncement()
+    /// The user allows Albumist's notifications, as iOS last said: read as the store is made and
+    /// each time Albumist becomes active (back from the Settings app, after iOS's question), so
+    /// the decision after a run's wait does not wait for iOS (review T1 of H14's round 2). Not
+    /// allowed until iOS has answered: the card owes the finish then, said twice rather than never.
+    private var notificationsAllowed = false
+    private var observers: [any NSObjectProtocol] = []
 
-    private init() {}
+    private init() {
+        readNotificationSettings()
+        observers = [
+            NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil,
+                                                   queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.readNotificationSettings() }
+            },
+        ]
+    }
 
     /// The end of a run in the app, decided before it waits for the overview.
     func runEnded(finished: Bool, celebrates: Bool) {
@@ -645,8 +660,13 @@ final class FinishAnnouncementStore {
     }
 
     /// What the finish moment showed after the wait: a notification said it, or the card owes it.
+    /// The notification says it only where iOS shows it: with Albumist in the background, read in
+    /// the same step as the model's `appActive` (in front, also while inactive, `willPresent`
+    /// shows nothing), and with its notifications allowed (review T1 of H14's round 2).
     func afterWait(_ shown: FinishMoment.Shown) {
-        rule.afterWait(card: shown.card, notification: shown.notification)
+        rule.afterWait(card: shown.card, notification: shown.notification,
+                       inBackground: UIApplication.shared.applicationState == .background,
+                       notificationsAllowed: notificationsAllowed)
     }
 
     /// The finished card is seen for the first time for its run (its check mark is claimed, only
@@ -659,6 +679,18 @@ final class FinishAnnouncementStore {
         var spoken = AttributedString(String(localized: "Analyse fertig"))
         spoken.accessibilitySpeechAnnouncementPriority = .low
         AccessibilityNotification.Announcement(spoken).post()
+    }
+
+    /// Asks iOS whether Albumist's notifications are allowed; the answer comes a moment later.
+    private func readNotificationSettings() {
+        Task { notificationsAllowed = await Self.notificationsAllowedNow() }
+    }
+
+    /// Allowed as Albumist asks for them, with alerts and sound (`FinishNotificationAsk`): only
+    /// `.authorized` shows the notification at once; a quiet (provisional) one would land in
+    /// Notification Centre unheard, and Albumist never asks for one.
+    nonisolated private static func notificationsAllowedNow() async -> Bool {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .authorized
     }
 }
 

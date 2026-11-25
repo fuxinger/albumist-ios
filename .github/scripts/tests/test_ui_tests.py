@@ -1630,7 +1630,7 @@ class SleepRuleTests(unittest.TestCase):
         "AccessibilityUITests.swift": 6,
         "DeviceConditionUITests.swift": 14,
         "SearchUITests.swift": 1,
-        "AlbumistFlowUITests.swift": 46,
+        "AlbumistFlowUITests.swift": 45,
         "AlbumistLockedUITests.swift": 1,
         "UITestOnboarding.swift": 1,
         # The poll interval of the condition waits (holds, which until, screenAtRest and never use),
@@ -1645,8 +1645,11 @@ class SleepRuleTests(unittest.TestCase):
     # the restart (fourth review of the tempo plan), so the restart does not cut the plan off.
     # ReleaseSmokeUITests none since design wave 1: the list no longer keeps a choice for later
     # (no "empfohlene auswählen" and back), the ticks open the preview themselves.
+    # AlbumistFlowUITests 15 since 25.11.: the welcome's screenshot waits for its entrance (the
+    # icon, the headline and the promises come in about 1.2 s after "Los geht's"; UI run
+    # 45567033486 showed an empty page above the button).
     AT_LEAST = {"AccessibilityUITests.swift": 1, "DeviceConditionUITests.swift": 1,
-                "AlbumistFlowUITests.swift": 14}
+                "AlbumistFlowUITests.swift": 15}
     # Long sleeps (3 s or more, or a computed length) without a "// pacing:" note, per file:
     # the ones still standing in for a state. None left since the condition waits of
     # UITestWait.swift; a new one fails test_a_long_sleep_is_pacing_and_says_so.

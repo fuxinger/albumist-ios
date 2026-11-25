@@ -50,7 +50,7 @@ final class AlbumistFlowUITests: XCTestCase {
         return app.navigationBars["Vorschläge"].exists && settings.exists
     }
 
-    /// The search tab (`Tab(role: .search)`): the system's round button at the bar's end
+    /// The search tab (`MainTabs.searchRole`): the round button at the bar's end
     /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
         UITestScreens.Search.button(app)
@@ -974,7 +974,6 @@ final class AlbumistFlowUITests: XCTestCase {
                 tap(button("Fertig"), "end selection")
             }
             ignoreAndUndo()
-            videoPlaysInThePhotoView()
         }
 
         // Albums. Until 20.11. this used the albums DeviceConditionUITests 05, 07 and 08 left on
@@ -1004,25 +1003,25 @@ final class AlbumistFlowUITests: XCTestCase {
             }
         }
 
-        // Search (the system names the search tab itself)
+        // Search (DS-12a), as the owner chose it on 25.11.2026 ("Runder Knopf, Suche bleibt"):
+        // the round button shows the page and its field, and the keyboard comes only when the
+        // field is tapped. What the search understands is SearchUITests'.
         if tap(searchTabButton(), "search tab") {
             let field = app.searchFields.firstMatch
-            // The field, and the keyboard where the tab brings it (`MainTabs.searchField`; by
-            // default it comes with the tap below), up to the second of the old pause (then the
-            // five below, as before).
-            _ = UITestWait.holds(timeout: 1) { field.exists && app.keyboards.firstMatch.exists }
+            UITestWait.appears(field, "search field shown", timeout: 10)
+            UITestWait.never("no keyboard before the search field is tapped", for: 1) { app.keyboards.firstMatch.exists }
             shot("19-search-empty")
-            if field.waitForExistence(timeout: 5) {
+            if field.exists {
                 field.tap()
                 field.typeText("Rom")
-                // pacing: the results before the screenshot; nothing is asserted on them here
-                // (SearchUITests checks the results)
-                sleep(3)
+                // The search's answer before the screenshot: its chips, results or empty state
+                // (SearchView sets them together), then the screen at rest.
+                let answer = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "identifier IN %@", ["search.token", "search.ignored", "search.result", "search.empty"])).firstMatch
+                UITestWait.appears(answer, "search answered 'Rom'", timeout: 10)
+                UITestWait.screenAtRest(app, "search 'Rom' at rest")
                 shot("20-search-rom")
-                // Close the keyboard: it covers the tab bar, and a tap on "Vorschläge" would hit it.
-                field.typeText("\n")
-                // The keyboard has gone (not asserted: the test ends here).
-                _ = UITestWait.holds(timeout: 5) { !app.keyboards.firstMatch.exists }
+                videoPlaysInThePhotoView(searchingIn: field)
             }
         }
     }
@@ -1333,48 +1332,43 @@ final class AlbumistFlowUITests: XCTestCase {
     }
 
     /// Design wave 3 (DS-16): the demo library's one video (at home, 14 March 2021, 4 s, a day
-    /// of its own) says its length to VoiceOver in "Unsortiert" (the thumbnail's value in its
-    /// cell), plays by itself in the photo view (Reduce Motion off here), and its controls
-    /// answer: "Anhalten"/"Abspielen", the position slider, "Ton an"/"Ton aus". Audited while
-    /// paused (the tree stands still), which covers the controls' tap areas; a pull down closes
-    /// it as it closes a photo.
-    private func videoPlaysInThePhotoView() {
-        let video = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ OR value BEGINSWITH %@", "14. März 2021", "Video, ")).firstMatch
-        let tabs = app.tabBars.firstMatch
-        // The newest day first: the video of 2021 lies further down (or above, after the
-        // swipes of the steps before), in "Unsortiert" or, once a plan sorted the rest, in
-        // "Unsicher". Clear of the floating tab bar and of the navigation bar, where a tap
-        // would change the tab or land on the bar.
-        func inReach() -> Bool {
-            guard video.exists, video.isHittable else { return false }
-            if UITestWait.underNavigationBar(video, app.navigationBars.firstMatch) { return false }
-            return !tabs.exists || video.frame.maxY < tabs.frame.minY - 8
-        }
-        func found() -> Bool {
-            var swipes = 0
-            while !inReach() && swipes < 16 { app.swipeUp(); swipes += 1 }
-            swipes = 0
-            while !inReach() && swipes < 32 { app.swipeDown(); swipes += 1 }
-            return inReach()
-        }
-        var seen = found()
-        // The other filters, never the one just searched.
-        for (area, name) in [("unorganized", "Unsortiert"), ("uncertain", "Unsicher")]
-        where !seen && !UITestScreens.Unsorted.filter(app, area).isSelected {
-            if UITestScreens.Unsorted.show(app, area, named: name, "\(name) for the video") { seen = found() }
-        }
-        print(seen ? "UI_STEP_OK the video in the grid" : "UI_STEP_MISSING the video in the grid")
-        XCTAssertTrue(seen, "The demo library's video is not in the tab \"Unsortiert\"")
-        guard seen else {
-            shot("x-no-video-in-the-grid")
+    /// of its own) is found by the search's word "Videos": it lies outside the main areas, so
+    /// "Unsortiert" and "Unsicher" never show it (UI run 45567033486 looked there in vain). It
+    /// says its length to VoiceOver in its cell (the thumbnail's value), plays by itself in the
+    /// photo view (Reduce Motion off here), and its controls answer: "Anhalten"/"Abspielen", the
+    /// position slider, "Ton an"/"Ton aus". Audited while paused (the tree stands still), which
+    /// covers the controls' tap areas; a pull down closes it as it closes a photo.
+    /// - Parameter field: The search field, focused, with a query typed.
+    private func videoPlaysInThePhotoView(searchingIn field: XCUIElement) {
+        let typed = (field.value as? String) ?? ""
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count + 2) + "Videos")
+        // The answer for "Videos", not the one for the query before: its chip, results and count
+        // come in one update (SearchView).
+        let chip = app.descendants(matching: .any).matching(identifier: "search.token")
+            .matching(NSPredicate(format: "label CONTAINS %@", "Video")).firstMatch
+        let results = app.descendants(matching: .any).matching(identifier: "search.result")
+        let answered = UITestWait.until("the search's results for 'Videos'", timeout: 15) { chip.exists && results.firstMatch.exists }
+        print("UI_FACT search 'Videos': \(results.count) results, "
+              + "\(results.allElementsBoundByIndex.prefix(4).map { "\($0.label) | \(($0.value as? String) ?? "")" })")
+        guard answered else {
+            shot("x-no-video-in-the-search")
             return
         }
+        // The cell VoiceOver hears as a video, else the first result (the library's one video),
+        // so a cell without its length fails its own check below, not the playback's.
+        let named = results.matching(NSPredicate(format: "value BEGINSWITH %@", "Video, ")).firstMatch
+        let video = named.exists ? named : results.firstMatch
+        // The keyboard away, so the cell is free to tap.
+        field.typeText("\n")
+        _ = UITestWait.holds(timeout: 5) { !app.keyboards.firstMatch.exists }
         let value = (video.value as? String) ?? ""
         print("UI_FACT video cell: label \(video.label), value \(value)")
         // Its own length, rounded to the second (the clip has 120 frames at 30 a second), as the
         // thumbnail's value: second review F, F5.
         XCTAssertTrue(value.hasPrefix("Video, 4 Sekunden"), "VoiceOver does not hear the video's length of 4 seconds in its cell: \"\(value)\"")
-        shot("14v-library-video")
+        shot("14v-search-video")
+        let free = UITestWait.until("the video's cell free to tap", timeout: 5) { video.isHittable }
+        guard free else { return }
         video.tap()
         print("UI_STEP_OK open the video")
         // While the video comes, its page waits with the grid's thumbnail or black, never with

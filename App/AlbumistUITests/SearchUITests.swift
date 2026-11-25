@@ -27,7 +27,7 @@ final class AlbumistSearchUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
-    /// The search tab (`Tab(role: .search)`): the system's round button at the bar's end
+    /// The search tab (`MainTabs.searchRole`): the round button at the bar's end
     /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
         UITestScreens.Search.button(app)
@@ -209,9 +209,17 @@ final class AlbumistSearchUITests: XCTestCase {
             XCTFail("No search field")
             return
         }
-        // What choosing the tab shows (`MainTabs.searchField`: by default the field without the
-        // keyboard, which comes with the tap below), for the first run on iOS 27.2.
+        // The owner's choice of 25.11.2026 ("Runder Knopf, Suche bleibt"): choosing the round
+        // button shows the page with its field and starting points; the keyboard comes only when
+        // the field is tapped (below). On iOS 27 the field sits on the page under its title
+        // (`MainTabs.searchField`; iOS 26 puts it in the tab bar's place).
         print("UI_FACT search tab chosen: \(UITestScreens.Search.facts(app))")
+        UITestWait.never("no keyboard before the search field is tapped", for: 2) { app.keyboards.firstMatch.exists }
+        if #available(iOS 27, *) {
+            let place = field.frame
+            print("UI_FACT search field at \(Int(place.minX)),\(Int(place.minY)), \(Int(place.width)) x \(Int(place.height)) pt")
+            XCTAssertLessThan(place.midY, app.windows.firstMatch.frame.midY, "The search field is not at the top of the search page")
+        }
         // Starting points come from the library (or examples before the analysis).
         let start = search("search.example")
         let started = start.waitForExistence(timeout: 10)
@@ -295,26 +303,31 @@ final class AlbumistSearchUITests: XCTestCase {
         field.typeText("\n")
         _ = UITestWait.holds(timeout: 5) { !app.keyboards.firstMatch.exists }
 
-        // DS-12a: while the search is active iOS may fold the other tabs into one button beside
-        // its field; leaving the search brings them back (`UITestScreens.Search.leave`). By that
-        // button first, as a user looks at another tab: it keeps the search, where the field's
-        // "Schließen" ends it and empties the field (review T4 of H14). Which tab shows then is
-        // the placement's (`MainTabs.searchField`; the tab before with `.tabViewOpeningKeyboard`):
-        // said, not asserted.
+        // DS-12a: leave the search as a user looks at another tab (`UITestScreens.Search.leave`).
+        // On iOS 26 iOS may fold the other tabs into one button beside the active field: that
+        // button first, as it keeps the search, where the field's "Schließen" ends it and empties
+        // the field (review T4 of H14). On iOS 27 the field is the page's and the tabs are back
+        // in the bar once the keyboard has gone. Which tab shows then is said, not asserted.
         let left = UITestScreens.Search.leave(app, "search", foldedTabsFirst: true)
         XCTAssertTrue(left.back, "Leaving the search does not bring the other tabs back")
         let before = app.tabBars.buttons["Vorschläge"]
         let backOnIt = UITestWait.holds(timeout: 3) { before.exists && before.isSelected }
         print("UI_FACT search left, back on \"Vorschläge\": \(backOnIt); \(UITestScreens.Search.facts(app))")
         shot("s7-search-left")
-        // Another tab, then the search again: what it kept (by default the query, its hits and
-        // the scroll position, and no keyboard) is said with the way the search was left, for the
-        // owner's choice of the placement, not asserted until then (review S5 of H14).
+        // Another tab, then the search again: it kept the query and its answer, and the keyboard
+        // does not come back (the owner's choice of 25.11.2026, "Suche bleibt"; said only before
+        // it, review S5 of H14), with the way the search was left.
         if tap(tabButton("Vorschläge"), "start page after the search"), tap(searchTabButton(), "search tab again") {
             let again = app.searchFields.firstMatch
             let shown = again.waitForExistence(timeout: 10)
             let query = (again.value as? String) ?? ""
             print("UI_FACT search chosen again: field \(shown), text \"\(query)\", left by \(left.ways), \(UITestScreens.Search.facts(app))")
+            XCTAssertTrue(shown, "No search field when the search is chosen again")
+            XCTAssertEqual(query, "xyzzy", "The search did not keep its query while another tab was looked at")
+            let kept = search("search.ignored", containing: "xyzzy").waitForExistence(timeout: 5)
+            print(kept ? "UI_STEP_OK search kept its answer" : "UI_STEP_MISSING search kept its answer")
+            XCTAssertTrue(kept, "The search did not keep its answer while another tab was looked at")
+            UITestWait.never("no keyboard when the search is chosen again", for: 2) { app.keyboards.firstMatch.exists }
             shot("s8-search-again")
         }
     }

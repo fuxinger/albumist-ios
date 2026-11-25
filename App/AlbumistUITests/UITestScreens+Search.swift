@@ -5,16 +5,15 @@ import XCTest
 extension UITestScreens {
     // MARK: Search
 
-    /// The search (DS-12a, design wave 3): `Tab(role: .search)`, Apple's search tab, with its
-    /// field where `MainTabs.searchField` puts it. By default on the tab view: choosing the tab
-    /// shows the page and the field, the keyboard comes when the field is tapped, and leaving
-    /// the search is choosing another tab (the search stays as it is). With
-    /// `.tabViewOpeningKeyboard` the keyboard comes with the tab and closing the field goes back
-    /// to the tab before; with `.pageFocusingField` the field is on the page, a fourth tab. The
-    /// tab carries the system's own name; iOS may draw it as a round button at the bar's end,
-    /// which may lie outside `app.tabBars`, and may fold the other tabs into one button beside an
-    /// active field. The helpers work with all three and say what iOS shows (`UI_FACT`), so the
-    /// first run on iOS 27.2 tells what they rest on (review S4 of H14).
+    /// The search (DS-12a, design wave 3), as the owner chose it on 25.11.2026 ("Runder Knopf,
+    /// Suche bleibt"): a round button of its own at the bar's end named "Suchen"
+    /// (`MainTabs.searchRole`), which may lie outside `app.tabBars`; choosing it shows the page
+    /// and the field, the keyboard comes when the field is tapped, and leaving the search is
+    /// choosing another tab (the search stays as it is). The field sits where
+    /// `MainTabs.searchField` puts it: on iOS 26 on the tab view, where iOS may fold the other
+    /// tabs into one button beside the active field; on iOS 27 on the page under its title,
+    /// always shown. The helpers work with both and say what iOS shows (`UI_FACT`; review S4 of
+    /// H14).
     @MainActor
     enum Search {
         /// The system's names of the search tab.
@@ -32,8 +31,7 @@ extension UITestScreens {
         /// dialog (review S10 of H14). A bar that scrolled away comes back with up to two swipes
         /// down, never a tap into it. Never another tab: when neither shows, the tab bar's buttons
         /// are printed and the element returned does not exist, so the caller's tap reports the
-        /// search tab missing. Choosing it brings the keyboard only with `.tabViewOpeningKeyboard`:
-        /// tap the field to type.
+        /// search tab missing. Choosing it never brings the keyboard: tap the field to type.
         static func button(_ app: XCUIApplication) -> XCUIElement {
             func found() -> XCUIElement? {
                 if let label = labels.first(where: { app.tabBars.buttons[$0].exists }) { return app.tabBars.buttons[label] }

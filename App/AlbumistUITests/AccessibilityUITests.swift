@@ -525,10 +525,10 @@ final class AccessibilityUITests: XCTestCase {
         // step after it is `tabButton`'s (`UITestScreens.tabButton`).
         if !short, tap(searchTabButton(), "\(tag) search tab") {
             UITestWait.appears(app.searchFields.firstMatch, "\(tag) search field shown", timeout: 10)
-            // The keyboard where the tab brings it (`MainTabs.searchField`), so the check sees
-            // it as it stays; not asserted: by default it comes only with the tap below, and the
-            // check runs on the whole screen. Up to a second, as flow test 1 (review T6 of H14).
-            _ = UITestWait.holds(timeout: 1) { app.keyboards.firstMatch.exists }
+            // No keyboard before the field is tapped (the owner's choice of 25.11.2026, "Runder
+            // Knopf, Suche bleibt"), watched for a second, as flow test 1 does (review T6 of
+            // H14): the check below sees the page as the round button shows it.
+            UITestWait.never("\(tag) no keyboard before the search field is tapped", for: 1) { app.keyboards.firstMatch.exists }
             check("\(tag) search", english: english)
             let field = app.searchFields.firstMatch
             if field.waitForExistence(timeout: 5) {
@@ -1190,7 +1190,7 @@ final class AccessibilityUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
     }
 
-    /// The search tab (`Tab(role: .search)`): the system's round button at the bar's end
+    /// The search tab (`MainTabs.searchRole`): the round button at the bar's end
     /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
         UITestScreens.Search.button(app)

@@ -7,9 +7,10 @@ import AlbumistTestSupport
 /// a Mac. One `tabButton` for every class (`UITestScreens.tabButton`), which leaves an active
 /// search before it looks for a tab and never taps into the bar; `Search.leave` waits for all
 /// three named tabs and looks for the way out beside the field first; what iOS shows is printed
-/// (`UI_FACT`), so the first run on iOS 27.2 tells what the helpers rest on. They work with
-/// every `MainTabs.searchField`: by default choosing the search tab brings no keyboard, and
-/// leaving the search is choosing another tab.
+/// (`UI_FACT`), so a run tells what the helpers rest on. They work with both places of
+/// `MainTabs.searchField` (the tab view on iOS 26, the page on iOS 27): choosing the search tab
+/// brings no keyboard, and leaving the search is choosing another tab, which keeps it (the
+/// owner's choice of 25.11.2026, "Runder Knopf, Suche bleibt").
 @Suite("UI test helpers for the tabs and the search")
 struct UITestTabsSourceTests {
     static let folder = "App/AlbumistUITests"
@@ -159,7 +160,9 @@ struct UITestTabsSourceTests {
     /// What the field kept is seen after leaving the search as a user looks at another tab
     /// (review T4 and T5 of H14): `SearchUITests` waits up to 5 s for the keyboard to go after the
     /// return key, leaves by the folded tabs first ("Schließen" ends the search and empties the
-    /// field), and says the ways it took in the same `UI_FACT` line as the text. The sweep and
+    /// field), and says the ways it took in the same `UI_FACT` line as the text. Since the owner's
+    /// choice of 25.11.2026 it asserts what the search kept: the query, its answer, and no
+    /// keyboard, as it asserts no keyboard when the tab is first chosen. The sweep and
     /// `tabButton` keep the field's own way out first, where only getting out matters.
     @Test func theSearchTestLeavesByTheFoldedTabsAndSaysSo() throws {
         let code = try Self.code("App/AlbumistUITests/SearchUITests.swift")
@@ -168,26 +171,44 @@ struct UITestTabsSourceTests {
         let leaves = try #require(test.range(of: #"letleft=UITestScreens.Search.leave(app,"search",foldedTabsFirst:true)"#), "\(test)")
         #expect(gone.upperBound <= leaves.lowerBound, "\(test)")
         #expect(test.contains("XCTAssertTrue(left.back,"), "\(test)")
-        #expect(test.contains(#"print("UI_FACTsearchchosenagain:field\(shown),text\"\(query)\",leftby\(left.ways),"#), "\(test)")
+        let said = try #require(test.range(of: #"print("UI_FACTsearchchosenagain:field\(shown),text\"\(query)\",leftby\(left.ways),"#), "\(test)")
+        let kept = String(test[said.upperBound...])
+        for check in [#"XCTAssertTrue(shown,"#, #"XCTAssertEqual(query,"xyzzy","#, #"XCTAssertTrue(kept,"#,
+                      #"UITestWait.never("nokeyboardwhenthesearchischosenagain",for:2){app.keyboards.firstMatch.exists}"#] {
+            #expect(kept.contains(check), "the search chosen again does not assert \(check): \(kept)")
+        }
+        let chosen = try #require(test.range(of: #"tap(searchTabButton(),"searchtab")"#), "\(test)")
+        let first = try #require(test.range(of: #"UITestWait.never("nokeyboardbeforethesearchfieldistapped",for:2){app.keyboards.firstMatch.exists}"#),
+                                 "choosing the tab is not checked for no keyboard: \(test)")
+        let typed = try #require(test.range(of: "field.tap()"), "\(test)")
+        #expect(chosen.upperBound <= first.lowerBound && first.upperBound <= typed.lowerBound, "\(test)")
         let flow = try Self.code("App/AlbumistUITests/AlbumistFlowUITests.swift")
         #expect(flow.contains(#"UITestScreens.Search.leave(app, "sweep")"#), "the sweep does not leave the search")
         #expect(flow.contains(#"UITestScreens.Search.leave(app, "sweep, back to the start page")"#), "the sweep does not leave the search")
         #expect(!flow.contains("foldedTabsFirst"), "the sweep leaves by the folded tabs first")
     }
 
-    /// The default never brings the keyboard with the search tab: the accessibility walk waits up
-    /// to a second for it, as flow test 1 does, not five seconds once per walk and language; and
-    /// the frame test's comment counts three placements, not two (review T6 of H14).
+    /// The search tab never brings the keyboard (the owner's choice of 25.11.2026): the
+    /// accessibility walk and flow test 1 watch a second for it and fail when it comes, not five
+    /// seconds once per walk and language (review T6 of H14); the frame test asserts the round
+    /// button apart from the tabs, where it only said its shape before the choice.
     @Test func theWalkWaitsASecondForAKeyboardTheDefaultNeverBrings() throws {
         let walk = Self.squeezed(try Self.code("App/AlbumistUITests/AccessibilityUITests.swift"))
         let tab = try #require(walk.range(of: #"tap(searchTabButton(),"\(tag)searchtab")"#), "no search step in the walk")
         let check = try #require(walk.range(of: #"check("\(tag)search",english:english)"#, range: tab.upperBound..<walk.endIndex))
         let wait = String(walk[tab.upperBound..<check.lowerBound])
-        #expect(wait.contains("_=UITestWait.holds(timeout:1){app.keyboards.firstMatch.exists}"), "\(wait)")
-        #expect(!wait.contains("waitForExistence(timeout:5)"), "\(wait)")
-        let frame = try AppSource.read("App/AlbumistUITests/FrameUITests.swift")
-        #expect(!frame.contains("between the two"), "the frame test still counts two placements")
-        #expect(frame.contains("among the three placements"), "the frame test does not count three placements")
+        #expect(wait.contains(#"UITestWait.never("\(tag)nokeyboardbeforethesearchfieldistapped",for:1){app.keyboards.firstMatch.exists}"#),
+                "\(wait)")
+        #expect(!wait.contains("waitForExistence(timeout:5)") && !wait.contains("UITestWait.holds("), "\(wait)")
+        let flow = Self.squeezed(try Self.code("App/AlbumistUITests/AlbumistFlowUITests.swift"))
+        #expect(flow.contains(#"UITestWait.never("nokeyboardbeforethesearchfieldistapped",for:1){app.keyboards.firstMatch.exists}"#),
+                "flow test 1 does not watch for the keyboard the search tab never brings")
+        let frame = Self.squeezed(try Self.code("App/AlbumistUITests/FrameUITests.swift"))
+        for check in ["letround=abs(frame.width-frame.height)<8", #"XCTAssertTrue(round,"#, #"XCTAssertGreaterThan(gap,0,"#] {
+            #expect(frame.contains(check), "the frame test does not assert the round button apart from the tabs: \(check)")
+        }
+        let comment = try AppSource.read("App/AlbumistUITests/FrameUITests.swift")
+        #expect(!comment.contains("placements"), "the frame test still waits for a choice among placements")
     }
 
     /// What iOS shows is printed as the search is left, and when no way out or no tab is found:

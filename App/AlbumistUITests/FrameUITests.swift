@@ -106,10 +106,10 @@ final class FrameUITests: XCTestCase {
             // In the design's order, the search after them.
             let places = wanted.compactMap { names.firstIndex(of: $0) }
             XCTAssertEqual(places, places.sorted(), "The tabs (\(language)) are not in the order \(wanted): \(names)")
-            // The search (DS-12a): Apple's search tab, a round button at the trailing end of the
-            // bar (or, behind `MainTabs.searchField`, a fourth tab in the row). That it is there
-            // and after "Alben" is asserted; its shape and gap are said for the screenshots until
-            // the owner has chosen among the three placements.
+            // The search (DS-12a), as the owner chose it on 25.11.2026 ("Runder Knopf, Suche
+            // bleibt"): a round button of its own at the bar's end, after "Alben" and apart from
+            // the row of tabs (`MainTabs.searchRole`). The search role alone drew a fourth tab in
+            // the row on iOS 27.2, 95 x 54 pt, 9 pt into "Alben" (UI run 45567033486).
             let search = UITestScreens.Search.button(app)
             let searchShown = search.waitForExistence(timeout: 5)
             XCTAssertTrue(searchShown, "The tab bar (\(language)) has no search button")
@@ -122,6 +122,8 @@ final class FrameUITests: XCTestCase {
                 print("UI_FACT search button (\(language)): \(size); round \(round); \(Int(gap)) pt after \"\(tabs.albums)\"; "
                       + "in the tab bar \(bar.buttons[search.label].exists)")
                 XCTAssertGreaterThan(frame.midX, albums.frame.midX, "The search button (\(language)) is not after \"\(tabs.albums)\"")
+                XCTAssertTrue(round, "The search button (\(language)) is not round: \(size)")
+                XCTAssertGreaterThan(gap, 0, "The search button (\(language)) is not apart from the tabs: \(Int(gap)) pt after \"\(tabs.albums)\"")
             }
             shot("tabs-\(english ? "en" : "de")")
         }

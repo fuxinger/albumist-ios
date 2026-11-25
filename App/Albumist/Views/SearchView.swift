@@ -11,9 +11,10 @@ struct SearchView: View {
     /// puts the field: on the tab view as Apple's search tab, or on this page as until wave 3.
     let input: SearchInput
     @State private var result = SearchResult()
-    /// The text `result` belongs to; the field runs ahead while a search is pending.
-    @State private var resultQuery = ""
-    @State private var searching = false
+    /// The text `result` belongs to (the field runs ahead while a search is pending), the facts it
+    /// was made from, and whether a search runs: coming back to the tab searches again only for a
+    /// search that did not finish, new facts or a new text (`SearchAnswer`, review T3 of H14).
+    @State private var answer = SearchAnswer()
     /// Completions for the word being typed, from the user's own library.
     @State private var suggestions: [SearchSuggestion] = []
     /// Starting points for the empty field, from the user's own library.
@@ -61,7 +62,7 @@ struct SearchView: View {
                     startingPoints
                 } else {
                     if !suggestions.isEmpty { suggestionList }
-                    if let rewrite = model.lastSearchRewrite, !searching {
+                    if let rewrite = model.lastSearchRewrite, !answer.searching {
                         Label("Verstanden als: \(rewrite)", systemImage: "apple.intelligence")
                             .font(.footnote).foregroundStyle(.noteText)
                     }
@@ -75,7 +76,7 @@ struct SearchView: View {
                     if result.isRelaxed { relaxedNote }
                     if result.ids.isEmpty {
                         // The previous answer stays while the next one is computed (no flicker).
-                        if resultQuery.isEmpty {
+                        if answer.text.isEmpty {
                             // The first answer is worked out: calm tiles where the hits will be
                             // (design wave 3, DS-18: no spinner).
                             waitingTiles(count: 6)
@@ -122,10 +123,13 @@ struct SearchView: View {
         .task(id: query) {
             let text = query
             guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
-                result = SearchResult(); resultQuery = ""; suggestions = []; searching = false
+                result = SearchResult(); answer.emptied(); suggestions = []
                 return
             }
-            searching = true
+            // The task starts again each time the search tab comes back: the finished answer for
+            // this text from these facts stays, with the pages shown, and nothing is asked again.
+            let facts = model.factsVersion
+            guard answer.starts(text, facts: facts) else { return }
             // Completions right away; the search itself waits until typing pauses.
             let completions = await model.searchSuggestions(for: text)
             suggestions = completions
@@ -135,9 +139,8 @@ struct SearchView: View {
             guard !Task.isCancelled else { return }
             // A word the completions continue is still being typed, never "nicht erkannt" (P3-13).
             result = found.beside(completions, for: text)
-            resultQuery = text
-            shown = Self.page
-            searching = false
+            // A new text shows its hits from the first page; the same one keeps the pages shown.
+            if answer.shows(text, facts: facts) { shown = Self.page }
         }
     }
 
@@ -307,7 +310,7 @@ extension SearchView {
                 ContentUnavailableView("Keine Fotos", systemImage: "magnifyingglass",
                                        description: Text("Zu „\(missing.label)“ gibt es keine Fotos in deiner Mediathek."))
             case .noMatch:
-                ContentUnavailableView.search(text: resultQuery)
+                ContentUnavailableView.search(text: answer.text)
             case nil:
                 EmptyView()
             }

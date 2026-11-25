@@ -199,6 +199,30 @@ struct SearchTabSourceTests {
         #expect(search.components(separatedBy: ".searchFocused(").count - 1 == 1, "\(search)")
     }
 
+    /// Coming back to the search tab does not search again (review T3 of H14's round 2): the
+    /// page's task starts again each time its page appears, so it asks `SearchAnswer` at its top,
+    /// right after the empty check, with the text and the facts' revision (`model.factsVersion`),
+    /// and does nothing when the answer on the page is the finished one for both: no second
+    /// question to Apple Intelligence, no "Verstanden als" going away and back, the pages of hits
+    /// shown stay. Only a new text shows the hits from the first page again.
+    @Test func comingBackToTheTabDoesNotSearchAgain() throws {
+        let type = try Self.body(["struct SearchView"], in: Self.search)
+        #expect(type.contains("@State private var answer = SearchAnswer()"), "\(type)")
+        #expect(!type.contains("@State private var resultQuery") && !type.contains("@State private var searching"), "\(type)")
+        let page = Self.squeezed(try Self.body(["struct SearchView", "var body: some View"], in: Self.search))
+        let task = try #require(page.range(of: ".task(id:query){"), "\(page)")
+        let rest = String(page[task.upperBound...])
+        #expect(rest.hasPrefix("lettext=queryguard!text.trimmingCharacters(in:.whitespaces).isEmptyelse{"
+                + "result=SearchResult();answer.emptied();suggestions=[]return}"
+                + "letfacts=model.factsVersionguardanswer.starts(text,facts:facts)else{return}"), "\(rest)")
+        #expect(rest.contains("result=found.beside(completions,for:text)ifanswer.shows(text,facts:facts){shown=Self.page}}"), "\(rest)")
+        #expect(page.components(separatedBy: "shown=Self.page").count - 1 == 1, "\(page)")
+        #expect(page.contains("ifletrewrite=model.lastSearchRewrite,!answer.searching{"), "\(page)")
+        #expect(page.contains("ifanswer.text.isEmpty{"), "\(page)")
+        let parts = Self.squeezed(try Self.body(["extension SearchView"], in: Self.search))
+        #expect(parts.contains("ContentUnavailableView.search(text:answer.text)"), "\(parts)")
+    }
+
     /// One field for the search: `.searchable(` bound to `SearchInput` only in the modifier (once
     /// per placement), and `tabViewSearchActivation` once. Every other field of the app ("Album
     /// suchen", "Ort suchen") binds a text of its own view, never the tabs' search, so typing there

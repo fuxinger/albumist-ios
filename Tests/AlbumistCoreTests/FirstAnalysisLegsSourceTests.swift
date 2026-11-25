@@ -55,7 +55,8 @@ struct FirstAnalysisLegsSourceTests {
             #expect(decided.upperBound < told.lowerBound, "\(follower)")
         }
         // A leg that counts when the run may bring the moment (what it analyses, the same run as at
-        // its end), going on from the resume position.
+        // its end), going on from the resume position, and for the rest after only the shared
+        // photos without it too (verification review Z, Z3: `theFollowUpOfARunThatMissedAChangeGoesOnWithItsLegs`).
         let store = try Source.code(Source.store)
         let begun = try Source.body(["extension AppModel", "func firstAnalysisLegStarted()"], in: store)
         #expect(begun.contains("FirstAnalysisMomentStore.shared.legStarted(firstAnalysisRun, goesOn: analysis.resumeFrom != nil)"),
@@ -65,10 +66,51 @@ struct FirstAnalysisLegsSourceTests {
         // A wait that is over spends the moment first (verification review Y: the legs count for
         // every run that may bring it while it is owed), and what changed is kept.
         let lapse = try #require(start.range(of: "moment.lapse(at: Date())"), "\(start)")
-        let counts = try #require(start.range(of: "legs.started(mayBringMoment: moment.mayBeBrought(by: run), goesOn: goesOn)"),
-                                  "\(start)")
+        let composition = "legs.started(mayBringMoment: moment.mayBeBrought(by: run), goesOn: moment.legsGoOn(with: run, fromPosition: goesOn))"
+        let counts = try #require(start.range(of: composition), "\(start)")
         let kept = try #require(start.range(of: "keep()"), "\(start)")
         #expect(lapse.upperBound < counts.lowerBound && counts.upperBound < kept.lowerBound, "\(start)")
+    }
+
+    /// The end of a run that is complete but missed a change (a setting, a trip the user split or
+    /// merged: `AnalysisRunEnd.followUp`) is not finished, and the follow-up starts right after it
+    /// (verification review Z, Z3). A check (an analysis was completed before) drops its resume
+    /// position there: its follow-up is a check too, named for its work. The rest of the library
+    /// after only the shared photos is such a check, and its legs go on without the position
+    /// (`FirstAnalysisMoment.legsGoOn`, asked by the store as the follow-up's leg starts). The
+    /// first analysis and the whole library after a quick trial year ("Nur 2026", then all years:
+    /// `changeScope` resets the marker before their run starts) are no check: they keep their
+    /// position there, and their follow-up goes on from it with the legs.
+    @Test func theFollowUpOfARunThatMissedAChangeGoesOnWithItsLegs() throws {
+        let model = try Source.code(Source.model)
+        let run = try Source.body(["func startAnalysisNow("], in: model)
+        #expect(run.contains("analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)"),
+                "\(run)")
+        let leg = try #require(run.range(of: "let leg = firstAnalysisLeg(ended: end.isFinished, since: runClockStart, showedBar: runShowedBar)"),
+                               "\(run)")
+        let told = try #require(run.range(of: "firstAnalysisRunEnded(finished: end.isFinished, celebrates: celebrate)"), "\(run)")
+        let check = try #require(run.range(of: "} else if end.report?.isComplete == true, analysis.kind == .check {"),
+                                 "the end drops the position of more runs than a check: \(run)")
+        let followUp = try #require(run.range(of: "if end.next == .followUp { startAnalysis() }"), "\(run)")
+        #expect(leg.upperBound < told.lowerBound && told.upperBound < check.lowerBound && check.upperBound < followUp.lowerBound,
+                "the follow-up starts before this run's legs were kept: \(run)")
+        let dropped = run[check.upperBound..<followUp.lowerBound]
+        #expect(dropped.contains("AnalysisMarker.unfinished = nil") && dropped.contains("analysis.resumeFrom = nil"), "\(dropped)")
+        let ending = run[leg.upperBound..<followUp.lowerBound]
+        #expect(ending.components(separatedBy: "AnalysisMarker.unfinished = nil").count - 1 == 1, "\(ending)")
+        // The whole library after a quick trial year starts with no analysis completed: no check.
+        let scope = try Source.body(["func changeScope("], in: model)
+        let reset = try #require(scope.range(of: "AnalysisMarker.reset()"), "\(scope)")
+        let starts = try #require(scope.range(of: "startAnalysis(cause: .tap)"), "\(scope)")
+        #expect(reset.upperBound < starts.lowerBound, "\(scope)")
+        // The follow-up's leg: from the position or not, the moment decides whether the legs go on.
+        let store = try Source.code(Source.store)
+        let begun = try Source.body(["extension AppModel", "func firstAnalysisLegStarted()"], in: store)
+        #expect(begun.contains("legStarted(firstAnalysisRun, goesOn: analysis.resumeFrom != nil)"), "\(begun)")
+        let start = try Source.body(["final class FirstAnalysisMomentStore", "func legStarted(_ run: FirstAnalysisMoment.Run, goesOn: Bool)"],
+                                    in: store)
+        #expect(start.contains("goesOn: moment.legsGoOn(with: run, fromPosition: goesOn))"),
+                "the follow-up of the rest starts without its legs: \(start)")
     }
 
     /// The legs live in `UserDefaults` beside the moment, under keys of their own: read at launch

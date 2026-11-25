@@ -131,6 +131,38 @@ struct FirstAnalysisLegsTests {
         #expect(fresh.seconds == 10)
     }
 
+    /// Whose legs go on as a run starts (`FirstAnalysisMoment.legsGoOn`, the store's `goesOn` for
+    /// `started`; verification review Z, Z3), for a run that may bring the moment: from the resume
+    /// position, always; without it, a run of the library as a whole starts the analysis anew and
+    /// drops them (`started(mayBringMoment: true, goesOn: false)`), while a run of the rest after
+    /// only the shared photos goes on with them: its runs are checks, and a check that missed a
+    /// change drops its position. A run that cannot bring the moment goes on with none.
+    @Test func whoseLegsGoOnAsARunStarts() {
+        let rest = FirstAnalysisMoment.Run(wholeLibrary: false, fullAccess: true)
+        let fresh = FirstAnalysisMoment(kept: nil, completedBefore: false)
+        #expect(fresh.legsGoOn(with: Self.whole, fromPosition: true))
+        #expect(!fresh.legsGoOn(with: Self.whole, fromPosition: false), "a new analysis goes on with the legs before it")
+        let shared = FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: Self.start, sharedOnly: true)
+        #expect(shared.legsGoOn(with: rest, fromPosition: true))
+        #expect(shared.legsGoOn(with: rest, fromPosition: false), "the rest's legs end where a check drops its position")
+        #expect(!shared.legsGoOn(with: Self.whole, fromPosition: false), "\"Analyse neu aufbauen\" goes on with the rest's legs")
+        #expect(!shared.legsGoOn(with: FirstAnalysisMoment.Run(wholeLibrary: false, fullAccess: false), fromPosition: true))
+        let quick = FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: Self.start)
+        #expect(!quick.legsGoOn(with: rest, fromPosition: false) && !quick.legsGoOn(with: rest, fromPosition: true),
+                "a check for new photos goes on with legs")
+        #expect(!FirstAnalysisMoment(kept: .spent, completedBefore: true).legsGoOn(with: Self.whole, fromPosition: true))
+        // As the store starts the legs: after an unfinished leg that counted, the rest's next run
+        // without the position goes on with it; the library as a whole without it starts anew.
+        var legs = FirstAnalysisLegs()
+        _ = Self.run(&legs, 3600, finished: false, goesOn: false)
+        legs.started(mayBringMoment: shared.mayBeBrought(by: rest), goesOn: shared.legsGoOn(with: rest, fromPosition: false))
+        #expect(legs.ended(Leg(seconds: 6), finished: true) == Leg(seconds: 3606, showedBar: true))
+        var anew = FirstAnalysisLegs()
+        _ = Self.run(&anew, 3600, finished: false, goesOn: false)
+        anew.started(mayBringMoment: shared.mayBeBrought(by: Self.whole), goesOn: shared.legsGoOn(with: Self.whole, fromPosition: false))
+        #expect(anew.ended(Leg(seconds: 6), finished: true) == Leg(seconds: 6))
+    }
+
     /// A run that cannot bring the moment is decided alone, as before, also when it runs in legs:
     /// once the moment was spent (celebrated, lapsed, completed overnight for the first time) and,
     /// while it is owed after a quick first analysis, a check for new photos or a catch-up of new

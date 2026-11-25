@@ -49,6 +49,11 @@
   mit Vorschau der zwei Reisen, Zusammenlegen mit der Reise davor oder danach (bis 14 Tage
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
+- Karte „Deine Welt“, Welle 0 (nur TestFlight und Debug, `MapPrototypeGate`): Kern im Modul
+  `AlbumistMap` (Reise-Geometrie, Weltregionen, Teilen-Schutz), eigener Metal-Globus (Plan A) und
+  Apples Globus (Plan B), „Reise abspielen“ auf Apples Karte und die Kamera-Probe mit 17 Schritten
+  (Flug in echter Zeit, feste Kameras, „Werte kopieren“ ohne Koordinaten). Die Testseite wird vor
+  der ersten App-Store-Einreichung entfernt.
 ### Geändert
 <!-- rename:keep-begin: the rename names the old spelling -->
 - 20.11.: Arbeitsname Sortly → Albumist auch im Code: Paket und Module (`AlbumistKit`, `AlbumistCore` …), Ordner

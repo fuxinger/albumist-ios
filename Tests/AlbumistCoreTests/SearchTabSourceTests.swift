@@ -16,8 +16,8 @@ import AlbumistTestSupport
 ///   it is not: the page focused its field only while it was empty and kept the search.
 /// - `.pageFocusingField`: the field on the page's own stack as until wave 3, focused as the page
 ///   opens with nothing typed.
-/// What is typed lives with the tabs (`SearchInput`), and the search page reads it. The
-/// screenshots on iOS 27.2 and the owner decide.
+/// What is typed lives with the tabs (`SearchInput`), and the search page reads it. A route that
+/// changes the tab in code ends an open search. The screenshots on iOS 27.2 and the owner decide.
 /// The App does not build on Linux, so these tests read its code (`AppSource`); how the bar looks
 /// is a screenshot check.
 @Suite("Search tab: the field on the tab view (DS-12a)")
@@ -161,6 +161,19 @@ struct SearchTabSourceTests {
                 "\(page)")
         let completions = Self.squeezed(try Self.body(["struct SearchView", "private var suggestionList: some View"], in: Self.search))
         #expect(completions.contains("query=suggestion.completion+\"\""), "\(completions)")
+    }
+
+    /// Siri, Shortcuts, Spotlight and a notification change the tab in code (`model.route`): a
+    /// route that leaves the search tab ends an open search first, so neither the field nor the
+    /// keyboard stays up over "Vorschläge" (review S of H14, unsure 2).
+    @Test func aRouteThatLeavesTheSearchEndsIt() throws {
+        let body = Self.squeezed(try Self.body(["struct MainTabs", "var body: some View"], in: Self.root))
+        let route = try #require(body.range(of: ".onChange(of:model.route,initial:true){_,targetin"), "\(body)")
+        let rest = body[route.upperBound...]
+        let ends = try #require(rest.range(of: "iftab==.search{search.isPresented=false}"), "a route leaves an open search as it is: \(rest)")
+        let chosen = try #require(rest.range(of: "tab=.suggestions"), "\(rest)")
+        #expect(ends.upperBound <= chosen.lowerBound, "the search is ended after the tab changed")
+        #expect(body.components(separatedBy: "search.isPresented=false").count - 1 == 1, "\(body)")
     }
 
     /// One field for the search: `.searchable(` bound to `SearchInput` only in the modifier (once

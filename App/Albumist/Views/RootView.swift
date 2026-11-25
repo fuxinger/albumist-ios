@@ -153,6 +153,9 @@ struct MainTabs: View {
             // Chosen here, not on the bar, which may be shrunk: the small moment's cover does not
             // count on it being open (`QuickCreateMoment.TabWatch`).
             if tab != .suggestions { QuickCreateMomentSources.shared.tabChosenInCode() }
+            // Leaving the search in code ends an open search, so neither its field nor the
+            // keyboard stays up over "Vorschläge".
+            if tab == .search { search.isPresented = false }
             tab = .suggestions
             // A suggestion that exists opens like one from a list (`ProposalScreen`: it stays
             // when the analysis drops it while its preview is open). The same target twice in a

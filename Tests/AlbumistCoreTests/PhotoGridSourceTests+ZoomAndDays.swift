@@ -100,6 +100,52 @@ extension PhotoGridSourceTests {
         }
     }
 
+    /// The grid's UI test pinches far enough for one step and only one (from three to five, to
+    /// seven, and back to five), also when UIKit counts the scale only from where the pinch
+    /// began, a tenth of the way in (`UIPinchGestureRecognizer.scale` is applied from when the
+    /// gesture is first recognized): 0.75 then reads 0.83, short of a step, one of the causes UI
+    /// run 45567033486 leaves open (its pinch of 0.75 made none).
+    @Test func theUITestPinchesFarEnoughForOneStep() throws {
+        let source = try AppSource.read("App/AlbumistUITests/PhotoGridUITests.swift")
+        let pinches = AppSource.callSites(of: "pinchTheGrid(", in: source).compactMap { call -> (to: Int, scale: Double)? in
+            let parts = call.arguments.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard parts.count > 2, parts[0].hasPrefix("to:"), parts[1].hasPrefix("by:"),
+                  let to = Int(parts[0].dropFirst(3).trimmingCharacters(in: .whitespaces)),
+                  let scale = Double(parts[1].dropFirst(3).trimmingCharacters(in: .whitespaces)) else { return nil }
+            return (to, scale)
+        }
+        #expect(pinches.map(\.to) == [5, 7, 5], "\(pinches)")
+        var columns = PhotoGridZoom.standard
+        for pinch in pinches {
+            for counted in [pinch.scale, pinch.scale < 1 ? pinch.scale / 0.9 : pinch.scale / 1.1] {
+                var zoom = PhotoGridZoom.Pinch(columns: columns)
+                var steps: [Int] = []
+                for scale in Array(stride(from: 1.0, through: counted, by: counted < 1 ? -0.01 : 0.01)) + [counted] {
+                    if let next = zoom.update(scale: scale) { steps.append(next) }
+                }
+                #expect(steps == [pinch.to], "\(pinch.scale), counted as \(counted), from \(columns) in a row: \(steps)")
+            }
+            columns = pinch.to
+        }
+    }
+
+    /// The grid's UI tests open a trip, whose days hold rows of photos, from the start page's
+    /// trips: the first suggestion of any area was a frequent place whose days hold one photo
+    /// each, with no row to drag along (UI run 45567033486).
+    @Test func theGridsUITestsOpenATrip() throws {
+        var code = ""
+        for path in AppSource.swiftFiles(under: "App/AlbumistUITests")
+        where URL(fileURLWithPath: path).lastPathComponent.hasPrefix("PhotoGridUITests") {
+            code += AppSource.code(try AppSource.read(path), keepStrings: true)
+        }
+        let listsTrips = code.contains("\"startPage.all.trips\"")
+        let takesAnyCard = code.contains("UITestScreens.Cards.first(")
+        #expect(listsTrips, "the trips' list")
+        #expect(!takesAnyCard, "the first card of any area")
+        let opened = AppSource.callSites(of: "openTrip(", in: code).count
+        #expect(opened >= 3, "test2's suggestion, test3's and its control's: \(opened)")
+    }
+
     /// After a zoom step lands the page scrolls plainly again (review L6): the scroll view finds
     /// the grid's photos by id only while a step is on its way (the scroll target layout is on
     /// only then, so it follows no photo while the user scrolls), and once the step landed (the

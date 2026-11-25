@@ -5,9 +5,9 @@ import UIKit
 /// pinch to zoom): while "Auswählen" is on, a finger drawn sideways ticks every photo from the
 /// first it touched to the one under it, across rows and days, and a drag that starts on a
 /// ticked photo takes the ticks away; a vertical swipe scrolls and ticks nothing; a tap right
-/// after a drag ticks; from the left screen edge a suggestion's page goes back. Two fingers
+/// after a drag ticks; from the left screen edge a trip's page goes back. Two fingers
 /// show three, five or seven photos in a row, one step per pinch, keep the photo under them
-/// also after the page was out of sight, show the same size in a suggestion's photos, and
+/// also after the page was out of sight, show the same size in a trip's photos, and
 /// three again after a relaunch (a UI run starts at the standard size, `PhotoGridMemory`).
 /// Each test brings the app to an onboarded, analysed demo library with every year taken in by
 /// itself; in CI the class runs in the group flow-other (.github/ui-groups.json). Log
@@ -22,9 +22,11 @@ final class PhotoGridUITests: XCTestCase {
     private func launch() {
         // UITestAppEnd.launch ends the app of the last launch first.
         app = XCUIApplication()
-        // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`).
-        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-AlbumistUITestUnlocked"]
-            + UITestStalls.arguments(besides: [])
+        // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`);
+        // the record says what the app saw of each pinch (`explainPinch`), from this launch on.
+        try? FileManager.default.removeItem(atPath: Self.pinchRecord)
+        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-AlbumistUITestUnlocked",
+                               "-AlbumistUITestProgressLog", Self.pinchRecord] + UITestStalls.arguments(besides: [])
         UITestAppEnd.launch(app)
     }
 
@@ -168,14 +170,14 @@ final class PhotoGridUITests: XCTestCase {
     }
 
     /// A row of two or more photos `identifier` well away from the bars, from the left, as one
-    /// snapshot saw it; up to three slow swipes up to find one. Within 72 pt of the bars the
-    /// page scrolls on by itself under a held finger, which would tick more. Below, the lowest
+    /// snapshot saw it; up to `swipes` (three) slow swipes up to find one. Within 72 pt of the bars
+    /// the page scrolls on by itself under a held finger, which would tick more. Below, the lowest
     /// of a bottom bar and a suggestion's own bar counts. Empty when there is none.
-    func calmRow(_ identifier: String) -> [CGRect] {
+    func calmRow(_ identifier: String, swipes: Int = 3) -> [CGRect] {
         let calm = 90.0
         let window = app.windows.firstMatch.frame
         var row: [CGRect] = []
-        for swipe in 0...3 {
+        for swipe in 0...swipes {
             if swipe > 0 { app.swipeUp(velocity: .slow) }
             let top = app.navigationBars.firstMatch.exists ? app.navigationBars.firstMatch.frame.maxY : 0
             let bars = [app.toolbars.firstMatch, UITestScreens.SuggestionPage.bar(app)]
@@ -188,13 +190,6 @@ final class PhotoGridUITests: XCTestCase {
             if row.count >= 2 { break }
         }
         return row.count >= 2 ? row : []
-    }
-
-    /// The first suggestion's page, from the list of the tab "Vorschläge" shown.
-    func openSuggestion(_ test: String) -> Bool {
-        guard let card = UITestScreens.Cards.first(app, swipes: 6, timeout: 10),
-              UITestScreens.Cards.open(card, in: app, "\(test): a suggestion's page") else { return false }
-        return UITestWait.until("\(test): the suggestion's page", timeout: 10) { UITestScreens.SuggestionPage.isShown(app) }
     }
 
     /// "N ausgewählt" in the bottom bar.
@@ -251,8 +246,12 @@ final class PhotoGridUITests: XCTestCase {
     /// out of sight (another tab, and back) the photo under the fingers stays under them, right
     /// after the step and a second later (review W5 of H10: the page finds its photos again, L1,
     /// and the step lands without a jump, L6); a photo among the page's first rows fails the test
-    /// (review Y5: at the top the scroll view cannot keep it). A suggestion's photos show the same
-    /// size (one for both grids), and a relaunch of a UI run starts at three again.
+    /// (review Y5: at the top the scroll view cannot keep it). A trip's photos show the same size
+    /// (one for both grids), and a relaunch of a UI run starts at three again. The fingers go on
+    /// the middle of the page, far apart, and pinch to 0.7 (spread to 1.4): one step each, also
+    /// where UIKit counts the scale only from where the pinch began (UI run 45567033486: 0.75 on
+    /// one photo of the left column made none). A pinch without its step says from the app's
+    /// record which it was: where the fingers went, what held the pinch back, or its scale.
     func test2_TwoFingersShowThreeFiveOrSevenInARow() {
         continueAfterFailure = true
         let test = "PhotoGridUITests.test2"
@@ -269,19 +268,17 @@ final class PhotoGridUITests: XCTestCase {
         UITestWait.screenAtRest(app, "\(test): the page at rest a few screens down")
         print("UI_FACT \(test): the first photo on screen a few screens down: '\(firstPhotoOnScreen())'")
         leaveTabAndComeBack(test, waitingFor: photos.firstMatch)
-        let held = pinchNearestPhoto(0.75, "to five", photos, test)
-        XCTAssertTrue(rowShowsPhotos(5, "after one pinch", photos, test), "\(test): one pinch does not show five photos in a row")
-        if let held, isBelow(firstRows, held, test) { pinchedPhotoKeepsItsPlace(held, "after the page was away", test) }
+        let five = pinchTheGrid(to: 5, by: 0.7, "to five", photos, test)
+        XCTAssertTrue(five.shown, "\(test): one pinch does not show five photos in a row")
+        if let held = five.held, isBelow(firstRows, held, test) { pinchedPhotoKeepsItsPlace(held, "after the page was away", test) }
         shot("pg-02-five")
-        _ = pinchNearestPhoto(0.75, "to seven", photos, test)
-        XCTAssertTrue(rowShowsPhotos(7, "after a second pinch", photos, test),
-                      "\(test): a second pinch does not show seven photos in a row")
+        let seven = pinchTheGrid(to: 7, by: 0.7, "to seven", photos, test)
+        XCTAssertTrue(seven.shown, "\(test): a second pinch does not show seven photos in a row")
         shot("pg-03-seven")
-        _ = pinchNearestPhoto(1.4, "back to five", photos, test)
-        XCTAssertTrue(rowShowsPhotos(5, "after spreading", photos, test),
-                      "\(test): spreading two fingers does not go back to five photos in a row")
+        let back = pinchTheGrid(to: 5, by: 1.4, "back to five", photos, test)
+        XCTAssertTrue(back.shown, "\(test): spreading two fingers does not go back to five photos in a row")
 
-        // A suggestion's photos: the same grid, at the same size.
+        // A trip's photos: the same grid, at the same size.
         suggestionShowsFiveInARow(test)
 
         // A UI run starts at the standard size again.
@@ -295,23 +292,19 @@ final class PhotoGridUITests: XCTestCase {
 
     // MARK: 3 Back from the left edge while selecting
 
-    /// On a suggestion's page while "Auswählen" is on, a finger drawn sideways along a row of
-    /// photos ticks them and the page stays; a finger from the left screen edge, at the height of
-    /// that row, goes back to the suggestions (review L7 of H10: the drag to select took the swipe
-    /// back away from the edge). First the control (review of H10's round 2): the same finger
-    /// before "Auswählen" goes back too, else the simulator's touch at the edge is no edge swipe
-    /// and the test says so, instead of a red result that could be either; then the page is
-    /// opened again.
+    /// On a trip's page (its days hold rows of photos, `openTrip`) while "Auswählen" is on, a
+    /// finger drawn sideways along a row of photos ticks them and the page stays; a finger from
+    /// the left screen edge, at the height of that row, goes back to the suggestions (review L7 of
+    /// H10: the drag to select took the swipe back away from the edge). First the control (review
+    /// of H10's round 2): the same finger before "Auswählen" goes back too, else the simulator's
+    /// touch at the edge is no edge swipe and the test says so, instead of a red result that could
+    /// be either; then the page is opened again.
     func test3_FromTheLeftEdgeASuggestionsPageGoesBackWhileSelecting() {
         continueAfterFailure = true
         let test = "PhotoGridUITests.test3"
         prepare(test)
         let suggestions = UITestScreens.Tabs.german.suggestions
-        guard tap(tabButton(suggestions), "\(test): tab \(suggestions)"), openSuggestion(test) else {
-            shot("x-no-suggestion-page")
-            XCTFail("\(test): no suggestion's page to select on")
-            return
-        }
+        guard tap(tabButton(suggestions), "\(test): tab \(suggestions)"), openTrip(test) else { return }
         // The control: the same finger from the left edge, over a row of photos, before "Auswählen".
         guard let edgeSwipeGoesBack = edgeSwipeControl(test) else { return }
 

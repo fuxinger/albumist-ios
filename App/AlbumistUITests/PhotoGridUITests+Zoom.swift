@@ -2,8 +2,9 @@ import XCTest
 import UIKit
 
 /// The steps of `PhotoGridUITests.test2_TwoFingersShowThreeFiveOrSevenInARow` (DS-06b, pinch
-/// to zoom): how many photos a row shows, the pinch on the photo nearest the middle, the photo
-/// that stays under the fingers, and a suggestion's photos at the same size.
+/// to zoom): how many photos a row shows, the pinch on the middle of the page, the photo that
+/// stays under the fingers, a trip's photos at the same size, and what the app saw of a pinch
+/// without its step (its record, `PhotoGridPinchRecord` in the app).
 extension PhotoGridUITests {
     /// Whether the grid's photos `photos` show `wanted` in a row, within a few seconds.
     func rowShowsPhotos(_ wanted: Int, _ what: String, _ photos: XCUIElementQuery, _ test: String) -> Bool {
@@ -14,31 +15,98 @@ extension PhotoGridUITests {
         return met
     }
 
-    /// Two fingers on the photo nearest the middle of the screen (the grid, not its bars). The
-    /// element is the one the snapshot saw there: checked by its frame, else the first photo
-    /// of the query that lies in the middle third of the screen. What was seen of it, read
-    /// before the pinch.
-    func pinchNearestPhoto(_ scale: CGFloat, _ what: String, _ photos: XCUIElementQuery, _ test: String) -> Seen? {
+    /// What a pinch did: whether the row then showed the photos wanted, and the photo under the
+    /// middle of the fingers as seen before (nil when none was on screen).
+    struct Pinched {
+        var shown: Bool
+        var held: Seen?
+    }
+
+    /// Two fingers on the middle of the page (the scroll view of the photos), not on one photo:
+    /// XCTest puts them as far apart as the element is large, so UIKit's small start of a pinch,
+    /// from where its scale counts, takes little of it (UI run 45567033486: 0.75 on one photo of
+    /// 133 pt made no step). The photo under the middle, or the nearest one, is the one that stays
+    /// under the fingers. Without the step the app's record of the pinch says why
+    /// (`explainPinch`).
+    func pinchTheGrid(to wanted: Int, by scale: CGFloat, _ what: String, _ photos: XCUIElementQuery, _ test: String) -> Pinched {
+        let page = app.scrollViews.containing(.button, identifier: "library.photo").firstMatch
+        guard page.waitForExistence(timeout: 5) else {
+            XCTFail("\(test): no page of photos to pinch (\(what))")
+            return Pinched(shown: false, held: nil)
+        }
+        let frame = page.frame
+        let middle = CGPoint(x: frame.midX, y: frame.midY)
+        let held = heldPhoto(at: middle)
+        print("UI_STEP_OK \(test): pinch \(scale) on the page (\(Int(frame.width)) x \(Int(frame.height)) pt) at its middle "
+              + "\(Int(middle.x)),\(Int(middle.y)), over '\(held?.label ?? "no photo")' (\(what))")
+        let since = Date()
+        page.pinch(withScale: scale, velocity: scale < 1 ? -1 : 1)
+        let shown = rowShowsPhotos(wanted, "after the pinch \(what)", photos, test)
+        explainPinch(what, since: since, stepped: shown, test)
+        return Pinched(shown: shown, held: held)
+    }
+
+    /// The photo under `point` on screen, else the one nearest to it, from one snapshot; the
+    /// first of the grid's order when two are as near.
+    func heldPhoto(at point: CGPoint) -> Seen? {
         let window = app.windows.firstMatch.frame
-        let all = self.photos("library.photo")
-        guard let nearest = all.indices.min(by: {
-            abs(all[$0].frame.midY - window.midY) < abs(all[$1].frame.midY - window.midY)
-        }) else {
-            XCTFail("\(test): no photo to pinch (\(what))")
-            return nil
+        let shown = photos("library.photo").filter { window.intersects($0.frame) }
+        if let under = shown.first(where: { $0.frame.contains(point) }) { return under }
+        func distance(_ frame: CGRect) -> CGFloat {
+            let dx = max(frame.minX - point.x, 0, point.x - frame.maxX)
+            let dy = max(frame.minY - point.y, 0, point.y - frame.maxY)
+            return (dx * dx + dy * dy).squareRoot()
         }
-        var target = photos.element(boundBy: nearest)
-        var held = all[nearest]
-        if target.frame != held.frame,
-           let middle = (0..<min(photos.count, 40)).lazy.map({ photos.element(boundBy: $0) }).first(where: {
-               abs($0.frame.midY - window.midY) < window.height / 6
-           }) {
-            target = middle
-            held = Seen(frame: middle.frame, selected: false, label: middle.label)
+        return shown.min { distance($0.frame) < distance($1.frame) }
+    }
+
+    /// The app's record of the grid's pinches (`-AlbumistUITestProgressLog`): in the runner's
+    /// temporary folder, which the simulator's app writes to, anew at each launch (`launch`).
+    static var pinchRecord: String { NSTemporaryDirectory() + "grid-pinch-record.txt" }
+
+    /// The app's marks of the grid's pinches since `since`: "grid pinch: fingers 2, …" when the
+    /// fingers lifted, "grid pinch step 3 to 5 at 0.78" at a step. Nil without a record.
+    func pinchMarks(since: Date) -> [String]? {
+        guard let text = try? String(contentsOfFile: Self.pinchRecord, encoding: .utf8) else { return nil }
+        return text.split(separator: "\n").compactMap { row -> String? in
+            let fields = row.split(separator: " ", maxSplits: 2).map(String.init)
+            guard fields.count == 3, fields[0] == "#", let time = Double(fields[1]), time >= since.timeIntervalSince1970,
+                  fields[2].hasPrefix("grid pinch") else { return nil }
+            return fields[2]
         }
-        print("UI_STEP_OK \(test): pinch \(scale) on '\(held.label)' at \(Int(held.frame.minX)),\(Int(held.frame.minY)) (\(what))")
-        target.pinch(withScale: scale, velocity: scale < 1 ? -1 : 1)
-        return held
+    }
+
+    /// What the app saw of the pinch, each mark as a `UI_FACT`; without its step, which of the
+    /// three causes UI run 45567033486 left open it was: one finger or none on the grid at a time
+    /// is where XCTest put them (the fingers); two and the pinch never began is another gesture
+    /// that held it back (the arbitration); it began and made no step is UIKit's scale, counted
+    /// from where it began, staying short of a step's 0.8 or 1.25 (the threshold).
+    func explainPinch(_ what: String, since: Date, stepped: Bool, _ test: String) {
+        guard let marks = pinchMarks(since: since) else {
+            if !stepped { print("UI_FACT \(test): pinch \(what): no record of the app's pinches at \(Self.pinchRecord)") }
+            return
+        }
+        for mark in marks { print("UI_FACT \(test): pinch \(what): the app saw '\(mark)'") }
+        guard !stepped else { return }
+        let lifts = marks.filter { $0.hasPrefix("grid pinch:") }
+        let verdict: String
+        if marks.contains(where: { $0.hasPrefix("grid pinch step") }) {
+            verdict = "the grid made its step and the row did not show it"
+        } else if !lifts.contains(where: { (Int(Self.field("fingers", of: $0) ?? "") ?? 0) >= 2 }) {
+            verdict = "the fingers: \(lifts.isEmpty ? "none" : "one at a time") on the grid"
+        } else if lifts.allSatisfy({ Self.field("began", of: $0) == "-" }) {
+            verdict = "the arbitration: two fingers on the grid, and the pinch never began"
+        } else {
+            verdict = "the threshold: the pinch began, and UIKit's scale stayed short of a step"
+        }
+        print("UI_FACT \(test): pinch \(what) made no step: \(verdict)")
+    }
+
+    /// The value after `name` in a line of the record ("fingers 2, apart 212, began -, …"), up
+    /// to the next comma.
+    static func field(_ name: String, of line: String) -> String? {
+        guard let range = line.range(of: " \(name) ") else { return nil }
+        return String(line[range.upperBound...].prefix { $0 != "," })
     }
 
     /// The photo the fingers held is under them again, within about a row of where it was:
@@ -84,20 +152,17 @@ extension PhotoGridUITests {
         return false
     }
 
-    /// A suggestion's photos: the same grid, at the same size (five in a row after the pinches).
+    /// A trip's photos: the same grid, at the same size (five in a row after the pinches). A trip,
+    /// whose days hold rows of photos (`openTrip`).
     func suggestionShowsFiveInARow(_ test: String) {
-        if tap(tabButton(UITestScreens.Tabs.german.suggestions), "\(test): tab Vorschläge"),
-           let card = UITestScreens.Cards.first(app, swipes: 6, timeout: 10),
-           UITestScreens.Cards.open(card, in: app, "\(test): a suggestion's page"),
-           UITestWait.until("\(test): the suggestion's page", timeout: 10, { UITestScreens.SuggestionPage.isShown(app) }) {
-            if let photo = UITestScreens.SuggestionPage.photoInReach(app) {
-                let inRow = columns(photo.frame.width)
-                print("UI_FACT \(test): a suggestion's photos: \(inRow) in a row (\(photo.frame.width) pt)")
-                XCTAssertEqual(inRow, 5, "\(test): a suggestion's photos do not show the size chosen in \"Unsortiert\"")
-                shot("pg-04-suggestion-five")
-            } else {
-                XCTFail("\(test): no photo of the suggestion's page in reach")
-            }
+        guard tap(tabButton(UITestScreens.Tabs.german.suggestions), "\(test): tab Vorschläge"), openTrip(test) else { return }
+        guard let photo = UITestScreens.SuggestionPage.photoInReach(app) else {
+            XCTFail("\(test): no photo of the trip's page in reach")
+            return
         }
+        let inRow = columns(photo.frame.width)
+        print("UI_FACT \(test): a trip's photos: \(inRow) in a row (\(photo.frame.width) pt)")
+        XCTAssertEqual(inRow, 5, "\(test): a trip's photos do not show the size chosen in \"Unsortiert\"")
+        shot("pg-04-suggestion-five")
     }
 }

@@ -483,15 +483,22 @@ struct PhotoGridSourceTests {
     /// "Heute" and "Gestern" follow midnight (review L11): the day that is today is kept and read
     /// anew when iOS says a significant time changed (midnight, a new time zone, a carrier's
     /// correction) and when the app is back on screen, so a tab left open overnight makes its
-    /// days anew.
+    /// days anew. With the day the iPhone's zone (review W10): photos without a zone of their own
+    /// are read on its clock, so a new zone makes the days anew also where the day number stays.
     @Test func todayAndYesterdayFollowMidnight() throws {
         let library = try Self.code(Self.library)
         #expect(library.contains("@State private var today = Self.today()"))
         #expect(library.contains("@Environment(\\.scenePhase) private var scenePhase"))
         let view = Self.squeezed(try Self.body(["struct LibraryView", "var body: some View"], in: Self.library))
+        #expect(view.contains(".task(id:DaysKey(bucket:bucket,members:members,words:model.proposalWords,today:today))"), "\(view)")
         #expect(view.contains(".onReceive(NotificationCenter.default.publisher(for:UIApplication.significantTimeChangeNotification))"
                               + "{_intoday=Self.today()}"), "\(view)")
         #expect(view.contains(".onChange(of:scenePhase){_,phaseinifphase==.active{today=Self.today()}}"), "\(view)")
+        let today = Self.squeezed(try Self.body(["struct LibraryView", "private static func today() -> Today"], in: Self.library))
+        #expect(today == "{letzone=TimeZone.currentreturnToday(day:LocalTime.day(LocalTime.wallClock(Date(),in:zone)),"
+                + "zone:zone.identifier)}", "\(today)")
+        let key = Self.squeezed(try Self.body(["struct LibraryView", "private struct DaysKey"], in: Self.library))
+        #expect(key.contains("vartoday:Today") && key.contains("a.today==b.today"), "\(key)")
     }
 
     /// The tab's own loading is calm (DS-18): words, no spinner, with the identifiers the UI

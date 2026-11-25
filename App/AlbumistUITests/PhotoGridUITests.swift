@@ -239,7 +239,7 @@ final class PhotoGridUITests: XCTestCase {
 
         // A vertical swipe scrolls; the ticks stay as they are.
         app.swipeUp(velocity: .slow)
-        UITestWait.never("\(test): the count changes after a vertical swipe", for: 1) { !selectedCount(ticked - 3).exists }
+        UITestWait.never("\(test): the count stays at \(ticked - 3) after a vertical swipe", for: 1) { !selectedCount(ticked - 3).exists }
         app.swipeDown(velocity: .slow)
         tap(app.buttons["Fertig"], "\(test): Fertig")
     }
@@ -250,24 +250,28 @@ final class PhotoGridUITests: XCTestCase {
     /// seven when they pinch, five again when they spread. On a page a few screens down that was
     /// out of sight (another tab, and back) the photo under the fingers stays under them, right
     /// after the step and a second later (review W5 of H10: the page finds its photos again, L1,
-    /// and the step lands without a jump, L6). A suggestion's photos show the same size (one for
-    /// both grids), and a relaunch of a UI run starts at three again.
+    /// and the step lands without a jump, L6); a photo among the page's first rows fails the test
+    /// (review Y5: at the top the scroll view cannot keep it). A suggestion's photos show the same
+    /// size (one for both grids), and a relaunch of a UI run starts at three again.
     func test2_TwoFingersShowThreeFiveOrSevenInARow() {
         continueAfterFailure = true
         let test = "PhotoGridUITests.test2"
         prepare(test)
         guard let photos = openUnsorted(test) else { return }
         guard rowShowsPhotos(3, "at the start", photos, test) else { return }
-        // A few screens down, then back by about one, so the page is away from its end (there the
-        // scroll view cannot keep a photo in place when the rows get smaller); then away to
-        // another tab and back, which shows the page again without building its photos anew.
+        // A few screens down, then back by about one, so the page is away from its top and from
+        // its end (at either the scroll view cannot keep a photo in place when the rows get
+        // smaller, review Y5); then away to another tab and back, which shows the page again
+        // without building its photos anew.
+        let firstRows = photosAtTheTop(test)
         for _ in 0..<3 { app.swipeUp() }
         for _ in 0..<2 { app.swipeDown(velocity: .slow) }
         UITestWait.screenAtRest(app, "\(test): the page at rest a few screens down")
+        print("UI_FACT \(test): the first photo on screen a few screens down: '\(firstPhotoOnScreen())'")
         leaveTabAndComeBack(test, waitingFor: photos.firstMatch)
         let held = pinchNearestPhoto(0.75, "to five", photos, test)
         XCTAssertTrue(rowShowsPhotos(5, "after one pinch", photos, test), "\(test): one pinch does not show five photos in a row")
-        if let held { pinchedPhotoKeepsItsPlace(held, "after the page was away", test) }
+        if let held, isBelow(firstRows, held, test) { pinchedPhotoKeepsItsPlace(held, "after the page was away", test) }
         shot("pg-02-five")
         _ = pinchNearestPhoto(0.75, "to seven", photos, test)
         XCTAssertTrue(rowShowsPhotos(7, "after a second pinch", photos, test),

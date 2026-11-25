@@ -96,6 +96,12 @@ public enum PhotoGridAutoScroll {
 /// passed (then it is dropped and teaches nothing, so no later step's report passes where the
 /// other way would have put it). Each run of scrolling by itself probes until one probe is
 /// answered: a lesson is learned, kept, or flipped where the probe lands the other way.
+///
+/// Where the scroll view reports a step a frame or two late, a step is always on its way
+/// (review Y1): then the run's first step that could tell lets the steps before the probe be
+/// answered first. It waits as a probe does, teaching nothing, and the next step that can tell
+/// probes. So each run's probe pauses the page for up to two frames (`patience`), and where
+/// the reports come late the steps before it pause it for up to two more, once a run.
 public struct PhotoGridScrollCalibration: Equatable, Sendable {
     public enum Convention: Equatable, Sendable {
         /// `y` is the content offset.
@@ -104,8 +110,9 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
         case fromRestingTop
     }
 
-    /// The frames after a probe that ask nothing while it waits for its report; at the next
-    /// one it is dropped. The scroll view takes a step with the next frame and reports it.
+    /// The frames after a probe (or the last step before it, review Y1) that ask nothing while
+    /// it waits for its report; at the next one it is dropped. The scroll view takes a step with
+    /// the next frame and reports it.
     public static let patience = 2
 
     public private(set) var convention: Convention?
@@ -113,19 +120,30 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
     private var last: Step?
     /// A probe of this run of scrolling by itself was answered.
     private var checked = false
+    /// This run let the steps before its probe be answered first (review Y1).
+    private var cleared = false
 
     private struct Step: Equatable, Sendable {
         var y: Double
         var insetTop: Double
-        /// It teaches when answered, and nothing else is asked while it waits.
-        var probe: Bool
-        /// The frames it has waited, as a probe.
+        /// What it waits for, while nothing else is asked; nil for a step among others.
+        var wait: Wait?
+        /// The frames it has waited.
         var frames = 0
 
         /// Where the scroll view goes if `scrollTo(y:)` counts the way `convention` says.
         func landing(_ convention: Convention) -> Double {
             convention == .contentOffset ? y : y - insetTop
         }
+    }
+
+    /// Why a step waits for its report.
+    private enum Wait: Equatable, Sendable {
+        /// The run's probe: answered, it teaches.
+        case probe
+        /// The last step before the probe, asked while the steps before it were on their way
+        /// (review Y1): answered, they are all in, and the next step that can tell probes.
+        case clearing
     }
 
     public init() {}
@@ -137,25 +155,44 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
     }
 
     /// A frame of scrolling by itself begins (once a frame, before its step): whether its step
-    /// may be asked. Not while a probe waits for its report, for `patience` frames; at the
-    /// next frame it is dropped.
+    /// may be asked. Not while a step waits for its report (the probe, or the last step before
+    /// it), for `patience` frames; at the next frame it is dropped, and stays a step on its way.
     public mutating func mayAsk() -> Bool {
-        guard var step = last, step.probe else { return true }
+        guard var step = last, step.wait != nil else { return true }
         step.frames += 1
-        if step.frames > Self.patience { step.probe = false }
+        if step.frames > Self.patience { step.wait = nil }
         last = step
-        return !step.probe
+        return step.wait == nil
     }
 
     /// `y` is asked while the scroll view is at `from`, in content offsets `range`. A probe
     /// when the run has no answered probe yet, the step before was answered, and the step can
-    /// tell: the two ways' landings are apart from each other (a top inset of 2 pt or more)
-    /// and from no move at all, and neither is cut at an end of the content.
+    /// tell (`tells`). With the step before still on its way (review Y1), a step that can tell,
+    /// also from where that one lands either way (so can the probe after it), lets the steps
+    /// be answered first, once a run.
     public mutating func asked(_ y: Double, from: Double, insetTop: Double, range: ClosedRange<Double>) {
+        let teaches = !checked && Self.tells(y, from: from, insetTop: insetTop, range: range)
+        var wait: Wait?
+        if let before = last {
+            // No probe: the report of the step before could land where one of the two ways puts it.
+            if teaches, !cleared, Self.tells(y, from: before.landing(.contentOffset), insetTop: insetTop, range: range),
+               Self.tells(y, from: before.landing(.fromRestingTop), insetTop: insetTop, range: range) {
+                wait = .clearing
+                cleared = true
+            }
+        } else if teaches {
+            wait = .probe
+        }
+        last = Step(y: y, insetTop: insetTop, wait: wait)
+    }
+
+    /// Whether `y`, asked while the scroll view is at `from`, can tell how `scrollTo(y:)`
+    /// counts: the two ways' landings are apart from each other (a top inset of 2 pt or more)
+    /// and from no move at all, and neither is cut at an end of the content.
+    private static func tells(_ y: Double, from: Double, insetTop: Double, range: ClosedRange<Double>) -> Bool {
         let asOffset = y, fromTop = y - insetTop
-        let tells = insetTop >= 2 && fromTop >= range.lowerBound + 1 && asOffset <= range.upperBound - 1
+        return insetTop >= 2 && fromTop >= range.lowerBound + 1 && asOffset <= range.upperBound - 1
             && abs(asOffset - from) >= 2 && abs(fromTop - from) >= 2
-        last = Step(y: y, insetTop: insetTop, probe: tells && !checked && last == nil)
     }
 
     /// The scroll view reports the content offset `offset`. Where one of the two ways puts the
@@ -171,7 +208,7 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
         } else {
             return
         }
-        if step.probe {
+        if step.wait == .probe {
             convention = answer
             checked = true
         }
@@ -183,5 +220,6 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
     public mutating func reset() {
         last = nil
         checked = false
+        cleared = false
     }
 }

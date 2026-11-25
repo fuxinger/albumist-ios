@@ -30,6 +30,9 @@ final class PhotoGridGestureState {
     /// A drag that began where no photo is (on a day's header): it begins at the first photo the
     /// finger reaches.
     private var waiting: Waiting?
+    /// A drag whose range ended while its finger was still down (`follow()`): it runs on until
+    /// its recognizer ends, so its lift is no tap of its own (review Y3).
+    private var endedEarly = false
     private var zooming: Zooming?
     /// The lift that ends a drag or a pinch is no tap of its own, only that lift
     /// (`swallowsTap`, review L8).
@@ -184,12 +187,19 @@ final class PhotoGridGestureState {
         followEdges()
     }
 
+    /// The drag's recognizer ended (the finger lifted), or a new drag begins.
     func endDrag() {
+        if drag != nil || waiting != nil || endedEarly { lift.gestureEnded(at: CACurrentMediaTime()) }
+        endRange()
+        waiting = nil
+        endedEarly = false
+    }
+
+    /// The range ends, its photos ticked as they are, and the page stops scrolling by itself.
+    private func endRange() {
         ticker.stop()
         drag?.scroller?.endAutoScroll()
-        if drag != nil || waiting != nil { lift.gestureEnded(at: CACurrentMediaTime()) }
         drag = nil
-        waiting = nil
     }
 
     /// Whether a tap on a photo now is the lift that ends a drag or a pinch (UIKit may hand it to
@@ -249,14 +259,16 @@ final class PhotoGridGestureState {
 
     /// The grid shows other photos than the range counts in (more were loaded below, the days
     /// were made anew): the range follows its photos by id into the grid's order now
-    /// (`PhotoGridDrag.rebased`), or, where they are no longer together, the drag ends, its photos
-    /// ticked as they are (review L3).
+    /// (`PhotoGridDrag.rebased`), or, where they are no longer together, the range ends, its
+    /// photos ticked as they are (review L3). Only the range: the finger is still down, and the
+    /// drag runs on until it lifts (review Y3).
     private func follow() {
         guard let current = drag else { return }
         let now = order()
         guard !Self.same(now, current.ids) else { return }
         guard let range = current.range.rebased(from: current.ids, to: now) else {
-            endDrag()
+            endRange()
+            endedEarly = true
             return
         }
         drag?.range = range
@@ -288,7 +300,7 @@ final class PhotoGridGestureState {
     }
 
     /// One frame of scrolling by itself; false stops the clock (the finger left the edge, or the
-    /// drag ended because its range could not follow the photos the grid shows now).
+    /// range ended because it could not follow the photos the grid shows now).
     private func scrollStep(_ seconds: Double) -> Bool {
         guard let current = drag, let scroller = current.scroller else { return false }
         let speed = edgeSpeed()

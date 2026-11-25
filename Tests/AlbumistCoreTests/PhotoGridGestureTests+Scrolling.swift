@@ -167,24 +167,101 @@ extension PhotoGridGestureTests {
         let range = -100.0...2_000
         var calibration = PhotoGridAutoScroll.Calibration()
         // A step too small to tell, on its way.
-        calibration.asked(700.5, from: 700, insetTop: 100, range: range)
-        // The next frame's step could tell, but the one before has not been reported: no probe,
-        // and it holds nothing back.
+        calibration.asked(701.5, from: 700, insetTop: 100, range: range)
+        // The next frame's step could tell (both ways 2 pt or more from where the scroll view
+        // is), but the one before has not been reported: no probe. Counted from the top it lands
+        // where the step before does, so the probe after it could not tell either: it holds
+        // nothing back (review Y1).
         var asks = calibration.mayAsk()
         #expect(asks)
-        calibration.asked(800, from: 700, insetTop: 100, range: range)
+        calibration.asked(802, from: 700, insetTop: 100, range: range)
         asks = calibration.mayAsk()
         #expect(asks, "no probe waits")
         // The step before lands where counting from the top would have put this one.
-        calibration.reported(700.5)
+        calibration.reported(701.5)
         #expect(calibration.convention == nil, "no probe, no lesson")
-        calibration.reported(800)
+        calibration.reported(802)
         // Nothing on its way now: the next step that can tell probes.
-        calibration.asked(820, from: 800, insetTop: 100, range: range)
+        calibration.asked(820, from: 802, insetTop: 100, range: range)
         asks = calibration.mayAsk()
         #expect(!asks)
         calibration.reported(820)
         #expect(calibration.convention == .contentOffset)
+    }
+
+    /// Where the scroll view reports each step a frame or two late (review Y1), a step is always
+    /// on its way, and no step could probe: the run's first step that could tell, also from where
+    /// the step before it lands, lets the steps be answered first (nothing is asked until it is),
+    /// and the next step probes.
+    @Test func theStepsBeforeTheProbeAreAnsweredFirst() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        // A step too small to tell, then one that could tell; the first is not reported yet.
+        calibration.asked(701, from: 700, insetTop: 100, range: range)
+        var asks = calibration.mayAsk()
+        #expect(asks)
+        calibration.asked(704, from: 700, insetTop: 100, range: range)
+        calibration.reported(701)
+        asks = calibration.mayAsk()
+        #expect(!asks, "the steps before the probe are answered first")
+        calibration.reported(704)
+        #expect(calibration.convention == nil, "no probe, no lesson")
+        asks = calibration.mayAsk()
+        #expect(asks, "all answered: the steps go on")
+        // The next step that can tell probes, alone.
+        calibration.asked(707, from: 704, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(!asks)
+        calibration.reported(707)
+        #expect(calibration.convention == .contentOffset)
+    }
+
+    /// The steps before the probe are waited for once a run, for `patience` frames: not answered
+    /// by then, the last of them is dropped, and while its report may still come no step probes
+    /// (it could land where one of the two ways puts that step).
+    @Test func theStepsBeforeTheProbeAreWaitedForOnceARun() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        calibration.asked(510, from: 500, insetTop: 100, range: range)
+        calibration.reported(510)
+        #expect(calibration.convention == .contentOffset)
+        // The next run: the reports do not come.
+        calibration.reset()
+        calibration.asked(708, from: 707, insetTop: 100, range: range)
+        var asks = calibration.mayAsk()
+        #expect(asks)
+        calibration.asked(711, from: 707, insetTop: 100, range: range)
+        let frames = (1...3).map { _ in calibration.mayAsk() }
+        #expect(frames == [false, false, true], "two frames ask nothing; then the steps go on")
+        // Once a run: the next step that could tell holds nothing back, and it is no probe.
+        calibration.asked(811, from: 707, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(asks, "once a run")
+        // The dropped step's report comes late, where counting from the top puts the last one.
+        calibration.reported(711)
+        #expect(calibration.convention == .contentOffset, "a step on its way, no probe")
+    }
+
+    /// The review's case (Y1): a finger selects into the bottom edge, and the scroll view reports
+    /// each step in the same frame, one or two frames late, or never. Whichever way `scrollTo(y:)`
+    /// counts, how fast the finger comes and at 60 or 120 frames a second, the run learns that
+    /// way where the reports come; the page stands still for at most two frames for each frame
+    /// they come late, at most twice `patience` frames.
+    @Test func aRunLearnsAlsoWhereTheScrollViewReportsLate() {
+        typealias Convention = PhotoGridAutoScroll.Calibration.Convention
+        let most = 2 * PhotoGridAutoScroll.Calibration.patience
+        for truth in [Convention.contentOffset, .fromRestingTop] {
+            for late in [0, 1, 2, nil] as [Int?] {
+                for rate in [60.0, 120] {
+                    for fingerSpeed in [50.0, 100, 200, 400, 800, 1_600] {
+                        let run = Self.selectIntoTheEdge(truth: truth, fingerSpeed: fingerSpeed, rate: rate, late: late)
+                        let label = "\(truth), \(late.map { "\($0) late" } ?? "never"), \(rate) Hz, \(fingerSpeed) pt/s"
+                        #expect(run.learned == (late == nil ? nil : truth), "\(label)")
+                        #expect(run.still <= min(2 * (late ?? most), most), "\(label): \(run.still) frames still")
+                    }
+                }
+            }
+        }
     }
 
     /// No lesson stands unchecked (review W4): each run of scrolling by itself probes once more,
@@ -262,5 +339,42 @@ extension PhotoGridGestureTests {
             calibration.reported(landed)
         }
         return calibration.convention
+    }
+
+    /// A finger that selects into the bottom edge at `fingerSpeed` points a second, on to 20 pt
+    /// past it, for two seconds of frames at `rate` a second; the grid scrolls by itself from
+    /// 3,000 (under 116 pt of bars) as `PhotoGridScroller.scroll(by:)` does, and the scroll view
+    /// goes where `scrollTo(y:)` takes it the way `truth` says and reports each move `late`
+    /// frames later (nil: never), in the update after that frame's step. What the calibration
+    /// learned, and the frames it asked nothing.
+    private static func selectIntoTheEdge(truth: PhotoGridAutoScroll.Calibration.Convention, fingerSpeed: Double,
+                                          rate: Double, late: Int?) -> (learned: PhotoGridAutoScroll.Calibration.Convention?, still: Int) {
+        let insetTop = 116.0, seen = 116.0...584, range = -insetTop...20_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        var target = PhotoGridAutoScroll.Target()
+        var reported = 3_000.0, position = reported, still = 0
+        var due: [(frame: Int, offset: Double)] = []
+        for frame in 0..<Int(2 * rate) {
+            let finger = min(seen.upperBound - PhotoGridAutoScroll.edge + fingerSpeed * Double(frame) / rate, seen.upperBound + 20)
+            let speed = PhotoGridAutoScroll.speed(y: finger, top: seen.lowerBound, bottom: seen.upperBound)
+            if speed != 0, !calibration.mayAsk() {
+                still += 1
+            } else if speed != 0,
+                      let wanted = target.next(by: PhotoGridAutoScroll.step(speed: speed, seconds: 1 / rate), offset: reported, range: range) {
+                let y = calibration.y(for: wanted, insetTop: insetTop)
+                calibration.asked(y, from: reported, insetTop: insetTop, range: range)
+                let landed = min(max(truth == .contentOffset ? y : y - insetTop, range.lowerBound), range.upperBound)
+                if let late, landed != position { due.append((frame + late, landed)) }
+                position = landed
+            }
+            // The frame's update: the reports due now, in order.
+            while let next = due.first, next.frame == frame {
+                due.removeFirst()
+                reported = next.offset
+                target.reported(next.offset)
+                calibration.reported(next.offset)
+            }
+        }
+        return (calibration.convention, still)
     }
 }

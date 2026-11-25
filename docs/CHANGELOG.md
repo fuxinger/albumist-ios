@@ -2,6 +2,10 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. Raster in „Unsortiert“ und in Vorschlägen nach der Nachprüfung (Design-Welle 3, H10, noch in keinem
+  Build): Das Weiterlaufen am Rand lernt, wie die Seite scrollt, auch wenn sie ihre Schritte ein oder zwei Bilder
+  später meldet (dafür hält sie je Weiterlaufen höchstens vier Bilder an); endet beim Ziehen der Bereich, während
+  der Finger noch liegt, hakt das Loslassen nichts ab, auch Sekunden später.
 - 25.11. Dritte Nachprüfung der ersten 100 % (Design-Welle 3, H13, noch in keinem Build): Auch nach einer schnellen
   ersten Analyse zählen die Etappen des Laufs zusammen, der die 100 % noch bringen kann (alle Jahre nach
   „Nur 2026“, der Rest nach wenigen freigegebenen Fotos): ein kurzer letzter Rest endet mit „Analyse fertig“ und

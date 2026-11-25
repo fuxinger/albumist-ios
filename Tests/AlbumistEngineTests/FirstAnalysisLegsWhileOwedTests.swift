@@ -8,9 +8,10 @@ import Testing
 /// completes X9): the first analysis; after a first analysis too quick for "Analyse fertig", a run
 /// of the library as a whole (another part of the library, "Analyse neu aufbauen"); after a quick
 /// first analysis of only the shared photos, the run with every photo allowed that analyses the
-/// rest. A check for new photos or a catch-up of new imports is decided alone and never brings the
-/// moment; it never shows twice; the seven days are as they were.
-@Suite("First analysis in legs while the moment is owed (Y2, Y4)")
+/// rest, whose legs go on also where a check that missed a change dropped its resume position
+/// (verification review Z, Z3). A check for new photos or a catch-up of new imports is decided
+/// alone and never brings the moment; it never shows twice; the seven days are as they were.
+@Suite("First analysis in legs while the moment is owed (Y2, Y4, Z3)")
 struct FirstAnalysisLegsWhileOwedTests {
     typealias Leg = FirstAnalysisLegs.Leg
     typealias Run = FirstAnalysisMoment.Run
@@ -35,14 +36,15 @@ struct FirstAnalysisLegsWhileOwedTests {
         var legs = FirstAnalysisLegs()
 
         /// A run of `seconds` with the bar shown that ends `time` seconds after `start`, from the
-        /// resume position (`goesOn`) or anew. As it starts, the wait may be over and its legs
-        /// count when it may bring the moment; as it ends, the moment hears it on screen with what
-        /// "Analyse fertig" was decided on, which it returns.
+        /// resume position (`goesOn`) or not. As it starts, the wait may be over, its legs count
+        /// when it may bring the moment, and the moment says whether the legs before it go on
+        /// (`legsGoOn`); as it ends, the moment hears it on screen with what "Analyse fertig" was
+        /// decided on, which it returns.
         @discardableResult
         mutating func run(_ run: Run, _ seconds: Double, finished: Bool, goesOn: Bool = true,
                           endingAt time: TimeInterval) -> Leg {
             moment.lapse(at: FirstAnalysisLegsWhileOwedTests.start.addingTimeInterval(time - seconds))
-            legs.started(mayBringMoment: moment.mayBeBrought(by: run), goesOn: goesOn)
+            legs.started(mayBringMoment: moment.mayBeBrought(by: run), goesOn: moment.legsGoOn(with: run, fromPosition: goesOn))
             let counted = legs.ended(Leg(seconds: seconds, showedBar: true), finished: finished)
             let celebrates = FirstAnalysisLegsTests.celebrates(counted, finished: finished)
             moment.runEnded(run, finished: finished, celebrates: celebrates, onScreen: true,
@@ -88,6 +90,57 @@ struct FirstAnalysisLegsWhileOwedTests {
         #expect(last == Leg(seconds: 312, showedBar: true))
         #expect(Self.celebrates(last))
         #expect(phone.isDue(at: Self.day) && phone.moment.kept == .spent && !phone.moment.sharedOnly)
+    }
+
+    /// Z3 (verification review Z, `m2`'s case C against D): 30 shared photos analysed in 8 s; "Alle
+    /// Fotos" allowed; the rest runs an hour in one go while Albumist is open, and the user splits a
+    /// trip meanwhile. It ends complete but with a change it missed (`AnalysisRunEnd.followUp`):
+    /// not finished, and as a check (an analysis was completed before) it drops its resume
+    /// position, so the follow-up starts without it. The rest's legs go on all the same: the
+    /// follow-up of 6 s ends with "Analyse fertig" and the 100 %, as the same sequence does for a
+    /// first analysis and for the whole library after a quick trial year, which keep their position
+    /// there and go on from it (case D: 3,606 s).
+    @Test func theRestThatMissedAChangeGoesOnWithItsLegs() {
+        var first = Installation()
+        first.run(Self.whole, 3600, finished: false, goesOn: false, endingAt: 3600)
+        let fromPosition = first.run(Self.whole, 6, finished: true, endingAt: 3606)
+        #expect(fromPosition == Leg(seconds: 3606, showedBar: true) && Self.celebrates(fromPosition))
+        #expect(first.isDue(at: 3606) && first.moment.kept == .spent)
+        var trialYear = Installation()
+        trialYear.run(Self.whole, 10, finished: true, goesOn: false, endingAt: 10)
+        trialYear.run(Self.whole, 3600, finished: false, goesOn: false, endingAt: 3700)
+        let allYears = trialYear.run(Self.whole, 6, finished: true, endingAt: 3706)
+        #expect(allYears == fromPosition && trialYear.isDue(at: 3706) && trialYear.moment.kept == .spent)
+        var rest = Installation()
+        rest.run(Self.sharedPhotos, 8, finished: true, goesOn: false, endingAt: 8)
+        rest.run(Self.everyPhoto, 3600, finished: false, goesOn: false, endingAt: 3700)
+        #expect(rest.legs.kept == Leg(seconds: 3600, showedBar: true) && rest.moment.sharedOnly)
+        let followUp = rest.run(Self.everyPhoto, 6, finished: true, goesOn: false, endingAt: 3706)
+        #expect(followUp == fromPosition, "the follow-up of the rest is decided alone")
+        #expect(rest.isDue(at: 3706) && rest.moment.kept == .spent && !rest.moment.sharedOnly)
+        #expect(rest.legs.kept == .none && !rest.legs.counting)
+    }
+
+    /// The rest keeps its legs until a run with every photo finishes it, also when its follow-up
+    /// cannot start at once (a plan being written: the end leaves the work to a catch-up or to the
+    /// next run, here a day later after a relaunch). A run that starts the analysis anew drops them:
+    /// "Analyse neu aufbauen" or another part of the library, the library as a whole without a
+    /// resume position.
+    @Test func theRestKeepsItsLegsUntilARunFinishesIt() {
+        var later = Installation()
+        later.run(Self.sharedPhotos, 8, finished: true, goesOn: false, endingAt: 8)
+        later.run(Self.everyPhoto, 3600, finished: false, goesOn: false, endingAt: 3700)
+        // Relaunched: the legs as the store reads them.
+        later.legs = FirstAnalysisLegs(kept: later.legs.kept, owed: later.moment.kept == .owed)
+        let nextDay = later.run(Self.everyPhoto, 20, finished: true, goesOn: false, endingAt: Self.day)
+        #expect(nextDay == Leg(seconds: 3620, showedBar: true), "the rest's next run is decided alone")
+        #expect(later.isDue(at: Self.day) && later.moment.kept == .spent)
+        var rebuilt = Installation()
+        rebuilt.run(Self.sharedPhotos, 8, finished: true, goesOn: false, endingAt: 8)
+        rebuilt.run(Self.everyPhoto, 3600, finished: false, goesOn: false, endingAt: 3700)
+        let anew = rebuilt.run(Self.whole, 40, finished: false, goesOn: false, endingAt: 3800)
+        #expect(anew == Leg(seconds: 40, showedBar: true), "a new analysis goes on with the rest's legs")
+        #expect(rebuilt.legs.kept == anew && rebuilt.moment.kept == .owed)
     }
 
     /// Y4's second scenario: the rest is genuinely short, 12 s in one run: not celebrated, and the

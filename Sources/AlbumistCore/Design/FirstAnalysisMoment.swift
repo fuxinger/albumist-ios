@@ -23,10 +23,10 @@ import Foundation
 /// aufbauen" (no analysis completed since `AnalysisMarker.reset`), and, after a first analysis
 /// of only the photos shared with Albumist ("Ausgewählte Fotos", `sharedOnly`), the first run to
 /// end once every photo is allowed, which analyses the rest of the library: it uses up that
-/// chance, celebrated or not (its legs count together, `FirstAnalysisLegs`, so a short last leg
-/// does not lose it). Never a check for new photos or a catch-up of new imports, however long it
-/// runs. After those seven days it is spent (second review, K7; the lead's decisions on
-/// verification reviews V6, X9 and Y, Y2 and Y4).
+/// chance, celebrated or not (its legs count together, `FirstAnalysisLegs`, also across a change it
+/// missed, `legsGoOn`, so a short last leg does not lose it). Never a check for new photos or a
+/// catch-up of new imports, however long it runs. After those seven days it is spent (second
+/// review, K7; the lead's decisions on verification reviews V6, X9 and Y, Y2 and Y4; Z, Z3).
 ///
 /// Exactly once per installation: whether it is still owed is kept in `UserDefaults`
 /// (`FirstAnalysisMomentStore`), written as `spent` the moment it becomes due, so once it was due
@@ -142,6 +142,19 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// imports. A wait that is over (`lapse`) is looked at first, where the run starts.
     public func mayBeBrought(by run: Run) -> Bool {
         kept == .owed && takesInWholeLibrary(run)
+    }
+
+    /// Whether the legs before a run that starts now count on with it (`FirstAnalysisLegs.started`,
+    /// its `goesOn`; verification reviews X9 and Z, Z3): a run that may bring the moment
+    /// (`mayBeBrought`) and goes on from the resume position (`fromPosition`). Without it, a run of
+    /// the library as a whole starts the analysis anew (the first run, another part of the library,
+    /// "Analyse neu aufbauen", a new or restored database) and drops them. The rest of the library
+    /// after only the shared photos goes on with them all the same: its runs are checks (an
+    /// analysis was completed before), and a check that missed a change (a setting, a trip the user
+    /// split or merged) drops its position, so the run after it starts without one; the photos
+    /// analysed stay analysed, and the rest is one wait until a run with every photo finishes it.
+    public func legsGoOn(with run: Run, fromPosition: Bool) -> Bool {
+        mayBeBrought(by: run) && (fromPosition || !run.wholeLibrary)
     }
 
     /// The run takes in the library as a whole: it analyses it as a whole (`Run.wholeLibrary`),
@@ -303,7 +316,9 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
 ///   that is, so a leg that iOS ended with the app (no end of its run) still counts. A run that goes
 ///   on from the resume position goes on with the legs; one that starts the analysis anew (the
 ///   first run, another part of the library, "Analyse neu aufbauen", a new or restored database,
-///   which drop the resume position) drops them too.
+///   which drop the resume position) drops them too. The rest of the library after only the shared
+///   photos goes on with them also without the position, which a check that missed a change drops
+///   (`FirstAnalysisMoment.legsGoOn`, verification review Z, Z3).
 /// - Done once such a run finished, celebrated or not, or the analysis was completed where no run
 ///   of the app ended (`drop`: the overnight refinement).
 public struct FirstAnalysisLegs: Sendable, Equatable {
@@ -342,9 +357,9 @@ public struct FirstAnalysisLegs: Sendable, Equatable {
     }
 
     /// A run in the app starts. `mayBringMoment`: it may bring the first 100 % when it ends
-    /// (`FirstAnalysisMoment.mayBeBrought`), so its legs count together. `goesOn`: it goes on from
-    /// the resume position, so the legs before it count on; otherwise it starts the analysis anew
-    /// and they are dropped.
+    /// (`FirstAnalysisMoment.mayBeBrought`), so its legs count together. `goesOn`: the legs before
+    /// it count on (`FirstAnalysisMoment.legsGoOn`: from the resume position, or a run of the rest
+    /// after only the shared photos); otherwise it starts the analysis anew and they are dropped.
     public mutating func started(mayBringMoment: Bool, goesOn: Bool) {
         counting = mayBringMoment
         before = mayBringMoment && goesOn ? kept : .none

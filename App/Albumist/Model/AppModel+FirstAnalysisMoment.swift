@@ -90,10 +90,12 @@ final class FirstAnalysisMomentStore {
     /// A run in the app starts (`AppModel.firstAnalysisLegStarted`): what it analyses (`run`),
     /// a leg that counts with the legs before it when it may bring the moment
     /// (`FirstAnalysisMoment.mayBeBrought`; a wait that is over first spends it); `goesOn`: from
-    /// the resume position.
+    /// the resume position. The moment says whether the legs before it go on
+    /// (`FirstAnalysisMoment.legsGoOn`): the rest after only the shared photos goes on without the
+    /// position too, which a check that missed a change drops (verification review Z, Z3).
     func legStarted(_ run: FirstAnalysisMoment.Run, goesOn: Bool) {
         moment.lapse(at: Date())
-        legs.started(mayBringMoment: moment.mayBeBrought(by: run), goesOn: goesOn)
+        legs.started(mayBringMoment: moment.mayBeBrought(by: run), goesOn: moment.legsGoOn(with: run, fromPosition: goesOn))
         keep()
     }
 
@@ -191,7 +193,9 @@ extension AppModel {
     /// A run in the app starts, with its clock (`beginCard`, after the resume position was read):
     /// a leg that counts with the legs before it when the run may bring the moment
     /// (`FirstAnalysisLegs`, verification review X9) and goes on from the resume position
-    /// (`analysis.resumeFrom`, read from `AnalysisMarker.unfinished`).
+    /// (`analysis.resumeFrom`, read from `AnalysisMarker.unfinished`), or analyses the rest after
+    /// only the shared photos: the follow-up of such a check that missed a change starts without
+    /// the position (`startAnalysisNow` drops it for a check) and goes on with the legs (Z3).
     func firstAnalysisLegStarted() {
         FirstAnalysisMomentStore.shared.legStarted(firstAnalysisRun, goesOn: analysis.resumeFrom != nil)
     }

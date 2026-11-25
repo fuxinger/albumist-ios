@@ -12,11 +12,13 @@ extension PhotoGridSourceTests {
     /// class alone (`isEdgeSwipeBack`).
     @Test func theSwipesBackAndTheDrag() throws {
         let waits = Self.squeezed(try Self.body(["final class PhotoGridSelectRecognizer", "shouldBeRequiredToFailBy"], in: Self.recognizers))
-        #expect(waits == "{otherGestureRecognizer!==self&&(otherGestureRecognizerisUIPanGestureRecognizer"
-                         + "||otherGestureRecognizer===swipesBack().content)&&!isEdgeSwipeBack(otherGestureRecognizer)}", "\(waits)")
+        // A UI run's record of the swipes back (`markSwipeBack`) only after the answer.
+        #expect(waits.hasPrefix("{letwaits=otherGestureRecognizer!==self&&(otherGestureRecognizerisUIPanGestureRecognizer"
+                                + "||otherGestureRecognizer===swipesBack().content)&&!isEdgeSwipeBack(otherGestureRecognizer)"), "\(waits)")
+        #expect(waits.hasSuffix("returnwaits}"), "\(waits)")
         // The swipe back from the screen's edge is never taken: the pan waits for it (review L7).
         let edge = Self.squeezed(try Self.body(["final class PhotoGridSelectRecognizer", "shouldRequireFailureOf"], in: Self.recognizers))
-        #expect(edge == "{isEdgeSwipeBack(otherGestureRecognizer)}", "\(edge)")
+        #expect(edge.hasPrefix("{letedge=isEdgeSwipeBack(otherGestureRecognizer)") && edge.hasSuffix("returnedge}"), "\(edge)")
         let isEdge = Self.squeezed(try Self.body(["final class PhotoGridSelectRecognizer", "private func isEdgeSwipeBack("],
                                                  in: Self.recognizers))
         #expect(isEdge == "{letpops=swipesBack()ifother===pops.edge{returntrue}"

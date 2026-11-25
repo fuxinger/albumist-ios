@@ -81,7 +81,10 @@ final class PhotoGridSelectRecognizer: UIPanGestureRecognizer, UIGestureRecogniz
     /// Only a sideways start selects: a vertical or diagonal one is the scroll view's.
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         let moved = translation(in: view)
-        return PhotoGridDrag.startsSelection(dx: Double(moved.x), dy: Double(moved.y))
+        let starts = PhotoGridDrag.startsSelection(dx: Double(moved.x), dy: Double(moved.y))
+        // For a UI run's record: how the drag began (UI run 45695824722, a sideways drag went back).
+        if ProgressLineLog.isOn { ProgressLineLog.mark("grid drag begins \(starts) at \(Int(moved.x)),\(Int(moved.y))") }
+        return starts
     }
 
     /// The scroll view's pan and the swipe back over the content (iOS 26's
@@ -89,16 +92,33 @@ final class PhotoGridSelectRecognizer: UIPanGestureRecognizer, UIGestureRecogniz
     /// not select it is switched off, and nothing waits for it.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        otherGestureRecognizer !== self
+        let waits = otherGestureRecognizer !== self
             && (otherGestureRecognizer is UIPanGestureRecognizer || otherGestureRecognizer === swipesBack().content)
             && !isEdgeSwipeBack(otherGestureRecognizer)
+        if ProgressLineLog.isOn { markSwipeBack(otherGestureRecognizer, "waits for the drag \(waits)") }
+        return waits
     }
 
     /// The swipe back from the screen's edge is never taken: this one waits for it to fail, so a
     /// finger from the left edge goes back, also over the photos while selecting (review L7).
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        isEdgeSwipeBack(otherGestureRecognizer)
+        let edge = isEdgeSwipeBack(otherGestureRecognizer)
+        if ProgressLineLog.isOn { markSwipeBack(otherGestureRecognizer, "the drag waits for it \(edge)") }
+        return edge
+    }
+
+    /// For a UI run's record: how a swipe back and the drag wait for each other, only for the
+    /// swipes back (the navigation's two, or another edge swipe).
+    private func markSwipeBack(_ other: UIGestureRecognizer, _ what: String) {
+        let pops = swipesBack()
+        let name: String? = other === pops.edge ? "edge" : other === pops.content ? "content"
+            : other is UIScreenEdgePanGestureRecognizer ? "other edge" : nil
+        guard let name else { return }
+        if ProgressLineLog.isOn {
+            ProgressLineLog.mark(
+                "grid drag \(name) swipe back (\(type(of: other))): \(what), found edge \(pops.edge != nil) content \(pops.content != nil)")
+        }
     }
 
     /// Whether `other` is the swipe back from the screen's edge: the navigation's own

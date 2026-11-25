@@ -70,12 +70,12 @@ extension PhotoGridUITests {
 
     /// The app's marks of the grid's pinches since `since`: "grid pinch: fingers 2, …" when the
     /// fingers lifted, "grid pinch step 3 to 5 at 0.78" at a step. Nil without a record.
-    func pinchMarks(since: Date) -> [String]? {
+    func pinchMarks(since: Date, prefix: String = "grid pinch") -> [String]? {
         guard let text = try? String(contentsOfFile: Self.pinchRecord, encoding: .utf8) else { return nil }
         return text.split(separator: "\n").compactMap { row -> String? in
             let fields = row.split(separator: " ", maxSplits: 2).map(String.init)
             guard fields.count == 3, fields[0] == "#", let time = Double(fields[1]), time >= since.timeIntervalSince1970,
-                  fields[2].hasPrefix("grid pinch") else { return nil }
+                  fields[2].hasPrefix(prefix) else { return nil }
             return fields[2]
         }
     }

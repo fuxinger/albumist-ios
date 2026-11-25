@@ -2607,6 +2607,10 @@ final class AlbumistFlowUITests: XCTestCase {
         XCTAssertTrue(pageBarCameBack(after: remove), "After taking a photo out, the page's bar (\"Nicht jetzt\" and the filled button) did not come back")
         XCTAssertFalse(tabBarHittable(), "The tab bar shows on the suggestion's page after taking a photo out (it is hidden there for good)")
         shot("08f-photo-taken-out")
+        // In reach: a tap on "Nicht jetzt" sets the suggestion aside and leaves its page.
+        app.buttons["proposal.notNow"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let left = UITestWait.until("the suggestion's page left by \"Nicht jetzt\"", timeout: 5) { !UITestScreens.SuggestionPage.isShown(app) }
+        XCTAssertTrue(left, "After taking a photo out, a tap on \"Nicht jetzt\" did not leave the suggestion's page")
     }
 
     /// `testRemovePhotoFromSuggestion`: the selection ended and the page's own bar is back and in
@@ -2617,7 +2621,10 @@ final class AlbumistFlowUITests: XCTestCase {
         let notNow = app.buttons["proposal.notNow"]
         let create = app.buttons["proposal.create"]
         let back = UITestWait.until("the page's bar back after taking the photo out", timeout: 5) {
-            !remove.exists && notNow.exists && notNow.isHittable && create.exists
+            // Shown on the screen; XCTest's `isHittable` says no for it before picking too (a
+            // toolbar as large as the screen in front, UI run 45695824722): the test taps it.
+            !remove.exists && notNow.exists && notNow.isEnabled && create.exists
+                && app.windows.firstMatch.frame.contains(notNow.frame)
         }
         if !back {
             print("UI_FACT the page's bar after taking the photo out: remove \(remove.exists) (hittable \(remove.exists && remove.isHittable)), "

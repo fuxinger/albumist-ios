@@ -126,3 +126,35 @@ public enum PhotoGridZoom {
         return min(max(oldSide / newSide, 0.85), 1.7)
     }
 }
+
+/// When a zoom step's photo is asked of the scroll view (`PhotoGridScroller.show`): once the grid
+/// has laid out its new size, which the scroll view's content height shows, and at the latest when
+/// the step lands. Asked at once, in the same update that changed the size and turned the grid's
+/// scroll targets on, the page went to its top instead (UI run 45695824722: offset 799 to -168,
+/// the photo pinched on from y 454 to 1072, off the screen).
+public struct PhotoGridZoomLanding<Photo: Equatable> {
+    private var photo: Photo?
+    /// The content height when the step asked; nil before the scroll view reported itself.
+    private var heightAsked: Double?
+
+    public init() {}
+
+    /// A step asks for `photo`, the content `contentHeight` high then; the last step counts.
+    public mutating func asked(_ photo: Photo, contentHeight: Double?) {
+        self.photo = photo
+        heightAsked = contentHeight
+    }
+
+    /// The scroll view reported its content `contentHeight` high: the photo to ask for now, once.
+    public mutating func reported(contentHeight: Double) -> Photo? {
+        guard let photo, heightAsked != contentHeight else { return nil }
+        self.photo = nil
+        return photo
+    }
+
+    /// The step lands: the photo not asked for yet, if any.
+    public mutating func landed() -> Photo? {
+        defer { photo = nil }
+        return photo
+    }
+}

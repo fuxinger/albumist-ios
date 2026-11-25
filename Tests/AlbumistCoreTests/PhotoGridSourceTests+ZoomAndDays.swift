@@ -34,7 +34,10 @@ extension PhotoGridSourceTests {
         #expect(step.contains("ifletpoint,!reduceMotion{settle=PhotoGridSettle(count:settle.count+1,"
                               + "from:PhotoGridZoom.settleScale(oldSide:oldSide,newSide:newSide),point:point)}"), "\(step)")
         let shown = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func show("], in: Self.scrolling))
-        #expect(shown.contains("anchor=pointposition.scrollTo(id:photo,anchor:point)"), "the modifier's anchor and the step's: \(shown)")
+        #expect(shown.contains("anchor=pointlanding.asked(photo,contentHeight:geometry.map{Double($0.contentSize.height)})"),
+                "the modifier's anchor and the step's: \(shown)")
+        let asked = Self.squeezed(try Self.body(["final class PhotoGridScroller", "private func ask("], in: Self.scrolling))
+        #expect(asked.hasSuffix("position.scrollTo(id:photo,anchor:anchor)}"), "\(asked)")
         // Remembered in the app's defaults, one size for both grids; UI runs start at the standard.
         let grid = try Self.code(Self.grid)
         #expect(grid.contains("@AppStorage(PhotoGridMemory.key, store: PhotoGridMemory.defaults) private var storedColumns = PhotoGridZoom.standard"))
@@ -215,12 +218,17 @@ extension PhotoGridSourceTests {
     /// nothing behind, and the page keeps its top when its size changes, as before the zoom.
     @Test func afterAZoomStepThePageScrollsPlainlyAgain() throws {
         let shown = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func show("], in: Self.scrolling))
-        #expect(shown.contains("findsPhotos=trueanchor=pointposition.scrollTo(id:photo,anchor:point)"), "\(shown)")
-        #expect(shown.contains("try?awaitTask.sleep(for:PhotoGridScroller.landing)guardletself,self.steps==stepelse{return}self.land()"),
-                "only the last step lands: \(shown)")
+        #expect(shown.contains("findsPhotos=trueanchor=pointlanding.asked(photo,"), "\(shown)")
+        let waits = Self.squeezed(try Self.body(["final class PhotoGridScroller", "private func waitToLand("], in: Self.scrolling))
+        #expect(waits.contains("try?awaitTask.sleep(for:PhotoGridScroller.landing)guardletself,self.steps==stepelse{return}self.land()"),
+                "only the last step lands: \(waits)")
+        // The photo is asked once the grid laid out its new size (UI run 45695824722), at the
+        // latest at the landing, which then waits for it; a UI run's record comes before the rest.
+        let reported = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func reported(_ geometry"], in: Self.scrolling))
+        #expect(reported.contains("ifletphoto=landing.reported(contentHeight:Double(geometry.contentSize.height)){ask(photo)}"), "\(reported)")
         let land = Self.squeezed(try Self.body(["final class PhotoGridScroller", "private func land("], in: Self.scrolling))
-        // Only a UI run's record (`ProgressLineLog`, off in the app) comes before it.
-        #expect(land == "{ifProgressLineLog.isOn{ProgressLineLog.mark(\"gridpinchlanded\"+placeForRecord(unitY:nil))}"
+        #expect(land == "{ifletphoto=landing.landed(){ask(photo)waitToLand(steps)return}"
+                + "ifProgressLineLog.isOn{ProgressLineLog.mark(\"gridpinchlanded\"+placeForRecord(unitY:nil))}"
                 + "anchor=nilfindsPhotos=falseposition=ScrollPosition(idType:AssetID.self)}", "\(land)")
         let scrolling = try Self.code(Self.scrolling)
         #expect(scrolling.contains("static let landing: Duration = .milliseconds(350)"), "after the grid settled (0.3 s)")

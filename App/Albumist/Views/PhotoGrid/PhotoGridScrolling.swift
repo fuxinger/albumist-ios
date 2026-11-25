@@ -59,6 +59,8 @@ final class PhotoGridScroller {
     private(set) var findsPhotos = false
     /// The steps asked for, so only the last one's landing gives back plain scrolling.
     @ObservationIgnored private var steps = 0
+    /// The photo of the last zoom step, until it is asked of the scroll view.
+    @ObservationIgnored private var landing = PhotoGridZoomLanding<AssetID>()
     /// How long a zoom step takes to land: the grid settles in 0.3 s (`PhotoGridSettle`).
     static let landing: Duration = .milliseconds(350)
     /// The scroll view as it reported itself last, at every frame while it moves: not observed,
@@ -112,6 +114,7 @@ final class PhotoGridScroller {
         self.geometry = geometry
         let offset = Double(geometry.contentOffset.y)
         target.reported(offset)
+        if let photo = landing.reported(contentHeight: Double(geometry.contentSize.height)) { ask(photo) }
         if scrollsByItself { Self.calibration.reported(offset) }
     }
 
@@ -142,7 +145,8 @@ final class PhotoGridScroller {
 
     /// Scrolls `photo` to where the point `unitY` of it (0 its top, 1 its bottom) and of the
     /// visible area meet: the modifier's anchor and the step's, both, while the step lands (the
-    /// scroll view keeps the photo there as the grid lays out its new size).
+    /// scroll view keeps the photo there as the grid lays out its new size). The photo is asked
+    /// of the scroll view once the grid laid out its new size (`PhotoGridZoomLanding`, `ask`).
     func show(_ photo: AssetID, unitY: Double) {
         let point = UnitPoint(x: 0.5, y: unitY)
         // For a UI run's record (`PhotoGridPinchRecord`): where the scroll view was when the step
@@ -150,9 +154,19 @@ final class PhotoGridScroller {
         if ProgressLineLog.isOn { ProgressLineLog.mark("grid pinch show " + placeForRecord(unitY: unitY)) }
         findsPhotos = true
         anchor = point
-        position.scrollTo(id: photo, anchor: point)
+        landing.asked(photo, contentHeight: geometry.map { Double($0.contentSize.height) })
         steps += 1
-        let step = steps
+        waitToLand(steps)
+    }
+
+    /// The scroll view goes to `photo`, at the step's anchor.
+    private func ask(_ photo: AssetID) {
+        if ProgressLineLog.isOn { ProgressLineLog.mark("grid pinch asked " + placeForRecord(unitY: nil)) }
+        position.scrollTo(id: photo, anchor: anchor)
+    }
+
+    /// The step `step` lands after `landing`, unless another step came after it.
+    private func waitToLand(_ step: Int) {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: PhotoGridScroller.landing)
             guard let self, self.steps == step else { return }
@@ -162,8 +176,14 @@ final class PhotoGridScroller {
 
     /// The zoom step landed: the scroll view scrolls plainly again, as before the zoom. No anchor
     /// is left, its position names no photo (one that goes leaves nothing behind), and it finds
-    /// and follows none while the user scrolls (review L6).
+    /// and follows none while the user scrolls (review L6). A photo not asked for yet (the grid's
+    /// size never showed in a report) is asked now, and the step lands after it.
     private func land() {
+        if let photo = landing.landed() {
+            ask(photo)
+            waitToLand(steps)
+            return
+        }
         if ProgressLineLog.isOn { ProgressLineLog.mark("grid pinch landed " + placeForRecord(unitY: nil)) }
         anchor = nil
         findsPhotos = false

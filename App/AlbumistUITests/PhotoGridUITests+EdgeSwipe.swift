@@ -119,7 +119,12 @@ extension PhotoGridUITests {
         let ticked = UITestWait.until("\(test): \(row.count) photos ticked by the sideways drag", timeout: 5) {
             remove.exists && remove.label.hasPrefix("\(row.count) ")
         }
-        if !ticked { print("UI_FACT \(test): the bottom bar says '\(remove.exists ? remove.label : "nothing")'") }
+        if !ticked {
+            print("UI_FACT \(test): the bottom bar says '\(remove.exists ? remove.label : "nothing")'")
+            for mark in pinchMarks(since: Date().addingTimeInterval(-20), prefix: "grid drag") ?? [] {
+                print("UI_FACT \(test): the app saw '\(mark)'")
+            }
+        }
         XCTAssertTrue(UITestScreens.SuggestionPage.isShown(app), "\(test): a sideways drag over the photos left the suggestion's page")
         shot("pg-05-suggestion-drag")
         return start

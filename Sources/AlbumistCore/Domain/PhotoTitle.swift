@@ -115,6 +115,19 @@ public struct PhotoTitle: Equatable, Sendable {
         located ? currentZone : homeZone ?? currentZone
     }
 
+    /// The photo's info, "Aufgenommen": the whole date and the time on the photo's clock, as the
+    /// title tells them ("14. Mai 2024 um 09:18", "May 14, 2024 at 9:18 AM"), never "Heute" or a
+    /// weekday. `zone`: the clock where it was taken (`AssetFacts.timeZone`); nil: the iPhone's
+    /// (`currentZone`), as in the title. Before, the info told the iPhone's clock and could say
+    /// another time than the title above it (design run of 25.11.).
+    public static func takenAt(_ date: Date, zone: TimeZone?, currentZone: TimeZone, words: ProposalWords = .german,
+                               clock: Clock? = nil) -> String {
+        let wallClock = LocalTime.wallClock(date, in: zone ?? currentZone)
+        let day = CalendarDay(wallClock: wallClock)
+        let time = Self.time(wallClock, clock: clock ?? (words.isGerman ? .twentyFourHour : .twelveHour))
+        return words.span(from: day, to: day, withYear: true) + words.t(" um ", " at ") + time
+    }
+
     /// Title and line as one sentence for VoiceOver ("München, 12. Oktober 2024, 14:32"); a
     /// Live Photo says so at the end.
     public func spoken(live: Bool = false) -> String {

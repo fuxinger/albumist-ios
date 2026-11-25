@@ -434,8 +434,11 @@ struct AssetDetailView: View {
             List {
                 // The photo itself is behind this sheet, in the viewer (design review W12).
                 Section {
+                    // On the photo's clock, as the title above says it (design run of 25.11.).
                     if let date = facts.asset.creationDate {
-                        LabeledContent("Aufgenommen", value: date.formatted(date: .long, time: .shortened))
+                        let taken = PhotoTitle.takenAt(date, zone: facts.timeZone, currentZone: .current, words: model.proposalWords,
+                                                       clock: AppModel.deviceClock())
+                        LabeledContent("Aufgenommen", value: taken)
                     }
                     if let place = placeText {
                         LabeledContent("Ort", value: place)

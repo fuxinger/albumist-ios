@@ -125,9 +125,9 @@ final class PhotoGridGestureState {
     /// A photo that reported a place in another order (the days changed, and it went or moved
     /// before it could report) does not count.
     private func cells(in ids: [AssetID], _ seen: Seen?) -> [(position: Int, frame: GridRect)] {
-        photos.onScreen(seen?.visible, frame: { GridRect($0.frame) }) { id, place in
+        photos.onScreen(seen?.visible, frame: { GridRect($0.frame) }, where: { id, place in
             place.position >= 0 && place.position < ids.count && ids[place.position] == id
-        }.map { (position: $0.value.position, frame: GridRect($0.value.frame)) }
+        }).map { (position: $0.value.position, frame: GridRect($0.value.frame)) }
     }
 
     // MARK: The photos the grid shows

@@ -57,7 +57,7 @@ struct PhotoGrid: View {
     @State private var settle = PhotoGridSettle()
 
     var body: some View {
-        let _ = MainThreadWatch.shared.count("photo grid body")
+        let _: Void = MainThreadWatch.shared.count("photo grid body")
         let columns = PhotoGridZoom.columns(stored: storedColumns)
         let side = CGFloat(PhotoGridZoom.side(width: Double(width), columns: columns))
         // A copy for the animation, which runs apart from the view.
@@ -66,8 +66,8 @@ struct PhotoGrid: View {
         // What it shows, for a drag that runs while more photos load or the days change (review
         // L3), and how it lays its photos out and pins its headers, for what is on screen (the
         // frames of another layout are stale, review W1): handed over, nothing made here.
-        let _ = gestures.show(PhotoGridShown(sections, below: limit), layout: PhotoGridLayout(columns: columns, width: Double(width)),
-                              pinsHeaders: pinned)
+        let _: Void = gestures.show(PhotoGridShown(sections, below: limit),
+                                    layout: PhotoGridLayout(columns: columns, width: Double(width)), pinsHeaders: pinned)
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: CGFloat(PhotoGridZoom.spacing)), count: columns),
                   spacing: CGFloat(PhotoGridZoom.spacing),
                   pinnedViews: pinned ? [.sectionHeaders] : []) {
@@ -92,9 +92,9 @@ struct PhotoGrid: View {
         // Fingers between two photos are on the grid too.
         .contentShape(Rectangle())
         .gesture(PhotoGridSelectDrag(isEnabled: selecting && !disabled, space: PhotoGridPlace.space,
-                                     touchedDown: { gestures.touchedDown() }) { touch in dragged(touch) })
+                                     touchedDown: { gestures.touchedDown() }, onTouch: { touch in dragged(touch) }))
         .gesture(PhotoGridPinch(isEnabled: !disabled, space: PhotoGridPlace.space,
-                                touchedDown: { gestures.touchedDown() }) { touch in pinched(touch) })
+                                touchedDown: { gestures.touchedDown() }, onTouch: { touch in pinched(touch) }))
         .coordinateSpace(.named(PhotoGridPlace.space))
         // After a pinch's step the grid settles from the old size around the fingers, so the
         // step looks like a zoom; not under Reduce Motion (`step(to:)`).

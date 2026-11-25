@@ -44,7 +44,7 @@ struct StartSections: View {
 
     var body: some View {
         // How often the page is drawn, for the main thread's stall lines in UI runs.
-        let _ = MainThreadWatch.shared.count("start page body")
+        let _: Void = MainThreadWatch.shared.count("start page body")
         let page = makePage(for: visit)
         let byID = Dictionary(model.proposals.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {

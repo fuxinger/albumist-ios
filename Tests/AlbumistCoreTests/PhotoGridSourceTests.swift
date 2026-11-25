@@ -180,7 +180,7 @@ struct PhotoGridSourceTests {
             #expect(!code.contains(".onAppear") && !code.contains(".onDisappear") && !code.contains("forget"), "\(code)")
         }
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
-        #expect(view.contains("let_=gestures.show(PhotoGridShown(sections,below:limit),"
+        #expect(view.contains("let_:Void=gestures.show(PhotoGridShown(sections,below:limit),"
                               + "layout:PhotoGridLayout(columns:columns,width:Double(width)),pinsHeaders:pinned)"), "\(view)")
         let state = try Self.code(Self.state)
         #expect(state.contains("private var photos = PhotoGridOnScreen<AssetID, PhotoGridPlace>()"))
@@ -191,7 +191,7 @@ struct PhotoGridSourceTests {
         #expect(show.contains("photos.laidOut(layout)headers.laidOut(layout)"), "\(show)")
         // What lies in the part of the grid the scroll view shows, still at its place in the order.
         let cells = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func cells("], in: Self.state))
-        #expect(cells.contains("photos.onScreen(seen?.visible,frame:{GridRect($0.frame)})"), "\(cells)")
+        #expect(cells.contains("photos.onScreen(seen?.visible,frame:{GridRect($0.frame)},where:{id,placein"), "\(cells)")
         #expect(cells.contains("place.position>=0&&place.position<ids.count&&ids[place.position]==id"), "\(cells)")
         let seen = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func seen("], in: Self.state))
         #expect(seen.contains("PhotoGridHitTest.visiblePart(gridY:Double(inGrid.y),scrollViewY:Double(inScrollView.y),"
@@ -247,7 +247,7 @@ struct PhotoGridSourceTests {
     /// tick on, and when the range cannot be kept the drag ends, its photos ticked as they are.
     @Test func aDragFollowsThePhotosTheGridShowsNow() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
-        #expect(view.contains("let_=gestures.show(PhotoGridShown(sections,below:limit),"), "\(view)")
+        #expect(view.contains("let_:Void=gestures.show(PhotoGridShown(sections,below:limit),"), "\(view)")
         let dragged = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func dragged("], in: Self.grid))
         #expect(dragged.contains("gestures.beginDrag(touch,selection:$selection,scroller:scroller)"), "\(dragged)")
         let extend = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func extend("], in: Self.state))
@@ -266,7 +266,7 @@ struct PhotoGridSourceTests {
     @Test func dragToSelectIsUIKitsPanBesideTheScrollView() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
         #expect(view.contains(".gesture(PhotoGridSelectDrag(isEnabled:selecting&&!disabled,space:PhotoGridPlace.space,"
-                              + "touchedDown:{gestures.touchedDown()}){touchindragged(touch)})"),
+                              + "touchedDown:{gestures.touchedDown()},onTouch:{touchindragged(touch)}))"),
                 "\(view)")
         let recognizers = try Self.code(Self.recognizers)
         #expect(recognizers.contains("final class PhotoGridSelectRecognizer: UIPanGestureRecognizer, UIGestureRecognizerDelegate {"))
@@ -348,8 +348,8 @@ struct PhotoGridSourceTests {
     /// Reduce Motion; the size is remembered, but not from one UI test to the next.
     @Test func pinchToZoomKeepsThePlace() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
-        #expect(view.contains(".gesture(PhotoGridPinch(isEnabled:!disabled,space:PhotoGridPlace.space,touchedDown:{gestures.touchedDown()})"
-                              + "{touchinpinched(touch)})"), "\(view)")
+        #expect(view.contains(".gesture(PhotoGridPinch(isEnabled:!disabled,space:PhotoGridPlace.space,touchedDown:{gestures.touchedDown()},"
+                              + "onTouch:{touchinpinched(touch)}))"), "\(view)")
         let recognizers = try Self.code(Self.recognizers)
         #expect(recognizers.contains("final class PhotoGridPinchRecognizer: UIPinchGestureRecognizer, UIGestureRecognizerDelegate {"))
         let stop = Self.squeezed(try Self.body(["final class PhotoGridPinchRecognizer", "func stopScrolling("], in: Self.recognizers))

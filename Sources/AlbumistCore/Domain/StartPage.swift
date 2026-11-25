@@ -231,16 +231,25 @@ public struct StartPage: Equatable, Sendable {
         if input.showsMosaic { sections.append(.mosaic) }
 
         // The one big part. Trips come newest first (`inDisplayOrder`).
+        let trips = shown.filter { $0.kind.area == .trips }
+        var big: [AlbumistID] = []
         let starter = starterSet(input, made: made)
-        let big = bigPart(input, trips: shown.filter { $0.kind.area == .trips }, starter: starter)
-        if let section = big.section { sections.append(section) }
+        if !input.analysedOnce {
+            big = pick(trips.map(\.id), keeping: visit.highlighted)
+            if !big.isEmpty { sections.append(.earlyTrips(big)) }
+        } else if !starter.isEmpty {
+            sections.append(.starterSet(starter))
+        } else {
+            big = pick(freshTrips(trips, since: visit.lastMade), keeping: visit.highlighted)
+            if !big.isEmpty { sections.append(.newTrips(big)) }
+        }
 
         // The rows: trips, then "Deine Welt", then places and the other areas.
-        let rowSections = rows(input, shown: shown, big: Set(big.cards), made: made)
+        let rowSections = rows(input, shown: shown, big: Set(big), made: made)
         let tripsRow = areas.contains(.trips) ? rowSections.trips : nil
 
         // Nothing open: why, in one calm card.
-        let nothingOpen = big.cards.isEmpty && tripsRow == nil && rowSections.others.isEmpty && starter.isEmpty
+        let nothingOpen = big.isEmpty && tripsRow == nil && rowSections.others.isEmpty && starter.isEmpty
         if nothingOpen, let why = nothingOpenCard(input) { sections.append(why) }
         if let tripsRow { sections.append(tripsRow) }
         sections.append(.atlas)
@@ -253,24 +262,14 @@ public struct StartPage: Equatable, Sendable {
                          seenDone: visit.awaitingDone.subtracting(input.open))
     }
 
-    /// The one big part and its cards: the first trips before the first analysis ended, else
-    /// "Dein Startpaket" (its cards are no big cards), else the trips that ended since the last
-    /// album made here. No section when it has no cards.
-    private static func bigPart(_ input: Input, trips: [AlbumProposal],
-                                starter: [AlbumistID]) -> (cards: [AlbumistID], section: Section?) {
-        let visit = input.visit
-        if !input.analysedOnce {
-            let big = pick(trips.map(\.id), keeping: visit.highlighted)
-            return (big, big.isEmpty ? nil : .earlyTrips(big))
-        }
-        if !starter.isEmpty { return ([], .starterSet(starter)) }
-        let fresh = trips.filter { trip in
-            guard let since = visit.lastMade else { return true }
+    /// The big part's trips after the first analysis: those that ended since the last album made
+    /// here (all of them before one was made).
+    private static func freshTrips(_ trips: [AlbumProposal], since lastMade: Date?) -> [AlbumistID] {
+        trips.filter { trip in
+            guard let since = lastMade else { return true }
             guard let end = trip.dateRange?.end else { return false }
             return end > since
-        }
-        let big = pick(fresh.map(\.id), keeping: visit.highlighted)
-        return (big, big.isEmpty ? nil : .newTrips(big))
+        }.map(\.id)
     }
 
     /// The rows of the page: the trips' row, and the others in order, places first; each with at

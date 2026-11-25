@@ -89,12 +89,13 @@ struct MainTabs: View {
     /// `.tabViewKeepingSearch`: Apple's search tab, the field on the tab view, which iOS may draw
     /// as a round button of its own at the bar's end; choosing it shows the page with its
     /// starting points and the field, the keyboard comes when the field is tapped, and the query,
-    /// the hits and the scroll position stay while another tab is looked at.
-    /// `.tabViewOpeningKeyboard`: the same place, and choosing the tab brings the keyboard every
-    /// time, also over an earlier query; closing the field goes back to the tab before and
-    /// empties it. `.pageFocusingField`: the field on the search page's own stack, as until
-    /// wave 3, focused as the page opens with nothing typed. Each is this one line, until the
-    /// screenshots on iOS 27.2 and the owner decide.
+    /// the hits and the scroll position stay while another tab is looked at, also when a route
+    /// (a notification, Siri) leaves the tab. `.tabViewOpeningKeyboard`: the same place, and
+    /// choosing the tab brings the keyboard every time, also over an earlier query; closing the
+    /// field goes back to the tab before and empties it. `.pageFocusingField`: the field on the
+    /// search page's own stack, as until wave 3, focused as the page opens with nothing typed.
+    /// With these two a route ends the search. Each is this one line, until the screenshots on
+    /// iOS 27.2 and the owner decide.
     static let searchField: SearchInput.Placement = .tabViewKeepingSearch
 
     /// Two cards for "Vorschläge", as in the draft: never sparkles, which stand for AI at Apple.
@@ -153,9 +154,10 @@ struct MainTabs: View {
             // Chosen here, not on the bar, which may be shrunk: the small moment's cover does not
             // count on it being open (`QuickCreateMoment.TabWatch`).
             if tab != .suggestions { QuickCreateMomentSources.shared.tabChosenInCode() }
-            // Leaving the search in code ends an open search, so neither its field nor the
-            // keyboard stays up over "Vorschläge".
-            if tab == .search { search.isPresented = false }
+            // Leaving the search in code (`SearchInput.leftInCode`): by default only the keyboard
+            // goes and the search stays; with the other two placements the search ends, so
+            // neither its field nor the keyboard stays up over "Vorschläge".
+            if tab == .search { search.leftInCode() }
             tab = .suggestions
             // A suggestion that exists opens like one from a list (`ProposalScreen`: it stays
             // when the analysis drops it while its preview is open). The same target twice in a

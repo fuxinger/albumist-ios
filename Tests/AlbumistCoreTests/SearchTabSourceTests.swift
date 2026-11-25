@@ -17,7 +17,8 @@ import AlbumistTestSupport
 /// - `.pageFocusingField`: the field on the page's own stack as until wave 3, focused as the page
 ///   opens with nothing typed.
 /// What is typed lives with the tabs (`SearchInput`), and the search page reads it. A route that
-/// changes the tab in code ends an open search. The screenshots on iOS 27.2 and the owner decide.
+/// changes the tab in code takes only the keyboard away by default and keeps the search; with the
+/// other two placements it ends the search. The screenshots on iOS 27.2 and the owner decide.
 /// The App does not build on Linux, so these tests read its code (`AppSource`); how the bar looks
 /// is a screenshot check.
 @Suite("Search tab: the field on the tab view (DS-12a)")
@@ -109,11 +110,13 @@ struct SearchTabSourceTests {
     @Test func theFieldSitsAndBehavesAsTheSwitchSays() throws {
         let modifier = Self.squeezed(try Self.body(["private struct SearchFieldModifier", "func body(content: Content)"], in: Self.search))
         #expect(modifier == "{ifhost!=MainTabs.searchField.host{content}"
-                + "elseifMainTabs.searchField==.tabViewKeepingSearch{\(Self.field)}"
+                + "elseifMainTabs.searchField==.tabViewKeepingSearch{\(Self.field).searchFocused($focused)"
+                + ".onChange(of:focused){_,nowininput.isFocused=now}.onChange(of:input.isFocused){_,nowinif!now{focused=false}}}"
                 + "elseifMainTabs.searchField==.tabViewOpeningKeyboard{\(Self.field).tabViewSearchActivation(.searchTabSelection)}"
                 + "else{\(Self.field).onAppear{ifinput.text.isEmpty{input.isPresented=true}}}}", "\(modifier)")
         let type = Self.squeezed(try Self.body(["private struct SearchFieldModifier"], in: Self.search))
         #expect(type.contains("@Bindablevarinput:SearchInput"), "\(type)")
+        #expect(type.contains("@FocusStateprivatevarfocused:Bool"), "\(type)")
         let extensionBody = Self.squeezed(try Self.body(["func searchField(_ input: SearchInput, on host: SearchInput.Host) -> some View"], in: Self.search))
         #expect(extensionBody == "{modifier(SearchFieldModifier(input:input,host:host))}", "\(extensionBody)")
         // The prompt as before, in its two variants.
@@ -166,17 +169,34 @@ struct SearchTabSourceTests {
         #expect(completions.contains("query=suggestion.completion+\"\""), "\(completions)")
     }
 
-    /// Siri, Shortcuts, Spotlight and a notification change the tab in code (`model.route`): a
-    /// route that leaves the search tab ends an open search first, so neither the field nor the
-    /// keyboard stays up over "Vorschläge" (review S of H14, unsure 2).
-    @Test func aRouteThatLeavesTheSearchEndsIt() throws {
+    /// Siri, Shortcuts, Spotlight and a notification change the tab in code (`model.route`). A
+    /// route that leaves the search tab hands the search to `SearchInput.leftInCode()` before the
+    /// tab changes (review S of H14, unsure 2), which does what the placement promises (review T2
+    /// of round 2): by default (`.tabViewKeepingSearch`) only the keyboard goes, through the
+    /// field's focus bound with `.searchFocused`, and the query, the hits and the scroll position
+    /// stay, as after a look at another tab; ending the search there emptied the field (Apple:
+    /// dismissing a search clears its text). With the other two placements the search ends, so
+    /// neither its field nor the keyboard stays up over "Vorschläge".
+    @Test func aRouteLeavesTheSearchAsItsPlacementSays() throws {
         let body = Self.squeezed(try Self.body(["struct MainTabs", "var body: some View"], in: Self.root))
         let route = try #require(body.range(of: ".onChange(of:model.route,initial:true){_,targetin"), "\(body)")
         let rest = body[route.upperBound...]
-        let ends = try #require(rest.range(of: "iftab==.search{search.isPresented=false}"), "a route leaves an open search as it is: \(rest)")
+        let leaves = try #require(rest.range(of: "iftab==.search{search.leftInCode()}"), "a route leaves an open search as it is: \(rest)")
         let chosen = try #require(rest.range(of: "tab=.suggestions"), "\(rest)")
-        #expect(ends.upperBound <= chosen.lowerBound, "the search is ended after the tab changed")
-        #expect(body.components(separatedBy: "search.isPresented=false").count - 1 == 1, "\(body)")
+        #expect(leaves.upperBound <= chosen.lowerBound, "the search is left after the tab changed")
+        #expect(!body.contains("search.isPresented"), "the tabs end the search themselves, whatever the placement: \(body)")
+        let input = try Self.body(["final class SearchInput"], in: Self.search)
+        #expect(input.contains("    var isFocused = false\n"), "\(input)")
+        let left = Self.squeezed(try Self.body(["final class SearchInput", "func leftInCode()"], in: Self.search))
+        #expect(left == "{ifMainTabs.searchField==.tabViewKeepingSearch{isFocused=false}else{isPresented=false}}", "\(left)")
+        // Its comment says what becomes of the query in each placement.
+        let comment = try Self.docComment(above: "func leftInCode()", in: Self.search)
+        for word in ["only the keyboard", "the query", "stay", "ends", "empties"] {
+            #expect(comment.contains(word), "the comment does not say \(word): \(comment)")
+        }
+        // Only the field's modifier binds its focus.
+        let search = try Self.code(Self.search)
+        #expect(search.components(separatedBy: ".searchFocused(").count - 1 == 1, "\(search)")
     }
 
     /// One field for the search: `.searchable(` bound to `SearchInput` only in the modifier (once

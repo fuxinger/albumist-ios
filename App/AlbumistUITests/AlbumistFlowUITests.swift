@@ -2225,9 +2225,22 @@ final class AlbumistFlowUITests: XCTestCase {
         // tapped, and the rest of the test ran under the settings sheet: every later step missed.
         // Now the dialog has 20 s, and the settings must close, both said by name when they do not.
         UITestWait.disappears(confirmRebuild, "rebuild dialog closed", timeout: 20)
+        // The rebuild is a run the user started, so the app asks for notifications now; that
+        // system question took the "Fertig" tap in full UI run 45567316233 (flow-other): its
+        // screenshot 60 shows the settings open under "“Albumist” Would Like to Send You
+        // Notifications", still there 58 s after the rebuild (`system alert in front before the Home press`). As for the trial year (1c1f39d): answer it first,
+        // and tap once more, with a screenshot, when the settings did not close within 10 s.
+        UITestWait.clearSystemAlert("after the rebuild, before closing the settings")
         let settingsDone = app.buttons["Fertig"]
+        let settingsBar = app.navigationBars["Einstellungen"]
         if settingsDone.exists { settingsDone.tap() }
-        UITestWait.disappears(app.navigationBars["Einstellungen"], "settings closed after the rebuild", timeout: 20)
+        if !UITestWait.holds(timeout: 10, { !settingsBar.exists }) {
+            print("UI_FLAKY_RETRY \(UITestWait.testID(self)) settings still open 10 s after \"Fertig\" after the rebuild, tapped again")
+            UITestWait.clearSystemAlert("after a \"Fertig\" that closed nothing")
+            shot("x-settings-not-closed-rebuild")
+            if settingsDone.exists { settingsDone.tap() }
+        }
+        UITestWait.disappears(settingsBar, "settings closed after the rebuild", timeout: 20)
 
         var seen: [(step: Int, done: Int, total: Int)] = []
         func record(_ moment: String) {
@@ -2339,9 +2352,23 @@ final class AlbumistFlowUITests: XCTestCase {
 
         // Trial year: chosen in the settings, shown on the overview, taken back there.
         let year = Calendar.current.component(.year, from: Date())
+        // A system alert can be in front here: "Neu prüfen" is a run the user started, and that is
+        // when the app asks for notifications. In UI runs 44886315629 and 44897908649 (flow-other)
+        // the tap on "Einstellungen" opened nothing for 20 s while the Mac was not busy; the
+        // notification question is answered here as everywhere ("Nicht erlauben"), any other
+        // alert is named in the log, and a tap that opened nothing is tried once more.
+        UITestWait.clearSystemAlert("before the trial-year settings")
         if tap(app.buttons["Einstellungen"], "settings for trial year") {
+            let settingsBar = app.navigationBars["Einstellungen"]
+            if !UITestWait.holds(timeout: 10, { settingsBar.exists }) {
+                print("UI_FLAKY_RETRY \(UITestWait.testID(self)) settings did not open 10 s after the tap for the trial year, tapped again")
+                UITestWait.clearSystemAlert("after a settings tap that opened nothing")
+                shot("x-settings-not-open-trial-year")
+                if app.buttons["Einstellungen"].exists { app.buttons["Einstellungen"].tap() }
+            }
+            UITestWait.appears(settingsBar, "settings open for the trial year", timeout: 20)
             let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Albumist arbeitet mit")).firstMatch
-            if tap(picker, "trial year picker") {
+            if tap(picker, "trial year picker", timeout: 30) {
                 let onlyYear = app.buttons["Nur \(year)"]
                 tap(onlyYear, "choose \(year)")
                 // The menu has closed (not asserted: the overview's note below is).
@@ -2349,6 +2376,7 @@ final class AlbumistFlowUITests: XCTestCase {
             }
             shot("65-settings-trial-year")
             if app.buttons["Fertig"].exists { app.buttons["Fertig"].tap() }
+            UITestWait.disappears(app.navigationBars["Einstellungen"], "settings closed after the trial year", timeout: 20)
             // Its note, or the card of a year without photos (the demo library has none of this year).
             let note = UITestScreens.TrialYear.shown(app)
             let shown = note.waitForExistence(timeout: 20)

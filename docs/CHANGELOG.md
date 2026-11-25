@@ -424,6 +424,7 @@
   normaler Schrift unter der Tab-Leiste); quer auf dem iPhone stehen die Zahlen neben Bildern und Knopf, und Drehen
   mitten in der Show lässt die Fotos weiterfliegen. Der Text des
   Knopfs wächst bis AX2, so bricht „überspringen“ nicht mehr mitten im Wort.
+- 21.11.: Suche, Atlas und Vorschläge stocken beim ersten Öffnen nicht mehr bis zu einer Sekunde: ob Apple Intelligence verfügbar ist, fragt die App jetzt im Hintergrund (beim Start und bei jeder Rückkehr) statt beim Zeichnen des Bildschirms. Gefunden vom neuen Hänger-Wächter der UI-Tests.
 - 20.11.: Die Karte der laufenden Analyse zeigt auf einen Blick nur noch, was zählt: was gerade läuft (mit „Pause“),
   die Zahl, eine kurze Zeile („Fertig gegen 23:40“, warum es langsamer geht oder wartet, der Countdown für Apple),
   den Balken, „Schon fertig … Ansehen“ und „Details“. „Schritt 4 von 6“, „Gerade angesehen“, ob die Analyse im

@@ -203,6 +203,22 @@ struct SortingShowSourceTests {
         #expect(raw.contains("func makeDatesAndRanksOffMain() async { // Design W3 H13"), "unmarked")
     }
 
+    /// The preview before "Anlegen" never makes the two tables on the main actor either (remark of
+    /// verification review V on `previewCovers`): when it opens, its albums' covers wait for the
+    /// same making off the main thread as the tap (`makeDatesAndRanksOffMain`, V13) before they
+    /// read the capture dates and the preview ranks, after the guard for a launch without facts.
+    @Test func thePreviewNeverMakesTheTablesOnTheMainActor() throws {
+        let raw = try AppSource.read("App/Albumist/Model/AppModel+History.swift")
+        let history = AppSource.code(raw, keepStrings: true)
+        let covers = try Self.body(["func previewCovers(for plan: ChangePlan)"], in: history)
+        let facts = try #require(covers.range(of: "guard !facts.isEmpty else { return nil }"), "\(covers)")
+        let made = try #require(covers.range(of: "await makeDatesAndRanksOffMain()"), "the preview reads tables it may make: \(covers)")
+        let read = try #require(covers.range(of: "let dates = creationDates, ranks = previewRanks"), "\(covers)")
+        #expect(facts.upperBound < made.lowerBound && made.upperBound < read.lowerBound, "\(covers)")
+        #expect(raw.contains("await makeDatesAndRanksOffMain() // Design W3 H13"), "unmarked")
+        #expect(raw.components(separatedBy: "// Design W3 H13").count - 1 == 1, "more of H13 in AppModel+History.swift")
+    }
+
     /// Low Power Mode: the calm version. Nothing flies (`flies`), the albums still fill one after
     /// the other with their tap; with Reduce Motion or VoiceOver the albums are riffled through
     /// quietly, as before. The haptic stays the one soft tap at a landing, no more.

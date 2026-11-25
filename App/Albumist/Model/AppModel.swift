@@ -406,9 +406,10 @@ final class AppModel {
         return ranks
     }
 
-    /// "Anlegen" (the sorting show, the result's stack): the capture dates and the preview ranks
-    /// where they are not kept (before the first refresh, the dates after a memory warning), made
-    /// off the main thread first, so the tap never makes them here (verification review V13 of H13).
+    /// "Anlegen" (the sorting show, the result's stack) and the preview before it (its albums'
+    /// covers): the capture dates and the preview ranks where they are not kept (before the first
+    /// refresh, the dates after a memory warning), made off the main thread first, so neither
+    /// makes them here (verification review V13 of H13, and its remark on `previewCovers`).
     func makeDatesAndRanksOffMain() async { // Design W3 H13: "Anlegen" never makes the two tables on the main actor
         guard datesCache == nil || previewRanksCache == nil else { return }
         let facts = self.facts

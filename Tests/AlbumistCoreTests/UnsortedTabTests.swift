@@ -89,7 +89,8 @@ struct UnsortedTabTests {
     @Test func theTabsAreNamedAsDecided() throws {
         let root = try AppSource.read("App/Albumist/Views/RootView.swift")
         let code = AppSource.code(root, keepStrings: true)
-        let names = ["Tab(\"Vorschläge\"", "Tab(\"Unsortiert\"", "Tab(\"Alben\"", "Tab(value: MainTab.search, role: .search)"]
+        let names = ["Tab(\"Vorschläge\"", "Tab(\"Unsortiert\"", "Tab(\"Alben\"",
+                     "Tab(\"Suchen\", systemImage: \"magnifyingglass\", value: MainTab.search, role: Self.searchRole)"]
         let places = try names.map { name in try #require(code.range(of: name), "\(name)").lowerBound }
         #expect(places == places.sorted(), "the tabs keep the decided order")
         #expect(!code.contains("Tab(\"Übersicht\"") && !code.contains("Tab(\"Mediathek\""))

@@ -8,7 +8,7 @@ import AlbumistEngine
 struct SearchView: View {
     @Environment(AppModel.self) private var model
     /// What is typed, held by the tabs (design wave 3, DS-12a), wherever `MainTabs.searchField`
-    /// puts the field: on the tab view as Apple's search tab, or on this page as until wave 3.
+    /// puts the field: on the tab view as Apple's search tab (iOS 26), or on this page (iOS 27).
     let input: SearchInput
     @State private var result = SearchResult()
     /// The text `result` belongs to (the field runs ahead while a search is pending), the revision
@@ -105,8 +105,8 @@ struct SearchView: View {
         // "Widerrufen" after ignoring a photo from its detail (design review D4).
         .safeAreaInset(edge: .bottom) { IgnoreUndoBar() }
         .animation(.snappy, value: model.lastIgnored)
-        // The field here only when the switch keeps it on the page (`MainTabs.searchField`);
-        // otherwise it sits on the tab view and this page reads what is typed there.
+        // The field here, under the page's title, on iOS 27 (`MainTabs.searchField`); on iOS 26
+        // it sits on the tab view and this page reads what is typed there.
         .searchField(input, on: .page)
         // Starting points follow every change of the facts (a finished analysis brings places and
         // topics, the pictures of photos it has looked at since), also one of a photo's rank
@@ -393,97 +393,70 @@ extension SearchView {
 final class SearchInput {
     var text = ""
     var isPresented = false
-    /// Raised to take the keyboard away with `.tabViewKeepingSearch` (`leftInCode`); the field's
-    /// modifier answers each raise by giving its focus up, and the search stays. A request, not a
-    /// state (review Q3 of H14's round 3): a focus mirrored from the field was false already if
-    /// the binding had not seen the field iOS 26 draws in the tab bar's place focused, so nothing
-    /// changed and the keyboard stayed. Asking a field without focus to give it up costs nothing.
+    /// Raised to take the keyboard away (`leftInCode`); the field's modifier answers each raise
+    /// by giving its focus up, and the search stays. A request, not a state (review Q3 of H14's
+    /// round 3): a focus mirrored from the field was false already if the binding had not seen
+    /// the field focused (iOS 26 draws it in the tab bar's place), so nothing changed and the
+    /// keyboard stayed. Asking a field without focus to give it up costs nothing.
     private(set) var keyboardAway = 0
 
     /// A route (Siri, Shortcuts, Spotlight, a notification) leaves the search tab in code
-    /// (`MainTabs`; review T2 of H14's round 2). With `.tabViewKeepingSearch` only the keyboard
-    /// goes: the query, the hits and the scroll position stay, as after a look at another tab
-    /// (ending the search would empty the field: Apple, dismissing a search clears its text).
-    /// With `.tabViewOpeningKeyboard` and `.pageFocusingField` the search ends, so neither its
-    /// field nor the keyboard stays up over "Vorschläge", and the field empties.
+    /// (`MainTabs`; review T2 of H14's round 2): only the keyboard goes; the query, the hits and
+    /// the scroll position stay, as after a look at another tab, as the owner chose (ending the
+    /// search would empty the field: Apple, dismissing a search clears its text).
     func leftInCode() {
-        if MainTabs.searchField == .tabViewKeepingSearch {
-            keyboardAway &+= 1
-        } else {
-            isPresented = false
-        }
+        keyboardAway &+= 1
     }
 
-    /// Where the field sits, and so how the search behaves: the place decides more than the look
-    /// (review S1 of H14). `MainTabs.searchField` chooses one.
+    /// Where the field sits (`MainTabs.searchField`). In both places it keeps the search: the
+    /// keyboard comes when the field is tapped, and the query, the hits and the scroll position
+    /// stay while another tab is looked at.
     enum Placement {
-        /// On the tab view, Apple's search tab: choosing it shows the page with its starting
-        /// points (DS-13) and the field; the keyboard comes when the field is tapped; the query,
-        /// the hits and the scroll position stay while another tab is looked at.
-        case tabViewKeepingSearch
-        /// On the tab view, and choosing the tab activates the field: the keyboard comes every
-        /// time, also over an earlier query; closing the field goes back to the tab before and
-        /// empties it.
-        case tabViewOpeningKeyboard
-        /// On the search page's own stack, as until wave 3: the field is focused as the page
-        /// opens with nothing typed; the search stays while another tab is looked at.
-        case pageFocusingField
-
-        /// The view that gets the field.
-        var host: Host { self == .pageFocusingField ? .page : .tabView }
-    }
-
-    /// The two views that ask for the field (`searchField(_:on:)`): the tab view and the page.
-    enum Host {
+        /// On the tab view, Apple's search tab of iOS 26: the field in the bar's place once the
+        /// round button is chosen.
         case tabView
+        /// On the search page's own stack, under its title, always shown (iOS 27, where the
+        /// search tab is a prominent tab and an active search's field sits at the top).
         case page
+
+        /// How the field is drawn on the view that gets it.
+        var field: SearchFieldPlacement {
+            switch self {
+            case .tabView: .automatic
+            case .page: .navigationBarDrawer(displayMode: .always)
+            }
+        }
     }
 }
 
 extension View {
     /// The search field of `input` on this view when `MainTabs.searchField` puts it on `host`,
     /// otherwise the view as it is: the tab view and the search page both ask, one gets it.
-    func searchField(_ input: SearchInput, on host: SearchInput.Host) -> some View {
+    func searchField(_ input: SearchInput, on host: SearchInput.Placement) -> some View {
         modifier(SearchFieldModifier(input: input, host: host))
     }
 }
 
-/// The field itself (`searchField(_:on:)`), with the prompt the page always had, on the view and
-/// with the behaviour `MainTabs.searchField` names.
+/// The field itself (`searchField(_:on:)`), with the prompt the page always had, on the view the
+/// system's place names (`MainTabs.searchField`).
 private struct SearchFieldModifier: ViewModifier {
     @Bindable var input: SearchInput
-    var host: SearchInput.Host
-    /// The field's focus with `.tabViewKeepingSearch`: given up when a route asks
-    /// (`SearchInput.keyboardAway`).
+    var host: SearchInput.Placement
+    /// The field's focus: given up when a route asks (`SearchInput.keyboardAway`).
     @FocusState private var focused: Bool
 
     @ViewBuilder func body(content: Content) -> some View {
-        if host != MainTabs.searchField.host {
+        if host != MainTabs.searchField {
             content
-        } else if MainTabs.searchField == .tabViewKeepingSearch {
-            // Only the field: it becomes active when it is tapped, and the search stays as it is
-            // while another tab is chosen (Apple's default activation). Never focused by hand:
-            // iOS 26 shows the field in the bar, and the starting points are the empty page's.
-            // Its focus is bound, so a route takes only the keyboard away when it asks
-            // (`leftInCode`), whatever the binding saw of the field's focus before.
+        } else {
+            // Only the field: it becomes active when it is tapped (Apple's default activation),
+            // never by the tab and never by hand, and the search stays as it is while another
+            // tab is chosen. Its focus is bound, so a route takes only the keyboard away when it
+            // asks (`leftInCode`), whatever the binding saw of the field's focus before.
             content
-                .searchable(text: $input.text, isPresented: $input.isPresented, prompt: SearchView.prompt)
+                .searchable(text: $input.text, isPresented: $input.isPresented, placement: host.field, prompt: SearchView.prompt)
                 .searchFocused($focused)
                 .onChange(of: input.keyboardAway) { focused = false }
-        } else if MainTabs.searchField == .tabViewOpeningKeyboard {
-            // The tab's selection and the field's activation go together (`.searchTabSelection`):
-            // the keyboard comes every time the tab is chosen, also over an earlier query, and
-            // closing the field goes back to the tab before and empties it (Apple: dismissing a
-            // search clears its text).
-            content
-                .searchable(text: $input.text, isPresented: $input.isPresented, prompt: SearchView.prompt)
-                .tabViewSearchActivation(.searchTabSelection)
-        } else {
-            // The field is shown and focused when the page opens with nothing typed; testers did
-            // not find a hidden one.
-            content
-                .searchable(text: $input.text, isPresented: $input.isPresented, prompt: SearchView.prompt)
-                .onAppear { if input.text.isEmpty { input.isPresented = true } }
         }
     }
 }

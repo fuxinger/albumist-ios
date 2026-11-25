@@ -24,8 +24,9 @@ struct QuickCreateMomentLayer: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.layoutDirection) private var layoutDirection
-    /// The tab bar shows "Alben" in its place: not while the search tab is chosen (the bar is then
-    /// the search field beside one round button), so nothing flies there.
+    /// The tab bar shows "Alben" in its place: not while the search tab is chosen on iOS 26 (the
+    /// bar is then the search field beside one round button), so nothing flies there; on iOS 27
+    /// the field sits on the search page and the bar stays as it is (`MainTabs.searchField`).
     var showsAlbumsTab: Bool
     /// The banner whose card is looked at (`begin`).
     @State private var pending: AlbumistID?

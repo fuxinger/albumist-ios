@@ -84,19 +84,30 @@ struct MainTabs: View {
 
     enum MainTab: Hashable { case suggestions, unsorted, albums, search }
 
-    /// Where the search field sits, and so how the search behaves (design wave 3, DS-12a, draft
-    /// E1; review S1 of H14): a choice between behaviours, not only looks.
-    /// `.tabViewKeepingSearch`: Apple's search tab, the field on the tab view, which iOS may draw
-    /// as a round button of its own at the bar's end; choosing it shows the page with its
-    /// starting points and the field, the keyboard comes when the field is tapped, and the query,
-    /// the hits and the scroll position stay while another tab is looked at, also when a route
-    /// (a notification, Siri) leaves the tab. `.tabViewOpeningKeyboard`: the same place, and
-    /// choosing the tab brings the keyboard every time, also over an earlier query; closing the
-    /// field goes back to the tab before and empties it. `.pageFocusingField`: the field on the
-    /// search page's own stack, as until wave 3, focused as the page opens with nothing typed.
-    /// With these two a route ends the search. Each is this one line, until the screenshots on
-    /// iOS 27.2 and the owner decide.
-    static let searchField: SearchInput.Placement = .tabViewKeepingSearch
+    /// Where the search field sits (design wave 3, DS-12a, draft E1), as the owner chose on
+    /// 25.11.2026 ("Runder Knopf, Suche bleibt"): the search is a round button of its own at the
+    /// bar's end; choosing it shows the page with its starting points and the field, the keyboard
+    /// comes when the field is tapped, and the query, the hits and the scroll position stay while
+    /// another tab is looked at, also when a route (a notification, Siri) leaves the tab. iOS 26
+    /// draws the search role as that button and the field on the tab view in the bar's place
+    /// (`.tabView`). iOS 27.2 drew the same tab as a fourth tab in the row and showed no field
+    /// until it was activated, which put the field at the top (UI run 45567033486): there the tab
+    /// takes the prominent role (`searchRole`), and the field sits on the page's own stack under
+    /// its title, always shown (`.page`).
+    static var searchField: SearchInput.Placement {
+        if #available(iOS 27, *) { return .page }
+        return .tabView
+    }
+
+    /// The search tab's role: the search role on iOS 26, which iOS draws as the round button at
+    /// the bar's end; the prominent role on iOS 27, Apple's documented way to that round button
+    /// in a separate place at the bar's end ("Only one tab can receive the prominent treatment"),
+    /// where the search role alone no longer gets it (`searchField`). One role per tab: the
+    /// prominent one has no system label, so the tab names itself.
+    static var searchRole: TabRole {
+        if #available(iOS 27, *) { return .prominent }
+        return .search
+    }
 
     /// Two cards for "Vorschläge", as in the draft: never sparkles, which stand for AI at Apple.
     /// The fanned portrait cards came with iOS 17; should iOS not have them, the fanned cards
@@ -127,15 +138,15 @@ struct MainTabs: View {
                 NavigationRoot(quickCreate: true) { AlbumsView() }
                     .showsQuickCreateBanner()
             }
-            // The search role, never `.prominent` (one role per tab): with the field on the tab
-            // view iOS may draw this tab as the round button at the bar's end (the screenshots on
-            // iOS 27.2 tell).
-            Tab(value: MainTab.search, role: .search) {
+            // The round button at the bar's end (`searchRole`), with the field where its system
+            // puts it (`searchField`).
+            Tab("Suchen", systemImage: "magnifyingglass", value: MainTab.search, role: Self.searchRole) {
                 NavigationRoot(quickCreate: true) { SearchView(input: search) }
                     .showsQuickCreateBanner()
             }
         }
-        // The search field on the tab view, as Apple shows a search tab (`searchField` above).
+        // The search field on the tab view, as Apple shows a search tab on iOS 26; on iOS 27 the
+        // search page has it (`searchField` above).
         .searchField(search, on: .tabView)
         // iPad: tabs become a sidebar; iPhone: the Liquid Glass tab bar shrinks while scrolling.
         .tabViewStyle(.sidebarAdaptable)
@@ -145,7 +156,7 @@ struct MainTabs: View {
         // its banner comes, when the tab bar is open (`QuickCreateMomentLayer`): over the tabs,
         // never tapped, hidden from VoiceOver, no haptic of its own.
         .overlay {
-            QuickCreateMomentLayer(showsAlbumsTab: tab != .search)
+            QuickCreateMomentLayer(showsAlbumsTab: tab != .search || MainTabs.searchField == .page)
         }
         // Siri, Shortcuts, Spotlight and the analysis card's buttons open their target from
         // the tab "Vorschläge": pushed onto its path, and the route is taken.
@@ -154,9 +165,8 @@ struct MainTabs: View {
             // Chosen here, not on the bar, which may be shrunk: the small moment's cover does not
             // count on it being open (`QuickCreateMoment.TabWatch`).
             if tab != .suggestions { QuickCreateMomentSources.shared.tabChosenInCode() }
-            // Leaving the search in code (`SearchInput.leftInCode`): by default only the keyboard
-            // goes and the search stays; with the other two placements the search ends, so
-            // neither its field nor the keyboard stays up over "Vorschläge".
+            // Leaving the search in code (`SearchInput.leftInCode`): only the keyboard goes, and
+            // the search stays as after a look at another tab.
             if tab == .search { search.leftInCode() }
             tab = .suggestions
             // A suggestion that exists opens like one from a list (`ProposalScreen`: it stays

@@ -17,7 +17,9 @@ extension MomentsSourceTests {
         let main = try Self.body(["struct MainTabs", "var body: some View"], in: tabs)
         #expect(main.contains(".tabBarMinimizeBehavior(UITestSupport.isRunning ? .never : .onScrollDown)"), "\(main)")
         let overlay = try #require(AppSource.body(of: ".overlay", in: main), "\(main)")
-        #expect(overlay.contains("QuickCreateMomentLayer(showsAlbumsTab: tab != .search)"), "\(overlay)")
+        // "Alben" is in the bar but while the search tab is chosen on iOS 26, where the bar is the
+        // field beside one round button; on iOS 27 the bar stays as it is (`MainTabs.searchField`).
+        #expect(overlay.contains("QuickCreateMomentLayer(showsAlbumsTab: tab != .search || MainTabs.searchField == .page)"), "\(overlay)")
         #expect(Self.count(".sensoryFeedback(", in: main) == 1, "\(main)")
         #expect(main.contains(".sensoryFeedback(.success, trigger: model.quickCreateBanner?.id)"), "the banner's success tap is gone")
         #expect(main.contains("new != nil && new != old"), "\(main)")
@@ -120,14 +122,21 @@ extension MomentsSourceTests {
     }
 
     /// The cover lands on "Alben": the third of three tabs beside the round search button, as
-    /// `QuickCreateMoment.TabBar` places it.
+    /// `QuickCreateMoment.TabBar` places it. The search tab names itself (the prominent role of
+    /// iOS 27 has no system label) and stands apart at the bar's end by its role, so it is not one
+    /// of the three.
     @Test func theAlbumsTabIsWhereTheMomentLands() throws {
         let tabs = try Self.code(Self.tabs)
         let main = try Self.body(["struct MainTabs", "var body: some View"], in: tabs)
+        let search = "Tab(\"Suchen\", systemImage: \"magnifyingglass\", value: MainTab.search, role: Self.searchRole)"
+        #expect(main.components(separatedBy: search).count - 1 == 1, "no round search button beside the tabs")
         let titles = main.matches(of: /Tab\("([^"]+)"/).map { String($0.output.1) }
-        #expect(titles.count == QuickCreateMoment.TabBar.tabs, "\(titles)")
-        #expect(titles.firstIndex(of: "Alben") == QuickCreateMoment.TabBar.albumsIndex, "\(titles)")
-        #expect(main.contains("Tab(value: MainTab.search, role: .search)"), "no round search button beside the tabs")
+        #expect(titles.last == "Suchen", "the search is not the last tab: \(titles)")
+        let row = titles.dropLast()
+        #expect(row.count == QuickCreateMoment.TabBar.tabs, "\(titles)")
+        #expect(row.firstIndex(of: "Alben") == QuickCreateMoment.TabBar.albumsIndex, "\(titles)")
+        let roles = main.matches(of: /Tab\("[^"]+"[^)]*\)/).map { String($0.output) }.filter { $0.contains("role:") }
+        #expect(roles == [search], "a tab of the row takes a role: \(roles)")
     }
 
     /// Each card that offers "Anlegen" marks itself with one line, with its suggestion as the card

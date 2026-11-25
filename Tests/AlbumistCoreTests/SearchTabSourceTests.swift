@@ -2,31 +2,31 @@ import Foundation
 import Testing
 import AlbumistTestSupport
 
-/// The search on the tab view (design wave 3, DS-12a; draft E1: "Suche als eigener runder Knopf
-/// wie in iOS 26"), built the way Apple documents a search tab: the field on the tab view, the
-/// search tab's content a stack. Where the field sits also decides how the search behaves, so the
-/// one switch, `MainTabs.searchField`, names both (review S1 of H14):
-/// - `.tabViewKeepingSearch`, the default: choosing the tab shows the page with its starting
-///   points (DS-13) and the field; the keyboard comes when the field is tapped; the query, the
-///   hits and the scroll position stay while another tab is looked at, as before wave 3.
-/// - `.tabViewOpeningKeyboard`: choosing the tab activates the field
-///   (`tabViewSearchActivation(.searchTabSelection)`), so the keyboard comes every time, also over
-///   an earlier query, and closing the field goes back to the tab before and empties it (Apple:
-///   dismissing a search clears its text). Round 1 took this one for what the page did by hand;
-///   it is not: the page focused its field only while it was empty and kept the search.
-/// - `.pageFocusingField`: the field on the page's own stack as until wave 3, focused as the page
-///   opens with nothing typed.
-/// What is typed lives with the tabs (`SearchInput`), and the search page reads it. A route that
-/// changes the tab in code takes only the keyboard away by default and keeps the search; with the
-/// other two placements it ends the search. The screenshots on iOS 27.2 and the owner decide.
-/// The App does not build on Linux, so these tests read its code (`AppSource`); how the bar looks
-/// is a screenshot check.
-@Suite("Search tab: the field on the tab view (DS-12a)")
+/// The search tab (design wave 3, DS-12a; draft E1: "Suche als eigener runder Knopf wie in
+/// iOS 26"), as the owner chose it on 25.11.2026 ("Runder Knopf, Suche bleibt"): a round button
+/// of its own at the bar's end; choosing it shows the page with its starting points (DS-13) and
+/// the field; the keyboard comes when the field is tapped; the query, the hits and the scroll
+/// position stay while another tab is looked at, as before wave 3. Where the field sits is the
+/// system's (`MainTabs.searchField`, `MainTabs.searchRole`):
+/// - iOS 26: the search role, drawn as the round button, and the field on the tab view in the
+///   bar's place (`.tabView`), Apple's documented search tab.
+/// - iOS 27: the same tab was a fourth tab in the row on iOS 27.2 and showed no field until it
+///   was activated, which put it at the top (UI run 45567033486): the prominent role, the
+///   documented separate round button at the bar's end, and the field on the page's own stack
+///   under its title, always shown (`.page`).
+/// Choosing the tab never activates the field (no `tabViewSearchActivation`), and nothing
+/// focuses it by hand. What is typed lives with the tabs (`SearchInput`), and the search page
+/// reads it. A route that changes the tab in code takes only the keyboard away and keeps the
+/// search. The two placements before the owner's choice (the keyboard every time; the page's
+/// own field focused as it opened) are gone. The App does not build on Linux, so these tests
+/// read its code (`AppSource`); how the bar looks is the frame test's (`FrameUITests` test1).
+@Suite("Search tab: a round button, the search stays (DS-12a)")
 struct SearchTabSourceTests {
     static let root = "App/Albumist/Views/RootView.swift"
     static let search = "App/Albumist/Views/SearchView.swift"
-    /// The field as every placement makes it: the page's prompt, bound to the tabs' search.
-    static let field = "content.searchable(text:$input.text,isPresented:$input.isPresented,prompt:SearchView.prompt)"
+    /// The field as both places make it: the page's prompt, bound to the tabs' search, drawn as
+    /// its place says.
+    static let field = "content.searchable(text:$input.text,isPresented:$input.isPresented,placement:host.field,prompt:SearchView.prompt)"
 
     /// The code of `path` (comments blanked, strings kept).
     static func code(_ path: String) throws -> String {
@@ -63,90 +63,103 @@ struct SearchTabSourceTests {
             .joined(separator: " ")
     }
 
-    /// The tabs keep what is typed and hand it to the search page; the field sits on the tab view
-    /// itself, before anything else wraps it (the moment's layer, the alert, the purchase sheet),
-    /// and the search tab's content is a stack, as Apple shows it.
-    @Test func theTabsKeepTheSearchAndPutItsFieldOnTheTabView() throws {
+    /// The tabs keep what is typed and hand it to the search page. The search tab is the page's
+    /// stack with a name and a symbol of its own (the prominent role has no system label) and the
+    /// role of its system (`MainTabs.searchRole`); the field's place on the tab view is asked for
+    /// on the tab view itself, before anything else wraps it (the moment's layer, the alert, the
+    /// purchase sheet), and the page asks for its own place: one of the two gets the field.
+    @Test func theTabsKeepTheSearchAndAskForItsFieldOnTheTabView() throws {
         let tabs = try Self.body(["struct MainTabs"], in: Self.root)
         #expect(tabs.contains("@State private var search = SearchInput()"), "\(tabs)")
         let body = Self.squeezed(try Self.body(["struct MainTabs", "var body: some View"], in: Self.root))
-        #expect(body.contains("Tab(value:MainTab.search,role:.search){NavigationRoot(quickCreate:true){SearchView(input:search)}.showsQuickCreateBanner()}}"),
+        #expect(body.contains("Tab(\"Suchen\",systemImage:\"magnifyingglass\",value:MainTab.search,role:Self.searchRole){"
+                              + "NavigationRoot(quickCreate:true){SearchView(input:search)}.showsQuickCreateBanner()}}"),
                 "the search tab's content is not the page's stack with the tabs' search: \(body)")
         #expect(body.contains("}.searchField(search,on:.tabView).tabViewStyle(.sidebarAdaptable)"),
-                "the field is not on the tab view itself: \(body)")
+                "the field's place on the tab view is not asked for on the tab view itself: \(body)")
         #expect(body.components(separatedBy: ".searchField(").count - 1 == 1, "\(body)")
-        // The tab keeps its role: one role per tab, and only the search role makes the field's
-        // tab the search of the bar (`TabRole.prominent` would take the search role away).
-        #expect(!body.contains(".prominent"), "\(body)")
-    }
-
-    /// One switch, documented, with three values named for what the user gets; the field on the
-    /// tab view that keeps the search by default. Each of the other two is the same one line.
-    @Test func oneSwitchNamesThreePlacementsByWhatTheyDo() throws {
-        let tabs = try Self.body(["struct MainTabs"], in: Self.root)
-        let switchLine = "static let searchField: SearchInput.Placement = .tabViewKeepingSearch"
-        #expect(tabs.contains(switchLine), "\(tabs)")
-        let raw = try AppSource.read(Self.root)
-        #expect(raw.components(separatedBy: "static let searchField").count - 1 == 1)
-        // Its comment says what each value does: where the keyboard comes, and what stays.
-        let comment = try Self.docComment(above: switchLine, in: Self.root)
-        for word in ["`.tabViewKeepingSearch`", "`.tabViewOpeningKeyboard`", "`.pageFocusingField`", "iOS 27.2",
-                     "starting points", "tapped", "every time", "tab before", "empties"] {
-            #expect(comment.contains(word), "the switch's comment does not say \(word): \(comment)")
+        // One role per tab, from one place (`MainTabs.searchRole`); no other tab takes a role of
+        // the search's (the alert's "OK" keeps its own).
+        #expect(body.components(separatedBy: "role:Self.searchRole").count - 1 == 1, "\(body)")
+        for role in ["role:.search", "role:.prominent"] {
+            #expect(!body.contains(role), "a tab takes \(role) beside the search's own: \(body)")
         }
-        let placement = Self.squeezed(try Self.body(["final class SearchInput", "enum Placement"], in: Self.search))
-        #expect(placement == "{casetabViewKeepingSearchcasetabViewOpeningKeyboardcasepageFocusingField"
-                + "varhost:Host{self==.pageFocusingField?.page:.tabView}}", "\(placement)")
-        let host = try Self.body(["final class SearchInput", "enum Host"], in: Self.search)
-        #expect(Self.squeezed(host) == "{casetabViewcasepage}", "\(host)")
     }
 
-    /// The field where the switch says, with the behaviour its name says, never twice:
-    /// - keeping the search: only the field, which the system activates when it is tapped; no
-    ///   activation by the tab, no focus by hand (iOS 26 shows the field in the bar, and the
-    ///   starting points are the empty page's);
-    /// - opening the keyboard: the tab's selection activates the field (`.searchTabSelection`);
-    /// - on the page: the page's own field as until wave 3, focused while nothing is typed.
-    @Test func theFieldSitsAndBehavesAsTheSwitchSays() throws {
+    /// The owner's choice on both systems, from one place each, documented: the field and the
+    /// role by the system the app runs on. The comment says what the user gets and what iOS 27.2
+    /// showed of the search role alone.
+    @Test func theRoleAndTheFieldFollowTheSystem() throws {
+        let raw = try AppSource.read(Self.root)
+        #expect(raw.components(separatedBy: "static var searchField").count - 1 == 1)
+        #expect(raw.components(separatedBy: "static var searchRole").count - 1 == 1)
+        let field = Self.squeezed(try Self.body(["struct MainTabs", "static var searchField: SearchInput.Placement"], in: Self.root))
+        #expect(field == "{if#available(iOS27,*){return.page}return.tabView}", "\(field)")
+        let role = Self.squeezed(try Self.body(["struct MainTabs", "static var searchRole: TabRole"], in: Self.root))
+        #expect(role == "{if#available(iOS27,*){return.prominent}return.search}", "\(role)")
+        let comment = try Self.docComment(above: "static var searchField: SearchInput.Placement", in: Self.root)
+        for word in ["25.11.2026", "Runder Knopf, Suche bleibt", "round button", "starting points", "tapped", "stay",
+                     "iOS 26", "iOS 27.2", "45567033486", "prominent", "always shown"] {
+            #expect(comment.contains(word), "the comment does not say \(word): \(comment)")
+        }
+        let roleComment = try Self.docComment(above: "static var searchRole: TabRole", in: Self.root)
+        for word in ["search role", "prominent role", "round button", "One role per tab"] {
+            #expect(roleComment.contains(word), "the role's comment does not say \(word): \(roleComment)")
+        }
+        // Two places, each with the field's look on its view; the choices of before are gone.
+        let placement = Self.squeezed(try Self.body(["final class SearchInput", "enum Placement"], in: Self.search))
+        #expect(placement == "{casetabViewcasepagevarfield:SearchFieldPlacement{switchself{"
+                + "case.tabView:.automaticcase.page:.navigationBarDrawer(displayMode:.always)}}}", "\(placement)")
+        let app = try AppSource.swiftFiles(under: "App/Albumist").map { AppSource.code(try AppSource.read($0)) }.joined()
+        for gone in ["tabViewKeepingSearch", "tabViewOpeningKeyboard", "pageFocusingField", "enum Host", ".tabViewSearchActivation("] {
+            #expect(!app.contains(gone), "\(gone) is still in the app")
+        }
+    }
+
+    /// The field where the system puts it, one field, which keeps the search: the system activates
+    /// it when it is tapped, never the tab and never the page by hand (on iOS 26 it is the bar's,
+    /// on iOS 27 it stands under the page's title); its focus is bound, so a route can take the
+    /// keyboard away (`leftInCode`).
+    @Test func theFieldSitsWhereTheSystemPutsItAndKeepsTheSearch() throws {
         let modifier = Self.squeezed(try Self.body(["private struct SearchFieldModifier", "func body(content: Content)"], in: Self.search))
-        #expect(modifier == "{ifhost!=MainTabs.searchField.host{content}"
-                + "elseifMainTabs.searchField==.tabViewKeepingSearch{\(Self.field).searchFocused($focused)"
-                + ".onChange(of:input.keyboardAway){focused=false}}"
-                + "elseifMainTabs.searchField==.tabViewOpeningKeyboard{\(Self.field).tabViewSearchActivation(.searchTabSelection)}"
-                + "else{\(Self.field).onAppear{ifinput.text.isEmpty{input.isPresented=true}}}}", "\(modifier)")
+        #expect(modifier == "{ifhost!=MainTabs.searchField{content}else{\(Self.field).searchFocused($focused)"
+                + ".onChange(of:input.keyboardAway){focused=false}}}", "\(modifier)")
         let type = Self.squeezed(try Self.body(["private struct SearchFieldModifier"], in: Self.search))
         #expect(type.contains("@Bindablevarinput:SearchInput"), "\(type)")
+        #expect(type.contains("varhost:SearchInput.Placement"), "\(type)")
         #expect(type.contains("@FocusStateprivatevarfocused:Bool"), "\(type)")
-        let extensionBody = Self.squeezed(try Self.body(["func searchField(_ input: SearchInput, on host: SearchInput.Host) -> some View"], in: Self.search))
+        let extensionBody = Self.squeezed(try Self.body(["func searchField(_ input: SearchInput, on host: SearchInput.Placement) -> some View"],
+                                                        in: Self.search))
         #expect(extensionBody == "{modifier(SearchFieldModifier(input:input,host:host))}", "\(extensionBody)")
         // The prompt as before, in its two variants.
         let prompt = Self.squeezed(try Self.body(["struct SearchView", "static var prompt: Text"], in: Self.search))
         #expect(prompt == "{SmartAssistant.isAvailable?Text(\"z.B.GrillenbeiOmaletztenSommer\"):Text(\"z.B.HundeItalien2023\")}", "\(prompt)")
-        // The page puts the modifier where its own field was, between the undo bar's animation
-        // and the starting points' task.
+        // The page asks for the field where its own field was, between the undo bar's animation
+        // and the starting points' task, inside its stack (the stack's bar draws it on iOS 27).
         let page = Self.squeezed(try Self.body(["struct SearchView", "var body: some View"], in: Self.search))
         #expect(page.contains(".animation(.snappy,value:model.lastIgnored).searchField(input,on:.page).task(id:model.factsVersion){"), "\(page)")
         #expect(!page.contains(".searchable("), "a field of the page's own besides the modifier")
         #expect(!page.contains(".onAppear"), "the page focuses its field by hand besides the modifier")
     }
 
-    /// Round 1 said the activation by the tab does what the page did by hand. It does not, and the
-    /// comments say what it does: the keyboard every time, and closing goes back and empties.
-    @Test func theCommentsSayWhatEachPlacementDoes() throws {
+    /// The comments say what the field does: it becomes active when it is tapped, and the search
+    /// stays while another tab is chosen; none says the keyboard comes every time.
+    @Test func theCommentsSayWhatTheFieldDoes() throws {
         let raw = try AppSource.read(Self.search)
         let modifier = try #require(AppSource.body(of: ["private struct SearchFieldModifier", "func body(content: Content)"], in: raw))
-        let keeping = try Self.comments(between: "== .tabViewKeepingSearch {", and: "== .tabViewOpeningKeyboard {", in: modifier)
+        let kept = try Self.comments(between: "} else {", and: "content\n", in: modifier)
         for word in ["tapped", "stays"] {
-            #expect(keeping.contains(word), "the comment of the default does not say \(word): \(keeping)")
+            #expect(kept.contains(word), "the field's comment does not say \(word): \(kept)")
         }
-        let opening = try Self.comments(between: "== .tabViewOpeningKeyboard {", and: "} else {", in: modifier)
-        #expect(!opening.contains("did by hand"), "\(opening)")
-        for word in ["every time", "tab before", "empties"] {
-            #expect(opening.contains(word), "the comment beside the activation does not say \(word): \(opening)")
+        let placement = try #require(AppSource.body(of: ["final class SearchInput", "enum Placement"], in: raw))
+        for word in ["iOS 26", "iOS 27", "always shown", "under its title"] {
+            #expect(placement.contains(word), "the places' comments do not say \(word): \(placement)")
         }
         let header = try Self.docComment(above: "@Suite(\"Search tab", in: "Tests/AlbumistCoreTests/SearchTabSourceTests.swift")
-        #expect(!header.contains("which does what the page did by hand"), "the header still says what round 1 said: \(header)")
-        #expect(header.contains("empties"), "\(header)")
+        #expect(header.contains("Runder Knopf, Suche bleibt") && header.contains("45567033486"), "\(header)")
+        for text in [raw, try AppSource.read(Self.root)] {
+            #expect(!text.contains("every time"), "a comment still says the keyboard comes every time")
+        }
     }
 
     /// The page reads and writes the tabs' text: its starting points and completions set it, its
@@ -171,36 +184,37 @@ struct SearchTabSourceTests {
 
     /// Siri, Shortcuts, Spotlight and a notification change the tab in code (`model.route`). A
     /// route that leaves the search tab hands the search to `SearchInput.leftInCode()` before the
-    /// tab changes (review S of H14, unsure 2), which does what the placement promises (review T2
-    /// of round 2): by default (`.tabViewKeepingSearch`) only the keyboard goes, through the
-    /// field's focus bound with `.searchFocused`, and the query, the hits and the scroll position
-    /// stay, as after a look at another tab; ending the search there emptied the field (Apple:
-    /// dismissing a search clears its text). With the other two placements the search ends, so
-    /// neither its field nor the keyboard stays up over "Vorschläge". The keyboard is taken away
-    /// by a request, a counter the route raises (review Q3 of round 3), not by a mirrored focus:
-    /// had the binding not seen the field of the tab bar focused, the mirror was false already,
-    /// nothing changed, and the keyboard stayed. Asking a field without focus to give it up costs
-    /// nothing.
-    @Test func aRouteLeavesTheSearchAsItsPlacementSays() throws {
+    /// tab changes (review S of H14, unsure 2), which keeps the search as the owner chose (review T2
+    /// of round 2): only the keyboard goes, through the field's focus bound with `.searchFocused`,
+    /// and the query, the hits and the scroll position stay, as after a look at another tab; ending
+    /// the search there would empty the field (Apple: dismissing a search clears its text). The
+    /// keyboard is taken away by a request, a counter the route raises (review Q3 of round 3), not
+    /// by a mirrored focus: had the binding not seen the field of the tab bar focused, the mirror
+    /// was false already, nothing changed, and the keyboard stayed. Asking a field without focus to
+    /// give it up costs nothing.
+    @Test func aRouteTakesOnlyTheKeyboardAway() throws {
         let body = Self.squeezed(try Self.body(["struct MainTabs", "var body: some View"], in: Self.root))
         let route = try #require(body.range(of: ".onChange(of:model.route,initial:true){_,targetin"), "\(body)")
         let rest = body[route.upperBound...]
         let leaves = try #require(rest.range(of: "iftab==.search{search.leftInCode()}"), "a route leaves an open search as it is: \(rest)")
         let chosen = try #require(rest.range(of: "tab=.suggestions"), "\(rest)")
         #expect(leaves.upperBound <= chosen.lowerBound, "the search is left after the tab changed")
-        #expect(!body.contains("search.isPresented"), "the tabs end the search themselves, whatever the placement: \(body)")
+        #expect(!body.contains("search.isPresented"), "the tabs end the search themselves: \(body)")
         let input = try Self.body(["final class SearchInput"], in: Self.search)
         #expect(input.contains("    private(set) var keyboardAway = 0\n"), "\(input)")
         #expect(!input.contains("isFocused"), "the keyboard follows a mirrored focus: \(input)")
         let left = Self.squeezed(try Self.body(["final class SearchInput", "func leftInCode()"], in: Self.search))
-        #expect(left == "{ifMainTabs.searchField==.tabViewKeepingSearch{keyboardAway&+=1}else{isPresented=false}}", "\(left)")
+        #expect(left == "{keyboardAway&+=1}", "\(left)")
         // Raised there only, and only the field's modifier answers it.
         let code = Self.squeezed(try Self.code(Self.search))
         #expect(code.components(separatedBy: "keyboardAway&+=1").count - 1 == 1, "\(code)")
         #expect(code.components(separatedBy: "input.keyboardAway").count - 1 == 1, "\(code)")
-        // Its comment says what becomes of the query in each placement.
+        // Nothing ends the search in code: `isPresented` is set false only where it is declared.
+        #expect(code.components(separatedBy: "isPresented=false").count - 1 == 1, "something ends the search in code: \(code)")
+        #expect(code.contains("varisPresented=false"), "\(code)")
+        // Its comment says what becomes of the query.
         let comment = try Self.docComment(above: "func leftInCode()", in: Self.search)
-        for word in ["only the keyboard", "the query", "stay", "ends", "empties"] {
+        for word in ["only the keyboard", "the query", "stay", "empty"] {
             #expect(comment.contains(word), "the comment does not say \(word): \(comment)")
         }
         // Only the field's modifier binds its focus.
@@ -244,17 +258,18 @@ struct SearchTabSourceTests {
         #expect(parts.contains("ContentUnavailableView.search(text:answer.text)"), "\(parts)")
     }
 
-    /// One field for the search: `.searchable(` bound to `SearchInput` only in the modifier (once
-    /// per placement), and `tabViewSearchActivation` once. Every other field of the app ("Album
-    /// suchen", "Ort suchen") binds a text of its own view, never the tabs' search, so typing there
-    /// never starts a search; and only the tabs and the search page know `SearchInput`.
+    /// One field for the search: `.searchable(` bound to `SearchInput` once, in the modifier, and no
+    /// `tabViewSearchActivation` (choosing the tab never brings the keyboard). Every other field of
+    /// the app ("Album suchen", "Ort suchen") binds a text of its own view, never the tabs' search,
+    /// so typing there never starts a search; and only the tabs and the search page know
+    /// `SearchInput`.
     @Test func theOtherFieldsSearchTheirOwnText() throws {
         var fields: [String] = []
         for path in AppSource.swiftFiles(under: "App/Albumist") {
             let code = try Self.code(path)
             let calls = Self.arguments(of: "searchable(", in: code)
             if path == Self.search {
-                #expect(calls == Array(repeating: "text: $input.text, isPresented: $input.isPresented, prompt: SearchView.prompt", count: 3), "\(calls)")
+                #expect(calls == ["text: $input.text, isPresented: $input.isPresented, placement: host.field, prompt: SearchView.prompt"], "\(calls)")
                 continue
             }
             for call in calls {
@@ -269,15 +284,13 @@ struct SearchTabSourceTests {
             if path != Self.root {
                 #expect(!code.contains("SearchInput") || path == Self.search, "\(path) knows the tabs' search")
             }
-            #expect(path == Self.search || !code.contains(".tabViewSearchActivation("), "\(path)")
+            #expect(!code.contains(".tabViewSearchActivation("), "\(path): choosing the tab activates the field")
         }
         #expect(fields.sorted() == [
             "HomeSettingsView.swift: text: $query, prompt: Text(\"Ort suchen\")",
             "LibraryView.swift: text: $query, prompt: Text(\"Album suchen\")",
             "ProposalViews.swift: text: $query, prompt: Text(\"Album suchen\")",
         ], "\(fields)")
-        let search = try Self.code(Self.search)
-        #expect(search.components(separatedBy: ".tabViewSearchActivation(").count - 1 == 1)
     }
 
     /// The arguments of every call of `function` (ending in "(") in `code`, as written: strings

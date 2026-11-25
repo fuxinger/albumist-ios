@@ -176,10 +176,12 @@ extension VideoViewerSourceTests {
         let refresh = try #require(AppSource.body(of: "func libraryChanged(", in: thumbnails))
         #expect(Self.inOrder(["for key in videoLengths.keys", "if let asset = assets.object(forKey: key as NSString)",
                               "kept[key] = ThumbnailRequest.Asset(asset)", "} else if let seconds = videoLengths[key]",
-                              "apply(KeptVideoLength.step(kept: seconds, inMemory: false, found: nil), to: key)",
+                              // `apply` before `||`: each record gets its step, whatever the others said.
+                              "readAgain = apply(KeptVideoLength.step(kept: seconds, inMemory: false, found: nil), to: key) || readAgain",
                               "await ThumbnailRequest.changed(kept, by: ", "guard let seconds = videoLengths[key] else { continue }",
                               "assets.setObject(asset.value, forKey: key as NSString)",
-                              "apply(KeptVideoLength.step(kept: seconds, inMemory: true, found: answer.lengthFound), to: key)",
+                              "readAgain = apply(KeptVideoLength.step(kept: seconds, inMemory: true, found: answer.lengthFound), to: key)"
+                                  + " || readAgain",
                               "if readAgain { lengthRevision.raise() }"], in: refresh), "\(refresh)")
         let apply = try #require(AppSource.body(of: "private func apply(_ step: KeptVideoLength.Step, to key: String) -> Bool", in: thumbnails))
         #expect(Self.inOrder(["case .keep:", "case .update(let seconds, _):", "videoLengths[key] = seconds", "case .drop(let checked):",

@@ -621,7 +621,7 @@ struct AnalysisFinishedView: View {
     private func play() {
         guard model.claimFinishMoment() else { return }
         // Heard once per finished run, also with Reduce Motion (design wave 3, H14).
-        FinishAnnouncementStore.shared.cardSeen(active: model.isOnScreen)
+        FinishAnnouncementStore.shared.cardSeen()
         guard !reduceMotion else { return }
         bounce += 1
     }
@@ -629,8 +629,9 @@ struct AnalysisFinishedView: View {
 
 /// "Analyse fertig" for VoiceOver, once per finished run (design wave 3, H14; the rule is
 /// `FinishAnnouncement`). One per app, outside the card, which is made anew between the end of a
-/// run and "Analyse fertig": the model tells it how each run ended (`AppModel`, with
-/// `FinishMoment`), the finished card when it is first seen (`AnalysisFinishedView.play`).
+/// run and "Analyse fertig": the model tells it, with `FinishMoment`, when a run brings a new
+/// finish and what the end's wait showed (`AppModel`, where the notification is decided), the
+/// finished card when it is first seen (`AnalysisFinishedView.play`).
 @MainActor
 final class FinishAnnouncementStore {
     static let shared = FinishAnnouncementStore()
@@ -639,15 +640,21 @@ final class FinishAnnouncementStore {
     private init() {}
 
     /// The end of a run in the app, decided before it waits for the overview.
-    func runEnded(finished: Bool, celebrates: Bool, inBackground: Bool) {
-        rule.runEnded(finished: finished, celebrates: celebrates, inBackground: inBackground)
+    func runEnded(finished: Bool, celebrates: Bool) {
+        rule.runEnded(finished: finished, celebrates: celebrates)
     }
 
-    /// The finished card is seen for the first time for its run (its check mark is claimed):
-    /// "Analyse fertig", quietly (low priority, as the card's other announcements), unless the
-    /// first 100 % on the card says it itself ("Analyse fertig: 100 %", DS-08).
-    func cardSeen(active: Bool) {
-        guard rule.cardSeen(voiceOver: UIAccessibility.isVoiceOverRunning, active: active,
+    /// What the finish moment showed after the wait: a notification said it, or the card owes it.
+    func afterWait(_ shown: FinishMoment.Shown) {
+        rule.afterWait(card: shown.card, notification: shown.notification)
+    }
+
+    /// The finished card is seen for the first time for its run (its check mark is claimed, only
+    /// while Albumist is on screen): "Analyse fertig", quietly (low priority, as the card's other
+    /// announcements), unless the first 100 % on the card says it itself ("Analyse fertig:
+    /// 100 %", DS-08).
+    func cardSeen() {
+        guard rule.cardSeen(voiceOver: UIAccessibility.isVoiceOverRunning,
                             saidByFirstMoment: FirstAnalysisMomentStore.shared.moment.shows(at: Date())) else { return }
         var spoken = AttributedString(String(localized: "Analyse fertig"))
         spoken.accessibilitySpeechAnnouncementPriority = .low

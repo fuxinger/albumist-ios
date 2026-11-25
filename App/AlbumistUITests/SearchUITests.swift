@@ -30,21 +30,13 @@ final class AlbumistSearchUITests: XCTestCase {
     /// The search tab (`Tab(role: .search)`): the system's round button at the bar's end
     /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
-        UITestScreens.Search.button(app, tabButton: tabButton)
+        UITestScreens.Search.button(app)
     }
 
-    /// A tab bar button; the iOS 26 tab bar shrinks while scrolling, so it is expanded first.
+    /// A tab bar button (`UITestScreens.tabButton`: leaves an active search first, brings a bar
+    /// that scrolled away back).
     private func tabButton(_ name: String) -> XCUIElement {
-        let button = app.tabBars.buttons[name]
-        var tries = 0
-        while !(button.exists && button.isHittable) && tries < 3 {
-            if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            // The bar expands after the swipe: on as soon as the button can be tapped, else the
-            // next try after the old second.
-            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
-            tries += 1
-        }
-        return button
+        UITestScreens.tabButton(app, name)
     }
 
     private func anything(_ text: String) -> XCUIElement {
@@ -217,6 +209,9 @@ final class AlbumistSearchUITests: XCTestCase {
             XCTFail("No search field")
             return
         }
+        // What choosing the tab shows (`MainTabs.searchField`: by default the field without the
+        // keyboard, which comes with the tap below), for the first run on iOS 27.2.
+        print("UI_FACT search tab chosen: \(UITestScreens.Search.facts(app))")
         // Starting points come from the library (or examples before the analysis).
         let start = search("search.example")
         let started = start.waitForExistence(timeout: 10)
@@ -238,6 +233,8 @@ final class AlbumistSearchUITests: XCTestCase {
         XCTAssertFalse(shown.contains { ["Live Photos", "HDR"].contains($0.label) }, "Live Photos or HDR offered as a starting point")
         shot("s0-search-start")
         field.tap()
+        _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+        print("UI_FACT search field tapped: \(UITestScreens.Search.facts(app))")
 
         // 1. Country and year: the Florence trip of 2022.
         check("Italien 2022", in: field, expect: ["Italien", "2022"], shotName: "s1-italien-2022")
@@ -296,14 +293,26 @@ final class AlbumistSearchUITests: XCTestCase {
         // Close the keyboard.
         field.typeText("\n")
 
-        // DS-12a: while the search is active iOS folds the other tabs into one button beside its
-        // field; leaving the search brings them back. Which tab is chosen then (the one before,
-        // with `.searchTabSelection`) is the system's: said, not asserted.
+        // DS-12a: while the search is active iOS may fold the other tabs into one button beside
+        // its field; leaving the search brings them back (`UITestScreens.Search.leave`: the
+        // field's "Schließen", else the folded tabs). Which tab shows then is the placement's
+        // (`MainTabs.searchField`; the tab before with `.tabViewOpeningKeyboard`): said, not
+        // asserted.
         let left = UITestScreens.Search.leave(app, "search")
         XCTAssertTrue(left, "Leaving the search does not bring the other tabs back")
         let before = app.tabBars.buttons["Vorschläge"]
         let backOnIt = UITestWait.holds(timeout: 3) { before.exists && before.isSelected }
-        print("UI_FACT search left, back on \"Vorschläge\": \(backOnIt); tabs \(app.tabBars.buttons.allElementsBoundByIndex.map(\.label))")
+        print("UI_FACT search left, back on \"Vorschläge\": \(backOnIt); \(UITestScreens.Search.facts(app))")
         shot("s7-search-left")
+        // Another tab, then the search again: what it kept (by default the query, its hits and
+        // the scroll position, and no keyboard) is said for the owner's choice of the placement,
+        // not asserted until then (review S5 of H14).
+        if tap(tabButton("Vorschläge"), "start page after the search"), tap(searchTabButton(), "search tab again") {
+            let again = app.searchFields.firstMatch
+            let shown = again.waitForExistence(timeout: 10)
+            let query = (again.value as? String) ?? ""
+            print("UI_FACT search chosen again: field \(shown), text \"\(query)\", \(UITestScreens.Search.facts(app))")
+            shot("s8-search-again")
+        }
     }
 }

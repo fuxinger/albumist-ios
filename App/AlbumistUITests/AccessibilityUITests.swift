@@ -515,11 +515,13 @@ final class AccessibilityUITests: XCTestCase {
             UITestWait.disappears(app.navigationBars[w.settings], "\(tag) settings closed", timeout: 10)
         }
 
-        // Search last: the search tab focuses its field, and the keyboard covers the tab bar.
+        // Search last: once the keyboard is up it covers the tab bar. Leaving the search for a
+        // step after it is `tabButton`'s (`UITestScreens.tabButton`).
         if !short, tap(searchTabButton(), "\(tag) search tab") {
             UITestWait.appears(app.searchFields.firstMatch, "\(tag) search field shown", timeout: 10)
-            // The keyboard the focused field brings up, so the check sees it as it stays; not
-            // asserted (without it the check runs as before, on the whole screen).
+            // The keyboard where the tab brings it (`MainTabs.searchField`), so the check sees
+            // it as it stays; not asserted: by default it comes only with the tap below, and the
+            // check runs on the whole screen.
             _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
             check("\(tag) search", english: english)
             let field = app.searchFields.firstMatch
@@ -1173,20 +1175,13 @@ final class AccessibilityUITests: XCTestCase {
     /// The search tab (`Tab(role: .search)`): the system's round button at the bar's end
     /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
-        UITestScreens.Search.button(app, tabButton: tabButton)
+        UITestScreens.Search.button(app)
     }
 
+    /// A tab bar button (`UITestScreens.tabButton`: leaves an active search first, brings a bar
+    /// that scrolled away back).
     private func tabButton(_ name: String) -> XCUIElement {
-        let button = app.tabBars.buttons[name]
-        var tries = 0
-        while !(button.exists && button.isHittable) && tries < 3 {
-            if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            // The bar expands after the swipe: on as soon as the button can be tapped, else the
-            // next try after the old second.
-            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
-            tries += 1
-        }
-        return button
+        UITestScreens.tabButton(app, name)
     }
 
     /// Taps "Beispiel-Mediathek anlegen" and checks that the seeding started: its progress text

@@ -48,7 +48,7 @@ struct FirstAnalysisLegsSourceTests {
         // "Analyse fertig", its notification, VoiceOver's word and the 100 % all follow `celebrate`.
         for follower in ["finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)",
                          "firstAnalysisRunEnded(finished: end.isFinished, celebrates: celebrate)",
-                         "FinishAnnouncementStore.shared.runEnded(finished: end.isFinished, celebrates: celebrate,"] {
+                         "FinishAnnouncementStore.shared.runEnded(finished: end.isFinished, celebrates: celebrate)"] {
             let told = try #require(run.range(of: follower), "\(follower)")
             #expect(decided.upperBound < told.lowerBound, "\(follower)")
         }

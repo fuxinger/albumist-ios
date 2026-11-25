@@ -33,17 +33,10 @@ final class FrameUITests: XCTestCase {
         XCTAssertTrue(idle, "\(test): the start page does not come to rest (the analysis still runs or waits)")
     }
 
-    /// A tab bar button; the iOS 26 tab bar shrinks while scrolling, so it is expanded first.
+    /// A tab bar button (`UITestScreens.tabButton`: leaves an active search first, brings a bar
+    /// that scrolled away back).
     private func tabButton(_ name: String) -> XCUIElement {
-        let button = app.tabBars.buttons[name]
-        var tries = 0
-        while !(button.exists && button.isHittable) && tries < 3 {
-            if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            // The bar expands after the swipe: on as soon as the button can be tapped.
-            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
-            tries += 1
-        }
-        return button
+        UITestScreens.tabButton(app, name)
     }
 
     @discardableResult
@@ -117,7 +110,7 @@ final class FrameUITests: XCTestCase {
             // bar (or, behind `MainTabs.searchField`, a fourth tab in the row). That it is there
             // and after "Alben" is asserted; its shape and gap are said for the screenshots until
             // the owner has chosen between the two.
-            let search = UITestScreens.Search.button(app, tabButton: tabButton)
+            let search = UITestScreens.Search.button(app)
             let searchShown = search.waitForExistence(timeout: 5)
             XCTAssertTrue(searchShown, "The tab bar (\(language)) has no search button")
             let albums = bar.buttons[tabs.albums]

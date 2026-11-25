@@ -53,26 +53,13 @@ final class AlbumistFlowUITests: XCTestCase {
     /// The search tab (`Tab(role: .search)`): the system's round button at the bar's end
     /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
-        UITestScreens.Search.button(app, tabButton: tabButton)
+        UITestScreens.Search.button(app)
     }
 
-    /// A tab bar button; the iOS 26 tab bar shrinks while scrolling, so it is expanded first.
-    /// While the search is active iOS folds the other tabs into one button beside its field
-    /// (DS-12a): the search is left first.
+    /// A tab bar button (`UITestScreens.tabButton`: leaves an active search first, brings a bar
+    /// that scrolled away back).
     private func tabButton(_ name: String) -> XCUIElement {
-        let button = app.tabBars.buttons[name]
-        if !button.exists, app.searchFields.firstMatch.exists {
-            UITestScreens.Search.leave(app, "tab \(name)")
-        }
-        var tries = 0
-        while !(button.exists && button.isHittable) && tries < 3 {
-            // Minimized bar: scroll back up first, then tap the bar itself to expand it.
-            if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            // The tab bar has expanded (at most the second the fixed pause gave it); the loop checks.
-            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
-            tries += 1
-        }
-        return button
+        UITestScreens.tabButton(app, name)
     }
 
     /// The tab bar can be tapped (it is hidden while photos are selected, as in Photos).
@@ -1015,8 +1002,9 @@ final class AlbumistFlowUITests: XCTestCase {
         // Search (the system names the search tab itself)
         if tap(searchTabButton(), "search tab") {
             let field = app.searchFields.firstMatch
-            // The field with the keyboard that comes with it, up to the second of the old pause
-            // (then the five below, as before).
+            // The field, and the keyboard where the tab brings it (`MainTabs.searchField`; by
+            // default it comes with the tap below), up to the second of the old pause (then the
+            // five below, as before).
             _ = UITestWait.holds(timeout: 1) { field.exists && app.keyboards.firstMatch.exists }
             shot("19-search-empty")
             if field.waitForExistence(timeout: 5) {
@@ -2314,16 +2302,20 @@ final class AlbumistFlowUITests: XCTestCase {
         // says so once the check has ended.
         if UITestScreens.Analysis.checkAgain(app, "check again") {
             let idle = waitStable("check finished", timeout: 120) { analysisIdle }
-            let said = idle && UITestScreens.Analysis.openSheet(app) && anything("keine neuen Fotos").waitForExistence(timeout: 5)
-            print(said ? "UI_STEP_OK check says no new photos" : "UI_STEP_MISSING check says no new photos")
+            let opened = idle && UITestScreens.Analysis.openSheet(app)
             // Sheets in a fitting size (DS-12b): at the standard text size a short sheet like
-            // "Analyse" opens half high, its "Fertig" in the lower part of the screen.
+            // "Analyse" opens half high, its "Fertig" in the lower part of the screen. Measured
+            // as soon as the sheet is open, whatever its line says (review S6 of H14: waiting for
+            // the line skipped the check without a word when the line came late).
             let sheetDone = app.buttons["analysis.summary.done"]
-            if said, sheetDone.exists {
+            XCTAssertTrue(sheetDone.exists, "The sheet \"Analyse\" is not open with its \"Fertig\" after \"Neu prüfen\" (opened: \(opened))")
+            if sheetDone.exists {
                 let top = sheetDone.frame.minY
                 print("UI_FACT sheet Analyse: Fertig at y \(Int(top)) of \(Int(app.frame.height))")
                 XCTAssertGreaterThan(top, app.frame.height * 0.4, "The sheet \"Analyse\" does not open half high at the standard text size")
             }
+            let said = opened && anything("keine neuen Fotos").waitForExistence(timeout: 5)
+            print(said ? "UI_STEP_OK check says no new photos" : "UI_STEP_MISSING check says no new photos")
             shot("64-check-again")
             UITestScreens.Analysis.closeSheet(app)
         }

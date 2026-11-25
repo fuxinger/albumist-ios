@@ -856,11 +856,18 @@ private struct SortedSheet: View {
                                 .monospacedDigit()
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityIdentifier("overview.recountNote")
-                            Button("OK") { model.dismissRecountNote() }
-                                .font(.subheadline)
-                                .frame(minHeight: 44)
-                                .accessibilityLabel("Hinweis zur neuen Zahl ausblenden")
-                                .accessibilityIdentifier("overview.recountNote.ok")
+                            Button {
+                                model.dismissRecountNote()
+                            } label: {
+                                // 44 pt to tap on the label, where the button takes the tap;
+                                // leading as the note, so nothing moves (review S3 of H14).
+                                Text("OK")
+                                    .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .font(.subheadline)
+                            .accessibilityLabel("Hinweis zur neuen Zahl ausblenden")
+                            .accessibilityIdentifier("overview.recountNote.ok")
                         }
                     }
                     explanation.full

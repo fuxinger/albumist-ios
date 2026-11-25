@@ -1648,6 +1648,49 @@ class HostLoadTests(unittest.TestCase):
         self.assertEqual(lines[1], "HOST_QUIET Siri knowledge (siriknowledged): off "
                                    "(sudo -n launchctl bootout system/com.apple.siriknowledged)")
 
+    def test_quiet_host_that_hangs_does_not_hold_the_boot(self):
+        # Second review of PR #20: a root child (sudo) cannot be killed by sh's timeout, so a
+        # stalled mdutil would keep `boot` from booting and turn the job red.
+        lines = []
+        started = time.monotonic()
+        ui_tests.quiet_host_bounded(limit=0.2, quiet=lambda: time.sleep(5) or [], out=lines.append)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(lines, ["HOST_QUIET gave up after 0 s; the boot goes on"])
+
+    def test_quiet_host_that_raises_does_not_stop_the_boot(self):
+        lines = []
+
+        def broken():
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad")
+
+        ui_tests.quiet_host_bounded(quiet=broken, out=lines.append)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("HOST_QUIET failed (UnicodeDecodeError"), lines[0])
+
+    def test_quiet_host_checks_what_it_did(self):
+        def run(command):
+            if command[:2] == ["mdutil", "-s"]:
+                return 0, "/:\n\tIndexing disabled.\n"
+            if command[0] == "pgrep":
+                return 1, ""
+            return 0, ""
+
+        lines = ui_tests.quiet_host(run=run, uid=501)
+        self.assertEqual(lines[-1], "HOST_QUIET check: Spotlight on /: Indexing disabled.; siriknowledged running: no")
+
+    def test_sampler_halts_at_once_and_prints_nothing_after_its_summary(self):
+        lines = []
+        sampler = ui_tests.LoadSampler("x", interval=0.01, load=lambda: 1.0, top=lambda: [], out=lines.append)
+        sampler.start()
+        time.sleep(0.05)
+        sampler.halt()
+        sampler.finish(timeout=5)
+        count = len(lines)
+        time.sleep(0.05)
+        sampler.sample()
+        self.assertEqual(len(lines), count)
+        self.assertTrue(lines[-1].startswith("PASS_LOAD_SUMMARY x: "))
+
     def test_boot_quiets_the_host_first(self):
         order = []
         with mock.patch.object(ui_tests, "quiet_host", side_effect=lambda: order.append("quiet") or []), \

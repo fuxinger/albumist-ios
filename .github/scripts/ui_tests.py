@@ -718,8 +718,11 @@ class LoadSampler(threading.Thread):
         self.out = out or (lambda line: print(line, flush=True))
         self.stopped = threading.Event()
         self.samples: list[float] = []
+        self.done = False
 
     def sample(self) -> None:
+        if self.done:
+            return
         value = self.load()
         self.samples.append(value)
         self.out(f"PASS_LOAD {self.name_} load(1m)={value:.2f}")
@@ -738,10 +741,21 @@ class LoadSampler(threading.Thread):
         return (f"PASS_LOAD_SUMMARY {self.name_}: {len(ordered)} samples, median load(1m) {median:.0f}, "
                 f"highest {ordered[-1]:.0f}")
 
-    def stop(self) -> None:
+    def halt(self) -> None:
+        """No new sample from now on (right after xcodebuild ended)."""
         self.stopped.set()
-        self.join(timeout=60)
+
+    def finish(self, timeout: float = 10) -> None:
+        """Waits briefly for a sample in flight (`ps` can take its 30 s on a starved Mac), then
+        the summary; a sample that is still running prints nothing after it."""
+        self.stopped.set()
+        self.join(timeout=timeout)
+        self.done = True
         self.out(self.summary())
+
+    def stop(self) -> None:
+        self.halt()
+        self.finish()
 
 
 # The Mac's own services that compete with the simulator on a 3-core runner and that no job needs.
@@ -752,6 +766,14 @@ QUIET_HOST = (
     ("Spotlight indexing", [["sudo", "-n", "mdutil", "-a", "-i", "off"]]),
     ("Siri knowledge (siriknowledged)", [["launchctl", "bootout", "gui/{uid}/com.apple.siriknowledged"],
                                          ["sudo", "-n", "launchctl", "bootout", "system/com.apple.siriknowledged"]]),
+)
+
+
+# What quiet-host left behind, logged so the next run's load numbers can be trusted (second review
+# of PR #20: exit 0 alone does not show that indexing was on before or that the process is gone).
+QUIET_CHECKS = (
+    ("Spotlight on /", ["mdutil", "-s", "/"]),
+    ("siriknowledged running", ["pgrep", "-x", "siriknowledged"]),
 )
 
 
@@ -772,7 +794,43 @@ def quiet_host(run=None, uid: int | None = None) -> list[str]:
             tried.append(f"{' '.join(command)}: exit {code} {' '.join(out.split())[:80]}".rstrip())
         else:
             lines.append(f"HOST_QUIET {what}: still on ({'; '.join(tried)})")
+    checks = []
+    for what, command in QUIET_CHECKS:
+        code, out = run(command)
+        if command[0] == "pgrep":
+            checks.append(f"{what}: {'yes' if code == 0 else 'no'}")
+        else:
+            found = [line.strip() for line in out.splitlines() if line.strip() and not line.strip().endswith(":")]
+            checks.append(f"{what}: {found[0] if found else f'exit {code}'}")
+    lines.append("HOST_QUIET check: " + "; ".join(checks))
     return lines
+
+
+def quiet_host_bounded(limit: float = 90, quiet=None, out=None) -> None:
+    """quiet_host for `boot`: in its own thread, at most `limit` s, and nothing it does can stop
+    the boot. `sh`'s timeout cannot kill a child that runs as root (sudo), and an exception there
+    (output that is not UTF-8) would end `boot` before the simulator starts (second review of
+    PR #20); either way the boot goes on and one HOST_QUIET line says why."""
+    quiet = quiet or quiet_host
+    out = out or (lambda line: print(line, flush=True))
+    result: dict = {}
+
+    def work() -> None:
+        try:
+            result["lines"] = quiet()
+        except Exception as error:  # noqa: BLE001 - report only, the boot must go on
+            result["error"] = f"{type(error).__name__}: {error}"
+
+    worker = threading.Thread(target=work, daemon=True)
+    worker.start()
+    worker.join(timeout=limit)
+    if worker.is_alive():
+        out(f"HOST_QUIET gave up after {limit:.0f} s; the boot goes on")
+    elif "error" in result:
+        out(f"HOST_QUIET failed ({result['error'][:160]}); the boot goes on")
+    else:
+        for line in result.get("lines", []):
+            out(line)
 
 
 def boot(udid: str) -> bool:
@@ -1305,10 +1363,11 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
         sampler = LoadSampler(f"{args.name} {label}")
         sampler.start()
         status, hung = wait_until(process, getattr(args, "deadline", 0) or 0)
-        sampler.stop()
+        sampler.halt()
         grants.stop()
         watchdog.stop()
         watchdog.join(timeout=90)
+        sampler.finish()
     if hung:
         with open(log_path, encoding="utf-8", errors="replace") as log:
             test = running_test(log.read())
@@ -1675,14 +1734,12 @@ def main(argv: list[str] | None = None) -> int:
         print(udid)
         return 0
     if args.command == "quiet-host":
-        for line in quiet_host():
-            print(line, flush=True)
+        quiet_host_bounded()
         return 0
     if args.command == "boot":
         # Before the boot, in every job that boots a simulator this way (ui.yml, ui-stress.yml,
         # testflight.yml): the boot is when the Mac is most starved (SIM_SETTLE).
-        for line in quiet_host():
-            print(line, flush=True)
+        quiet_host_bounded()
         ok = boot(args.udid)
         if BOOT_RETRIES:
             os.makedirs(args.out, exist_ok=True)

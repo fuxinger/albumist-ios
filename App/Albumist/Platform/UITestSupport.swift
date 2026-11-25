@@ -464,28 +464,10 @@ final class MainThreadWatch: @unchecked Sendable {
         lock.unlock()
         guard asked != nil else { return }
         if waited >= Self.hangLimit - Self.tick {
-            // Named off the main thread: `dladdr` and demangling of up to 64 frames took up to half
-            // a second here when the images' symbol tables were cold, and the watch reported its
-            // own naming as a hang of the app (accessibility, UI run 44870948643).
-            Self.hangNaming.async { [self] in
-                let frames = addresses.enumerated().map { Self.symbol($0.element, isReturnAddress: $0.offset > 0) }
-                let kind = HangKind(frames: frames, inactive: inactive, beforeFirstActive: !started, starved: starved)
-                note("UI_MAIN_HANG \(Int(waited * 1000)) ms \(kind.rawValue) in [\(hangNames)]: \(HangKind.shortStack(frames))")
-            }
+            nameHang(addresses, waited: waited, sections: hangNames, inactive: inactive, started: started, starved: starved)
         }
         // Written only here, on the main thread.
-        if waited > 0.5, let file {
-            var lines = String(format: "%.3f %ld\n", Date().timeIntervalSince1970, Int(waited * 1000))
-            if waited >= 2, !work.isEmpty {
-                let parts = work.sorted { ($0.value.nanoseconds, $0.value.count) > ($1.value.nanoseconds, $1.value.count) }.prefix(12).map { name, value in
-                    value.nanoseconds > 0 ? "\(name) \(value.count)x \(Self.text(Double(value.nanoseconds) / 1e9)) s" : "\(name) \(value.count)x"
-                }
-                lines += "% in the stall of \(Self.text(waited)) s from \(Self.clock(since)) UTC: \(parts.joined(separator: ", "))\n"
-            }
-            fileLock.lock()
-            file.write(Data(lines.utf8))
-            fileLock.unlock()
-        }
+        if waited > 0.5, let file { writeStall(waited: waited, since: since, work: work, to: file) }
         if stress, waited > 1 {
             NSLog("UITEST_MAIN_BLOCKED %ld ms (longest %ld ms)", Int(waited * 1000), Int(longest * 1000))
         }
@@ -494,6 +476,31 @@ final class MainThreadWatch: @unchecked Sendable {
         } else if waited >= 1 {
             note("UI_MAIN_STALL 1-2 s in \(names)\(Self.tag(inactive))")
         }
+    }
+
+    /// Names a hang's stack off the main thread: `dladdr` and demangling of up to 64 frames took up
+    /// to half a second when the images' symbol tables were cold, and the watch reported its own
+    /// naming as a hang of the app (accessibility, UI run 44870948643).
+    private func nameHang(_ addresses: [UInt], waited: Double, sections: String, inactive: Bool, started: Bool, starved: Bool) {
+        Self.hangNaming.async { [self] in
+            let frames = addresses.enumerated().map { Self.symbol($0.element, isReturnAddress: $0.offset > 0) }
+            let kind = HangKind(frames: frames, inactive: inactive, beforeFirstActive: !started, starved: starved)
+            note("UI_MAIN_HANG \(Int(waited * 1000)) ms \(kind.rawValue) in [\(sections)]: \(HangKind.shortStack(frames))")
+        }
+    }
+
+    /// One stall line for the stress test's file, with the marked work in it from 2 s on.
+    private func writeStall(waited: Double, since: Double, work: [String: (count: Int, nanoseconds: UInt64)], to file: FileHandle) {
+        var lines = String(format: "%.3f %ld\n", Date().timeIntervalSince1970, Int(waited * 1000))
+        if waited >= 2, !work.isEmpty {
+            let parts = work.sorted { ($0.value.nanoseconds, $0.value.count) > ($1.value.nanoseconds, $1.value.count) }.prefix(12).map { name, value in
+                value.nanoseconds > 0 ? "\(name) \(value.count)x \(Self.text(Double(value.nanoseconds) / 1e9)) s" : "\(name) \(value.count)x"
+            }
+            lines += "% in the stall of \(Self.text(waited)) s from \(Self.clock(since)) UTC: \(parts.joined(separator: ", "))\n"
+        }
+        fileLock.lock()
+        file.write(Data(lines.utf8))
+        fileLock.unlock()
     }
 
     private static func tag(_ inactive: Bool) -> String { inactive ? " (app not active)" : "" }

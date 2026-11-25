@@ -45,7 +45,8 @@ struct HangKindTests {
         #expect(HangKind(frames: ["Albumist.debug.dylib MainThreadWatch.section<A>(_:_:) + 9"] + bottom,
                          inactive: false, beforeFirstActive: false) == .system)
         #expect(HangKind(frames: [ours] + bottom, inactive: false, beforeFirstActive: false) == .app)
-        #expect(HangKind.shortStack([kernel] + bottom) == "libsystem_kernel.dylib mach_msg2_trap | Albumist.debug.dylib static AlbumistApp.$main() | Albumist.debug.dylib __debug_main_executable_dylib_entry_point | Albumist main")
+        #expect(HangKind.shortStack([kernel] + bottom) == "libsystem_kernel.dylib mach_msg2_trap | Albumist.debug.dylib static AlbumistApp.$main() | "
+                + "Albumist.debug.dylib __debug_main_executable_dylib_entry_point | Albumist main")
         // An app frame without a symbol is still ours.
         #expect(HangKind(frames: ["Albumist.debug.dylib +0x1f2c"] + bottom, inactive: false, beforeFirstActive: false) == .app)
     }
@@ -65,7 +66,8 @@ struct HangKindTests {
 
     @Test func theShortStackShowsOurFramesAndWhatTheyWaitedIn() {
         let line = HangKind.shortStack([kernel, swiftUI, ours, swiftUI, "Albumist.debug.dylib AppModel.tick() + 7"])
-        #expect(line == "SwiftUICore AG::Graph::UpdateStack::update() | Albumist.debug.dylib closure #1 in OverviewView.body.getter | Albumist.debug.dylib AppModel.tick()")
+        #expect(line == "SwiftUICore AG::Graph::UpdateStack::update() | Albumist.debug.dylib closure #1 in OverviewView.body.getter | "
+                + "Albumist.debug.dylib AppModel.tick()")
     }
 
     @Test func theShortStackIsTheSameInEveryRun() {

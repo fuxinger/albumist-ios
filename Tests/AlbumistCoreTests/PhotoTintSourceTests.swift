@@ -14,6 +14,8 @@ struct PhotoTintSourceTests {
     static let theme = "App/Albumist/DesignSystem/Theme.swift"
     static let cover = "App/Albumist/DesignSystem/CoverPhoto.swift"
     static let loader = "App/Albumist/DesignSystem/CoverLoader.swift"
+    /// UI tests 3 and 4 (the page's colour, the icon in "Über"), an extension of `ShowAndHandwritingUITests`.
+    static let handwritingUITest = "App/AlbumistUITests/ShowAndHandwritingUITests+Handwriting.swift"
     static let accent = "App/Albumist/Resources/Assets.xcassets/AccentColor.colorset/Contents.json"
     static let mark = "// Design W3 H13: photo tint"
 
@@ -298,8 +300,8 @@ struct PhotoTintSourceTests {
         #expect(combined.upperBound <= identified.lowerBound, "the identifier is not on the combined element: \(row)")
         let image = try Self.code("App/Albumist/DesignSystem/AppIconImage.swift")
         #expect(image.contains(".accessibilityHidden(true)"), "the icon speaks for itself")
-        let test = AppSource.code(try AppSource.read("App/AlbumistUITests/ShowAndHandwritingUITests.swift"), keepStrings: true)
-        let body = try Self.body(["final class ShowAndHandwritingUITests", "func test4_SettingsAboutShowsTheAppsIconAndName()"], in: test)
+        let test = AppSource.code(try AppSource.read(Self.handwritingUITest), keepStrings: true)
+        let body = try Self.body(["extension ShowAndHandwritingUITests", "func test4_SettingsAboutShowsTheAppsIconAndName()"], in: test)
         #expect(body.contains("node.identifier == \"settings.about.app\""), "UI test 4 does not find the row by its identifier: \(body)")
         #expect(body.contains("XCTAssertEqual(row.label, \"Albumist\""), "\(body)")
         #expect(body.contains("XCTAssertGreaterThanOrEqual(row.frame.height, 48"), "UI test 4 does not look at the icon: \(body)")
@@ -313,13 +315,13 @@ struct PhotoTintSourceTests {
     /// fails it. It waits up to 25 s for the colour: the reader alone waits up to 6 s for the
     /// cover, and a busy Mac takes longer.
     @Test func theUITestKnowsAPaleOrDeepGround() throws {
-        let test = AppSource.code(try AppSource.read("App/AlbumistUITests/ShowAndHandwritingUITests.swift"), keepStrings: true)
-        let calm = try Self.body(["final class ShowAndHandwritingUITests", "private static func isCalmGround("], in: test)
+        let test = AppSource.code(try AppSource.read(Self.handwritingUITest), keepStrings: true)
+        let calm = try Self.body(["extension ShowAndHandwritingUITests", "private static func isCalmGround("], in: test)
         #expect(calm.contains("dark ? colour.allSatisfy { $0 <= 80 } : colour.allSatisfy { $0 >= 215 }"), "\(calm)")
-        let wait = try Self.body(["final class ShowAndHandwritingUITests", "private func waitForTint("], in: test)
+        let wait = try Self.body(["extension ShowAndHandwritingUITests", "private func waitForTint("], in: test)
         #expect(wait.contains("UITestWait.holds(timeout: 25)"), "\(wait)")
         #expect(wait.contains("zip(now, neutral).map { abs($0 - $1) }.reduce(0, +) >= 4"), "not neutral is no longer asked: \(wait)")
-        let open = try Self.body(["final class ShowAndHandwritingUITests", "private func openTintedTrip("], in: test)
+        let open = try Self.body(["extension ShowAndHandwritingUITests", "private func openTintedTrip("], in: test)
         let tinted = try #require(open.range(of: "if tinted {"), "\(open)")
         let asked = try #require(open.range(of: "XCTAssertTrue(calm, "), "the colour's bounds are not asserted: \(open)")
         let found = try #require(open.range(of: "return name"), "\(open)")

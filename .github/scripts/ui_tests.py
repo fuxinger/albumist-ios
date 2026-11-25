@@ -1346,7 +1346,12 @@ def swiftui_stream_command(udid: str) -> list[str]:
     diagnosticd was the second largest process after the app (PASS_TOP, about a quarter of
     a core on average in the device group), and every line the gates read from this file was
     a fault (UI_RUNTIME_WARNING type `F`). The default level keeps default, error and fault
-    messages, so no line the gates use is lost."""
+    messages, so no line the gates use is lost.
+
+    Not proven by a run: that SwiftUI's navigation warning ("no matching navigationDestination")
+    and "Publishing changes from within view updates" arrive as faults too. They are Xcode
+    runtime issues, which SwiftUI logs as faults, but run 45662948348 was green and had none
+    (second review 25.11.). The first run that shows one settles it."""
     return ["xcrun", "simctl", "spawn", udid, "log", "stream", "--style", "compact",
             "--predicate", 'process == "Albumist" AND (subsystem == "com.apple.SwiftUI" OR messageType == fault '
                            'OR eventMessage CONTAINS[c] "navigationDestination")']

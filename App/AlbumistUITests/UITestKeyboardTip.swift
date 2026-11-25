@@ -21,10 +21,14 @@ enum UITestKeyboardTip {
         let text = app.descendants(matching: .any).matching(tipText).firstMatch
         guard text.waitForExistence(timeout: timeout) else { return false }
         print("UI_FACT keyboard tip shown at \(step): '\(text.label.prefix(80))'")
+        // The tip's own button sits below its text, inside the tip; an app button of the same
+        // name above the keyboard is never taken (second review 25.11.).
+        let tipTop = text.frame.minY
         let button = app.buttons.matching(NSPredicate(format: "label IN %@", closeLabels))
-            .allElementsBoundByIndex.first { $0.exists && $0.isHittable }
+            .allElementsBoundByIndex.first { $0.exists && $0.isHittable && $0.frame.minY >= tipTop }
         guard let close = button else {
-            print("UI_STEP_MISSING keyboard tip closed at \(step) (no button \(closeLabels))")
+            print("UI_STEP_MISSING keyboard tip closed at \(step) (no button \(closeLabels) below the tip)")
+            XCTFail("iOS' keyboard tip covers the screen at \(step) and has no button to close it")
             return false
         }
         close.tap()

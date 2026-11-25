@@ -641,14 +641,31 @@ final class AccessibilityUITests: XCTestCase {
             }
             auditFailures = []
             pendingContrast = []
-            // Kept: the pause before the second attempt of an audit that did not complete (a
-            // busy simulator). Nothing on screen says the simulator has caught up.
-            sleep(2)
+            if attempt == 1 { waitForResponsiveApp(before: screen) }
         }
         // "Audit failed to complete in time" twice: the screen went unaudited, and a screen nobody
         // checked must not pass (Prüfer B G5-06). The tree checks still ran; check() fails the test.
         print("A11Y_FAIL \(screen) | audit | did not complete in 2 attempts, screen not audited")
         auditFailures.append("audit did not complete in 2 attempts, screen not audited")
+    }
+
+    /// Before the second attempt of an audit that did not complete: waits until the app's
+    /// accessibility tree answers quickly again, as ui_tests.py `settle` waits for the simulator.
+    /// A fixed 2 s pause was not enough on a busy Mac: "overview after first analysis" timed out
+    /// twice in a row (UI run 45651824235, Mac load 549) while the same group was green on the
+    /// commit before. Two snapshots in a row under 2 s count as caught up, at most 90 s; the
+    /// second attempt runs anyway after that, and a second timeout still fails the screen.
+    private func waitForResponsiveApp(before screen: String) {
+        let start = Date()
+        var calm = 0
+        let caughtUp = UITestWait.holds(timeout: 90, interval: 1) {
+            let asked = Date()
+            let answered = (try? app.snapshot()) != nil
+            calm = answered && Date().timeIntervalSince(asked) < 2 ? calm + 1 : 0
+            return calm >= 2
+        }
+        let waited = String(format: "%.1f", Date().timeIntervalSince(start))
+        print("A11Y_AUDIT_RETRY \(screen) app \(caughtUp ? "answered quickly again" : "still slow") after \(waited) s")
     }
 
     /// "Contrast failed" must repeat in a second contrast audit two seconds later to count.

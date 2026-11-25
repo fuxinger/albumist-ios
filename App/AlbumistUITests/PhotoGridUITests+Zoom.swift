@@ -156,7 +156,8 @@ extension PhotoGridUITests {
     }
 
     /// A trip's photos: the same grid, at the same size (five in a row after the pinches). A trip,
-    /// whose days hold rows of photos (`openTrip`).
+    /// whose days hold rows of photos (`openTrip`). Then two fingers on one of its photos
+    /// (`spreadOnePhoto`).
     func suggestionShowsFiveInARow(_ test: String) {
         guard tap(tabButton(UITestScreens.Tabs.german.suggestions), "\(test): tab Vorschläge"), openTrip(test) else { return }
         guard let photo = UITestScreens.SuggestionPage.photoInReach(app) else {
@@ -167,5 +168,21 @@ extension PhotoGridUITests {
         print("UI_FACT \(test): a trip's photos: \(inRow) in a row (\(photo.frame.width) pt)")
         XCTAssertEqual(inRow, 5, "\(test): a trip's photos do not show the size chosen in \"Unsortiert\"")
         shot("pg-04-suggestion-five")
+        spreadOnePhoto(photo, test)
+    }
+
+    /// Two fingers spread on one photo, both on it, as a hand mostly pinches (the page's pinches
+    /// above have them on different photos; second review of the fix): back to three in a row.
+    /// From five the step to three is the last one, so 1.8 makes exactly one, also counted from a
+    /// tenth of the way in. Without it, the app's record says why (`explainPinch`).
+    func spreadOnePhoto(_ photo: XCUIElement, _ test: String) {
+        let what = "on one photo back to three"
+        print("UI_STEP_OK \(test): spread 1.8 on one photo '\(photo.label)' (\(Int(photo.frame.width)) pt) (\(what))")
+        let since = Date()
+        photo.pinch(withScale: 1.8, velocity: 1)
+        let three = rowShowsPhotos(3, "after the spread \(what)", app.buttons.matching(identifier: "proposalPhotos.photo"), test)
+        explainPinch(what, since: since, stepped: three, test)
+        XCTAssertTrue(three, "\(test): two fingers spread on one photo do not go back to three photos in a row")
+        shot("pg-04b-one-photo-three")
     }
 }

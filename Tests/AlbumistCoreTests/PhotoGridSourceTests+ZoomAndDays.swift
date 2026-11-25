@@ -42,36 +42,47 @@ extension PhotoGridSourceTests {
         #expect(grid.contains("if UITestSupport.isRunning { UserDefaults.standard.removeObject(forKey: key) }"))
     }
 
-    /// Two fingers on the grid are a pinch from the second finger on (UI run 45567033486: on a
+    /// Two fingers on the grid that move apart or together are a pinch (UI run 45567033486: on a
     /// Mac two fingers on one photo made no step and opened nothing). A representable has
     /// `.gesture` only (`simultaneousGesture` and `highPriorityGesture` take a SwiftUI
     /// `Gesture`), which may leave it waiting for the photos' own gestures to fail, and two
-    /// fingers on one photo never make them fail. So its recognizer ends them at the second
-    /// finger: the photo's button (tap and pressed look), the long press's menu and, while the
-    /// grid selects, the drag, whose ticks stay; pans (scrolling, the swipe back) and what is the
-    /// scroll view's or the window's go on. Beside it run only the drag (a second finger reaches
-    /// the pinch while a drag runs) and the scroll view's pan until it begins: a pinch beside the
-    /// button or the menu would let them open or lift under the fingers. What a touch did goes to
-    /// a UI run's record only while one asks for it.
-    @Test func twoFingersAreAPinchFromTheSecondFinger() throws {
+    /// fingers on one photo never make them fail. So once they moved apart or together by a few
+    /// points (where UIKit's pinch itself begins), its recognizer ends them: the photo's button
+    /// (tap and pressed look), the long press's menu and, while the grid selects, the drag, whose
+    /// ticks stay; pans (scrolling, the swipe back) and what is the scroll view's or the window's
+    /// go on. Not at the second finger itself (second review of the fix): two thumbs ticking two
+    /// photos at once stay two taps. It happens in the move, after every gesture of the fingers
+    /// heard of them, never later than the move (no task that a busy main thread delays). Beside
+    /// it run only the drag (a second finger reaches the pinch while a drag runs) and the scroll
+    /// view's pan until it begins; when it begins, both end, so a drag never ticks while the grid
+    /// changes its size. What a touch did goes to a UI run's record only while one asks for it.
+    @Test func twoFingersThatMoveAreAPinch() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
         let drag = try #require(view.range(of: ".gesture(PhotoGridSelectDrag("), "\(view)")
         let pinch = try #require(view.range(of: ".gesture(PhotoGridPinch("), "\(view)")
         let space = try #require(view.range(of: ".coordinateSpace(.named(PhotoGridPlace.space))"), "\(view)")
         #expect(drag.upperBound <= pinch.lowerBound && pinch.upperBound <= space.lowerBound, "\(view)")
-        #expect(try Self.code(Self.recognizers).contains("import UIKit.UIGestureRecognizerSubclass"), "touchesBegan is the subclass's")
+        #expect(try Self.code(Self.recognizers).contains("import UIKit.UIGestureRecognizerSubclass"), "touchesMoved is the subclass's")
         let pinchRecognizer = "final class PhotoGridPinchRecognizer"
-        // At the second finger, right after every gesture of the fingers heard of them.
+        #expect(try Self.code(Self.recognizers).contains("static let takeOverSpread: CGFloat = 6"))
+        // Where the second finger touched, and nothing ended yet.
         let touched = Self.squeezed(try Self.body([pinchRecognizer, "override func touchesBegan("], in: Self.recognizers))
-        var last = touched.startIndex
-        for step in ["super.touchesBegan(touches,with:event)", "guardnumberOfTouches>1,state==.possibleelse{return}",
-                     "letfingers=event.touches(for:self)??touches", "Task{@MainActor[weakself]inself?.takeOver(fingers)}"] {
-            let found = try #require(touched.range(of: step, range: last..<touched.endIndex), "\(step) is not in its place: \(touched)")
+        #expect(touched.contains("super.touchesBegan(touches,with:event)ifapartAtSecondFinger==nil{apartAtSecondFinger=fingersApart()}"),
+                "\(touched)")
+        #expect(!touched.contains("takeOver(") && !touched.contains("Task{"), "\(touched)")
+        // Once they moved apart or together, in the move itself.
+        let moved = Self.squeezed(try Self.body([pinchRecognizer, "override func touchesMoved("], in: Self.recognizers))
+        var last = moved.startIndex
+        for step in ["super.touchesMoved(touches,with:event)",
+                     "guard!tookOver,[.possible,.began,.changed].contains(state),letapart,letstart=apartAtSecondFinger,"
+                        + "abs(apart-start)>=Self.takeOverSpreadelse{return}",
+                     "tookOver=truetakeOver(event.touches(for:self)??touches)"] {
+            let found = try #require(moved.range(of: step, range: last..<moved.endIndex), "\(step) is not in its place: \(moved)")
             last = found.upperBound
         }
+        #expect(!moved.contains("Task{"), "\(moved)")
         let takeOver = Self.squeezed(try Self.body([pinchRecognizer, "private func takeOver("], in: Self.recognizers))
-        #expect(takeOver.hasPrefix("{letready=state==.possible&&numberOfTouches>1ifProgressLineLog.isOn{record.tookOver=ready}"
-                                   + "guardreadyelse{return}"), "\(takeOver)")
+        #expect(takeOver.hasPrefix("{ifProgressLineLog.isOn{record.tookOver=true}"), "\(takeOver)")
         for rule in ["$0.gestureRecognizers??[]", "[ObjectIdentifier(self)]", "Self.givesWay(other)",
                      "other.isEnabled=falseother.isEnabled=true"] {
             #expect(takeOver.contains(rule), "\(rule): \(takeOver)")
@@ -80,13 +91,33 @@ extension PhotoGridSourceTests {
         #expect(givesWay == "{guardother.isEnabled,!(other.delegateisUIScrollView),!(other.viewisUIWindow)else{returnfalse}"
                             + "ifotherisPhotoGridSelectRecognizer{returntrue}"
                             + "return!(otherisUIPanGestureRecognizer)&&[.possible,.began,.changed].contains(other.state)}", "\(givesWay)")
+    }
+
+    /// When the pinch begins, the scroll view's pan and the drag to select end, the drag's ticks as
+    /// they are (second review of the fix: the drag ran beside the pinch until then and went on
+    /// ticking while the grid changed its size). Beside the pinch run only the drag and, until it
+    /// begins, the scroll view's pan.
+    @Test func aPinchThatBeginsEndsTheDragAndTheScroll() throws {
+        let pinchRecognizer = "final class PhotoGridPinchRecognizer"
+        let action = Self.squeezed(try Self.body(["struct PhotoGridPinch", "func handleUIGestureRecognizerAction("], in: Self.recognizers))
+        #expect(action.contains("case.began:recognizer.stopScrolling()recognizer.stopSelecting()phase=.began"), "\(action)")
+        let stopSelecting = Self.squeezed(try Self.body([pinchRecognizer, "func stopSelecting("], in: Self.recognizers))
+        #expect(stopSelecting == "{guardletselectPan,selectPan.state==.began||selectPan.state==.changedelse{return}"
+                                 + "selectPan.isEnabled=falseselectPan.isEnabled=true}", "\(stopSelecting)")
         let beside = Self.squeezed(try Self.body([pinchRecognizer, "shouldRecognizeSimultaneouslyWith"], in: Self.recognizers))
-        #expect(beside == "{ifotherGestureRecognizerisPhotoGridSelectRecognizer{returntrue}guardstate==.possible,"
+        #expect(beside == "{ifotherGestureRecognizerisPhotoGridSelectRecognizer{selectPan=otherGestureRecognizerreturntrue}"
+                          + "guardstate==.possible,"
                           + "letscrollView=otherGestureRecognizer.viewas?UIScrollView,otherGestureRecognizer===scrollView.panGestureRecognizer"
                           + "else{returnfalse}scrollPan=otherGestureRecognizerreturntrue}", "\(beside)")
-        // The record: one line when the fingers lift, a step's line, only while a UI run asks.
+    }
+
+    /// A pinch writes one line to a UI run's record when its fingers lift, and a step's line before
+    /// the step, only while a UI run asks for it (`ProgressLineLog.isOn`).
+    @Test func aPinchIsRecordedOnlyWhenAUIRunAsks() throws {
+        let pinchRecognizer = "final class PhotoGridPinchRecognizer"
         let reset = Self.squeezed(try Self.body([pinchRecognizer, "override func reset("], in: Self.recognizers))
-        #expect(reset == "{super.reset()ifletline=record.line,ProgressLineLog.isOn{ProgressLineLog.mark(line)}record=PhotoGridPinchRecord()}",
+        #expect(reset == "{super.reset()ifletline=record.line,ProgressLineLog.isOn{ProgressLineLog.mark(line)}record=PhotoGridPinchRecord()"
+                         + "apartAtSecondFinger=niltookOver=false}",
                 "\(reset)")
         let pinched = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func pinched("], in: Self.grid))
         let marked = try #require(pinched.range(of: "ifProgressLineLog.isOn{ProgressLineLog.mark("), "\(pinched)")
@@ -126,6 +157,25 @@ extension PhotoGridSourceTests {
                 #expect(steps == [pinch.to], "\(pinch.scale), counted as \(counted), from \(columns) in a row: \(steps)")
             }
             columns = pinch.to
+        }
+    }
+
+    /// The grid's UI test also spreads two fingers on one photo, both on it, as a hand mostly
+    /// pinches (second review of the fix: the page's pinches have them on different photos): on
+    /// the trip's page at five in a row, far enough for the one step back to three, also counted
+    /// from a tenth of the way in, and never more (three is the last step).
+    @Test func theUITestSpreadsOnOnePhotoForOneStep() throws {
+        let zoom = try AppSource.read("App/AlbumistUITests/PhotoGridUITests+Zoom.swift")
+        let call = try #require(zoom.range(of: "photo.pinch(withScale: "), "no pinch on one photo")
+        let scale = try #require(Double(zoom[call.upperBound...].prefix { $0.isNumber || $0 == "." }))
+        #expect(zoom.contains("rowShowsPhotos(3, "), "it waits for three in a row")
+        for counted in [scale, scale / 1.1] {
+            var pinch = PhotoGridZoom.Pinch(columns: 5)
+            var steps: [Int] = []
+            for value in Array(stride(from: 1.0, through: counted, by: 0.01)) + [counted] {
+                if let next = pinch.update(scale: value) { steps.append(next) }
+            }
+            #expect(steps == [3], "\(scale), counted as \(counted), from 5 in a row: \(steps)")
         }
     }
 

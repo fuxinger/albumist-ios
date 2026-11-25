@@ -29,8 +29,9 @@ struct PhotoGridTouch {
 /// scroll view's pan, and any other pan (the swipe back over the content), waits for it to fail,
 /// so a vertical swipe scrolls as before and a sideways one over the photos selects instead of
 /// going back. The swipe back from the screen's edge always goes back: the pan waits for it
-/// (review L7). A tap never begins it: a tap still ticks one photo. One finger: a second one
-/// ends it, its ticks as they are, and is a pinch (`PhotoGridPinchRecognizer.takeOver`).
+/// (review L7). A tap never begins it: a tap still ticks one photo. One finger: two that move
+/// apart or together end it, its ticks as they are, and are a pinch
+/// (`PhotoGridPinchRecognizer.takeOver`, `stopSelecting`).
 struct PhotoGridSelectDrag: UIGestureRecognizerRepresentable {
     var isEnabled: Bool
     /// The grid's coordinate space (`PhotoGridPlace.space`).
@@ -101,7 +102,7 @@ final class PhotoGridSelectRecognizer: UIPanGestureRecognizer, UIGestureRecogniz
 
 /// Pinch to zoom: UIKit's pinch beside the scroll view's pan. Once it begins, the scroll view
 /// lets go of the fingers, so the grid changes its size where it is and does not also scroll.
-/// Two fingers on the grid are a pinch from the second finger on (`PhotoGridPinchRecognizer`).
+/// Two fingers on the grid that move apart or together are a pinch (`PhotoGridPinchRecognizer`).
 struct PhotoGridPinch: UIGestureRecognizerRepresentable {
     var isEnabled: Bool
     /// The grid's coordinate space (`PhotoGridPlace.space`).
@@ -129,6 +130,7 @@ struct PhotoGridPinch: UIGestureRecognizerRepresentable {
         switch recognizer.state {
         case .began:
             recognizer.stopScrolling()
+            recognizer.stopSelecting()
             phase = .began
         case .changed: phase = .changed
         case .ended, .cancelled, .failed: phase = .ended
@@ -141,30 +143,44 @@ struct PhotoGridPinch: UIGestureRecognizerRepresentable {
 
 /// The pinch of pinch to zoom, its own delegate: it may begin while the scroll view's pan
 /// follows the fingers (two fingers that touched a moment apart), and then stops that pan; once
-/// it runs, the scroll view's pan does not begin beside it. Two fingers on the grid are a pinch,
-/// as in Photos: the second one ends what the photos under them do with one (`takeOver`).
+/// it runs, the scroll view's pan does not begin beside it. Two fingers on the grid that move
+/// apart or together are a pinch, as in Photos: they end what the photos under them do with one
+/// (`takeOver`); two that only tap, two thumbs ticking photos, stay taps.
 final class PhotoGridPinchRecognizer: UIPinchGestureRecognizer, UIGestureRecognizerDelegate {
     /// The pan of the scroll view the grid is in, met while the pinch had not begun.
     private weak var scrollPan: UIGestureRecognizer?
+    /// The grid's drag to select, which runs beside the pinch until the pinch begins.
+    private weak var selectPan: UIGestureRecognizer?
     /// Told of each finger that touches the grid (`PhotoGridLift`).
     var touchedDown: (() -> Void)?
+    /// How far apart the first two fingers were when the second touched (pt); nil with one.
+    private var apartAtSecondFinger: CGFloat?
+    /// Whether these fingers took over already (`takeOver`, once per touch of the grid).
+    private var tookOver = false
     /// What this touch of the grid did, for a UI run's record (`PhotoGridPinchRecord`).
     private var record = PhotoGridPinchRecord()
 
-    /// The second finger on the grid takes over while the pinch has not begun (`takeOver`), right
-    /// after every gesture of these fingers heard of them, before they move: ended then, none of
-    /// them hears of them again.
+    /// How far two fingers move apart or together before they are a pinch and take over (pt):
+    /// about where UIKit's pinch itself begins; two thumbs that tap stay well within it.
+    static let takeOverSpread: CGFloat = 6
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
+        if apartAtSecondFinger == nil { apartAtSecondFinger = fingersApart() }
         if ProgressLineLog.isOn { record.touched(fingers: numberOfTouches, apart: fingersApart()) }
-        guard numberOfTouches > 1, state == .possible else { return }
-        let fingers = event.touches(for: self) ?? touches
-        Task { @MainActor [weak self] in self?.takeOver(fingers) }
     }
 
+    /// Two fingers that moved apart or together by `takeOverSpread` take over (`takeOver`), also
+    /// when the pinch began without them (a scroll that became a pinch): after every gesture of
+    /// these fingers heard of them, so none of them hears of them again once ended.
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesMoved(touches, with: event)
-        if ProgressLineLog.isOn { record.moved(apart: fingersApart(), running: state == .began || state == .changed, scale: scale) }
+        let apart = fingersApart()
+        if ProgressLineLog.isOn { record.moved(apart: apart, running: state == .began || state == .changed, scale: scale) }
+        guard !tookOver, [.possible, .began, .changed].contains(state), let apart, let start = apartAtSecondFinger,
+              abs(apart - start) >= Self.takeOverSpread else { return }
+        tookOver = true
+        takeOver(event.touches(for: self) ?? touches)
     }
 
     /// The fingers lifted: what they did goes to the record (only while a UI run asks for it).
@@ -172,6 +188,8 @@ final class PhotoGridPinchRecognizer: UIPinchGestureRecognizer, UIGestureRecogni
         super.reset()
         if let line = record.line, ProgressLineLog.isOn { ProgressLineLog.mark(line) }
         record = PhotoGridPinchRecord()
+        apartAtSecondFinger = nil
+        tookOver = false
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
@@ -180,12 +198,15 @@ final class PhotoGridPinchRecognizer: UIPinchGestureRecognizer, UIGestureRecogni
     }
 
     /// Beside the pinch run the drag to select, so a second finger reaches the pinch while a drag
-    /// runs (`takeOver` ends the drag), and the scroll view's pan until the pinch begins. Nothing
-    /// else: beside a pinch, a photo's button or its long press could open it or lift it under
-    /// the fingers; once the pinch begins, they fail.
+    /// runs (`takeOver` and `stopSelecting` end the drag), and the scroll view's pan until the
+    /// pinch begins. Nothing else: beside a pinch, a photo's button or its long press could open
+    /// it or lift it under the fingers; once the pinch begins, they fail.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        if otherGestureRecognizer is PhotoGridSelectRecognizer { return true }
+        if otherGestureRecognizer is PhotoGridSelectRecognizer {
+            selectPan = otherGestureRecognizer
+            return true
+        }
         guard state == .possible, let scrollView = otherGestureRecognizer.view as? UIScrollView,
               otherGestureRecognizer === scrollView.panGestureRecognizer else { return false }
         scrollPan = otherGestureRecognizer
@@ -200,18 +221,24 @@ final class PhotoGridPinchRecognizer: UIPinchGestureRecognizer, UIGestureRecogni
         scrollPan.isEnabled = true
     }
 
-    /// Two fingers on the grid are a pinch, never a tap, a long press or a drag: at the second
-    /// finger the gestures these fingers would start with one end (the photo's button with its
-    /// tap and pressed look, the long press's menu before it lifts, and while the grid selects
-    /// the drag, its ticks as they are), so the pinch waits for none of them to fail. Attached
-    /// with `.gesture`, the only way a representable has, it may give way to the photos' own
-    /// gestures as SwiftUI's own gestures do, and two fingers on one photo never fail them: on a
-    /// Mac they made no step (UI run 45567033486). Each is switched off and on again, which ends
-    /// it, as `stopScrolling` does; its name goes to the record.
+    /// The drag to select ends as the pinch begins, its ticks as they are (it ran beside the pinch
+    /// until then): never both at once, also when the fingers took over late or not at all.
+    func stopSelecting() {
+        guard let selectPan, selectPan.state == .began || selectPan.state == .changed else { return }
+        selectPan.isEnabled = false
+        selectPan.isEnabled = true
+    }
+
+    /// Two fingers that move apart or together are a pinch, never a tap, a long press or a drag:
+    /// the gestures these fingers started with one end (the photo's button with its tap and
+    /// pressed look, the long press's menu before it lifts, and while the grid selects the drag,
+    /// its ticks as they are), so the pinch waits for none of them to fail. Attached with
+    /// `.gesture`, the only way a representable has, it may give way to the photos' own gestures
+    /// as SwiftUI's own gestures do, and two fingers on one photo never fail them: on a Mac they
+    /// made no step (UI run 45567033486). Each is switched off and on again, which ends it, as
+    /// `stopScrolling` does; its name goes to the record once.
     private func takeOver(_ touches: Set<UITouch>) {
-        let ready = state == .possible && numberOfTouches > 1
-        if ProgressLineLog.isOn { record.tookOver = ready }
-        guard ready else { return }
+        if ProgressLineLog.isOn { record.tookOver = true }
         var seen: Set<ObjectIdentifier> = [ObjectIdentifier(self)]
         for other in touches.flatMap({ $0.gestureRecognizers ?? [] }) where seen.insert(ObjectIdentifier(other)).inserted {
             guard Self.givesWay(other) else { continue }
@@ -221,7 +248,7 @@ final class PhotoGridPinchRecognizer: UIPinchGestureRecognizer, UIGestureRecogni
         }
     }
 
-    /// Whether the second finger ends `other` (`takeOver`): the drag to select, also while it
+    /// Whether a pinch's fingers end `other` (`takeOver`): the drag to select, also while it
     /// runs; any other gesture that has not ended but a pan, so scrolling (also with two
     /// fingers, until the pinch begins) and the swipe back go on; never one of the scroll view's
     /// own (it is their delegate) or of the window (the system's).
@@ -248,8 +275,8 @@ final class PhotoGridPinchRecognizer: UIPinchGestureRecognizer, UIGestureRecogni
 /// Fingers: how many touched the grid; apart: how far apart the first two were (pt); began:
 /// their own scale when the pinch began ("-": it never began); scale: UIKit's at the end,
 /// counted from where it began; spread: their own scale at the end; stopped: the gestures the
-/// second finger ended (`takeOver`; "late": the pinch had failed before, "-": no second
-/// finger). The grid's UI test reads it when a pinch made no step.
+/// fingers ended when they moved apart or together (`takeOver`; "-": they never did). The
+/// grid's UI test reads it when a pinch made no step.
 struct PhotoGridPinchRecord {
     var fingers = 0
     /// How far apart the first two fingers were when the second touched, and at the last move.
@@ -257,8 +284,8 @@ struct PhotoGridPinchRecord {
     var now: CGFloat?
     var began: CGFloat?
     var scale: CGFloat?
-    /// Whether the second finger took over (`takeOver`), and what it ended.
-    var tookOver: Bool?
+    /// Whether the fingers took over (`takeOver`), and what they ended.
+    var tookOver = false
     var stopped: [String] = []
 
     mutating func touched(fingers count: Int, apart distance: CGFloat?) {
@@ -280,7 +307,7 @@ struct PhotoGridPinchRecord {
         guard fingers > 0 else { return nil }
         let spread = apart.flatMap { first in now.map { first > 0 ? $0 / first : 1 } }
         let distance = apart.map { "\(Int($0.rounded()))" } ?? "-"
-        let ended = tookOver.map { $0 ? "\(stopped.count) [\(stopped.joined(separator: ", "))]" : "late" } ?? "-"
+        let ended = tookOver ? "\(stopped.count) [\(stopped.joined(separator: ", "))]" : "-"
         return "grid pinch: fingers \(fingers), apart \(distance), began \(Self.text(began)), scale \(Self.text(scale)), "
             + "spread \(Self.text(spread)), stopped \(ended)"
     }

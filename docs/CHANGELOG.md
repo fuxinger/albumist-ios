@@ -3,10 +3,10 @@
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
 - 25.11. Zoom mit zwei Fingern im Raster (Design-Welle 3, DS-06b, noch in keinem Build): Zwei Finger auf einem Foto
-  in „Unsortiert“ oder in einem Vorschlag sind ab dem zweiten Finger ein Zoom: Das Foto öffnet sich nicht, bleibt
-  nicht gedrückt und hebt kein Menü an, auch wenn die Finger kurz liegen bleiben; beim Auswählen endet ein
-  laufendes Ziehen mit dem zweiten Finger, seine Haken bleiben. Scrollen und der Wisch vom Rand zurück bleiben wie
-  bisher.
+  in „Unsortiert“ oder in einem Vorschlag, die sich auseinander oder zueinander bewegen, sind ein Zoom: Das Foto
+  öffnet sich nicht, bleibt nicht gedrückt und hebt kein Menü an. Zwei Daumen, die nur tippen, bleiben zwei Tipps.
+  Beim Auswählen endet ein laufendes Ziehen, sobald der Zoom beginnt, seine Haken bleiben. Scrollen und der Wisch
+  vom Rand zurück bleiben wie bisher.
 - 25.11. App-Symbol (Design-Welle 3, noch in keinem Build): Die Hügel enden jetzt an den runden Ecken der vorderen
   Karte. Vorher ragten sie unten rechts etwa 12 und unten links 4 von 1024 Pixeln darüber hinaus, auch im großen
   Symbol im App Store.

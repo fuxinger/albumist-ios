@@ -2,6 +2,11 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. Suche nach der Wahl von Fuchs „Runder Knopf, Suche bleibt“ (Design-Welle 3, DS-12a, noch in keinem
+  Build): Die Suche ist ein eigener runder Knopf am Ende der Tab-Leiste. Ihre Wahl zeigt die Startpunkte und das
+  Suchfeld, die Tastatur kommt erst beim Tippen ins Feld, und Suchtext und Treffer bleiben beim Blick in einen
+  anderen Tab. Unter iOS 27 sitzt das Feld oben auf der Suchseite; iOS 27.2 hatte die Suche sonst als vierten Tab
+  ohne Feld gezeigt.
 - 25.11. Suche und „Analyse fertig“ nach der zweiten Prüfung (Design-Welle 3, H14, noch in keinem Build): Zurück
   auf dem Such-Tab sucht Albumist neu, wenn sich seitdem etwas geändert hat, das die Suche liest (ein ignoriertes
   Foto, ein Album, der Name eines Orts, das Zuhause, neue Ergebnisse der Analyse oder ein neuer Tag), sonst bleibt

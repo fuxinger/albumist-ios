@@ -288,12 +288,7 @@ struct PhotoGridSourceTests {
         let begins = Self.squeezed(try Self.body(["final class PhotoGridSelectRecognizer", "func gestureRecognizerShouldBegin("],
                                                  in: Self.recognizers))
         #expect(begins.contains("PhotoGridDrag.startsSelection(dx:Double(moved.x),dy:Double(moved.y))"), "\(begins)")
-        let waits = Self.squeezed(try Self.body(["final class PhotoGridSelectRecognizer", "shouldBeRequiredToFailBy"], in: Self.recognizers))
-        #expect(waits == "{otherGestureRecognizer!==self&&otherGestureRecognizerisUIPanGestureRecognizer"
-                         + "&&!(otherGestureRecognizerisUIScreenEdgePanGestureRecognizer)}", "\(waits)")
-        // The swipe back from the screen's edge is never taken: the pan waits for it (review L7).
-        let edge = Self.squeezed(try Self.body(["final class PhotoGridSelectRecognizer", "shouldRequireFailureOf"], in: Self.recognizers))
-        #expect(edge == "{otherGestureRecognizerisUIScreenEdgePanGestureRecognizer}", "\(edge)")
+        // Which gestures wait for it, and which it waits for: `theSwipesBackAndTheDrag`.
         let made = Self.squeezed(try Self.body(["struct PhotoGridSelectDrag", "func makeUIGestureRecognizer("], in: Self.recognizers))
         #expect(made.contains("recognizer.maximumNumberOfTouches=1") && made.contains("recognizer.delegate=recognizer"), "\(made)")
         // The range is the core's, from where the finger touched, given back as it shrinks.

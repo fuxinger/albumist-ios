@@ -675,6 +675,10 @@ struct ProposalDetailView: View {
         // Leaving while the album is made would look like cancelling it; it is made either way.
         .navigationBarBackButtonHidden(creating)
         .toolbarVisibility(.hidden, for: .tabBar)
+        // The system's bottom bar holds "N aus Vorschlag entfernen" only while photos are picked;
+        // left empty after, it stayed over the page's own bar, which showed and could not be
+        // tapped (UI runs 45567033486 and 45603459548).
+        .toolbarVisibility(selecting ? .visible : .hidden, for: .bottomBar)
         .toolbarColorScheme(coverIsPhoto && !pastCover ? ColorScheme.dark : nil, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) {

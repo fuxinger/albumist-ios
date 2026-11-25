@@ -248,9 +248,9 @@ final class PhotoGridUITests: XCTestCase {
     /// and the step lands without a jump, L6); a photo among the page's first rows fails the test
     /// (review Y5: at the top the scroll view cannot keep it). A trip's photos show the same size
     /// (one for both grids), and a relaunch of a UI run starts at three again. The fingers go on
-    /// the middle of the page, far apart, and pinch to 0.7 (spread to 1.4): one step each, also
-    /// where UIKit counts the scale only from where the pinch began (UI run 45567033486: 0.75 on
-    /// one photo of the left column made none). A pinch without its step says from the app's
+    /// the photo under the page's middle and pinch to 0.66 (spread to 1.55): one step each, also
+    /// where UIKit counts the scale only from where the pinch began (UI run 45603459548: XCTest's
+    /// spread of 1.4 read 1.23, short of a step). A pinch without its step says from the app's
     /// record which it was: where the fingers went, what held the pinch back, or its scale.
     func test2_TwoFingersShowThreeFiveOrSevenInARow() {
         continueAfterFailure = true
@@ -268,14 +268,14 @@ final class PhotoGridUITests: XCTestCase {
         UITestWait.screenAtRest(app, "\(test): the page at rest a few screens down")
         print("UI_FACT \(test): the first photo on screen a few screens down: '\(firstPhotoOnScreen())'")
         leaveTabAndComeBack(test, waitingFor: photos.firstMatch)
-        let five = pinchTheGrid(to: 5, by: 0.7, "to five", photos, test)
+        let five = pinchTheGrid(to: 5, by: 0.66, "to five", photos, test)
         XCTAssertTrue(five.shown, "\(test): one pinch does not show five photos in a row")
         if let held = five.held, isBelow(firstRows, held, test) { pinchedPhotoKeepsItsPlace(held, "after the page was away", test) }
         shot("pg-02-five")
-        let seven = pinchTheGrid(to: 7, by: 0.7, "to seven", photos, test)
+        let seven = pinchTheGrid(to: 7, by: 0.66, "to seven", photos, test)
         XCTAssertTrue(seven.shown, "\(test): a second pinch does not show seven photos in a row")
         shot("pg-03-seven")
-        let back = pinchTheGrid(to: 5, by: 1.4, "back to five", photos, test)
+        let back = pinchTheGrid(to: 5, by: 1.55, "back to five", photos, test)
         XCTAssertTrue(back.shown, "\(test): spreading two fingers does not go back to five photos in a row")
 
         // A trip's photos: the same grid, at the same size.

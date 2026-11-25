@@ -2,6 +2,11 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. Raster und Vorschlag nach dem vollen Mac-Lauf 262 (Design-Welle 3, noch in keinem Build): Beim Auswählen
+  auf der Seite eines Vorschlags hakt ein Finger, der seitlich über die Fotos zieht, sie wieder an; vorher hielt
+  iOS das für den Wisch zurück über den Inhalt und ging zurück. Der Wisch vom linken Rand geht weiter zurück. Nach
+  „Entfernen“ oder „Fertig“ lassen sich „Nicht jetzt“ und der gefüllte Knopf wieder antippen; vorher lag die leere
+  Leiste des Systems darüber.
 - 25.11. Zoom mit zwei Fingern im Raster (Design-Welle 3, DS-06b, noch in keinem Build): Zwei Finger auf einem Foto
   in „Unsortiert“ oder in einem Vorschlag, die sich auseinander oder zueinander bewegen, sind ein Zoom: Das Foto
   öffnet sich nicht, bleibt nicht gedrückt und hebt kein Menü an. Zwei Daumen, die nur tippen, bleiben zwei Tipps.

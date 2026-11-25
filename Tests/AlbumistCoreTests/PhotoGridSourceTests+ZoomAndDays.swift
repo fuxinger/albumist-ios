@@ -133,9 +133,10 @@ extension PhotoGridSourceTests {
 
     /// The grid's UI test pinches far enough for one step and only one (from three to five, to
     /// seven, and back to five), also when UIKit counts the scale only from where the pinch
-    /// began, a tenth of the way in (`UIPinchGestureRecognizer.scale` is applied from when the
-    /// gesture is first recognized): 0.75 then reads 0.83, short of a step, one of the causes UI
-    /// run 45567033486 leaves open (its pinch of 0.75 made none).
+    /// began (`UIPinchGestureRecognizer.scale` is applied from when the gesture is first
+    /// recognized): a pinch a tenth of the way in, a spread as UI run 45603459548 measured it
+    /// (XCTest's 1.4 read 1.23 there, short of a step: its fingers start a few points apart and
+    /// UIKit begins at about twice that).
     @Test func theUITestPinchesFarEnoughForOneStep() throws {
         let source = try AppSource.read("App/AlbumistUITests/PhotoGridUITests.swift")
         let pinches = AppSource.callSites(of: "pinchTheGrid(", in: source).compactMap { call -> (to: Int, scale: Double)? in
@@ -148,7 +149,7 @@ extension PhotoGridSourceTests {
         #expect(pinches.map(\.to) == [5, 7, 5], "\(pinches)")
         var columns = PhotoGridZoom.standard
         for pinch in pinches {
-            for counted in [pinch.scale, pinch.scale < 1 ? pinch.scale / 0.9 : pinch.scale / 1.1] {
+            for counted in [pinch.scale, pinch.scale < 1 ? pinch.scale / 0.9 : pinch.scale * 0.85] {
                 var zoom = PhotoGridZoom.Pinch(columns: columns)
                 var steps: [Int] = []
                 for scale in Array(stride(from: 1.0, through: counted, by: counted < 1 ? -0.01 : 0.01)) + [counted] {
@@ -160,13 +161,24 @@ extension PhotoGridSourceTests {
         }
     }
 
+    /// The grid's UI test pinches on the photo under the page's middle, not on the page: on the
+    /// page XCTest's fingers of a pinch start as far apart as the page is large, and none of them
+    /// reached the grid (UI run 45603459548: both pinches to 0.7 left no record of a finger on it).
+    @Test func theUITestPinchesOnAPhoto() throws {
+        let zoom = try AppSource.read("App/AlbumistUITests/PhotoGridUITests+Zoom.swift")
+        let body = try #require(zoom.range(of: "func pinchTheGrid(").map { String(zoom[$0.upperBound...].prefix(3000)) })
+        #expect(body.contains("photo.pinch(withScale: scale, velocity: scale < 1 ? -1 : 1)"), "\(body)")
+        #expect(!body.contains("page.pinch("), "\(body)")
+    }
+
     /// The grid's UI test also spreads two fingers on one photo, both on it, as a hand mostly
     /// pinches (second review of the fix: the page's pinches have them on different photos): on
     /// the trip's page at five in a row, far enough for the one step back to three, also counted
     /// from a tenth of the way in, and never more (three is the last step).
     @Test func theUITestSpreadsOnOnePhotoForOneStep() throws {
         let zoom = try AppSource.read("App/AlbumistUITests/PhotoGridUITests+Zoom.swift")
-        let call = try #require(zoom.range(of: "photo.pinch(withScale: "), "no pinch on one photo")
+        let spread = try #require(zoom.range(of: "func spreadOnePhoto("), "no spread on one photo")
+        let call = try #require(zoom.range(of: "photo.pinch(withScale: ", range: spread.upperBound..<zoom.endIndex), "no pinch on one photo")
         let scale = try #require(Double(zoom[call.upperBound...].prefix { $0.isNumber || $0 == "." }))
         #expect(zoom.contains("rowShowsPhotos(3, "), "it waits for three in a row")
         for counted in [scale, scale / 1.1] {

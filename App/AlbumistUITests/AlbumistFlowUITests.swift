@@ -2622,7 +2622,9 @@ final class AlbumistFlowUITests: XCTestCase {
         if !back {
             print("UI_FACT the page's bar after taking the photo out: remove \(remove.exists) (hittable \(remove.exists && remove.isHittable)), "
                   + "\"Nicht jetzt\" \(notNow.exists) (hittable \(notNow.exists && notNow.isHittable), enabled \(notNow.exists && notNow.isEnabled)), "
-                  + "main button \(create.exists), \"Auswählen\" \(app.buttons["proposalPhotos.select"].exists)")
+                  + "main button \(create.exists), \"Auswählen\" \(app.buttons["proposalPhotos.select"].exists); "
+                  + "\"Nicht jetzt\" at \(notNow.exists ? "\(notNow.frame)" : "-"), bottom bars "
+                  + "\(app.toolbars.allElementsBoundByIndex.map { "\($0.frame) hittable \($0.isHittable)" })")
         }
         return back
     }

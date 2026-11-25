@@ -22,12 +22,12 @@ extension PhotoGridUITests {
         var held: Seen?
     }
 
-    /// Two fingers on the middle of the page (the scroll view of the photos), not on one photo:
-    /// XCTest puts them as far apart as the element is large, so UIKit's small start of a pinch,
-    /// from where its scale counts, takes little of it (UI run 45567033486: 0.75 on one photo of
-    /// 133 pt made no step). The photo under the middle, or the nearest one, is the one that stays
-    /// under the fingers. Without the step the app's record of the pinch says why
-    /// (`explainPinch`).
+    /// Two fingers on the photo under the middle of the page (or the nearest one), which stays
+    /// under them. Not on the page itself: there XCTest starts a pinch's fingers as far apart as
+    /// the page is large, and none of them reached the grid (UI run 45603459548: both pinches to
+    /// 0.7 left no record of a finger on it). UIKit counts the scale only from where the pinch
+    /// began, so the scales leave room for that (`PhotoGridSourceTests`). Without the step the
+    /// app's record of the pinch says why (`explainPinch`).
     func pinchTheGrid(to wanted: Int, by scale: CGFloat, _ what: String, _ photos: XCUIElementQuery, _ test: String) -> Pinched {
         let page = app.scrollViews.containing(.button, identifier: "library.photo").firstMatch
         guard page.waitForExistence(timeout: 5) else {
@@ -36,11 +36,15 @@ extension PhotoGridUITests {
         }
         let frame = page.frame
         let middle = CGPoint(x: frame.midX, y: frame.midY)
-        let held = heldPhoto(at: middle)
-        print("UI_STEP_OK \(test): pinch \(scale) on the page (\(Int(frame.width)) x \(Int(frame.height)) pt) at its middle "
-              + "\(Int(middle.x)),\(Int(middle.y)), over '\(held?.label ?? "no photo")' (\(what))")
+        guard let held = heldPhoto(at: middle) else {
+            XCTFail("\(test): no photo on screen to pinch (\(what))")
+            return Pinched(shown: false, held: nil)
+        }
+        let photo = photos.matching(NSPredicate(format: "label == %@", held.label)).firstMatch
+        print("UI_STEP_OK \(test): pinch \(scale) on the photo '\(held.label)' (\(Int(held.frame.width)) pt) "
+              + "at \(Int(held.frame.midX)),\(Int(held.frame.midY)), under the page's middle \(Int(middle.x)),\(Int(middle.y)) (\(what))")
         let since = Date()
-        page.pinch(withScale: scale, velocity: scale < 1 ? -1 : 1)
+        photo.pinch(withScale: scale, velocity: scale < 1 ? -1 : 1)
         let shown = rowShowsPhotos(wanted, "after the pinch \(what)", photos, test)
         explainPinch(what, since: since, stepped: shown, test)
         return Pinched(shown: shown, held: held)

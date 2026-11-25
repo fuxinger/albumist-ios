@@ -125,6 +125,18 @@ struct SuggestionPageWordsTests {
         #expect(album.upperBound < inPage.lowerBound && inPage.upperBound < photos.lowerBound)
     }
 
+    /// After photos were picked and taken out (or "Fertig"), the page's own bar ("Nicht jetzt"
+    /// and the filled button) is in reach again: the system's bottom bar that held "N aus
+    /// Vorschlag entfernen" is shown only while photos are picked. Without it the empty bar stayed
+    /// over the page's bar (UI runs 45567033486 and 45603459548: "Nicht jetzt" there, drawn, and
+    /// not hittable).
+    @Test func theBottomBarIsShownOnlyWhilePhotosArePicked() throws {
+        let page = try Self.body(["struct ProposalDetailView", "var body: some View"], in: Self.views)
+        #expect(page.contains(".toolbarVisibility(selecting ? .visible : .hidden, for: .bottomBar)"), "\(page)")
+        let inset = try #require(page.range(of: ".safeAreaInset(edge: .bottom, spacing: 0) {"))
+        #expect(page[inset.upperBound...].prefix(40).contains("if !selecting {"))
+    }
+
     /// Review B, 12: back from its own preview, the page closes only when that preview's plan
     /// ran, not when any plan ended meanwhile (one started on another tab).
     @Test func onlyItsOwnPreviewsRunClosesThePage() throws {

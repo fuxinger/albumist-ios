@@ -84,19 +84,44 @@ final class PhotoGridSelectRecognizer: UIPanGestureRecognizer, UIGestureRecogniz
         return PhotoGridDrag.startsSelection(dx: Double(moved.x), dy: Double(moved.y))
     }
 
-    /// The scroll view's pan and the swipe back over the content wait until this one failed.
-    /// While the grid does not select it is switched off, and nothing waits for it.
+    /// The scroll view's pan and the swipe back over the content (iOS 26's
+    /// `interactiveContentPopGestureRecognizer`) wait until this one failed. While the grid does
+    /// not select it is switched off, and nothing waits for it.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        otherGestureRecognizer !== self && otherGestureRecognizer is UIPanGestureRecognizer
-            && !(otherGestureRecognizer is UIScreenEdgePanGestureRecognizer)
+        otherGestureRecognizer !== self
+            && (otherGestureRecognizer is UIPanGestureRecognizer || otherGestureRecognizer === swipesBack().content)
+            && !isEdgeSwipeBack(otherGestureRecognizer)
     }
 
     /// The swipe back from the screen's edge is never taken: this one waits for it to fail, so a
     /// finger from the left edge goes back, also over the photos while selecting (review L7).
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        otherGestureRecognizer is UIScreenEdgePanGestureRecognizer
+        isEdgeSwipeBack(otherGestureRecognizer)
+    }
+
+    /// Whether `other` is the swipe back from the screen's edge: the navigation's own
+    /// (`interactivePopGestureRecognizer`), or another edge swipe, but never the swipe back over
+    /// the content. By its class alone the content's swipe back counted as the edge's, and a
+    /// sideways drag over a trip's photos went back instead of ticking them (UI run 45603459548).
+    private func isEdgeSwipeBack(_ other: UIGestureRecognizer) -> Bool {
+        let pops = swipesBack()
+        if other === pops.edge { return true }
+        return other is UIScreenEdgePanGestureRecognizer && other !== pops.content
+    }
+
+    /// The swipes back of the navigation the grid's page is in: from the edge, and over the
+    /// content; nil without one (the tabs' first pages).
+    private func swipesBack() -> (edge: UIGestureRecognizer?, content: UIGestureRecognizer?) {
+        var responder: UIResponder? = view
+        while let next = responder {
+            if let controller = next as? UIViewController, let navigation = controller.navigationController {
+                return (navigation.interactivePopGestureRecognizer, navigation.interactiveContentPopGestureRecognizer)
+            }
+            responder = next.next
+        }
+        return (nil, nil)
     }
 }
 

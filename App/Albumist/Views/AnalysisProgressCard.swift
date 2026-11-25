@@ -629,8 +629,9 @@ struct AnalysisFinishedView: View {
 
 /// "Analyse fertig" for VoiceOver, once per finished run (design wave 3, H14; the rule is
 /// `FinishAnnouncement`). One per app, outside the card, which is made anew between the end of a
-/// run and "Analyse fertig": the model tells it how each run ended (`AppModel`, with
-/// `FinishMoment`), the finished card when it is first seen (`AnalysisFinishedView.play`).
+/// run and "Analyse fertig": the model tells it, with `FinishMoment`, when a run brings a new
+/// finish and what the end's wait showed (`AppModel`, where the notification is decided), the
+/// finished card when it is first seen (`AnalysisFinishedView.play`).
 @MainActor
 final class FinishAnnouncementStore {
     static let shared = FinishAnnouncementStore()
@@ -639,8 +640,13 @@ final class FinishAnnouncementStore {
     private init() {}
 
     /// The end of a run in the app, decided before it waits for the overview.
-    func runEnded(finished: Bool, celebrates: Bool, inBackground: Bool) {
-        rule.runEnded(finished: finished, celebrates: celebrates, inBackground: inBackground)
+    func runEnded(finished: Bool, celebrates: Bool) {
+        rule.runEnded(finished: finished, celebrates: celebrates)
+    }
+
+    /// What the finish moment showed after the wait: a notification said it, or the card owes it.
+    func afterWait(_ shown: FinishMoment.Shown) {
+        rule.afterWait(card: shown.card, notification: shown.notification)
     }
 
     /// The finished card is seen for the first time for its run (its check mark is claimed):

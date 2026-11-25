@@ -293,7 +293,7 @@ struct AlbumScreen: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text(model.creationDates[photo]?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+        .accessibilityLabel(Text(AssetThumbnail.spokenDate(model.creationDates[photo], facts: model.factsByID[photo])))
         .accessibilityIdentifier("album.photo")
         .photoMenu(photo, place: .album, side: Self.photoSide) { action in
             perform(action, on: photo, ids: ids)

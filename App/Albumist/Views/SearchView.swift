@@ -232,7 +232,7 @@ struct SearchView: View {
         }
         .buttonStyle(.plain)
         .disabled(hit == nil)
-        .accessibilityLabel(Text(Self.spokenDate(hit)))
+        .accessibilityLabel(Text(AssetThumbnail.spokenDate(hit?.asset.creationDate, facts: hit)))
         .accessibilityIdentifier("search.result")
         // The long press (DS-06a): the photo larger, with what a hit offers.
         .photoMenu(id, place: .search, side: Self.photoSide, available: hit != nil) { action in
@@ -288,16 +288,6 @@ struct SearchView: View {
 /// states and the calm tiles while hits load (apart from the struct's body, SwiftLint's type
 /// body length).
 extension SearchView {
-    /// The photo's date and time on the clock where it was taken, as the grids and the photo
-    /// view's title say it (decision of 19.11.2026, "Ortszeit am Aufnahmeort wie Apple Fotos");
-    /// before, a result told the iPhone's clock. "Foto" before Albumist knows the photo (its cell
-    /// waits).
-    private static func spokenDate(_ facts: AssetFacts?) -> String {
-        guard let facts, let date = facts.asset.creationDate else { return String(localized: "Foto") }
-        let zone = InboxDays.clock(of: facts, homeZone: nil, currentZone: .current)
-        return LocalTime.wallClock(date, in: zone).formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: .gmt))
-    }
-
     /// Nothing matched every term: the search left the least important ones out and says so.
     private var relaxedNote: some View {
         Label {

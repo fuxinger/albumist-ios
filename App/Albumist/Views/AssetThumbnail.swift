@@ -127,6 +127,20 @@ struct AssetThumbnail: View {
     }
 }
 
+extension AssetThumbnail {
+    /// What a photo's cell is called for VoiceOver outside the day grids (a search result, an
+    /// album's photo): its date and time on the clock where it was taken, as the grids
+    /// (`PhotoGrid`) and the photo view's title say it (decision of 19.11.2026, "Ortszeit am
+    /// Aufnahmeort wie Apple Fotos"); before, these cells told the iPhone's clock. Facts without a
+    /// zone of their own and a photo Albumist has no facts of yet count on the iPhone's clock
+    /// (`InboxDays.clock`). "Foto" without a date.
+    static func spokenDate(_ date: Date?, facts: AssetFacts?) -> String {
+        guard let date else { return String(localized: "Foto") }
+        let zone = InboxDays.clock(of: facts, homeZone: nil, currentZone: .current)
+        return LocalTime.wallClock(date, in: zone).formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, timeZone: .gmt))
+    }
+}
+
 /// The ground of a thumbnail while its photo comes (design wave 3, DS-18): the card with a soft
 /// wash of the accent, top-leading to bottom-trailing, the family of the covers' placeholder
 /// (`CoverPhoto`), never the flat grey slab of before; a little stronger in dark mode and with

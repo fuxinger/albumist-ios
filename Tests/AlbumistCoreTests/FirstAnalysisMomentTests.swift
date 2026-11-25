@@ -22,8 +22,8 @@ struct FirstAnalysisMomentTests {
     /// library (no analysis completed since `AnalysisMarker.reset`), not a check for new photos.
     static func end(_ moment: inout FirstAnalysisMoment, finished: Bool = true, celebrates: Bool = true,
                     wholeLibrary: Bool = true, fullAccess: Bool = true, onScreen: Bool = true, after seconds: TimeInterval = 0) {
-        moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, fullAccess: fullAccess,
-                        onScreen: onScreen, at: start.addingTimeInterval(seconds))
+        moment.runEnded(FirstAnalysisMoment.Run(wholeLibrary: wholeLibrary, fullAccess: fullAccess), finished: finished,
+                        celebrates: celebrates, onScreen: onScreen, at: start.addingTimeInterval(seconds))
     }
 
     static func at(_ seconds: TimeInterval) -> Date { start.addingTimeInterval(seconds) }

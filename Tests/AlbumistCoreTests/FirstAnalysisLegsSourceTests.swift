@@ -52,12 +52,15 @@ struct FirstAnalysisLegsSourceTests {
             let told = try #require(run.range(of: follower), "\(follower)")
             #expect(decided.upperBound < told.lowerBound, "\(follower)")
         }
-        // A leg of the first analysis while no analysis was completed, going on from the resume position.
+        // A leg that counts when the run may bring the moment (what it analyses, the same run as at
+        // its end), going on from the resume position.
         let store = try Source.code(Source.store)
         let begun = try Source.body(["extension AppModel", "func firstAnalysisLegStarted()"], in: store)
-        #expect(begun.contains("legStarted(firstAnalysis: !AnalysisMarker.completedOnce, goesOn: analysis.resumeFrom != nil)"), "\(begun)")
-        let start = try Source.body(["final class FirstAnalysisMomentStore", "func legStarted(firstAnalysis: Bool, goesOn: Bool)"], in: store)
-        #expect(start.contains("legs.started(firstCompletion: firstAnalysis && moment.firstCompletionAhead, goesOn: goesOn)"), "\(start)")
+        #expect(begun.contains("FirstAnalysisMomentStore.shared.legStarted(firstAnalysisRun, goesOn: analysis.resumeFrom != nil)"),
+                "\(begun)")
+        let start = try Source.body(["final class FirstAnalysisMomentStore", "func legStarted(_ run: FirstAnalysisMoment.Run, goesOn: Bool)"],
+                                    in: store)
+        #expect(start.contains("legs.started(mayBringMoment: moment.mayBeBrought(by: run), goesOn: goesOn)"), "\(start)")
     }
 
     /// The legs live in `UserDefaults` beside the moment, under keys of their own: read at launch

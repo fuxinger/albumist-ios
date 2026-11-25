@@ -68,10 +68,10 @@ final class FirstAnalysisMomentStore {
     /// completed its analysis before this version kept the moment.
     func launched() {}
 
-    /// The end of a run in the app (`AppModel.firstAnalysisRunEnded`).
-    func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, fullAccess: Bool, onScreen: Bool) {
+    /// The end of a run in the app (`AppModel.firstAnalysisRunEnded`): what it analysed (`run`).
+    func runEnded(_ run: FirstAnalysisMoment.Run, finished: Bool, celebrates: Bool, onScreen: Bool) {
         guard finished else { return }
-        moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, fullAccess: fullAccess, onScreen: onScreen, at: Date())
+        moment.runEnded(run, finished: finished, celebrates: celebrates, onScreen: onScreen, at: Date())
         keep()
     }
 
@@ -85,11 +85,11 @@ final class FirstAnalysisMomentStore {
         keep()
     }
 
-    /// A run in the app starts (`AppModel.firstAnalysisLegStarted`): a leg of the first analysis
-    /// when `firstAnalysis` (no analysis completed since `AnalysisMarker.reset`) and the first
-    /// completion on this installation is still ahead; `goesOn`: from the resume position.
-    func legStarted(firstAnalysis: Bool, goesOn: Bool) {
-        legs.started(firstCompletion: firstAnalysis && moment.firstCompletionAhead, goesOn: goesOn)
+    /// A run in the app starts (`AppModel.firstAnalysisLegStarted`): what it analyses (`run`),
+    /// a leg that counts with the legs before it when it may bring the moment
+    /// (`FirstAnalysisMoment.mayBeBrought`); `goesOn`: from the resume position.
+    func legStarted(_ run: FirstAnalysisMoment.Run, goesOn: Bool) {
+        legs.started(mayBringMoment: moment.mayBeBrought(by: run), goesOn: goesOn)
         keepLegs(exactly: true)
     }
 
@@ -178,24 +178,28 @@ extension AppModel {
     /// background (second review, K7): Control Center, an alert or a call banner in front leave
     /// the scene inactive, and the card claims the moment once it is active again
     /// (`FirstAnalysisMomentHeader`); gone to the background before, it is not shown later.
-    /// Whether it analysed the library as a whole, from the marker before this run's end sets it:
-    /// no analysis completed since `AnalysisMarker.reset` (the first one, "Analyse neu aufbauen",
-    /// another part of the library), not a check for new photos (verification review V6); and
-    /// whether every photo is allowed as it ends: after a quick first analysis of only the shared
-    /// photos, the first such run analysed the rest of the library (K7's case).
+    /// What it analysed is `firstAnalysisRun`.
     func firstAnalysisRunEnded(finished: Bool, celebrates: Bool) {
-        FirstAnalysisMomentStore.shared.runEnded(finished: finished, celebrates: celebrates,
-                                                 wholeLibrary: !AnalysisMarker.completedOnce,
-                                                 fullAccess: access == .full,
+        FirstAnalysisMomentStore.shared.runEnded(firstAnalysisRun, finished: finished, celebrates: celebrates,
                                                  onScreen: UIApplication.shared.applicationState != .background)
     }
 
     /// A run in the app starts, with its clock (`beginCard`, after the resume position was read):
-    /// a leg of the first analysis while no analysis was completed (`FirstAnalysisLegs`,
-    /// verification review X9), which goes on with the legs before it when the run goes on from
-    /// the resume position (`analysis.resumeFrom`, read from `AnalysisMarker.unfinished`).
+    /// a leg that counts with the legs before it when the run may bring the moment
+    /// (`FirstAnalysisLegs`, verification review X9) and goes on from the resume position
+    /// (`analysis.resumeFrom`, read from `AnalysisMarker.unfinished`).
     func firstAnalysisLegStarted() {
-        FirstAnalysisMomentStore.shared.legStarted(firstAnalysis: !AnalysisMarker.completedOnce, goesOn: analysis.resumeFrom != nil)
+        FirstAnalysisMomentStore.shared.legStarted(firstAnalysisRun, goesOn: analysis.resumeFrom != nil)
+    }
+
+    /// What the moment asks of a run as it starts and as it ends (`FirstAnalysisMoment.Run`).
+    /// Whether it analyses the library as a whole, from the marker before this run's end sets it:
+    /// no analysis completed since `AnalysisMarker.reset` (the first one, "Analyse neu aufbauen",
+    /// another part of the library), not a check for new photos (verification review V6); and
+    /// whether every photo is allowed: after a quick first analysis of only the shared photos,
+    /// the first such run analyses the rest of the library (K7's case).
+    private var firstAnalysisRun: FirstAnalysisMoment.Run {
+        FirstAnalysisMoment.Run(wholeLibrary: !AnalysisMarker.completedOnce, fullAccess: access == .full)
     }
 
     /// The run works, `since` its start; `showedBar`: the card showed it as a full analysis. Told

@@ -104,16 +104,20 @@ struct FirstAnalysisMomentSourceTests {
     @Test func aQuickFirstAnalysisWaitsAWeekForTheWholeLibrary() throws {
         let store = try Self.code(Self.store)
         let tell = try Self.body(["extension AppModel", "func firstAnalysisRunEnded("], in: store)
-        #expect(tell.contains("wholeLibrary: !AnalysisMarker.completedOnce"), "\(tell)")
-        // Every photo readable as the run ends: after a quick first analysis of only the shared
-        // photos, the first such run analyses the rest of the library (K7's case).
-        #expect(tell.contains("fullAccess: access == .full"), "\(tell)")
+        #expect(tell.contains("FirstAnalysisMomentStore.shared.runEnded(firstAnalysisRun, finished: finished, celebrates: celebrates,"),
+                "\(tell)")
+        // The same run as it starts (the legs, `FirstAnalysisLegsSourceTests`) and as it ends. Every
+        // photo readable: after a quick first analysis of only the shared photos, the first such
+        // run analyses the rest of the library (K7's case).
+        let run = try Self.body(["extension AppModel", "private var firstAnalysisRun: FirstAnalysisMoment.Run"], in: store)
+        #expect(run.contains("FirstAnalysisMoment.Run(wholeLibrary: !AnalysisMarker.completedOnce, fullAccess: access == .full)"),
+                "\(run)")
         let ended = try Self.body(["final class FirstAnalysisMomentStore",
-                                   "func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, fullAccess: Bool, onScreen: Bool)"],
+                                   "func runEnded(_ run: FirstAnalysisMoment.Run, finished: Bool, celebrates: Bool, onScreen: Bool)"],
                                   in: store)
         #expect(ended.contains("guard finished else { return }"), "\(ended)")
-        #expect(ended.contains("moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, "
-                               + "fullAccess: fullAccess, onScreen: onScreen, at: Date())"), "\(ended)")
+        #expect(ended.contains("moment.runEnded(run, finished: finished, celebrates: celebrates, onScreen: onScreen, at: Date())"),
+                "\(ended)")
         let type = try Self.body(["final class FirstAnalysisMomentStore"], in: store)
         #expect(type.contains("private static let firstCompletedKey = \"analysis.firstFinishMoment.firstCompleted\""), "\(type)")
         let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)

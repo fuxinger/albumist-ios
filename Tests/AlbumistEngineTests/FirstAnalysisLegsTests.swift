@@ -14,6 +14,8 @@ import Testing
 struct FirstAnalysisLegsTests {
     typealias Leg = FirstAnalysisLegs.Leg
     static let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
+    /// A run of the library as a whole, every photo allowed: the first analysis.
+    static let whole = FirstAnalysisMoment.Run(wholeLibrary: true, fullAccess: true)
 
     /// What `AppModel` decides at the end of a run with what the legs counted.
     static func celebrates(_ counted: Leg, finished: Bool = true) -> Bool {
@@ -24,7 +26,7 @@ struct FirstAnalysisLegsTests {
     /// One run as `AppModel` tells it: started, a report halfway, ended after `seconds`.
     static func run(_ legs: inout FirstAnalysisLegs, _ seconds: Double, showedBar: Bool = true, finished: Bool,
                     firstCompletion: Bool = true, goesOn: Bool = true) -> Leg {
-        legs.started(firstCompletion: firstCompletion, goesOn: goesOn)
+        legs.started(mayBringMoment: firstCompletion, goesOn: goesOn)
         legs.runs(Leg(seconds: seconds / 2, showedBar: showedBar))
         return legs.ended(Leg(seconds: seconds, showedBar: showedBar), finished: finished)
     }
@@ -43,8 +45,7 @@ struct FirstAnalysisLegsTests {
         #expect(last == Leg(seconds: 3620, showedBar: true))
         #expect(Self.celebrates(last))
         #expect(!Self.celebrates(Leg(seconds: 20, showedBar: true)), "the last leg alone is celebrated")
-        moment.runEnded(finished: true, celebrates: Self.celebrates(last), wholeLibrary: true, fullAccess: true,
-                        onScreen: true, at: Self.start)
+        moment.runEnded(Self.whole, finished: true, celebrates: Self.celebrates(last), onScreen: true, at: Self.start)
         #expect(moment.isDue(at: Self.start) && moment.kept == .spent)
         // Done with the first completion.
         #expect(legs.kept == .none && !legs.counting)
@@ -58,8 +59,7 @@ struct FirstAnalysisLegsTests {
         let only = Self.run(&legs, 20, finished: true, goesOn: false)
         #expect(only == Leg(seconds: 20, showedBar: true))
         #expect(!Self.celebrates(only))
-        moment.runEnded(finished: true, celebrates: Self.celebrates(only), wholeLibrary: true, fullAccess: true,
-                        onScreen: true, at: Self.start)
+        moment.runEnded(Self.whole, finished: true, celebrates: Self.celebrates(only), onScreen: true, at: Self.start)
         #expect(!moment.isDue(at: Self.start) && moment.kept == .owed && moment.firstCompleted == Self.start)
         #expect(!moment.firstCompletionAhead)
     }
@@ -100,7 +100,7 @@ struct FirstAnalysisLegsTests {
     /// is kept (with the resume position), and the next launch goes on with it.
     @Test func aLegCutOffWithoutItsEndStillCounts() {
         var legs = FirstAnalysisLegs()
-        legs.started(firstCompletion: true, goesOn: false)
+        legs.started(mayBringMoment: true, goesOn: false)
         legs.runs(Leg(seconds: 25, showedBar: true))
         legs.runs(Leg(seconds: 40, showedBar: true))
         #expect(legs.kept == Leg(seconds: 40, showedBar: true))

@@ -2547,22 +2547,8 @@ final class AlbumistFlowUITests: XCTestCase {
             return
         }
 
-        guard tap(UITestScreens.SuggestionPage.selectPhotos(app), "select a photo to take out", timeout: 5) else { return }
-        guard let photo = UITestScreens.SuggestionPage.photoInReach(app) else {
-            print("UI_STEP_MISSING a photo of the suggestion in reach")
-            XCTFail("No photo of the suggestion came clear of the bars to be picked")
-            return
-        }
-        photo.tap()
+        guard takeOnePhotoOut() else { return }
         let remove = app.buttons["proposalPhotos.remove"]
-        // The button names one photo and is in reach: no tab bar over it (the page hides it).
-        let free = UITestWait.until("remove button free to tap", timeout: 5) {
-            remove.exists && remove.isEnabled && remove.label.hasPrefix("1 ") && remove.isHittable && !tabBarHittable()
-        }
-        shot("08e-remove-from-suggestion")
-        guard free else { return }
-        remove.tap()
-        guard tap(app.buttons["Entfernen"], "confirm taking the photo out", timeout: 5) else { return }
 
         var after: Int?
         let fewer = UITestWait.until("suggestion has one photo less", timeout: 15) {
@@ -2580,5 +2566,26 @@ final class AlbumistFlowUITests: XCTestCase {
         XCTAssertTrue(barBack, "After taking a photo out, the page's bar (\"Nicht jetzt\" and the filled button) did not come back")
         XCTAssertFalse(tabBarHittable(), "The tab bar shows on the suggestion's page after taking a photo out (it is hidden there for good)")
         shot("08f-photo-taken-out")
+    }
+
+    /// `testRemovePhotoFromSuggestion`: selects one photo of the suggestion in reach, taps
+    /// "1 aus Vorschlag entfernen" once it is free to tap and confirms. False when a step failed.
+    private func takeOnePhotoOut() -> Bool {
+        guard tap(UITestScreens.SuggestionPage.selectPhotos(app), "select a photo to take out", timeout: 5) else { return false }
+        guard let photo = UITestScreens.SuggestionPage.photoInReach(app) else {
+            print("UI_STEP_MISSING a photo of the suggestion in reach")
+            XCTFail("No photo of the suggestion came clear of the bars to be picked")
+            return false
+        }
+        photo.tap()
+        let remove = app.buttons["proposalPhotos.remove"]
+        // The button names one photo and is in reach: no tab bar over it (the page hides it).
+        let free = UITestWait.until("remove button free to tap", timeout: 5) {
+            remove.exists && remove.isEnabled && remove.label.hasPrefix("1 ") && remove.isHittable && !tabBarHittable()
+        }
+        shot("08e-remove-from-suggestion")
+        guard free else { return false }
+        remove.tap()
+        return tap(app.buttons["Entfernen"], "confirm taking the photo out", timeout: 5)
     }
 }

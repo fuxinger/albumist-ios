@@ -1018,6 +1018,20 @@ final class DeviceConditionUITests: XCTestCase {
 
     // MARK: 4 Unreadable, iCloud only, offline
 
+    /// `test04_UnreadableICloudOfflineComplete`: countries come from the offline map, at least
+    /// eight in the atlas teaser.
+    private func expectOfflineAtlas() {
+        let teaser = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Dein Reise-Atlas")).firstMatch
+        if teaser.waitForExistence(timeout: 10), let label = try? teaser.snapshot().label {
+            print("UI_FACT atlas offline \(label)")
+            let countries = label.firstMatch(of: #/(\d+) Länder/#).flatMap { Int($0.1) } ?? 0
+            XCTAssertGreaterThanOrEqual(countries, 8, "Offline the atlas knows too few countries: \(label)")
+        } else {
+            print("UI_STEP_MISSING atlas offline")
+            XCTFail("No travel atlas without network")
+        }
+    }
+
     /// Photos without a readable preview yet (still syncing), documents only in iCloud and no
     /// network: the analysis still completes, says how many photos it could not read, places
     /// come from the offline map and the rest waits. No error, no loop. Back online with the
@@ -1057,16 +1071,7 @@ final class DeviceConditionUITests: XCTestCase {
         let quiet = waitStable("no error loop offline", timeout: 30, stableChecks: 6) { analysisIdle && !app.alerts.firstMatch.exists }
         XCTAssertTrue(quiet, "Offline the analysis kept restarting or showed errors")
         XCTAssertFalse(app.buttons["Fortsetzen"].exists, "Offline the analysis ended as paused")
-        // Countries come from the offline map.
-        let teaser = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Dein Reise-Atlas")).firstMatch
-        if teaser.waitForExistence(timeout: 10), let label = try? teaser.snapshot().label {
-            print("UI_FACT atlas offline \(label)")
-            let countries = label.firstMatch(of: #/(\d+) Länder/#).flatMap { Int($0.1) } ?? 0
-            XCTAssertGreaterThanOrEqual(countries, 8, "Offline the atlas knows too few countries: \(label)")
-        } else {
-            print("UI_STEP_MISSING atlas offline")
-            XCTFail("No travel atlas without network")
-        }
+        expectOfflineAtlas()
 
         // Online again and every preview readable: "Neu prüfen" runs calmly. A photo that could
         // not be read is tried again only an hour later (ContentAnalysis.retrySpacing, since

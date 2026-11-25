@@ -16,18 +16,18 @@ import UIKit
 /// PurchaseStoreKitTests.
 @MainActor
 final class AlbumistLockedUITests: XCTestCase {
-    private var app = XCUIApplication()
+    var app = XCUIApplication()
 
-    private func button(_ text: String) -> XCUIElement {
+    func button(_ text: String) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
-    private func anything(_ text: String) -> XCUIElement {
+    func anything(_ text: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
     @discardableResult
-    private func tap(_ element: XCUIElement, _ step: String, timeout: TimeInterval = 15) -> Bool {
+    func tap(_ element: XCUIElement, _ step: String, timeout: TimeInterval = 15) -> Bool {
         guard element.waitForExistence(timeout: timeout) else {
             print("UI_STEP_MISSING \(step)")
             XCTFail("Missing: \(step)")
@@ -44,7 +44,7 @@ final class AlbumistLockedUITests: XCTestCase {
     }
 
     /// What is on screen, as base64 chunks in the log (artifacts are not reachable everywhere).
-    private func shot(_ name: String) {
+    func shot(_ name: String) {
         let image = XCUIScreen.main.screenshot().image
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1.5
@@ -114,56 +114,6 @@ final class AlbumistLockedUITests: XCTestCase {
         let idle = UITestWait.holds(timeout: 120) { UITestScreens.Analysis.isIdle(app) }
         print(idle ? "UI_STEP_OK \(step)" : "UI_STEP_MISSING \(step)")
         return idle
-    }
-
-    /// The number of a row made of a title and a number, maybe with a word after it: the plan's
-    /// summary (PlanReviewView.row, combined into one element: "Neue Alben, 3") or Settings'
-    /// "Noch kostenlos" (LabeledContent: "1 Alben" as the element's value, or combined). Should
-    /// the two come as elements of their own, the number is the text on the title's line. nil
-    /// when no such row is there within `timeout`.
-    private func rowCount(_ title: String, timeout: TimeInterval) -> Int? {
-        func number(_ text: some StringProtocol) -> Int? {
-            let plain = text.replacingOccurrences(of: ".", with: "")
-            guard let m = plain.wholeMatch(of: #/[,:\s]*(\d+)(?:\s+\p{L}+)?\s*/#) else { return nil }
-            return Int(m.1)
-        }
-        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", title))
-        if timeout > 0 { _ = rows.firstMatch.waitForExistence(timeout: timeout) }
-        var titleFrame: CGRect?
-        for row in rows.allElementsBoundByIndex {
-            guard let snapshot = try? row.snapshot() else { continue }
-            if let n = number(snapshot.label.dropFirst(title.count)) { return n }
-            if snapshot.label == title {
-                if let value = snapshot.value as? String, let n = number(value) { return n }
-                titleFrame = snapshot.frame
-            }
-        }
-        guard let line = titleFrame else { return nil }
-        for text in app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+( \\p{L}+)?")).allElementsBoundByIndex {
-            guard let snapshot = try? text.snapshot(), snapshot.frame.midY >= line.minY, snapshot.frame.midY <= line.maxY,
-                  snapshot.frame.minX > line.maxX, let n = number(snapshot.label) else { continue }
-            return n
-        }
-        return nil
-    }
-
-    /// "Noch kostenlos: N Alben" in Settings (SettingsView, section "Vollversion"), opened from
-    /// the start page and closed again. nil when it cannot be read.
-    private func freeAlbumsLeftInSettings() -> Int? {
-        guard tap(app.buttons["Einstellungen"], "settings for the free albums (locked)") else { return nil }
-        UITestWait.appears(app.navigationBars["Einstellungen"], "settings open for the free albums (locked)", timeout: 10)
-        let row = anything("Noch kostenlos")
-        var swipes = 0
-        while !(row.exists && row.isHittable) && swipes < 10 {
-            app.swipeUp()
-            swipes += 1
-        }
-        let left = rowCount("Noch kostenlos", timeout: 5)
-        print("UI_FACT locked: Settings says \(left.map { "\($0)" } ?? "?") free albums left")
-        shot("72-locked-free-albums")
-        tap(button("Fertig"), "close settings after the free albums (locked)")
-        UITestWait.disappears(app.navigationBars["Einstellungen"], "settings closed after the free albums (locked)", timeout: 20)
-        return left
     }
 
     private func back() {
@@ -335,16 +285,7 @@ final class AlbumistLockedUITests: XCTestCase {
         if !UITestOnboarding.fullFlowReachedItsEnd { UITestOnboarding.completeIfNeeded(app, in: "test8") }
         waitForIdleStartPage("locked start page without free albums")
 
-        // After a complete flow most suggestions are made: the newest plans are taken back then.
-        if cardThatCreates(skipping: 0) == nil {
-            print("UI_FACT locked: no card with \"Anlegen\", taking back the newest plans")
-            if takeBackNewestPlans(limit: 2) > 0 {
-                _ = UITestWait.holds(timeout: 120) {
-                    offersSeveral() || UITestScreens.Cards.cards(app, action: "create").firstMatch.exists
-                }
-                relaunch()
-            }
-        }
+        takeBackPlansWithoutACardThatCreates()
         // "Anlegen" makes at once only what needs no look first: a suggestion whose plan has
         // something to point out opens its page before the free albums are counted
         // (`AppModel.createNow`; UI run 44878163259 tapped „København V, Mai 2023“, whose page
@@ -352,7 +293,7 @@ final class AlbumistLockedUITests: XCTestCase {
         // `FrameUITests.test3` does.
         let sheet = UITestScreens.Purchase.sheet(app)
         let preview = app.navigationBars["Vorschau"]
-        var tapped: (identifier: String, name: String, title: String)?
+        var tapped: TappedCard?
         var cardsFound = 0
         for attempt in 0..<3 {
             guard let card = cardThatCreates(skipping: attempt) else { break }
@@ -368,7 +309,7 @@ final class AlbumistLockedUITests: XCTestCase {
                 sheet.exists || UITestScreens.SuggestionPage.isShown(app) || preview.exists || app.alerts.firstMatch.exists
             }
             if sheet.exists {
-                tapped = (identifier, name, title)
+                tapped = TappedCard(identifier: identifier, name: name, title: title)
                 break
             }
             if preview.exists || UITestScreens.SuggestionPage.isShown(app) {
@@ -380,7 +321,8 @@ final class AlbumistLockedUITests: XCTestCase {
             // What came instead (UI run 44862187776 left no picture of it): a message, or the
             // start page as it was.
             let alert = app.alerts.firstMatch
-            print("UI_FACT locked: after Anlegen \(alert.exists ? "the message '\(alert.label)'" : "no message"), screen '\(app.navigationBars.firstMatch.identifier)'")
+            let came = alert.exists ? "the message '\(alert.label)'" : "no message"
+            print("UI_FACT locked: after Anlegen \(came), screen '\(app.navigationBars.firstMatch.identifier)'")
             break
         }
         guard cardsFound > 0 else {
@@ -396,7 +338,33 @@ final class AlbumistLockedUITests: XCTestCase {
             return
         }
         print("UI_STEP_OK purchase sheet after Anlegen (locked)")
-        let (identifier, name, title) = tapped
+        expectTheSheetSaysWhyAndNothingIsMade(tapped)
+    }
+
+    /// `test8`: after a complete flow most suggestions are made, so without a card that offers
+    /// "Anlegen" the newest plans are taken back and the app starts again.
+    private func takeBackPlansWithoutACardThatCreates() {
+        if cardThatCreates(skipping: 0) == nil {
+            print("UI_FACT locked: no card with \"Anlegen\", taking back the newest plans")
+            if takeBackNewestPlans(limit: 2) > 0 {
+                _ = UITestWait.holds(timeout: 120) {
+                    offersSeveral() || UITestScreens.Cards.cards(app, action: "create").firstMatch.exists
+                }
+                relaunch()
+            }
+        }
+    }
+
+    /// The card `test8` tapped: its identifier, its name and the album's name its button says.
+    private struct TappedCard {
+        let identifier: String
+        let name: String
+        let title: String
+    }
+
+    /// `test8`, after the purchase sheet came for `tapped`: the sheet says why and that the
+    /// suggestion stays; closed, nothing was made and the card still offers "Anlegen".
+    private func expectTheSheetSaysWhyAndNothingIsMade(_ tapped: TappedCard) {
         shot("77-locked-card-purchase-sheet")
         let why = anything("kostenlosen Alben sind angelegt").waitForExistence(timeout: 3)
         print(why ? "UI_STEP_OK the sheet says the free albums are used up" : "UI_STEP_MISSING the sheet says the free albums are used up")
@@ -408,14 +376,14 @@ final class AlbumistLockedUITests: XCTestCase {
 
         // Nothing was made: no banner "angelegt", and the suggestion still offers "Anlegen".
         UITestWait.never("an album is made without free albums (banner)", for: 3) { UITestScreens.QuickCreate.banner(app).exists }
-        let again = UITestScreens.Cards.card(app, identifier: identifier, titled: title)
+        let again = UITestScreens.Cards.card(app, identifier: tapped.identifier, titled: tapped.title)
         let stayed = again.waitForExistence(timeout: 10)
         print(stayed ? "UI_STEP_OK the suggestion stayed open (locked)" : "UI_STEP_MISSING the suggestion stayed open (locked)")
-        XCTAssertTrue(stayed, "The suggestion '\(name)' is gone after the purchase sheet was closed")
+        XCTAssertTrue(stayed, "The suggestion '\(tapped.name)' is gone after the purchase sheet was closed")
         if stayed {
             let cardButton = UITestScreens.Cards.action(of: again)
             XCTAssertTrue(UITestScreens.Cards.button(cardButton, says: "anlegen"),
-                          "The suggestion '\(name)' no longer offers \"Anlegen\" after the purchase sheet was closed ('\(cardButton.label)')")
+                          "The suggestion '\(tapped.name)' no longer offers \"Anlegen\" after the purchase sheet was closed ('\(cardButton.label)')")
         }
         shot("78-locked-card-after-sheet")
     }

@@ -22,18 +22,24 @@ extension UITestScreens {
         /// What leaves an active search: the field's "Schließen" (iOS 26 and later), else
         /// "Abbrechen"; a photo opened from the results closes with "Schließen" too.
         static let leaveLabels = ["Schließen", "Abbrechen", "Close", "Cancel"]
+        /// What closes a photo opened from the results, the only way out that is not beside the
+        /// field: never "Abbrechen", which ends a dialog, not the search (review S10 of H14).
+        static let closeLabels = ["Schließen", "Close"]
 
-        /// The search button: the tab bar's, else one outside the tab bar by its name while no
-        /// keyboard is up (the keyboard's return key says "Suchen" too). A bar that scrolled away
-        /// comes back with up to two swipes down, never a tap into it (review S10 of H14). Never
-        /// another tab: when neither shows, the tab bar's buttons are printed and the element
-        /// returned does not exist, so the caller's tap reports the search tab missing. Choosing
-        /// it brings the keyboard only with `.tabViewOpeningKeyboard`: tap the field to type.
+        /// The search button: the tab bar's, else one by its name in the tab bar's row (iOS may
+        /// draw it as a round button of its own beside the bar), while neither the keyboard (its
+        /// return key says "Suchen" too) nor a dialog is up: never a "Suchen" of the page or of a
+        /// dialog (review S10 of H14). A bar that scrolled away comes back with up to two swipes
+        /// down, never a tap into it. Never another tab: when neither shows, the tab bar's buttons
+        /// are printed and the element returned does not exist, so the caller's tap reports the
+        /// search tab missing. Choosing it brings the keyboard only with `.tabViewOpeningKeyboard`:
+        /// tap the field to type.
         static func button(_ app: XCUIApplication) -> XCUIElement {
             func found() -> XCUIElement? {
                 if let label = labels.first(where: { app.tabBars.buttons[$0].exists }) { return app.tabBars.buttons[label] }
-                let outside = app.buttons.matching(NSPredicate(format: "label IN %@", labels)).firstMatch
-                return !app.keyboards.firstMatch.exists && outside.exists ? outside : nil
+                guard !app.keyboards.firstMatch.exists, !app.alerts.firstMatch.exists, !app.sheets.firstMatch.exists else { return nil }
+                return app.buttons.matching(NSPredicate(format: "label IN %@", labels)).allElementsBoundByIndex
+                    .first(where: { inTabBarRow($0, app) })
             }
             UITestScreens.expandTabBar(app) { found()?.isHittable == true }
             if let button = found() { return button }
@@ -43,23 +49,42 @@ extension UITestScreens {
             return app.tabBars.buttons[english ? "Search" : labels[0]]
         }
 
+        /// `element` stands in the tab bar's row: iOS may draw the search tab as a round button of
+        /// its own beside the bar, outside `app.tabBars`.
+        private static func inTabBarRow(_ element: XCUIElement, _ app: XCUIApplication) -> Bool {
+            let bar = app.tabBars.firstMatch
+            guard bar.exists, element.exists else { return false }
+            let mid = element.frame.midY
+            return mid >= bar.frame.minY && mid <= bar.frame.maxY
+        }
+
         /// Leaves the search, so the three named tabs are back in the tab bar, hittable (iOS may
         /// fold them into one button beside an active search, and the keyboard covers them).
         /// True when no search field is left or the tabs are back; at most three taps: a photo
         /// opened from the results, the field's own way out, and by default (where closing the
-        /// field stays on the search) the folded tabs. The way out: `wayOut`.
+        /// field stays on the search) the folded tabs. The way out: `wayOut`, the field's own
+        /// first, where only getting out matters (the sweep, `tabButton`).
         @discardableResult
         static func leave(_ app: XCUIApplication, _ what: String) -> Bool {
+            leave(app, what, foldedTabsFirst: false).back
+        }
+
+        /// `leave(_:_:)`, and the ways it tapped as the log names them. `foldedTabsFirst`: the
+        /// folded tabs before the field's own way out, as a user looks at another tab; they leave
+        /// the search as it is, where "Schließen" ends it and empties the field (review T4 of H14).
+        static func leave(_ app: XCUIApplication, _ what: String, foldedTabsFirst: Bool) -> (back: Bool, ways: [String]) {
+            var ways: [String] = []
             for step in 0..<3 {
-                guard app.searchFields.firstMatch.exists, !tabsBack(app) else { return true }
+                guard app.searchFields.firstMatch.exists, !tabsBack(app) else { return (true, ways) }
                 if step == 0 { print("UI_FACT \(what): leaving the search; \(facts(app))") }
-                guard let way = wayOut(app, what) else { return false }
-                way.tap()
-                if UITestWait.holds(timeout: 5, { tabsBack(app) }) { return true }
+                guard let way = wayOut(app, what, foldedTabsFirst: foldedTabsFirst) else { return (false, ways) }
+                ways.append(way.said)
+                way.button.tap()
+                if UITestWait.holds(timeout: 5, { tabsBack(app) }) { return (true, ways) }
             }
             let back = !app.searchFields.firstMatch.exists || tabsBack(app)
             if !back { print("UI_FACT \(what): the tabs are not back after leaving the search; \(facts(app))") }
-            return back
+            return (back, ways)
         }
 
         /// The three named tabs can be tapped, in German or in English: the search does not fold
@@ -74,31 +99,42 @@ extension UITestScreens {
         }
 
         /// The way out of the search, said in the log before it is tapped: a button of
-        /// `leaveLabels` beside the field first (its own "Schließen"), else one elsewhere (a
-        /// photo opened from the results), else the one button left in the tab bar besides the
-        /// search (the folded tabs, which choose a tab; review S4 and S10 of H14). Nil, with what
-        /// shows, when there is none.
-        private static func wayOut(_ app: XCUIApplication, _ what: String) -> XCUIElement? {
-            let named = app.buttons.matching(NSPredicate(format: "label IN %@", leaveLabels))
-                .allElementsBoundByIndex.filter(\.isHittable)
+        /// `leaveLabels` beside the field first (its own "Schließen"), else a "Schließen"
+        /// elsewhere (a photo opened from the results), else the one button left in the tab bar
+        /// besides the search (the folded tabs, which choose a tab; review S4 and S10 of H14);
+        /// with `foldedTabsFirst` the folded tabs before the others (review T4). Never a button of
+        /// a dialog (`leaveButtons`). Nil, with what shows, when there is none.
+        private static func wayOut(_ app: XCUIApplication, _ what: String, foldedTabsFirst: Bool) -> (button: XCUIElement, said: String)? {
+            let named = leaveButtons(app)
             let field = app.searchFields.firstMatch
             let row = field.exists ? field.frame.insetBy(dx: -60, dy: -12) : .null
+            var ways: [(button: XCUIElement, said: String)] = []
             if let beside = named.first(where: { row.intersects($0.frame) }) {
-                print("UI_STEP_OK \(what): leave the search with \"\(beside.label)\" beside its field")
-                return beside
+                ways.append((beside, "\"\(beside.label)\" beside its field"))
             }
-            if let elsewhere = named.first {
-                print("UI_STEP_OK \(what): leave the search with \"\(elsewhere.label)\", not beside its field")
-                return elsewhere
+            if let elsewhere = named.first(where: { closeLabels.contains($0.label) && !row.intersects($0.frame) }) {
+                ways.append((elsewhere, "\"\(elsewhere.label)\", not beside its field"))
             }
             let left = app.tabBars.buttons.allElementsBoundByIndex.filter { $0.isHittable && !labels.contains($0.label) }
             if left.count == 1, let folded = left.first {
-                print("UI_STEP_OK \(what): leave the search with the one button left in the tab bar, \"\(folded.label)\"")
-                return folded
+                let way = (button: folded, said: "the one button left in the tab bar, \"\(folded.label)\"")
+                if foldedTabsFirst { ways.insert(way, at: 0) } else { ways.append(way) }
+            }
+            if let way = ways.first {
+                print("UI_STEP_OK \(what): leave the search with \(way.said)")
+                return way
             }
             print("UI_FACT \(what): a search field shows, but none of \(leaveLabels) can be tapped, and the tab bar has "
                   + "\(left.count) buttons besides the search; \(facts(app))")
             return nil
+        }
+
+        /// The buttons of `leaveLabels` that can be tapped, but none of a dialog (an alert, an
+        /// action sheet): its "Abbrechen" ends the dialog, never the search (review S10 of H14).
+        private static func leaveButtons(_ app: XCUIApplication) -> [XCUIElement] {
+            let dialogs = (app.alerts.allElementsBoundByIndex + app.sheets.allElementsBoundByIndex).map(\.frame)
+            return app.buttons.matching(NSPredicate(format: "label IN %@", leaveLabels)).allElementsBoundByIndex
+                .filter { button in button.isHittable && !dialogs.contains { $0.intersects(button.frame) } }
         }
 
         /// What iOS shows of the search, for the log: the tab bar's buttons, whether the named

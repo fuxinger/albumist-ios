@@ -290,28 +290,31 @@ final class AlbumistSearchUITests: XCTestCase {
         XCTAssertTrue(empty, "No helpful empty state for a query without results")
         shot("s6-not-understood")
 
-        // Close the keyboard.
+        // Close the keyboard, and let it go: a button iOS takes away as the field loses its focus
+        // is not tapped on its way out (review T5 of H14).
         field.typeText("\n")
+        _ = UITestWait.holds(timeout: 5) { !app.keyboards.firstMatch.exists }
 
         // DS-12a: while the search is active iOS may fold the other tabs into one button beside
-        // its field; leaving the search brings them back (`UITestScreens.Search.leave`: the
-        // field's "Schließen", else the folded tabs). Which tab shows then is the placement's
-        // (`MainTabs.searchField`; the tab before with `.tabViewOpeningKeyboard`): said, not
-        // asserted.
-        let left = UITestScreens.Search.leave(app, "search")
-        XCTAssertTrue(left, "Leaving the search does not bring the other tabs back")
+        // its field; leaving the search brings them back (`UITestScreens.Search.leave`). By that
+        // button first, as a user looks at another tab: it keeps the search, where the field's
+        // "Schließen" ends it and empties the field (review T4 of H14). Which tab shows then is
+        // the placement's (`MainTabs.searchField`; the tab before with `.tabViewOpeningKeyboard`):
+        // said, not asserted.
+        let left = UITestScreens.Search.leave(app, "search", foldedTabsFirst: true)
+        XCTAssertTrue(left.back, "Leaving the search does not bring the other tabs back")
         let before = app.tabBars.buttons["Vorschläge"]
         let backOnIt = UITestWait.holds(timeout: 3) { before.exists && before.isSelected }
         print("UI_FACT search left, back on \"Vorschläge\": \(backOnIt); \(UITestScreens.Search.facts(app))")
         shot("s7-search-left")
         // Another tab, then the search again: what it kept (by default the query, its hits and
-        // the scroll position, and no keyboard) is said for the owner's choice of the placement,
-        // not asserted until then (review S5 of H14).
+        // the scroll position, and no keyboard) is said with the way the search was left, for the
+        // owner's choice of the placement, not asserted until then (review S5 of H14).
         if tap(tabButton("Vorschläge"), "start page after the search"), tap(searchTabButton(), "search tab again") {
             let again = app.searchFields.firstMatch
             let shown = again.waitForExistence(timeout: 10)
             let query = (again.value as? String) ?? ""
-            print("UI_FACT search chosen again: field \(shown), text \"\(query)\", \(UITestScreens.Search.facts(app))")
+            print("UI_FACT search chosen again: field \(shown), text \"\(query)\", left by \(left.ways), \(UITestScreens.Search.facts(app))")
             shot("s8-search-again")
         }
     }

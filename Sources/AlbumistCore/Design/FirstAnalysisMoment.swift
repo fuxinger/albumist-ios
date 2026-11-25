@@ -50,6 +50,11 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// a run that ends with every photo allowed analyses the library as a whole too, until one is
     /// celebrated (which spends the moment). Kept next to `firstCompleted`; false once spent.
     public private(set) var sharedOnly = false
+    /// No analysis was completed on this installation yet, as far as the moment knows: owed, and
+    /// no first analysis too quick for "Analyse fertig" (`firstCompleted`). Until then the legs of
+    /// the first analysis count together for "Analyse fertig" and its 100 % (`FirstAnalysisLegs`;
+    /// verification review X9).
+    public var firstCompletionAhead: Bool { kept == .owed && firstCompleted == nil }
     /// The first full analysis finished on screen then; the card shows the moment from then until
     /// `window` has passed. In memory only.
     public private(set) var dueSince: Date?
@@ -244,5 +249,93 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
             x += part.width + open
             return part
         }
+    }
+}
+
+/// The legs of the first analysis (verification review X9, the lead's decision): a first analysis
+/// that was paused, cut off by iOS or closed and went on later is one wait for "Analyse fertig"
+/// and its 100 %. Each run was decided alone before (`AnalysisCardState.celebratesFinish`: 30 s or
+/// more with the bar shown), so an analysis of an hour whose last leg took 20 s ended without
+/// "Analyse fertig", and its first 100 % was lost for good.
+///
+/// - For the first completion on this installation only (`FirstAnalysisMoment.firstCompletionAhead`,
+///   no analysis completed since `AnalysisMarker.reset`), the legs count together: their summed
+///   time and whether one showed the bar. Every later run is decided alone, as before.
+/// - Kept with the resume position (`AnalysisMarker.unfinished`): written while a run works, as
+///   that is, so a leg that iOS ended with the app (no end of its run) still counts. A run that goes
+///   on from the resume position goes on with the legs; one that starts the analysis anew (the
+///   first run, another part of the library, "Analyse neu aufbauen", a new or restored database,
+///   which drop the resume position) drops them too.
+/// - Done once the first completion came, celebrated or not, or the analysis was completed where no
+///   run of the app ended (`drop`: the overnight refinement).
+public struct FirstAnalysisLegs: Sendable, Equatable {
+    /// How long a run or legs ran, in seconds, and whether the card showed one of them as a full
+    /// analysis (the bar, not the quick check): what "Analyse fertig" is decided on.
+    public struct Leg: Sendable, Equatable {
+        public var seconds: Double
+        public var showedBar: Bool
+
+        public init(seconds: Double = 0, showedBar: Bool = false) {
+            self.seconds = max(0, seconds)
+            self.showedBar = showedBar
+        }
+
+        /// Nothing ran.
+        public static let none = Leg()
+
+        /// This and `next` one after the other.
+        public func then(_ next: Leg) -> Leg {
+            Leg(seconds: seconds + next.seconds, showedBar: showedBar || next.showedBar)
+        }
+    }
+
+    /// The legs so far, the run now included: what is kept across launches.
+    public private(set) var kept: Leg
+    /// The run now is a leg of the first analysis (`started`): its legs count together.
+    public private(set) var counting = false
+    /// The legs before the run now. In memory only.
+    private var before: Leg
+
+    /// At launch: the legs kept, while the first completion is still ahead
+    /// (`FirstAnalysisMoment.firstCompletionAhead`); none otherwise.
+    public init(kept: Leg = .none, firstCompletionAhead: Bool = false) {
+        self.kept = firstCompletionAhead ? kept : .none
+        before = self.kept
+    }
+
+    /// A run in the app starts. `firstCompletion`: it may complete the analysis for the first time
+    /// on this installation (`FirstAnalysisMoment.firstCompletionAhead`, and no analysis completed
+    /// since `AnalysisMarker.reset`). `goesOn`: it goes on from the resume position, so the legs
+    /// before it count on; otherwise it starts the analysis anew and they are dropped.
+    public mutating func started(firstCompletion: Bool, goesOn: Bool) {
+        counting = firstCompletion
+        before = firstCompletion && goesOn ? kept : .none
+        kept = before
+    }
+
+    /// The run works: `leg` since it started. Kept with the resume position.
+    public mutating func runs(_ leg: Leg) {
+        guard counting else { return }
+        kept = before.then(leg)
+    }
+
+    /// The run ended after `leg`; `finished`: it finished the analysis. What "Analyse fertig" is
+    /// decided on: a leg of the first analysis together with the legs before it, any other run
+    /// alone. A finished one ends the legs; an unfinished one leaves them for the next leg.
+    public mutating func ended(_ leg: Leg, finished: Bool) -> Leg {
+        guard counting else { return leg }
+        let counted = before.then(leg)
+        counting = false
+        kept = finished ? .none : counted
+        before = kept
+        return counted
+    }
+
+    /// The analysis was completed where no run of the app ended (the overnight refinement): no
+    /// first completion is ahead any more.
+    public mutating func drop() {
+        kept = .none
+        before = .none
+        counting = false
     }
 }

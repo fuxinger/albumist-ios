@@ -31,8 +31,9 @@ struct FirstAnalysisMomentSourceTests {
     /// Launch: what is kept is read while `AnalysisMarker` still says whether an analysis was
     /// completed before (the load resets it for a restored backup or a new database). End of a
     /// run: told before the wait for the overview, with whether Albumist is on screen. The
-    /// overnight refinement that completes the analysis tells it too (second review, K7). Three
-    /// marked lines in `AppModel.swift`, nothing else there.
+    /// overnight refinement that completes the analysis tells it too (second review, K7). Eight
+    /// marked lines of DS-08 in `AppModel.swift` (three of the moment, five of the legs of the
+    /// first analysis, X9) and one of V13, nothing else there.
     @Test func theModelTellsTheRuleAtLaunchAndAtTheEndOfARun() throws {
         let raw = try AppSource.read(Self.model)
         let model = try Self.code(Self.model)
@@ -55,9 +56,9 @@ struct FirstAnalysisMomentSourceTests {
         }
         #expect(model.components(separatedBy: "firstAnalysisRunEnded(").count - 1 == 1, "told from another place too")
         #expect(model.components(separatedBy: "FirstAnalysisMomentStore.shared.").count - 1 == 2, "told from another place too")
-        #expect(raw.components(separatedBy: "\(Self.mark): the first 100 %").count - 1 == 3, "the marked lines of DS-08 in AppModel.swift changed")
+        #expect(raw.components(separatedBy: "\(Self.mark): the first 100 %").count - 1 == 8, "the marked lines of DS-08 in AppModel.swift changed")
         // And one of the sorting show's "Anlegen" (verification review V13), nothing else of H13.
-        #expect(raw.components(separatedBy: Self.mark).count - 1 == 4, "the marked lines of H13 in AppModel.swift changed")
+        #expect(raw.components(separatedBy: Self.mark).count - 1 == 9, "the marked lines of H13 in AppModel.swift changed")
     }
 
     /// "On screen" as a run ends means not in the background (second review, K7 b): Control
@@ -125,6 +126,82 @@ struct FirstAnalysisMomentSourceTests {
         #expect(initializer.contains("let sharedOnly = !fresh && UserDefaults.standard.bool(forKey: Self.sharedOnlyKey)"), "\(initializer)")
         #expect(keep.contains("UserDefaults.standard.set(true, forKey: Self.sharedOnlyKey)"), "\(keep)")
         #expect(keep.contains("UserDefaults.standard.removeObject(forKey: Self.sharedOnlyKey)"), "\(keep)")
+    }
+
+    /// The legs of the first analysis count together for its first completion (verification review
+    /// X9, `FirstAnalysisLegs`): the model tells where a run starts (with its clock, after the
+    /// resume position was read), while it works (with each report, as the resume position is
+    /// written) and as it ends, before "Analyse fertig" is decided, which is decided on what the
+    /// legs counted, for every follower of `celebrate` alike.
+    @Test func theModelCountsTheLegsOfTheFirstAnalysis() throws {
+        let model = try Self.code(Self.model)
+        let run = try Self.body(["func startAnalysisNow("], in: model)
+        let resume = try #require(run.range(of: "analysis.resumeFrom = AnalysisMarker.unfinished"), "\(run)")
+        let begin = try #require(run.range(of: "beginCard()"), "\(run)")
+        #expect(resume.upperBound < begin.lowerBound, "the leg starts before the resume position is read")
+        let card = try Self.body(["private func beginCardNow()"], in: model)
+        let clock = try #require(card.range(of: "runClockStart = .now"), "\(card)")
+        let started = try #require(card.range(of: "firstAnalysisLegStarted()"), "no leg starts with the run: \(card)")
+        #expect(clock.upperBound < started.lowerBound, "\(card)")
+        let receive = try Self.body(["private func receive("], in: model)
+        let marker = try #require(receive.range(of: "AnalysisMarker.unfinished = .init("), "\(receive)")
+        let runs = try #require(receive.range(of: "firstAnalysisLegRuns(since: runClockStart, showedBar: runShowedBar)"),
+                                "the legs are not kept with the resume position: \(receive)")
+        #expect(marker.upperBound < runs.lowerBound, "\(receive)")
+        let leg = try #require(run.range(of: "let leg = firstAnalysisLeg(ended: end.isFinished, since: runClockStart, showedBar: runShowedBar)"),
+                               "the end is decided without the legs: \(run)")
+        let decided = try #require(run.range(of: "let celebrate = AnalysisCardState.celebratesFinish(isComplete: end.isFinished,"), "\(run)")
+        #expect(leg.upperBound < decided.lowerBound, "\(run)")
+        let rule = run[decided.upperBound...].prefix(260)
+        #expect(rule.contains("wasQuickCheck: !leg.showedBar,") && rule.contains("ranFor: .seconds(leg.seconds))"), "\(rule)")
+        #expect(!run.contains("wasQuickCheck: !runShowedBar"), "the run is decided alone: \(run)")
+        // "Analyse fertig", its notification, VoiceOver's word and the 100 % all follow `celebrate`.
+        for follower in ["finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)",
+                         "firstAnalysisRunEnded(finished: end.isFinished, celebrates: celebrate)",
+                         "FinishAnnouncementStore.shared.runEnded(finished: end.isFinished, celebrates: celebrate,"] {
+            let told = try #require(run.range(of: follower), "\(follower)")
+            #expect(decided.upperBound < told.lowerBound, "\(follower)")
+        }
+        // A leg of the first analysis while no analysis was completed, going on from the resume position.
+        let store = try Self.code(Self.store)
+        let begun = try Self.body(["extension AppModel", "func firstAnalysisLegStarted()"], in: store)
+        #expect(begun.contains("legStarted(firstAnalysis: !AnalysisMarker.completedOnce, goesOn: analysis.resumeFrom != nil)"), "\(begun)")
+        let start = try Self.body(["final class FirstAnalysisMomentStore", "func legStarted(firstAnalysis: Bool, goesOn: Bool)"], in: store)
+        #expect(start.contains("legs.started(firstCompletion: firstAnalysis && moment.firstCompletionAhead, goesOn: goesOn)"), "\(start)")
+    }
+
+    /// The legs live in `UserDefaults` beside the moment, under keys of their own: read at launch
+    /// (none for a test that starts the moment afresh), written exactly as a run starts and ends
+    /// and at most once a second while it works, gone once the first completion came, also
+    /// overnight (`completedAway`). Not observed: the ring card reads only the moment.
+    @Test func theLegsAreKeptBesideTheMoment() throws {
+        let store = try Self.code(Self.store)
+        let type = try Self.body(["final class FirstAnalysisMomentStore"], in: store)
+        #expect(type.contains("private static let legSecondsKey = \"analysis.firstFinishMoment.legSeconds\""), "\(type)")
+        #expect(type.contains("private static let legBarKey = \"analysis.firstFinishMoment.legBar\""), "\(type)")
+        #expect(type.contains("@ObservationIgnored private var legs = FirstAnalysisLegs()"), "\(type)")
+        let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
+        #expect(initializer.contains("let legSeconds = fresh ? 0 : UserDefaults.standard.double(forKey: Self.legSecondsKey)"), "\(initializer)")
+        #expect(initializer.contains("let legBar = !fresh && UserDefaults.standard.bool(forKey: Self.legBarKey)"), "\(initializer)")
+        let read = try #require(initializer.range(of: "legs = FirstAnalysisLegs(kept: FirstAnalysisLegs.Leg(seconds: legSeconds, showedBar: legBar),"),
+                                "\(initializer)")
+        let lapse = try #require(initializer.range(of: "moment.lapse(at: Date())"), "\(initializer)")
+        let kept = try #require(initializer.range(of: "keep()"), "\(initializer)")
+        #expect(lapse.upperBound < read.lowerBound && read.upperBound < kept.lowerBound, "\(initializer)")
+        #expect(initializer.contains("firstCompletionAhead: moment.firstCompletionAhead)"), "\(initializer)")
+        let works = try Self.body(["final class FirstAnalysisMomentStore", "func legRuns(_ leg: FirstAnalysisLegs.Leg)"], in: store)
+        #expect(works.contains("guard legs.counting else { return }") && works.contains("keepLegs(exactly: false)"), "\(works)")
+        let ended = try Self.body(["final class FirstAnalysisMomentStore", "func legEnded(_ leg: FirstAnalysisLegs.Leg, finished: Bool)"], in: store)
+        #expect(ended.contains("legs.ended(leg, finished: finished)") && ended.contains("keepLegs(exactly: true)"), "\(ended)")
+        let written = try Self.body(["final class FirstAnalysisMomentStore", "private func keepLegs(exactly: Bool)"], in: store)
+        #expect(written.contains("exactly ? seconds != stored : abs(seconds - stored) >= 1"), "\(written)")
+        #expect(written.contains("UserDefaults.standard.removeObject(forKey: Self.legSecondsKey)"), "\(written)")
+        let keep = try Self.body(["final class FirstAnalysisMomentStore", "private func keep()"], in: store)
+        #expect(keep.contains("keepLegs(exactly: true)"), "\(keep)")
+        let away = try Self.body(["final class FirstAnalysisMomentStore", "func completedAway(first: Bool)"], in: store)
+        let dropped = try #require(away.range(of: "legs.drop()"), "the legs outlive an overnight completion: \(away)")
+        let keptAway = try #require(away.range(of: "keep()"), "\(away)")
+        #expect(dropped.upperBound < keptAway.lowerBound, "\(away)")
     }
 
     /// The observers are written `any NSObjectProtocol`, as every existential of the App

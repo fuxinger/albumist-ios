@@ -1293,9 +1293,10 @@ final class AppModel {
             let reason = end.report?.pausedBecause
             // The last reports of this run, before it is shown as ended.
             tick(run: generation)
+            let leg = firstAnalysisLeg(ended: end.isFinished, since: runClockStart, showedBar: runShowedBar) // Design W3 H13: the first 100 % (DS-08), X9
             let celebrate = AnalysisCardState.celebratesFinish(isComplete: end.isFinished,
-                                                               wasQuickCheck: !runShowedBar,
-                                                               ranFor: ContinuousClock.now - runClockStart)
+                                                               wasQuickCheck: !leg.showedBar, // Design W3 H13: the first 100 % (DS-08), X9
+                                                               ranFor: .seconds(leg.seconds)) // Design W3 H13: the first 100 % (DS-08), X9
             // Owed before the wait below: a run that starts meanwhile (a trip change, new photos,
             // "Neu prüfen") no longer drops "Analyse fertig" (`FinishMoment`).
             finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)
@@ -1473,6 +1474,7 @@ final class AppModel {
                     ?? (carried != nil ? analysis.resumed?.secondsThen ?? carried?.secondsLeft : nil),
                 caughtUp: held != nil ? analysis.resumed?.caughtUp : nil)
         }
+        firstAnalysisLegRuns(since: runClockStart, showedBar: runShowedBar) // Design W3 H13: the first 100 % (DS-08), with the resume position (X9)
         glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
                      itemsPerSecond: estimator.rate, total: progress.total)
         keepRunningInBackgroundIfLong()
@@ -1501,6 +1503,7 @@ final class AppModel {
         lastStepRemainingCheck = nil
         lastEarlyLook = nil
         runShowedBar = false
+        firstAnalysisLegStarted() // Design W3 H13: the first 100 % (DS-08), a leg of the first analysis starts (X9)
         analysisBar = glide.value(at: .now, gliding: false)
         analysisFinish = nil
         analysisStepRemaining = nil

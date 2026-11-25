@@ -134,7 +134,7 @@ struct StartPageSourceTests {
         let rows = try #require(AppSource.body(of: "private func analysisRows(", in: overview), "the analysis rows do not know the card")
         #expect(rows.contains("if case .year(let year) = model.analysisScope, empty?.offersAllYears != true {"))
         #expect(overview.contains("analysisRows(empty: empty)"))
-        let screens = try AppSource.read("App/AlbumistUITests/UITestScreens.swift")
+        let screens = try UITestScreensSource.read()
         let trialYear = try #require(AppSource.body(of: "enum TrialYear", in: screens))
         let shown = try #require(AppSource.body(of: "static func shown(", in: trialYear), "the UI tests know the trial year by its note only")
         #expect(shown.contains("analysis.trial") && shown.contains("Keine Fotos aus "))

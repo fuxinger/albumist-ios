@@ -462,7 +462,7 @@ struct ProposalDetailView: View {
     var proposal: AlbumProposal
     /// The namespace of the card the page was opened from: the page zooms out of that card and
     /// back into it (design report, Scheibe 2). Nil where it was opened another way.
-    var zoom: Namespace.ID? = nil
+    var zoom: Namespace.ID?
     @State private var name = ""
     @State private var showAdjust = false
     @State private var suggesting = false
@@ -854,30 +854,35 @@ struct ProposalDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if canSuggestTitle {
-                Button {
-                    Task { await suggestTitle() }
-                } label: {
-                    // 44 pt to tap on the label, where the button takes the tap; leading, so
-                    // nothing moves (review S3 of H14).
-                    Group {
-                        if suggesting {
-                            ProgressView().controlSize(.small)
-                                .accessibilityLabel(Text("Name wird vorgeschlagen"))
-                        } else {
-                            Label("Namen vorschlagen", systemImage: "apple.intelligence")
-                        }
-                    }
-                    .frame(minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .font(.subheadline.weight(.semibold))
-                .disabled(suggesting || busy)
+                suggestTitleButton
             }
             if proposal.isSensitive {
                 Label("Persönlicher Inhalt: wird nie automatisch ausgewählt.", systemImage: "lock")
                     .font(.footnote).foregroundStyle(.noteText)
             }
         }
+    }
+
+    /// "Namen vorschlagen" under the name; a small spinner while the name is being suggested.
+    private var suggestTitleButton: some View {
+        Button {
+            Task { await suggestTitle() }
+        } label: {
+            // 44 pt to tap on the label, where the button takes the tap; leading, so
+            // nothing moves (review S3 of H14).
+            Group {
+                if suggesting {
+                    ProgressView().controlSize(.small)
+                        .accessibilityLabel(Text("Name wird vorgeschlagen"))
+                } else {
+                    Label("Namen vorschlagen", systemImage: "apple.intelligence")
+                }
+            }
+            .frame(minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .font(.subheadline.weight(.semibold))
+        .disabled(suggesting || busy)
     }
 
     /// "Vorschlag · noch nicht in Fotos" on its own tinted ground, never on the photo: it stays
@@ -1606,7 +1611,7 @@ struct AdjustProposalView: View {
     /// is the same text, so a name typed there is here, and a name changed here is there after
     /// closing, also with "Abbrechen" (owner's device test 18.11.: "Dahoam" typed in the
     /// suggestion, "Titel" here was empty). Nothing is stored before an album is chosen.
-    var name: Binding<String>? = nil
+    var name: Binding<String>?
     @State private var ownTitle = ""
 
     /// The text of "Titel".

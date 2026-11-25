@@ -87,7 +87,13 @@ final class AccessibilityUITests: XCTestCase {
     /// under a bar counts as under a bar.
     private var ownBarElements: [(label: String, frame: CGRect)] = []
     /// "Contrast failed" findings waiting for the second contrast audit.
-    private var pendingContrast: [(label: String, line: String, detail: String)] = []
+    private var pendingContrast: [PendingContrast] = []
+    /// A "contrast failed" finding: the element's label, the report line and the audit's detail.
+    private struct PendingContrast {
+        let label: String
+        let line: String
+        let detail: String
+    }
 
     private static let largestText = "UICTContentSizeCategoryAccessibilityXXXL"
     private static let failingAuditTypes: XCUIAccessibilityAuditType = [.contrast, .textClipped, .hitRegion, .sufficientElementDescription]
@@ -737,7 +743,8 @@ final class AccessibilityUITests: XCTestCase {
         if let element = issue.element {
             let frame = element.frame
             label = element.label
-            place = "\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)) type \(element.elementType.rawValue) id '\(element.identifier)'"
+            place = "\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))"
+                + " type \(element.elementType.rawValue) id '\(element.identifier)'"
             // The same element before the audit: same label, column and size (a scroll only moves it up or down).
             let before = (framesBeforeAudit[label] ?? []).filter {
                 abs($0.minX - frame.minX) < 1 && abs($0.width - frame.width) < 1 && abs($0.height - frame.height) < 1
@@ -763,25 +770,32 @@ final class AccessibilityUITests: XCTestCase {
                         && (frame.minY < bounds.minY || frame.maxY > bounds.maxY) {
                 reason = "cut by the top or bottom edge of the screen (scrolled)"
             }
-        } else if type == .textClipped {
-            reason = "text clipped, no element (text inside a combined row)"
-        } else if type == .contrast {
-            if summary.localizedCaseInsensitiveContains("nearly") {
-                reason = "contrast nearly passed (system secondary text), no element"
-            } else if barOverContent {
-                reason = "no element, screen has content passing under a system bar"
-            }
+        } else {
+            reason = Self.reasonWithoutElement(type, summary: summary, barOverContent: barOverContent)
         }
         let line = "\(screen) | audit \(Self.name(of: type)) | \(summary) | label '\(label)' | \(place)"
         if let reason {
             print("A11Y_WARN \(line) | \(reason)")
         } else if type == .contrast {
-            pendingContrast.append((label, line, String(issue.detailedDescription.prefix(400))))
+            pendingContrast.append(PendingContrast(label: label, line: line, detail: String(issue.detailedDescription.prefix(400))))
         } else {
             print("A11Y_FAIL \(line)")
             print("A11Y_DETAIL \(screen) | \(String(issue.detailedDescription.prefix(400)))")
             auditFailures.append("\(Self.name(of: type)) '\(label.prefix(40))'")
         }
+    }
+
+    /// Why a finding without an element is only a warning, if it is.
+    private static func reasonWithoutElement(_ type: XCUIAccessibilityAuditType, summary: String,
+                                             barOverContent: Bool) -> String? {
+        if type == .textClipped {
+            return "text clipped, no element (text inside a combined row)"
+        }
+        guard type == .contrast else { return nil }
+        if summary.localizedCaseInsensitiveContains("nearly") {
+            return "contrast nearly passed (system secondary text), no element"
+        }
+        return barOverContent ? "no element, screen has content passing under a system bar" : nil
     }
 
     /// Taller than two lines of body text at the largest accessibility size: text that wraps.
@@ -790,7 +804,10 @@ final class AccessibilityUITests: XCTestCase {
     /// Flags and other emoji, without letters or digits.
     private static func isEmojiOnly(_ label: String) -> Bool {
         let scalars = label.unicodeScalars.filter { !CharacterSet.whitespaces.contains($0) }
-        return !scalars.isEmpty && scalars.allSatisfy { $0.properties.isEmojiPresentation || (0x1F1E6...0x1F1FF).contains($0.value) || $0.properties.isEmojiModifier || $0.value == 0xFE0F || $0.value == 0x200D }
+        return !scalars.isEmpty && scalars.allSatisfy {
+            $0.properties.isEmojiPresentation || (0x1F1E6...0x1F1FF).contains($0.value) || $0.properties.isEmojiModifier
+                || $0.value == 0xFE0F || $0.value == 0x200D
+        }
     }
 
     private static func name(of type: XCUIAccessibilityAuditType) -> String {
@@ -970,7 +987,8 @@ final class AccessibilityUITests: XCTestCase {
             let allowed = flagLine + CGFloat(words + 2) * bodyLine + 2 * 10 + 2 * 4 + 8
             if frame.height > allowed {
                 print("A11Y_FAIL \(tag) atlas lower | country row broken mid-word | label '\(row.label)' | height \(Int(frame.height)) > \(Int(allowed)) for \(words) word(s)")
-                XCTFail("\(tag) atlas: the row '\(row.label)' is \(Int(frame.height)) pt tall, more than \(Int(allowed)) pt for \(words) word(s) and the year: the name or the year breaks mid-word")
+                XCTFail("\(tag) atlas: the row '\(row.label)' is \(Int(frame.height)) pt tall, more than \(Int(allowed)) pt for "
+                        + "\(words) word(s) and the year: the name or the year breaks mid-word")
             }
         }
         if measured > 0 {

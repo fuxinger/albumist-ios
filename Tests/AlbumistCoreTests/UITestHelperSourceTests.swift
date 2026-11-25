@@ -50,7 +50,7 @@ struct UITestHelperSourceTests {
         words += empty.matches(of: /Button\("([^"]+)"\)\s*\{\s*model\.changeScope\(\.all\)/).map { String($0.1) }
         #expect(Set(words) == ["Alle Jahre", "Ganze Mediathek dazunehmen"], "the app's wordings changed: \(words)")
 
-        let screens = try AppSource.read("App/AlbumistUITests/UITestScreens.swift")
+        let screens = try UITestScreensSource.read()
         let trialYear = try #require(AppSource.body(of: "enum TrialYear", in: screens))
         let list = try #require(trialYear.firstMatch(of: /static let allYearsWords\s*=\s*\[([^\]]*)\]/))
         let known = Set(list.1.matches(of: /"([^"]+)"/).map { String($0.1) })
@@ -171,10 +171,15 @@ struct UITestHelperSourceTests {
         #expect(test.matches(of: /StartPage\.openList\(/).count >= 2, "the list is not looked for again after taking back")
         #expect(test.contains("shot(\"x-"), "a missing list leaves no picture")
 
-        let screens = try AppSource.read("App/AlbumistUITests/UITestScreens.swift")
+        let screens = try UITestScreensSource.read()
         let shared = try #require(AppSource.body(of: "static func takeBackNewestPlans(", in: screens))
         #expect(shared.contains("\"receipt.undo\""), "the shared helper takes nothing back")
         #expect(shared.contains("springboard"), "the shared helper does not answer iOS's question before albums are deleted")
+        // The answer is given in its helper, which the shared helper asks with the springboard.
+        #expect(shared.contains("confirmUndo(app, springboard: springboard)"), "the shared helper does not confirm its undo")
+        let confirm = try #require(AppSource.body(of: "private static func confirmUndo(", in: screens))
+        #expect(confirm.contains("springboard.alerts") && confirm.contains("\"Löschen\""),
+                "the shared helper does not answer iOS's question before albums are deleted")
         let locked = try AppSource.read("App/AlbumistUITests/AlbumistLockedUITests.swift")
         let own = try #require(AppSource.body(of: "private func takeBackNewestPlans(", in: locked))
         #expect(own.contains("UITestScreens.Albums.takeBackNewestPlans(app,"), "the locked tests keep a copy of their own")

@@ -192,30 +192,38 @@ struct HitTargetSourceTests {
     /// The control a block opened at `open` is the label closure of: after `label:`, or the
     /// trailing closure of a control whose only closure is its label.
     private static func closureOwner(open: Int, in code: [Unicode.Scalar]) -> String? {
-        var before = skipSpace(back: open - 1, in: code)
+        let before = skipSpace(back: open - 1, in: code)
         guard before >= 0 else { return nil }
-        if code[before] == ":" {
-            // `label:` after the first trailing closure (`Button { } label: {`, `Menu { } label:
-            // {`); as an argument (`Button(action: go, label: {`) the parentheses tell.
-            guard word(endingAt: before - 1, in: code) == "label" else { return nil }
-            before = skipSpace(back: before - 1 - "label".unicodeScalars.count, in: code)
-            guard before >= 0 else { return nil }
-            if code[before] == "," || code[before] == "(" {
-                // An argument: the control is the call whose parentheses hold it.
-                before = skipSpace(back: openParenthesis(around: before, in: code) - 1, in: code)
-            } else {
-                if code[before] == "}" {
-                    before = skipSpace(back: matching(open: "{", close: "}", from: before, in: code) - 1, in: code)
-                }
-                if before >= 0, code[before] == ")" {
-                    before = skipSpace(back: matching(open: "(", close: ")", from: before, in: code) - 1, in: code)
-                }
-            }
-            guard let name = word(endingAt: before, in: code), controls.contains(name) else { return nil }
-            return name
-        }
+        if code[before] == ":" { return labelOwner(colon: before, in: code) }
         // The only trailing closure of a control whose closure is its label.
         guard code[before] == ")" else { return nil }
+        return trailingLabelOwner(close: before, in: code)
+    }
+
+    /// `label:` (its ":" at `colon`) after the first trailing closure (`Button { } label: {`,
+    /// `Menu { } label: {`); as an argument (`Button(action: go, label: {`) the parentheses tell.
+    private static func labelOwner(colon: Int, in code: [Unicode.Scalar]) -> String? {
+        guard word(endingAt: colon - 1, in: code) == "label" else { return nil }
+        var before = skipSpace(back: colon - 1 - "label".unicodeScalars.count, in: code)
+        guard before >= 0 else { return nil }
+        if code[before] == "," || code[before] == "(" {
+            // An argument: the control is the call whose parentheses hold it.
+            before = skipSpace(back: openParenthesis(around: before, in: code) - 1, in: code)
+        } else {
+            if code[before] == "}" {
+                before = skipSpace(back: matching(open: "{", close: "}", from: before, in: code) - 1, in: code)
+            }
+            if before >= 0, code[before] == ")" {
+                before = skipSpace(back: matching(open: "(", close: ")", from: before, in: code) - 1, in: code)
+            }
+        }
+        guard let name = word(endingAt: before, in: code), controls.contains(name) else { return nil }
+        return name
+    }
+
+    /// The control whose argument list closes at `close`, when its trailing closure is its
+    /// label: a link, a toggle, or a button or navigation link given its action or destination.
+    private static func trailingLabelOwner(close before: Int, in code: [Unicode.Scalar]) -> String? {
         let start = matching(open: "(", close: ")", from: before, in: code)
         let arguments = String(String.UnicodeScalarView(code[start...before]))
         guard let name = word(endingAt: skipSpace(back: start - 1, in: code), in: code) else { return nil }

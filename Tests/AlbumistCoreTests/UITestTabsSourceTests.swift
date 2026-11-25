@@ -13,7 +13,6 @@ import AlbumistTestSupport
 @Suite("UI test helpers for the tabs and the search")
 struct UITestTabsSourceTests {
     static let folder = "App/AlbumistUITests"
-    static let screens = "App/AlbumistUITests/UITestScreens.swift"
     /// Their own copies stay while their own threads of work change these files; neither
     /// searches.
     static let ownCopies: Set<String> = ["App/AlbumistUITests/PhotoGridUITests.swift",
@@ -29,16 +28,23 @@ struct UITestTabsSourceTests {
         String(text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.map(Character.init))
     }
 
-    /// The body of `path` (declarations inside each other) in `UITestScreens.swift`, squeezed.
+    /// The code of `UITestScreens.swift` and the files beside it (`UITestScreensSource`), as one
+    /// text (comments blanked, strings kept).
+    static func screensCode() throws -> String {
+        AppSource.code(try UITestScreensSource.read(), keepStrings: true)
+    }
+
+    /// The body of `path` (declarations inside each other) in `UITestScreens`' files, squeezed.
     static func screensBody(_ path: [String]) throws -> String {
-        squeezed(try #require(AppSource.body(of: path, in: try code(screens)), "\(path) is not in UITestScreens.swift"))
+        squeezed(try #require(AppSource.body(of: path, in: try screensCode()), "\(path) is not in UITestScreens' files"))
     }
 
     /// Every class asks `UITestScreens.tabButton`: its own `tabButton` only hands the name on
     /// (review S7 of H14: only one of six copies left the search).
     @Test func everyClassTakesTheOneTabButton() throws {
         var classes: [String] = []
-        for path in AppSource.swiftFiles(under: Self.folder) where path != Self.screens && !Self.ownCopies.contains(path) {
+        for path in AppSource.swiftFiles(under: Self.folder)
+        where !UITestScreensSource.paths.contains(path) && !Self.ownCopies.contains(path) {
             guard let body = AppSource.body(of: ["func tabButton(_ name: String) -> XCUIElement"], in: try Self.code(path)) else { continue }
             #expect(Self.squeezed(body) == "{UITestScreens.tabButton(app,name)}", "\(path): \(body)")
             classes.append(URL(fileURLWithPath: path).lastPathComponent)
@@ -103,7 +109,7 @@ struct UITestTabsSourceTests {
     /// the tab bar's buttons, whether the tabs are folded, the field, the keyboard and the
     /// buttons beside the field.
     @Test func theHelpersSayWhatIOSShows() throws {
-        let screens = try Self.code(Self.screens)
+        let screens = try Self.screensCode()
         let facts = try #require(AppSource.body(of: ["enum Search", "static func facts(_ app: XCUIApplication) -> String"], in: screens))
         for said in ["tab bar", "folded", "search field", "keyboard", "beside the field"] {
             #expect(facts.contains(said), "the facts do not say \(said): \(facts)")

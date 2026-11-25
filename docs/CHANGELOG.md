@@ -9,7 +9,8 @@
   Build): Die Suche ist ein eigener runder Knopf am Ende der Tab-Leiste. Ihre Wahl zeigt die Startpunkte und das
   Suchfeld, die Tastatur kommt erst beim Tippen ins Feld, und Suchtext und Treffer bleiben beim Blick in einen
   anderen Tab. Unter iOS 27 sitzt das Feld oben auf der Suchseite; iOS 27.2 hatte die Suche sonst als vierten Tab
-  ohne Feld gezeigt.
+  ohne Feld gezeigt. Kommt man auf die Suche zurück, kommt die Tastatur nicht von selbst wieder. VoiceOver nennt
+  die Treffer mit der Uhrzeit am Aufnahmeort, wie das Raster und der Titel des Fotos.
 - 25.11. Suche und „Analyse fertig“ nach der zweiten Prüfung (Design-Welle 3, H14, noch in keinem Build): Zurück
   auf dem Such-Tab sucht Albumist neu, wenn sich seitdem etwas geändert hat, das die Suche liest (ein ignoriertes
   Foto, ein Album, der Name eines Orts, das Zuhause, neue Ergebnisse der Analyse oder ein neuer Tag), sonst bleibt

@@ -768,7 +768,10 @@ final class AppModel {
                 // Not readable even then: the app starts with the standard settings and says
                 // so, instead of not starting at all.
                 settings = OrganizationSettings()
-                message = .failure(String(localized: "Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. Bitte prüfe sie in den Einstellungen."))
+                message = .failure(String(localized: """
+                    Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. \
+                    Bitte prüfe sie in den Einstellungen.
+                    """))
             }
             await dropOldRootFolderDefault(store)
             decisions = try await store.value([AlbumistID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
@@ -2844,7 +2847,9 @@ final class AppModel {
         // The free albums are checked here too, not only on the review screen.
         let wanted = plan.freeAlbumUse(applied: false)
         if plan.reverts == nil, !resume, !Purchases.shared.allows(albums: wanted) {
-            execution = ExecutionState(planID: plan.id, failure: String(localized: "Die Gratis-Alben reichen für diese Änderungen nicht. Schalte Albumist frei, um weiterzumachen."))
+            execution = ExecutionState(planID: plan.id, failure: String(localized: """
+                Die Gratis-Alben reichen für diese Änderungen nicht. Schalte Albumist frei, um weiterzumachen.
+                """))
             return
         }
         // Every plan runs only once the results of finished plans are stored (after a full disk
@@ -2924,8 +2929,14 @@ final class AppModel {
     /// branch: an interrupted undo was called "Anlegen" too).
     private var interruptedPlanFirst: String {
         interruptedPlan?.reverts != nil
-            ? String(localized: "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach geht es hier weiter.")
-            : String(localized: "Ein früheres Anlegen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach geht es hier weiter.")
+            ? String(localized: """
+                Ein früheres Rückgängigmachen wurde unterbrochen. \
+                Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach geht es hier weiter.
+                """)
+            : String(localized: """
+                Ein früheres Anlegen wurde unterbrochen. \
+                Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach geht es hier weiter.
+                """)
     }
 
     /// The plan offered to continue, take back or keep, read again from the store after every

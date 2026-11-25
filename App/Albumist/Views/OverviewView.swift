@@ -549,7 +549,10 @@ struct RecheckedSuggestionsCard: View {
             Text("\(count) Vorschläge neu geprüft: bitte noch einmal ansehen.")
                 .font(.subheadline).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert.")
+            Text("""
+                Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. \
+                Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert.
+                """)
                 .font(.subheadline).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
             Button("OK") { model.dismissRecheckNotice() }

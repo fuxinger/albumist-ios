@@ -211,6 +211,75 @@ struct SearchView: View {
         }
     }
 
+    private func thumbnail(_ id: AssetID, source: String) -> some View {
+        let hit = model.factsByID[id]
+        let key = source + ":" + id.rawValue
+        return Button {
+            open(id, from: key)
+        } label: {
+            AssetThumbnail(id: id, side: Self.photoSide)
+                .aspectRatio(1, contentMode: .fill)
+                .matchedTransitionSource(id: key, in: zoom)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(hit == nil)
+        .accessibilityLabel(Text(hit?.asset.creationDate?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+        .accessibilityIdentifier("search.result")
+        // The long press (DS-06a): the photo larger, with what a hit offers.
+        .photoMenu(id, place: .search, side: Self.photoSide, available: hit != nil) { action in
+            perform(action, on: id, from: key)
+        }
+    }
+
+    /// The photo large, zooming out of the thumbnail `key` (a photo can be in the best hits and
+    /// in the grid).
+    private func open(_ id: AssetID, from key: String) {
+        zoomSource = key
+        // The best hits sit above the grid and may lie beyond the pages shown: the
+        // viewer always contains the photo that was tapped.
+        var ids = Array(result.ids.prefix(shown))
+        if !ids.contains(id) { ids.insert(id, at: 0) }
+        viewing = PhotoViewer.Start(id: id, ids: ids)
+    }
+
+    /// An item of a hit's long press, the search's way: "Ansehen" as a tap, "Zu Album
+    /// hinzufügen …" the sheet "Als Album anlegen" opens (then the preview).
+    private func perform(_ action: PhotoMenu.Item, on id: AssetID, from key: String) {
+        switch action {
+        case .view: open(id, from: key)
+        case .addToAlbum: addingToAlbum = [id]
+        // Ignoring is the model's, the same everywhere (`PhotoMenuItems`); a suggestion's own.
+        case .ignore, .stopIgnoring, .removeFromSuggestion: break
+        }
+    }
+
+    static func symbol(_ kind: SearchToken.Kind) -> String {
+        switch kind {
+        case .country: "globe.europe.africa"
+        case .place: "mappin.and.ellipse"
+        case .year, .month, .date: "calendar"
+        case .mediaType: "photo.on.rectangle"
+        case .category: "tag"
+        case .document: "doc.text"
+        case .merchant: "bag"
+        case .field: "number"
+        case .group: "person.2"
+        case .album: "rectangle.stack"
+        case .location: "location"
+        case .status: "tray.full"
+        case .text: "text.magnifyingglass"
+        case .trip: "airplane"
+        case .favorite: "heart"
+        case .ignored: "questionmark.circle"
+        }
+    }
+}
+
+/// The hits and what stands in their place: the note when terms were left out, the empty
+/// states and the calm tiles while hits load (apart from the struct's body, SwiftLint's type
+/// body length).
+extension SearchView {
     /// Nothing matched every term: the search left the least important ones out and says so.
     private var relaxedNote: some View {
         Label {
@@ -304,70 +373,6 @@ struct SearchView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
         .accessibilityElement(children: .ignore)
-    }
-
-    private func thumbnail(_ id: AssetID, source: String) -> some View {
-        let hit = model.factsByID[id]
-        let key = source + ":" + id.rawValue
-        return Button {
-            open(id, from: key)
-        } label: {
-            AssetThumbnail(id: id, side: Self.photoSide)
-                .aspectRatio(1, contentMode: .fill)
-                .matchedTransitionSource(id: key, in: zoom)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(hit == nil)
-        .accessibilityLabel(Text(hit?.asset.creationDate?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
-        .accessibilityIdentifier("search.result")
-        // The long press (DS-06a): the photo larger, with what a hit offers.
-        .photoMenu(id, place: .search, side: Self.photoSide, available: hit != nil) { action in
-            perform(action, on: id, from: key)
-        }
-    }
-
-    /// The photo large, zooming out of the thumbnail `key` (a photo can be in the best hits and
-    /// in the grid).
-    private func open(_ id: AssetID, from key: String) {
-        zoomSource = key
-        // The best hits sit above the grid and may lie beyond the pages shown: the
-        // viewer always contains the photo that was tapped.
-        var ids = Array(result.ids.prefix(shown))
-        if !ids.contains(id) { ids.insert(id, at: 0) }
-        viewing = PhotoViewer.Start(id: id, ids: ids)
-    }
-
-    /// An item of a hit's long press, the search's way: "Ansehen" as a tap, "Zu Album
-    /// hinzufügen …" the sheet "Als Album anlegen" opens (then the preview).
-    private func perform(_ action: PhotoMenu.Item, on id: AssetID, from key: String) {
-        switch action {
-        case .view: open(id, from: key)
-        case .addToAlbum: addingToAlbum = [id]
-        // Ignoring is the model's, the same everywhere (`PhotoMenuItems`); a suggestion's own.
-        case .ignore, .stopIgnoring, .removeFromSuggestion: break
-        }
-    }
-
-    static func symbol(_ kind: SearchToken.Kind) -> String {
-        switch kind {
-        case .country: "globe.europe.africa"
-        case .place: "mappin.and.ellipse"
-        case .year, .month, .date: "calendar"
-        case .mediaType: "photo.on.rectangle"
-        case .category: "tag"
-        case .document: "doc.text"
-        case .merchant: "bag"
-        case .field: "number"
-        case .group: "person.2"
-        case .album: "rectangle.stack"
-        case .location: "location"
-        case .status: "tray.full"
-        case .text: "text.magnifyingglass"
-        case .trip: "airplane"
-        case .favorite: "heart"
-        case .ignored: "questionmark.circle"
-        }
     }
 }
 

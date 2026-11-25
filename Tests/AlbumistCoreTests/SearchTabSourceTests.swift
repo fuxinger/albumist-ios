@@ -153,6 +153,9 @@ struct SearchTabSourceTests {
         #expect(type.contains("    let input: SearchInput\n"), "\(type)")
         #expect(!type.contains("@State private var query"), "the page keeps a text of its own")
         #expect(!type.contains("searchActive"), "the page keeps a presentation of its own")
+        // The hits' parts sit in an extension beside the struct (SwiftLint's type body length).
+        let parts = try Self.body(["extension SearchView"], in: Self.search)
+        #expect(!parts.contains("searchActive"), "the page keeps a presentation of its own")
         let query = Self.squeezed(try Self.body(["struct SearchView", "private var query: String"], in: Self.search))
         #expect(query == "{get{input.text}nonmutatingset{input.text=newValue}}", "\(query)")
         let page = Self.squeezed(try Self.body(["struct SearchView", "var body: some View"], in: Self.search))

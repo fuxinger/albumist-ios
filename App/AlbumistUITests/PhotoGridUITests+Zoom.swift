@@ -54,7 +54,34 @@ extension PhotoGridUITests {
             shot("x-place-lost")
             return
         }
-        UITestWait.never("\(test): the photo pinched on leaves the fingers a second later \(what)", for: 1) { !there() }
+        UITestWait.never("\(test): the photo pinched on stays under the fingers a second later \(what)", for: 1) { !there() }
+    }
+
+    /// The page's first rows, by label: the photos on screen while it is at its top. The first
+    /// one's label goes to the log (`UI_FACT`), as the first one's on screen does after the page
+    /// went away (`firstPhotoOnScreen`), so the log shows that it went.
+    func photosAtTheTop(_ test: String) -> Set<String> {
+        let window = app.windows.firstMatch.frame
+        let atTop = photos("library.photo").filter { $0.frame.minY < window.maxY }
+        print("UI_FACT \(test): the first photo at the page's top: '\(atTop.first?.label ?? "none")', \(atTop.count) photos on screen")
+        return Set(atTop.map(\.label))
+    }
+
+    /// The label of the first photo on screen, below the navigation bar.
+    func firstPhotoOnScreen() -> String {
+        let window = app.windows.firstMatch.frame
+        let bar = app.navigationBars.firstMatch
+        let top = bar.exists ? bar.frame.maxY : window.minY
+        return photos("library.photo").first { $0.frame.maxY > top && $0.frame.minY < window.maxY }?.label ?? "none"
+    }
+
+    /// The photo the fingers held is not among the page's first rows (`photosAtTheTop`): at the
+    /// top the scroll view cannot keep it under them either (review Y5), so there the test could
+    /// not check what it is for, and fails.
+    func isBelow(_ firstRows: Set<String>, _ held: Seen, _ test: String) -> Bool {
+        guard firstRows.contains(held.label) else { return true }
+        XCTFail("\(test): the photo pinched on ('\(held.label)') is among the page's first rows: the swipes left the page at its top")
+        return false
     }
 
     /// A suggestion's photos: the same grid, at the same size (five in a row after the pinches).

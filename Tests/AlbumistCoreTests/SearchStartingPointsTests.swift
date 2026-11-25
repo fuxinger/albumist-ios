@@ -222,12 +222,12 @@ struct SearchStartingPointsTests {
     /// photos, so it shows one, although its newest pictures are screenshots; the kind
     /// "Screenshots" has none and keeps its tile on the calm placeholder with its symbol, as an
     /// album of only screenshots shows in the tab "Alben" (review G5).
-    @Test func neverAScreenshotOrAPaperTheScreenshotsShowTheirSymbol() {
+    @Test func neverAScreenshotOrAPaperTheScreenshotsShowTheirSymbol() throws {
         let ranks = Self.large.library.ranks
         for start in Self.large.library.starts(limit: 20) {
             #expect(start.coverIDs.allSatisfy { (ranks[$0] ?? .photo) <= .unknown }, "\(start.suggestion.label) shows a screenshot or paper")
         }
-        let screenshots = try! #require(Self.large.library.starts().first { $0.suggestion.label == "Screenshots" })
+        let screenshots = try #require(Self.large.library.starts().first { $0.suggestion.label == "Screenshots" })
         #expect(screenshots.coverIDs.isEmpty)
         #expect(!screenshots.coverIDs.contains(Self.large.newestHarmlessScreenshot))
         #expect(screenshots.suggestion.count == 9)
@@ -257,19 +257,19 @@ struct SearchStartingPointsTests {
     }
 
     /// As the albums tab picks a cover: the user's favourite first, then the newest.
-    @Test func aFavouriteLeads() {
-        let rome = try! #require(Self.large.library.starts().first { $0.suggestion.label == "Rom" })
+    @Test func aFavouriteLeads() throws {
+        let rome = try #require(Self.large.library.starts().first { $0.suggestion.label == "Rom" })
         #expect(rome.coverIDs.first == Self.large.romeFavourite)
         // The trip has the same favourite, already Rom's: its own picture is another one.
-        let trips = try! #require(Self.large.library.starts().first { $0.suggestion.kind == .trip })
+        let trips = try #require(Self.large.library.starts().first { $0.suggestion.kind == .trip })
         #expect(trips.coverIDs.first != Self.large.romeFavourite)
         #expect(!trips.coverIDs.contains(Self.large.romeFavourite))
     }
 
     /// A topic shows a photo the analysis is sure about, not just its newest one.
-    @Test func aTopicShowsAPhotoTheAnalysisIsSureAbout() {
-        let topic = try! #require(Self.large.library.starts().first { $0.suggestion.kind == .category })
-        let first = try! #require(topic.coverIDs.first)
+    @Test func aTopicShowsAPhotoTheAnalysisIsSureAbout() throws {
+        let topic = try #require(Self.large.library.starts().first { $0.suggestion.kind == .category })
+        let first = try #require(topic.coverIDs.first)
         #expect(Self.large.sureMountains.contains(first))
     }
 

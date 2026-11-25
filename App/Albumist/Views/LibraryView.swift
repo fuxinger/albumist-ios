@@ -303,7 +303,11 @@ struct LibraryView: View {
             .accessibilityIdentifier("library.filter")
         }
     }
+}
 
+// MARK: Selection and an empty area
+
+extension LibraryView {
     /// The actions for the selected photos, in the system bottom bar: add to an album on the
     /// left, how many are selected in the middle, ignore on the right, like the selection in
     /// Photos. Each button keeps its name for VoiceOver and the large content viewer.

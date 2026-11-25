@@ -193,20 +193,18 @@ struct TripTimelineTests {
         let before = [trip.add("2023-07-25 10:00", "Akureyri"), trip.add("2023-07-28 18:00", "Akureyri")]
         let after = [trip.add("2023-08-12 09:00", "Höfn")]
         let iceland = Set(Self.iceland.trip.ids)
-        let content = TripTimeline.content(of: iceland, before: Set(before), after: Set(after), facts: FactsByID(trip.facts),
-                                           ranks: trip.ranks, dates: trip.dates, calendar: Self.calendar)
+        let library = TripTimeline.Library(facts: FactsByID(trip.facts), ranks: trip.ranks, dates: trip.dates, calendar: Self.calendar)
+        let content = TripTimeline.content(of: iceland, before: Set(before), after: Set(after), in: library)
         #expect(content.days == Self.iceland.trip.timeline())
         // From the 28th of July to the 1st of August: the 29th, 30th and 31st.
         #expect(content.quietDaysFromBefore == 3)
         // From the 7th to the 12th of August: four days between.
         #expect(content.quietDaysToAfter == 4)
-        let alone = TripTimeline.content(of: iceland, before: nil, after: nil, facts: FactsByID(trip.facts),
-                                         ranks: trip.ranks, dates: trip.dates, calendar: Self.calendar)
+        let alone = TripTimeline.content(of: iceland, before: nil, after: nil, in: library)
         #expect(alone.days == content.days)
         #expect(alone.quietDaysFromBefore == nil && alone.quietDaysToAfter == nil)
         // A neighbour without a dated photo has no days between.
-        let undated = TripTimeline.content(of: iceland, before: [AssetID("none")], after: [], facts: FactsByID(trip.facts),
-                                           ranks: trip.ranks, dates: trip.dates, calendar: Self.calendar)
+        let undated = TripTimeline.content(of: iceland, before: [AssetID("none")], after: [], in: library)
         #expect(undated.quietDaysFromBefore == nil && undated.quietDaysToAfter == nil)
     }
 

@@ -40,7 +40,9 @@ struct ChangeCoversSourceTests {
     /// row its own; the change cut off on its way shows what it sets out to add.
     @Test func theHistoryWorksOutACoverForEachChange() throws {
         let view = Self.squeezed(try Self.body(["struct HistoryView", "var body"], in: Self.settings))
-        #expect(view.contains(".task(id:model.changeCoverInputs(model.history,interrupted:model.interruptedPlan)){letmade=awaitmodel.historyCovers(model.history,interrupted:model.interruptedPlan)guard!Task.isCancelledelse{return}covers=made}"))
+        #expect(view.contains(".task(id:model.changeCoverInputs(model.history,interrupted:model.interruptedPlan))"
+                              + "{letmade=awaitmodel.historyCovers(model.history,interrupted:model.interruptedPlan)guard!Task.isCancelledelse{return}"
+                              + "covers=made}"))
         #expect(view.contains("InterruptedHistoryRow(plan:interrupted,cover:covers[interrupted.id])"))
         #expect(view.contains("HistoryRow(plan:plan,cover:covers[plan.id])"))
         let inputs = Self.squeezed(try Self.body(["func changeCoverInputs("], in: Self.model))
@@ -71,7 +73,8 @@ struct ChangeCoversSourceTests {
     @Test func aHistoryRowShowsTheCoverOfItsChange() throws {
         let row = Self.squeezed(try Self.body(["struct HistoryRow", "var body"], in: Self.settings))
         #expect(row.hasPrefix("{PushLink(.receipt(PlanToken(plan))){AdaptiveStack(spacing:Theme.Spacing.m){ChangeCover(mosaic:cover,symbol:PlanReceipt.Kind(plan).coverSymbol)VStack(alignment:.leading,spacing:2){"))
-        #expect(row.contains("ifmodel.undonePlans.contains(plan.id){Label(\"Rückgängiggemacht\",systemImage:\"arrow.uturn.backward\").font(.footnote).foregroundStyle(.noteText)}"))
+        #expect(row.contains("ifmodel.undonePlans.contains(plan.id){Label(\"Rückgängiggemacht\",systemImage:\"arrow.uturn.backward\").font(.footnote)"
+                             + ".foregroundStyle(.noteText)}"))
         #expect(row.contains("}.fixedSize(horizontal:false,vertical:true)}.padding(.vertical,Theme.Spacing.xs)}"))
         #expect(row.hasSuffix(".accessibilityIdentifier(\"history.row\")}"))
     }
@@ -140,7 +143,8 @@ struct ChangeCoversSourceTests {
     @Test func aReceiptAlbumShowsALargerCover() throws {
         let row = Self.squeezed(try Self.body(["private struct ReceiptAlbumRow", "var body"], in: Self.receipt))
         #expect(row.hasPrefix("{AdaptiveStack(spacing:Theme.Spacing.m){coverViewVStack(alignment:.leading,spacing:2){"))
-        #expect(row.contains("ViewThatFits(in:.horizontal){HStack(alignment:.firstTextBaseline,spacing:Theme.Spacing.s){badgecounts}VStack(alignment:.leading,spacing:2){badgecounts}}"))
+        #expect(row.contains("ViewThatFits(in:.horizontal){HStack(alignment:.firstTextBaseline,spacing:Theme.Spacing.s){badgecounts}"
+                             + "VStack(alignment:.leading,spacing:2){badgecounts}}"))
         #expect(row.hasSuffix(".padding(.vertical,Theme.Spacing.xs).accessibilityElement(children:.combine)}"))
         let cover = Self.squeezed(try Self.body(["private struct ReceiptAlbumRow", "private var coverView"], in: Self.receipt))
         #expect(cover.contains("ifalbum.added>0{AlbumRowCover(ids:cover?.ids??[],hidesPreview:cover?.hidden??false,placeholderSymbol:cover==nil?nil:\"rectangle.stack\")}"))
@@ -161,7 +165,8 @@ struct ChangeCoversSourceTests {
     /// (`PlanCovers.key`), never one made for another plan.
     @Test func thePreviewWorksOutTheCoverOfEachAlbum() throws {
         let view = Self.squeezed(try Self.body(["struct PlanReviewView", "var body"], in: Self.review))
-        #expect(view.contains(".task(id:albumCoverInputs){guardalbumCoverInputs!=nil,letplanelse{return}letmade=awaitmodel.previewCovers(for:plan)guard!Task.isCancelledelse{return}albumCovers=AlbumCovers(plan:plan.id,covers:made)}"))
+        #expect(view.contains(".task(id:albumCoverInputs){guardalbumCoverInputs!=nil,letplanelse{return}letmade=awaitmodel.previewCovers(for:plan)"
+                              + "guard!Task.isCancelledelse{return}albumCovers=AlbumCovers(plan:plan.id,covers:made)}"))
         let content = Self.squeezed(try Self.body(["struct PlanReviewView", "func planContent("], in: Self.review))
         #expect(content.contains("if!facts.albums.isEmpty{PlanAlbumList(albums:facts.albums,covers:covers(of:plan))}"))
         let mine = Self.squeezed(try Self.body(["struct PlanReviewView", "func covers(of"], in: Self.review))
@@ -194,7 +199,11 @@ struct ChangeCoversSourceTests {
     /// VoiceOver with the words of before, in the order of before.
     @Test func aPreviewRowShowsTheAlbumsCover() throws {
         let row = Self.squeezed(try Self.body(["private struct PlanAlbumRow", "var body"], in: Self.review))
-        #expect(row.hasPrefix("{AdaptiveStack(spacing:Theme.Spacing.m){coverViewVStack(alignment:.leading,spacing:2){Text(album.title).font(.body.weight(.medium)).compactLineLimit(2)if!album.folderPath.isEmpty{Text(album.folderPath.joined(separator:\"›\")).font(.footnote).foregroundStyle(.noteText).compactLineLimit(2)}ViewThatFits(in:.horizontal){HStack(alignment:.firstTextBaseline,spacing:Theme.Spacing.s){badgecount}VStack(alignment:.leading,spacing:2){badgecount}}}.frame(maxWidth:.infinity,alignment:.leading)}"))
+        #expect(row.hasPrefix("{AdaptiveStack(spacing:Theme.Spacing.m){coverViewVStack(alignment:.leading,spacing:2){Text(album.title)"
+                              + ".font(.body.weight(.medium)).compactLineLimit(2)if!album.folderPath.isEmpty"
+                              + "{Text(album.folderPath.joined(separator:\"›\")).font(.footnote).foregroundStyle(.noteText).compactLineLimit(2)}"
+                              + "ViewThatFits(in:.horizontal){HStack(alignment:.firstTextBaseline,spacing:Theme.Spacing.s){badgecount}"
+                              + "VStack(alignment:.leading,spacing:2){badgecount}}}.frame(maxWidth:.infinity,alignment:.leading)}"))
         #expect(row.hasSuffix(".padding(.vertical,Theme.Spacing.xs).accessibilityElement(children:.combine)}"))
         let cover = Self.squeezed(try Self.body(["private struct PlanAlbumRow", "private var coverView"], in: Self.review))
         #expect(cover.contains("ifalbum.addedCount>0{AlbumRowCover(ids:cover?.ids??[],hidesPreview:cover?.hidden??false,placeholderSymbol:cover==nil?nil:\"rectangle.stack\")}else{AlbumRowCover(ids:[],placeholderSymbol:\"rectangle.stack\")}"))
@@ -205,7 +214,8 @@ struct ChangeCoversSourceTests {
         let words = Self.squeezed(whole)
         #expect(words.contains("Text(\"Neu\").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)"))
         #expect(words.contains("Text(\"Ergänzt\").font(.caption.weight(.semibold)).foregroundStyle(.noteText)"))
-        #expect(words.contains("Text(\"\\(album.addedCount)\\(album.addedCount.formatted())Fotos\").font(.footnote).foregroundStyle(.noteText).monospacedDigit()"))
+        #expect(words.contains("Text(\"\\(album.addedCount)\\(album.addedCount.formatted())Fotos\").font(.footnote).foregroundStyle(.noteText)"
+                               + ".monospacedDigit()"))
     }
 
     /// The names the UI tests use stay (`AlbumistFlowUITests`, `AlbumistLockedUITests`).

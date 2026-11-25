@@ -8,10 +8,9 @@ import AlbumistTestSupport
 /// where motion is welcome, and everything the viewer did before stays.
 @Suite("Photo view source (DS-10)")
 struct PhotoViewerSourceTests {
-    static let viewerPath = "App/Albumist/Views/PhotoViewer.swift"
     static let folder = "App/Albumist/Views/PhotoViewer"
 
-    static func viewer() throws -> String { try AppSource.read(viewerPath) }
+    static func viewer() throws -> String { try PhotoViewerSource.read() }
     static func file(_ name: String) throws -> String { try AppSource.read("\(folder)/\(name)") }
 
     /// The code of `path` with comments and strings blanked.
@@ -19,7 +18,7 @@ struct PhotoViewerSourceTests {
 
     /// The files that load photos for the photo view.
     static var loadingFiles: [String] {
-        [viewerPath, "App/Albumist/Views/AssetThumbnail.swift"] + AppSource.swiftFiles(under: folder)
+        PhotoViewerSource.views + ThumbnailSource.paths + AppSource.swiftFiles(under: folder)
     }
 
     static func count(_ pattern: String, in text: String) -> Int {
@@ -124,8 +123,10 @@ struct PhotoViewerSourceTests {
         let first = try #require(body.range(of: "titleLine"))
         let second = try #require(body.range(of: "subtitleLine"))
         #expect(first.upperBound < second.lowerBound)
-        for (line, guarded, long, short) in [("private var titleLine", "if title.shortTitle != title.title {", "heading(title.title)", "heading(title.shortTitle)"),
-                                             ("private var subtitleLine", "if title.shortSubtitle != title.subtitle {", "line(title.subtitle)", "line(title.shortSubtitle)")] {
+        for (line, guarded, long, short) in [
+            ("private var titleLine", "if title.shortTitle != title.title {", "heading(title.title)", "heading(title.shortTitle)"),
+            ("private var subtitleLine", "if title.shortSubtitle != title.subtitle {", "line(title.subtitle)", "line(title.shortSubtitle)"),
+        ] {
             let code = try #require(AppSource.body(of: line, in: bar), "\(line) is missing")
             let condition = try #require(code.range(of: guarded), "\(line) picks a form it does not have")
             let fits = try #require(code.range(of: "ViewThatFits(in: .horizontal) {", range: condition.upperBound..<code.endIndex))
@@ -207,6 +208,39 @@ struct PhotoViewerSourceTests {
         #expect(player.contains("startPlayback(with: .full)"))
         #expect(player.contains("stopPlayback()"))
         #expect(player.contains("isOtherAudioPlaying"), "a Live Photo's sound would stop the user's music")
+        try Self.theSoundMixesWithTheUsers(player)
+        // PhotoKit does not promise the main thread for its delegate calls: a hop, not a trap (M4).
+        let hop = try #require(AppSource.body(of: "nonisolated private func showOnMain(", in: player))
+        #expect(hop.contains("if Thread.isMainThread"))
+        #expect(hop.contains("Task { @MainActor in"))
+        #expect(Self.count("assumeIsolated", in: player) == 1)
+        // The motion at the screen's pixels: it shows only while it plays (L5).
+        let loadLive = try #require(AppSource.body(of: "func loadLive(", in: AppSource.code(try Self.viewer())))
+        #expect(loadLive.contains("LivePhotoLoader.load("))
+        #expect(!loadLive.contains("* 2"))
+        let viewer = AppSource.code(try Self.viewer(), keepStrings: true)
+        let hint = try #require(viewer.range(of: "LiveMotion.playsHint("), "the short motion plays everywhere")
+        let call = String(viewer[hint.lowerBound...].prefix(260))
+        #expect(call.contains("reduceMotion"))
+        #expect(call.contains("isLowPowerModeEnabled"))
+        #expect(call.contains("isVideoAutoplayEnabled"))
+        try Self.theLongPressIsUIKits(viewer)
+        // The touch that was a press is neither a tap nor a pull down to close.
+        for gesture in ["private var taps", "private var pullDown"] {
+            let body = try #require(AppSource.body(of: gesture, in: viewer))
+            #expect(body.contains("pressedLately"), "\(gesture) acts on a long press")
+        }
+        #expect(viewer.contains("Button(\"Live Photo abspielen\")"), "VoiceOver cannot play it")
+        #expect(viewer.contains(".accessibilityHidden(true)"))
+        for path in PhotoViewerSource.paths + ["\(Self.folder)/LivePhotoPlayer.swift"] {
+            #expect(!(try AppSource.read(path)).contains("\"livephoto\""), "\(path): a Live Photo sign on the photo")
+        }
+        #expect(try Self.file("PhotoTitleBar.swift").contains("Image(systemName: \"livephoto\")"))
+    }
+
+    /// `livePhotosMoveWhereMotionIsWelcome`: the sound of a Live Photo, prepared when the photo
+    /// view opens.
+    static func theSoundMixesWithTheUsers(_ player: String) throws {
         // The app's sound mixes with the user's and follows the silent switch (review D, H2).
         // Set when the photo view opens, off the main thread and not where a Live Photo starts
         // to move; kept only once it worked, so a failure is tried again (review D2, N9).
@@ -224,21 +258,10 @@ struct PhotoViewerSourceTests {
         #expect(!prepare.contains("isReady = true"), "kept before it worked")
         #expect(try #require(AppSource.body(of: "private static func finished(", in: player)).contains("isReady = done"))
         #expect(try #require(AppSource.body(of: "private func opened(", in: AppSource.code(try Self.viewer()))).contains("LiveAudio.prepare()"))
-        // PhotoKit does not promise the main thread for its delegate calls: a hop, not a trap (M4).
-        let hop = try #require(AppSource.body(of: "nonisolated private func showOnMain(", in: player))
-        #expect(hop.contains("if Thread.isMainThread"))
-        #expect(hop.contains("Task { @MainActor in"))
-        #expect(Self.count("assumeIsolated", in: player) == 1)
-        // The motion at the screen's pixels: it shows only while it plays (L5).
-        let loadLive = try #require(AppSource.body(of: "private func loadLive(", in: AppSource.code(try Self.viewer())))
-        #expect(loadLive.contains("LivePhotoLoader.load("))
-        #expect(!loadLive.contains("* 2"))
-        let viewer = AppSource.code(try Self.viewer(), keepStrings: true)
-        let hint = try #require(viewer.range(of: "LiveMotion.playsHint("), "the short motion plays everywhere")
-        let call = String(viewer[hint.lowerBound...].prefix(260))
-        #expect(call.contains("reduceMotion"))
-        #expect(call.contains("isLowPowerModeEnabled"))
-        #expect(call.contains("isVideoAutoplayEnabled"))
+    }
+
+    /// `livePhotosMoveWhereMotionIsWelcome`: the long press that plays a Live Photo, with its rules.
+    static func theLongPressIsUIKits(_ viewer: String) throws {
         // The long press is UIKit's, beside the pager's swipe: SwiftUI's long press followed by
         // a drag kept the swipe from the pager on exactly the Live Photo pages (review D, H1).
         #expect(!viewer.contains("LongPressGesture("))
@@ -260,17 +283,6 @@ struct PhotoViewerSourceTests {
         let handled = try #require(AppSource.body(of: "func handleUIGestureRecognizerAction(", in: press))
         #expect(handled.contains("case .began: onPress(true)"))
         #expect(handled.contains("case .ended, .cancelled, .failed: onPress(false)"))
-        // The touch that was a press is neither a tap nor a pull down to close.
-        for gesture in ["private var taps", "private var pullDown"] {
-            let body = try #require(AppSource.body(of: gesture, in: viewer))
-            #expect(body.contains("pressedLately"), "\(gesture) acts on a long press")
-        }
-        #expect(viewer.contains("Button(\"Live Photo abspielen\")"), "VoiceOver cannot play it")
-        #expect(viewer.contains(".accessibilityHidden(true)"))
-        for path in [Self.viewerPath, "\(Self.folder)/LivePhotoPlayer.swift"] {
-            #expect(!(try AppSource.read(path)).contains("\"livephoto\""), "\(path): a Live Photo sign on the photo")
-        }
-        #expect(try Self.file("PhotoTitleBar.swift").contains("Image(systemName: \"livephoto\")"))
     }
 
     /// The long press is the innermost gesture of the photo (review D2, N3): a gesture added
@@ -309,7 +321,7 @@ struct PhotoViewerSourceTests {
         #expect(held.contains("pressing == id"), "another page's end frees the pager")
         #expect(AppSource.calls(of: "ZoomablePhoto(", in: source).allSatisfy { $0.contains("onPressing: { livePress(id, $0) }") })
         // A page that goes while pressed ends its press, so the pager is never held for good.
-        let photo = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: source))
+        let photo = try #require(AppSource.body(of: "struct ZoomablePhoto", in: source))
         let gone = try #require(AppSource.body(of: ".onDisappear", in: photo))
         #expect(gone.contains("if pressing { press(false) }"))
         // No pinch and no moving the zoomed photo while the press plays.
@@ -318,184 +330,6 @@ struct PhotoViewerSourceTests {
             let changed = try #require(body.range(of: ".onChanged { value in"), "\(gesture)")
             #expect(String(body[changed.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
                 .hasPrefix("guard !pressing else { return }"), "\(gesture) moves the photo under a press")
-        }
-    }
-
-    // MARK: Sharing
-
-    /// The share button shares the photo's file as Photos hands it out (the edited one, else the
-    /// original), from a temporary file with the photo's own name that goes when the share sheet
-    /// closes; "Bild sichern" and "Zu geteiltem Album hinzufügen" would copy the photo into the
-    /// library or into iCloud and are not offered. Off with a reason where only a preview is on
-    /// the iPhone; no answer from Photos is no verdict (review D: M3, M5, M6, L4, L8, L9).
-    @Test func sharingUsesOnlyWhatIsOnTheIPhone() throws {
-        let share = AppSource.code(try Self.file("PhotoShare.swift"))
-        #expect(share.contains("UIActivityViewController("))
-        #expect(share.contains("excludedActivityTypes = [.saveToCameraRoll, UIActivity.ActivityType(rawValue:"))
-        #expect(AppSource.code(try Self.file("PhotoShare.swift"), keepStrings: true)
-            .contains("\"com.apple.mobileslideshow.StreamShareService\""))
-        let done = try #require(share.range(of: "completionWithItemsHandler"))
-        #expect(share[done.lowerBound...].prefix(120).contains("remove("), "the shared file stays behind")
-        #expect(share.contains("temporaryDirectory"))
-        #expect(share.contains("SharedPhotoFile.name("))
-        // The file Photos would hand out, and only for a still image.
-        #expect(share.contains("$0.type == .fullSizePhoto"))
-        #expect(share.contains("$0.type == .photo"))
-        #expect(share.contains("mediaType == .image"))
-        // Its first bytes say whether it is on the iPhone, and the reading stops there.
-        let check = try #require(AppSource.body(of: "private static func firstBytes(", in: share))
-        #expect(check.contains("requestData("))
-        #expect(check.contains("finish(.onDevice, stop: true)"))
-        // Only Photos' "network access required" says "only in iCloud"; any other error is
-        // unknown (review D2, N5), by the core's rule, with the errors under the error too.
-        let ended = try #require(check.range(of: "} completionHandler: { error in"))
-        #expect(String(check[ended.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-            .hasPrefix("answer.finish(ShareAvailability.afterReading(errors: errorChain(of: error)))"))
-        #expect(!check.contains(".onlyInICloud"), "an error read as only in iCloud by itself")
-        let chain = try #require(AppSource.body(of: "static func errorChain(", in: share))
-        #expect(chain.contains("NSUnderlyingErrorKey"))
-        // The core's numbers are PhotoKit's (checked on every debug run of the app).
-        #expect(check.contains("PHPhotosError.errorDomain == ShareAvailability.photosErrorDomain"))
-        #expect(check.contains("PHPhotosError.Code.networkAccessRequired.rawValue == ShareAvailability.networkAccessRequired"))
-        #expect(try Self.file("PhotoKitAnswer.swift").contains("cancelDataRequest("))
-        // The share checks first, then Photos copies the file, readable only while it is open.
-        let write = try #require(AppSource.body(of: "private static func write(", in: share))
-        #expect(write.contains("firstBytes("), "shared without knowing it is on the iPhone")
-        #expect(write.contains("FileProtectionType.completeUnlessOpen"))
-        // No answer from Photos is no verdict.
-        let prepare = try #require(AppSource.body(of: "static func prepare(", in: share))
-        #expect(prepare.contains("case .noAnswer: return .unavailable(.unknown)"))
-        let thumbnails = AppSource.code(try AppSource.read("App/Albumist/Views/AssetThumbnail.swift"))
-        #expect(thumbnails.contains("func assetLookup(for id: AssetID) async -> AssetLookup"))
-        // Leftovers go at launch too, and never the folder of the sheet on screen.
-        let app = AppSource.code(try AppSource.read("App/Albumist/App/AlbumistApp.swift"))
-        #expect(try #require(AppSource.body(of: "init()", in: app)).contains("PhotoShare.removeLeftovers()"))
-        #expect(try #require(AppSource.body(of: "static func removeLeftovers(", in: share)).contains("onScreen"))
-        #expect(try #require(AppSource.body(of: "static func present(", in: share)).contains("onScreen = folder"))
-
-        let viewer = AppSource.code(try Self.viewer(), keepStrings: true)
-        #expect(viewer.contains("Label(\"Teilen\", systemImage: \"square.and.arrow.up\")"))
-        #expect(viewer.contains("\"viewer.share\""))
-        #expect(viewer.contains(".disabled(!shareState.canShare"))
-        #expect(viewer.contains(".accessibilityHint("))
-        #expect(viewer.contains("Das ganze Foto liegt nur in iCloud. Teilen kannst du es in der Fotos-App."))
-        // Only still images, by Photos' own kind once known.
-        #expect(try #require(AppSource.body(of: "private var shareButton", in: viewer)).contains("if isImage"))
-        #expect(try #require(AppSource.body(of: "private var isImage", in: viewer)).contains("basics[current]"))
-        // Only a verdict is kept; leftovers go when the view opens and closes.
-        #expect(try #require(AppSource.body(of: "private func checkSharing(", in: viewer)).contains("found != .unknown"))
-        #expect(try #require(AppSource.body(of: "private func opened(", in: viewer)).contains("PhotoShare.removeLeftovers()"))
-        #expect(try #require(AppSource.body(of: "private func closed(", in: viewer)).contains("PhotoShare.removeLeftovers()"))
-    }
-
-    /// The share being prepared belongs to the photo on screen (`SharePreparation`, review D2,
-    /// N7): a swipe, the details or closing the view leave it, and only its end for the photo
-    /// still on screen shows the sheet or says that it failed; a file not shown is removed. The
-    /// failure is said by the photo view itself, on its root (N1): the app's alert
-    /// (`model.message`, on `RootView`) cannot show over the full-screen photo view and came up
-    /// after it had closed.
-    @Test func aShareIsForThePhotoOnScreenAndSaysItsFailureItself() throws {
-        let source = try Self.viewer()
-        let viewer = AppSource.code(source, keepStrings: true)
-        #expect(!AppSource.code(source).contains("model.message"), "the photo view uses the app's alert")
-        func position(_ text: String, in body: String, after: String.Index? = nil) throws -> String.Index {
-            let range = try #require(body.range(of: text, range: (after ?? body.startIndex)..<body.endIndex), "\(text) not found in place")
-            return range.lowerBound
-        }
-        // On the photo view's root, after the navigation root, not inside the pages.
-        let body = try #require(AppSource.body(of: ["struct PhotoViewer", "var body: some View"], in: viewer))
-        let root = try position("NavigationRoot { pager }", in: body)
-        let alert = try position(".alert(\"Das hat nicht geklappt\", isPresented: shareFailed)", in: body, after: root)
-        _ = try position("Button(\"OK\", role: .cancel) {}", in: body, after: alert)
-        _ = try position("Text(\"Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal.\")", in: body, after: alert)
-        for part in ["private var pager", "private var pages"] {
-            #expect(!(try #require(AppSource.body(of: part, in: viewer))).contains(".alert("), "\(part) has the alert")
-        }
-        let failed = try #require(AppSource.body(of: "private var shareFailed", in: viewer))
-        #expect(failed.contains("get: { preparation.failed }"))
-        #expect(failed.contains("preparation.failureSeen()"))
-        // The share: begun for the photo on screen, ended by the core's rule.
-        let share = try #require(AppSource.body(of: "private func share(", in: viewer))
-        let begun = try position("guard let ticket = preparation.begin(current) else { return }", in: share)
-        let prepared = try position("await PhotoShare.prepare(ticket.photo", in: share, after: begun)
-        let ended = try position("switch preparation.end(ticket, with: prepared.result, onScreen: current)", in: share, after: prepared)
-        let shown = try position("case .present:", in: share, after: ended)
-        _ = try position("PhotoShare.present(file)", in: share, after: shown)
-        let discarded = try position("case .discard:", in: share, after: ended)
-        _ = try position("PhotoShare.remove(file.deletingLastPathComponent())", in: share, after: discarded)
-        let kept = try position("case .remember(let reason):", in: share, after: ended)
-        _ = try position("sharing[ticket.photo] = reason", in: share, after: kept)
-        #expect(viewer.contains(".disabled(!shareState.canShare || preparation.isPreparing)"))
-        // Left on a swipe, when the details open and when the view closes.
-        let leave = try #require(AppSource.body(of: "private func leaveShare(", in: viewer))
-        #expect(leave.contains("preparation.leave()"))
-        #expect(leave.contains("shareTask?.cancel()"))
-        #expect(try #require(AppSource.body(of: ".onChange(of: current)", in: viewer)).contains("leaveShare()"))
-        let info = try #require(AppSource.body(of: "private var infoButton", in: viewer))
-        _ = try position("info = facts", in: info, after: try position("leaveShare()", in: info))
-        #expect(try #require(AppSource.body(of: "private func closed(", in: viewer)).contains("leaveShare()"))
-        // No answer, or no file written, is a failure; Photos' verdicts are kept.
-        let result = try #require(AppSource.body(of: "var result: SharePreparation.Result", in: AppSource.code(try Self.file("PhotoShare.swift"))))
-        #expect(result.contains("case .file: .file"))
-        #expect(result.contains("case .unavailable(let reason): reason.canShare ? .failed : .unavailable(reason)"))
-    }
-
-    // MARK: What stays
-
-    /// Everything the photo view did stays: the pages built around the photo, zoom, VoiceOver's
-    /// zoom, pull down to close, the close and "i" buttons, ignoring with "Widerrufen", the
-    /// details and "Zu Album hinzufügen", the callers' initializer and the honest loading states.
-    @Test func whatTheViewerDidStays() throws {
-        let viewer = AppSource.code(try Self.viewer(), keepStrings: true)
-        for kept in ["PageWindow(around:", "window.following(", "MagnifyGesture()", ".accessibilityZoomAction",
-                     "\"viewer.close\"", "\"viewer.info\"", "IgnoreUndoBar()", ".accessibilityAction(.escape)",
-                     "AssetDetailView(facts:", "AddToAlbumSheet(assets:", "init(ids: [AssetID], current: AssetID, showsInfo: Bool = false)",
-                     "Text(\"Foto wird geladen\")", "\"viewer.unavailable\"", "ThumbnailCache.shared.largeImage(for:",
-                     "DragGesture(minimumDistance: 20)", "onClose()", ".tabViewStyle(.page(indexDisplayMode: .never))"] {
-            #expect(viewer.contains(kept), "\(kept) is gone")
-        }
-        let thumbnails = AppSource.code(try AppSource.read("App/Albumist/Views/AssetThumbnail.swift"))
-        for kept in ["func image(for id: AssetID, side: CGFloat) async -> UIImage?",
-                     "func cover(for id: AssetID, pixels: CGSize) async -> CoverFetch",
-                     "func largeImage(for id: AssetID, pixels: CGSize) async -> UIImage?"] {
-            #expect(thumbnails.contains(kept), "\(kept) changed")
-        }
-        let asset = try #require(AppSource.body(of: "func asset(for id: AssetID) async -> ThumbnailRequest.Asset?", in: thumbnails))
-        #expect(asset.contains("photoAsset(for: id)"), "a second way to look up photos")
-    }
-
-    /// Xcode's type checker gave up on one long SwiftUI expression in wave 1 ("failed to produce
-    /// diagnostic for expression"): the photo view's bodies stay short, their pieces are typed
-    /// properties of their own.
-    @Test func theBodiesStayShort() throws {
-        let viewer = try Self.viewer()
-        for path in [["struct PhotoViewer", "var body: some View"], ["private struct ZoomablePhoto", "var body: some View"]] {
-            let body = try #require(AppSource.body(of: path, in: viewer), "\(path) not found")
-            let lines = body.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
-            #expect(lines.count <= 16, "\(path.joined(separator: " ")) has \(lines.count) lines")
-        }
-    }
-
-    // MARK: Words
-
-    /// The photo view's new words are in the catalog with their English.
-    @Test func theNewWordsAreTranslated() throws {
-        let catalog = try StringCatalogTests.catalog()
-        let english = [
-            "Live Photo abspielen": "Play Live Photo",
-            "Das ganze Foto liegt nur in iCloud. Teilen kannst du es in der Fotos-App.":
-                "The full photo is only in iCloud. You can share it from the Photos app.",
-            "Teilen": "Share",
-            "Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal.":
-                "The photo could not be prepared for sharing. Please try again in a moment.",
-            // The photo view's own alert for a failed share (review D2, N1).
-            "Das hat nicht geklappt": "That Didn\u{2019}t Work",
-            "OK": "OK",
-        ]
-        for (german, wanted) in english {
-            let entry = try #require(catalog[german], "\(german) is not in the catalog")
-            let value = (StringCatalogTests.localization(entry, "en")?["stringUnit"] as? [String: Any])?["value"] as? String
-            #expect(value == wanted, "\(german): \(value ?? "no English")")
         }
     }
 }

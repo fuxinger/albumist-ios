@@ -22,7 +22,7 @@ private struct PhotoGridScrollHost: ViewModifier {
 
     func body(content: Content) -> some View {
         // Read here, so a step the grid asks for (`scroll(by:)`, `show`) reaches the scroll view.
-        let _ = scroller.position
+        let _: ScrollPosition = scroller.position
         content
             .scrollPosition($scroller.position, anchor: scroller.anchor)
             .onScrollGeometryChange(for: ScrollGeometry.self) { geometry in

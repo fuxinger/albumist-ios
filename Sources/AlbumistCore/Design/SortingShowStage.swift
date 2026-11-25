@@ -26,6 +26,19 @@ public struct SortingShowLayout: Hashable, Sendable {
         public var dy: Double
     }
 
+    /// Where a loose photo of the pile lies from its centre (x, y) and how it is turned (degrees).
+    public struct Loose: Hashable, Sendable {
+        public var x: Double
+        public var y: Double
+        public var angle: Double
+
+        public init(_ x: Double, _ y: Double, angle: Double) {
+            self.x = x
+            self.y = y
+            self.angle = angle
+        }
+    }
+
     /// The photos of the show before DS-17: never smaller than these at the scene's own size.
     public static let previousPhoto = 76.0
     /// The album of the show before DS-17, and the smallest cover now.
@@ -38,8 +51,9 @@ public struct SortingShowLayout: Hashable, Sendable {
     /// The pile's loose photos as they were made for 76 pt photos: offset x, offset y, turn in
     /// degrees (applied at 60 %). Grown with the photo; the offsets up and down at 60 %, so the
     /// bigger photos take less of the screen's height.
-    static let loosePhotos: [(x: Double, y: Double, angle: Double)] = [
-        (-54, -4, -11), (46, -12, 8), (-14, 12, -3), (60, 16, 13), (-66, 24, -16), (8, -22, 5),
+    static let loosePhotos: [Loose] = [
+        Loose(-54, -4, angle: -11), Loose(46, -12, angle: 8), Loose(-14, 12, angle: -3),
+        Loose(60, 16, angle: 13), Loose(-66, 24, angle: -16), Loose(8, -22, angle: 5),
     ]
     static let verticalScatter = 0.6
     /// Above the pile: a turned photo reaches a little higher than its centre plus half its side.
@@ -120,10 +134,10 @@ public struct SortingShowLayout: Hashable, Sendable {
 
     /// Where the pile's `index`-th loose photo lies, from the pile's centre, and how it is turned
     /// (degrees). The pile repeats the pattern after six photos.
-    public func loose(_ index: Int) -> (x: Double, y: Double, angle: Double) {
+    public func loose(_ index: Int) -> Loose {
         let base = Self.loosePhotos[((index % Self.loosePhotos.count) + Self.loosePhotos.count) % Self.loosePhotos.count]
         let grown = photo / Self.previousPhoto
-        return (base.x * grown, base.y * grown * Self.verticalScatter * looseness, base.angle * 0.6)
+        return Loose(base.x * grown, base.y * grown * Self.verticalScatter * looseness, angle: base.angle * 0.6)
     }
 }
 

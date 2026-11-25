@@ -37,20 +37,27 @@ struct TripTimelineSourceTests {
     /// waits (review G4); the days between the trips are said in the merge rows.
     @Test func theTripReadsInTheOrderOfTimeEachPartUnderItsOwnHeading() throws {
         let body = Self.squeezed(try Self.body(["struct TripWorkshopView", "var body"], in: Self.workshop))
-        #expect(body.contains("header(timeline?.days.count??days.count)changesSection(saysWhy:!mergeShown||timeline==nil)iflettimeline{ifletbefore=around.before{neighbourSection(before,side:.before,gap:gap(to:before,side:.before),explains:true)}daysSection(timeline)ifletafter=around.after{neighbourSection(after,side:.after,gap:gap(to:after,side:.after),explains:around.before==nil)}}"))
+        #expect(body.contains("header(timeline?.days.count??days.count)changesSection(saysWhy:!mergeShown||timeline==nil)iflettimeline"
+                              + "{ifletbefore=around.before{neighbourSection(before,side:.before,gap:gap(to:before,side:.before),explains:true)}"
+                              + "daysSection(timeline)ifletafter=around.after{neighbourSection(after,side:.after,gap:gap(to:after,side:.after),"
+                              + "explains:around.before==nil)}}"))
         #expect(!body.contains("timelineSection(") && !body.contains("splitSection(") && !body.contains("mergeSection("))
         // The days: their heading and the hint belong to them.
         let days = Self.squeezed(try Self.body(["func daysSection("], in: Self.workshop))
-        #expect(days.contains("}header:{iftimeline.days.count>1{Text(\"AneinemTagteilen\")}else{Text(\"DieseReise\")}}footer:{iftimeline.days.count>1{Text(\"TippeaufdenTag,andemdiezweiteReisebeginnt.\")}}"))
+        #expect(days.contains("}header:{iftimeline.days.count>1{Text(\"AneinemTagteilen\")}else{Text(\"DieseReise\")}}footer:{iftimeline.days.count>1"
+                              + "{Text(\"TippeaufdenTag,andemdiezweiteReisebeginnt.\")}}"))
         #expect(!days.contains("mergeButton(") && !days.contains("neighbour") && !days.contains("Pause"))
         // A neighbour: a heading of its own; under the first one shown why it waits and what it is for.
         let neighbour = Self.squeezed(try Self.body(["func neighbourSection("], in: Self.workshop))
-        #expect(neighbour.contains("Section{mergeButton(other,side:side,gap:gap)}header:{ifside==.before{Text(\"Reisedavor\")}else{Text(\"Reisedanach\")}}footer:{ifexplains{VStack(alignment:.leading,spacing:Theme.Spacing.s){TripChangeWaitNote()Text(\"FüreineReisemitPause,zumBeispieleinWochenendezuHausezwischenzweiStationen.\")}}}"))
+        #expect(neighbour.contains("Section{mergeButton(other,side:side,gap:gap)}header:{ifside==.before{Text(\"Reisedavor\")}else"
+                                   + "{Text(\"Reisedanach\")}}footer:{ifexplains{VStack(alignment:.leading,spacing:Theme.Spacing.s)"
+                                   + "{TripChangeWaitNote()Text(\"FüreineReisemitPause,zumBeispieleinWochenendezuHausezwischenzweiStationen.\")}}}"))
         let view = try Self.code(Self.workshop)
         #expect(view.components(separatedBy: "Für eine Reise mit Pause").count - 1 == 1, "what merging is for is said twice")
         // The days between the trips, in the merge row ("Island · 120 Fotos · 3 Tage dazwischen").
         let button = Self.squeezed(try Self.body(["func mergeButton("], in: Self.workshop))
-        #expect(button.contains("letdetail:Textifletgap,gap>0{letbetween=Text(\"\\(gap)\\(gap.formatted())Tagedazwischen\")detail=Text(\"\\(title(other))·\\(photos)·\\(between)\")}else{detail=Text(\"\\(title(other))·\\(photos)\")}"))
+        #expect(button.contains("letdetail:Textifletgap,gap>0{letbetween=Text(\"\\(gap)\\(gap.formatted())Tagedazwischen\")"
+                                + "detail=Text(\"\\(title(other))·\\(photos)·\\(between)\")}else{detail=Text(\"\\(title(other))·\\(photos)\")}"))
         // Days without photos between two days, on the line.
         #expect(days.contains("TripTimelineGapRow(text:Text(\"\\(entry.quietDaysBefore)\\(entry.quietDaysBefore.formatted())TageohneFotos\"),line:lines.gap)"))
     }
@@ -64,16 +71,21 @@ struct TripTimelineSourceTests {
         for work in ["TripTimeline.days(", "TripTimeline.span(", "TripTimeline.content(", "TripTimeline.quietDays(", "funcquietDays("] {
             #expect(!view.contains(work), "\(work) in the sheet")
         }
-        #expect(view.contains("letinputs=TimelineInputs(trip:proposal.id,photos:proposal.assetIDs.count,before:around.before?.id,after:around.after?.id,facts:model.factsVersion)"))
-        #expect(view.contains(".task(id:inputs){letmade=awaitmodel.tripTimeline(of:proposal,before:around.before,after:around.after)guard!Task.isCancelledelse{return}ifmade.days.map(\\.id)!=timeline?.days.map(\\.id){splitIndex=nil}timeline=madetimelineMadeFor=inputs}"))
+        #expect(view.contains("letinputs=TimelineInputs(trip:proposal.id,photos:proposal.assetIDs.count,before:around.before?.id,"
+                              + "after:around.after?.id,facts:model.factsVersion)"))
+        #expect(view.contains(".task(id:inputs){letmade=awaitmodel.tripTimeline(of:proposal,before:around.before,after:around.after)"
+                              + "guard!Task.isCancelledelse{return}ifmade.days.map(\\.id)!=timeline?.days.map(\\.id){splitIndex=nil}"
+                              + "timeline=madetimelineMadeFor=inputs}"))
         let inputs = Self.squeezed(try Self.body(["struct TripWorkshopView", "private struct TimelineInputs"], in: Self.workshop))
         #expect(inputs == "{vartrip:AlbumistIDvarphotos:Intvarbefore:AlbumistID?varafter:AlbumistID?varfacts:Int}")
         #expect(view.contains("@Stateprivatevartimeline:TripTimeline.Content?"))
         // The split takes the days shown.
-        #expect(view.contains("letindex=splitIndex,letentries=timeline?.days,letpreview=TripWorkshop.split(entries.map(\\.day),before:index,dates:model.creationDates){splitBar(preview,day:entries[index].day)"))
+        #expect(view.contains("letindex=splitIndex,letentries=timeline?.days,letpreview=TripWorkshop.split(entries.map(\\.day),before:index,"
+                              + "dates:model.creationDates){splitBar(preview,day:entries[index].day)"))
         let model = Self.squeezed(try Self.body(["func tripTimeline("], in: Self.model))
-        #expect(model.contains("letfacts=factsByID,ranks=previewRanks,dates=creationDates,calendar=Calendar.current"))
-        #expect(model.contains("returnawaitTask.detached(priority:.userInitiated){TripTimeline.content(of:photos,before:earlier,after:later,facts:facts,ranks:ranks,dates:dates,calendar:calendar)}.value"))
+        #expect(model.contains("letlibrary=TripTimeline.Library(facts:factsByID,ranks:previewRanks,dates:creationDates,calendar:Calendar.current)"))
+        #expect(model.contains("returnawaitTask.detached(priority:.userInitiated){TripTimeline.content(of:photos,before:earlier,after:later,"
+                               + "in:library)}.value"))
     }
 
     /// Until the timeline is made, why the changes wait is said under them (review M5: the merge
@@ -88,7 +100,9 @@ struct TripTimelineSourceTests {
         #expect(!body.contains("gap:timeline.quietDays"), "the gap of whatever timeline is shown")
         #expect(body.contains("timeline=madetimelineMadeFor=inputs}"))
         let gap = Self.squeezed(try Self.body(["struct TripWorkshopView", "private func gap(to"], in: Self.workshop))
-        #expect(gap == "{guardlettimeline,letmade=timelineMadeFor,made.trip==proposal.id,made.photos==proposal.assetIDs.countelse{returnnil}switchside{case.before:returnmade.before==other.id?timeline.quietDaysFromBefore:nilcase.after:returnmade.after==other.id?timeline.quietDaysToAfter:nil}}")
+        #expect(gap == "{guardlettimeline,letmade=timelineMadeFor,made.trip==proposal.id,made.photos==proposal.assetIDs.countelse{returnnil}"
+                       + "switchside{case.before:returnmade.before==other.id?timeline.quietDaysFromBefore:nil"
+                       + "case.after:returnmade.after==other.id?timeline.quietDaysToAfter:nil}}")
         let view = Self.squeezed(try Self.code(Self.workshop))
         #expect(view.contains("@StateprivatevartimelineMadeFor:TimelineInputs?"))
     }
@@ -97,7 +111,10 @@ struct TripTimelineSourceTests {
     /// as before (identifier, hint, selected trait); the first says "Beginn der Reise".
     @Test func everyDayAfterTheFirstChoosesWhereTheSecondTripBegins() throws {
         let row = Self.squeezed(try Self.body(["func dayRow("], in: Self.workshop))
-        #expect(row.contains("ifentry.canStartNewTrip{Button{withAnimation(.smooth(duration:0.25)){splitIndex=splitIndex==index?nil:index}}label:{TripTimelineDayRow(entry:entry,note:selected?String(localized:\"NeueReiseabhier\"):nil,selected:selected,above:lines.above,below:lines.below)}.buttonStyle(.plain).accessibilityIdentifier(\"workshop.day\").accessibilityHint(Text(\"NeueReiseabdiesemTag\")).accessibilityAddTraits(selected?.isSelected:[])"))
+        #expect(row.contains("ifentry.canStartNewTrip{Button{withAnimation(.smooth(duration:0.25)){splitIndex=splitIndex==index?nil:index}}label:"
+                             + "{TripTimelineDayRow(entry:entry,note:selected?String(localized:\"NeueReiseabhier\"):nil,selected:selected,"
+                             + "above:lines.above,below:lines.below)}.buttonStyle(.plain).accessibilityIdentifier(\"workshop.day\")"
+                             + ".accessibilityHint(Text(\"NeueReiseabdiesemTag\")).accessibilityAddTraits(selected?.isSelected:[])"))
         #expect(row.contains("TripTimelineDayRow(entry:entry,note:String(localized:\"BeginnderReise\"),selected:false,above:lines.above,below:lines.below)"))
         // The line breaks where the second trip begins, also over days without photos before it
         // (review G8): the core's rule (`TripTimeline.lines`), not one of the sheet's own.
@@ -128,7 +145,8 @@ struct TripTimelineSourceTests {
     @Test func aDayShowsItsDatePlaceAndLargerPhotos() throws {
         let day = Self.squeezed(try Self.body(["struct TripTimelineDayRow", "var body"], in: Self.timeline))
         #expect(day.contains("Text(entry.day.start.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(.headline)"))
-        #expect(day.contains(".foregroundStyle(selected?AnyShapeStyle(Theme.accent):AnyShapeStyle(.noteText))}.fixedSize(horizontal:false,vertical:true).accessibilityElement(children:.combine)"))
+        #expect(day.contains(".foregroundStyle(selected?AnyShapeStyle(Theme.accent):AnyShapeStyle(.noteText))}.fixedSize(horizontal:false,"
+                             + "vertical:true).accessibilityElement(children:.combine)"))
         let detail = Self.squeezed(try Self.body(["struct TripTimelineDayRow", "private var detail"], in: Self.timeline))
         #expect(detail.contains("entry.places.formatted(.list(type:.and))"))
         let pictures = Self.squeezed(try Self.body(["struct TripTimelineDayRow", "private var pictures"], in: Self.timeline))

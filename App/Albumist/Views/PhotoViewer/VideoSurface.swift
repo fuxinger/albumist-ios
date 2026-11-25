@@ -39,7 +39,7 @@ struct VideoSurface: UIViewRepresentable {
 
 /// A view whose layer is a player layer.
 final class PlayerLayerView: UIView {
-    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
 
     var playerLayer: AVPlayerLayer? { layer as? AVPlayerLayer }
 }

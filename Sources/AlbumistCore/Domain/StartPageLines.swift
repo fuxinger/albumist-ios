@@ -24,10 +24,11 @@ public enum FinishNotice: Equatable, Sendable {
     ///   - runGoesOn: the analysis runs or waits for the device and goes on by itself (not
     ///     paused, not a quick check for new photos, not the overnight refinement).
     ///   - finish: the expected end (`FinishEstimate`); nil while there is none.
+    ///   - now: the moment the card is drawn (the tests pass their own).
     ///   - firstAnalysis: the first analysis, which takes long anyway: offered before its first
     ///     estimate.
     ///   - allowedHere: the user allowed it on this card in this visit.
-    public static func make(runGoesOn: Bool, finish: Date?, now: Date, firstAnalysis: Bool,
+    public static func make(runGoesOn: Bool, finish: Date?, now: Date = .now, firstAnalysis: Bool,
                             permission: Permission, allowedHere: Bool) -> FinishNotice? {
         guard runGoesOn else { return nil }
         switch permission {

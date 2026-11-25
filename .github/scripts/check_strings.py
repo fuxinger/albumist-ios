@@ -14,7 +14,27 @@ pat = re.compile(r'(?:(?:Text|Button|Label|Section|navigationTitle|Toggle|TextFi
 # (not `recognizedText("…")` or other test data) and `localizedString(forKey: "…")`.
 test_pat = re.compile(r'(?:String\(localized: |(?<![A-Za-z_.])Text\()\s*"((?:[^"\\]|\\.)*)"')
 test_key_pat = re.compile(r'localizedString\(forKey: "((?:[^"\\]|\\.)*)"')
+# A multi-line literal (`"""` on lines of their own), for a text too long for one line of code.
+MULTI_LINE = re.compile(r'"""[ \t]*\n(.*?)\n([ \t]*)"""', re.S)
 INTERPOLATION = re.compile(r'\\\((?:[^()]|\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\))*\)')
+
+
+def one_line(src):
+    """The source with each multi-line literal written as the one-line literal of the same text.
+
+    Its lines lose the indentation of the closing quotes; a line ending in a backslash goes on
+    without a line break (the way a long text is wrapped), any other line ends in `\\n`. The
+    newlines it took follow the literal, so the lines after it keep their numbers."""
+    def joined(m):
+        indent, lines, text = m.group(2), m.group(1).split('\n'), ''
+        for number, line in enumerate(lines, 1):
+            line = line[len(indent):] if line.startswith(indent) else line.lstrip()
+            if (len(line) - len(line.rstrip('\\'))) % 2:
+                text += line[:-1]
+            else:
+                text += line + ('\\n' if number < len(lines) else '')
+        return '"' + re.sub(r'(?<!\\)"', '\\"', text) + '"' + '\n' * m.group(0).count('\n')
+    return MULTI_LINE.sub(joined, src)
 
 
 def norm(k):
@@ -35,7 +55,7 @@ def key_of(literal):
 def missing_in_app(root, keys):
     missing = {}
     for f in glob.glob(f'{root}/App/Albumist/**/*.swift', recursive=True):
-        src = open(f).read()
+        src = one_line(open(f).read())
         for m in pat.finditer(src):
             lit = m.group(1)
             if not re.search(r'[A-Za-zÄÖÜäöü]', lit): continue
@@ -54,7 +74,7 @@ def missing_in_tests(root, catalog_keys):
     keys = {norm(k) for k in catalog_keys}
     found = []
     for f in sorted(glob.glob(f'{root}/App/AlbumistTests/**/*.swift', recursive=True)):
-        src = open(f).read()
+        src = one_line(open(f).read())
         def where(m):
             return f'{os.path.relpath(f, root)}:{src.count(chr(10), 0, m.start()) + 1}'
         for m in test_pat.finditer(src):

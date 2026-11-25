@@ -27,9 +27,8 @@ extension AppModel {
     /// menu, and for a card's actions while an assistive technology or a UI test asks for them;
     /// then every card follows what it reads here, a trip card where "Keine Reise" is offered
     /// the analysis too (review C2 of design wave 2, N3).
-    func suggestionMenu(for proposal: AlbumProposal, action: ProposalCardAction, made: Bool, working: Bool,
-                        waits: Bool, selecting: Bool) -> SuggestionMenu {
-        SuggestionMenu(action: action, made: made, working: working, waits: waits, selecting: selecting,
+    func suggestionMenu(for proposal: AlbumProposal, card: SuggestionCardState) -> SuggestionMenu {
+        SuggestionMenu(action: card.action, made: card.made, working: card.working, waits: card.waits, selecting: card.selecting,
                        setAside: { isSetAside(proposal) }, canReshape: { canReshape(proposal) },
                        offersNotATrip: { offersNotATrip(proposal) }, canAnswerNotATrip: { canChangeHome })
     }
@@ -55,12 +54,29 @@ extension AppModel {
     }
 }
 
+/// What a suggestion's card is doing now, as its menu needs it (`AppModel.suggestionMenu`).
+struct SuggestionCardState {
+    /// Its one action (`ProposalCardText.action`).
+    var action: ProposalCardAction
+    /// "✓ Angelegt": made from this card a moment ago.
+    var made: Bool
+    /// Its album is being made, or its preview prepared.
+    var working: Bool
+    /// Another card's album is being made, or its preview prepared.
+    var waits: Bool
+    /// The list selects suggestions.
+    var selecting: Bool
+}
+
 extension AppMessage {
     /// A card's action or an item of its menu found its suggestion gone (`currentSuggestion`):
     /// nothing was done, and where to see what there is now. The title is the purchase sheet's
     /// for the same case (`continueQuickCreate`).
     static var suggestionChanged: AppMessage {
         AppMessage(title: String(localized: "Der Vorschlag hat sich geändert"),
-                   text: String(localized: "Albumist hat die Vorschläge eben aktualisiert. Angelegt oder geändert wurde nichts; den neuen Stand siehst du auf der Seite „Vorschläge“."))
+                   text: String(localized: """
+                       Albumist hat die Vorschläge eben aktualisiert. Angelegt oder geändert wurde nichts; \
+                       den neuen Stand siehst du auf der Seite „Vorschläge“.
+                       """))
     }
 }

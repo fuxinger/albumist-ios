@@ -106,15 +106,31 @@ public enum TripTimeline {
         }
     }
 
+    /// What the timeline reads of the library: the photos' facts, their preview ranks and dates,
+    /// and the calendar the split uses.
+    public struct Library: Sendable {
+        public var facts: FactsByID
+        public var ranks: [AssetID: PreviewRank]
+        public var dates: [AssetID: Date]
+        public var calendar: Calendar
+
+        public init(facts: FactsByID, ranks: [AssetID: PreviewRank], dates: [AssetID: Date], calendar: Calendar) {
+            self.facts = facts
+            self.ranks = ranks
+            self.dates = dates
+            self.calendar = calendar
+        }
+    }
+
     /// The timeline of the trip of `photos`, with the trips right `before` and `after` it (their
     /// photos; nil: none): its days as the split takes them (`TripWorkshop.days`), what each one
     /// shows, and the days without photos a merge would bridge. One pass over the trip's photos,
     /// one over each neighbour's.
     public static func content(of photos: some Collection<AssetID>, before: Set<AssetID>?, after: Set<AssetID>?,
-                               facts: FactsByID, ranks: [AssetID: PreviewRank], dates: [AssetID: Date],
-                               calendar: Calendar) -> Content {
-        let made = days(TripWorkshop.days(of: photos, dates: dates, calendar: calendar), facts: facts, ranks: ranks,
-                        dates: dates, calendar: calendar)
+                               in library: Library) -> Content {
+        let (dates, calendar) = (library.dates, library.calendar)
+        let made = days(TripWorkshop.days(of: photos, dates: dates, calendar: calendar), facts: library.facts,
+                        ranks: library.ranks, dates: dates, calendar: calendar)
         let trip = span(of: photos, dates: dates)
         let earlier = before.flatMap { span(of: $0, dates: dates) }
         let later = after.flatMap { span(of: $0, dates: dates) }

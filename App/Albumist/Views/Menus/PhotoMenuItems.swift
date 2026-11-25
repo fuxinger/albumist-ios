@@ -152,7 +152,7 @@ struct PhotoPreview: View {
     /// The side its cell's thumbnail is asked for (`AssetThumbnail.side`), in points.
     var side: CGFloat
     /// The width of a grid that zooms (`PhotoGrid`), nil elsewhere.
-    var gridWidth: CGFloat? = nil
+    var gridWidth: CGFloat?
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {

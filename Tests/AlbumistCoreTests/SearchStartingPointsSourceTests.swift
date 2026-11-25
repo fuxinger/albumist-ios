@@ -49,7 +49,8 @@ struct SearchStartingPointsSourceTests {
     /// meanwhile starts no more work and keeps nothing; both lists are shown together.
     @Test func theStartingPointsFollowEveryChangeOfTheFacts() throws {
         let view = Self.squeezed(try Self.code(Self.search))
-        #expect(view.contains(".task(id:model.factsVersion){letwords=awaitmodel.featuredSearches()guard!Task.isCancelledelse{return}letmade=awaitmodel.searchStartingPoints()guard!Task.isCancelledelse{return}featured=wordsstarts=made}"))
+        #expect(view.contains(".task(id:model.factsVersion){letwords=awaitmodel.featuredSearches()guard!Task.isCancelledelse{return}"
+                              + "letmade=awaitmodel.searchStartingPoints()guard!Task.isCancelledelse{return}featured=wordsstarts=made}"))
         #expect(!view.contains("StartingPointsInputs"), "keyed on counts, which a change of rank leaves as they are")
         #expect(!view.contains("model.facts.count"))
         // The revision is observed, so a screen keyed on it works its part out again; only the
@@ -98,7 +99,9 @@ struct SearchStartingPointsSourceTests {
         #expect(!tile.contains(".overlay"), "no text on the photo")
         #expect(tile.contains("Text(\"\\(suggestion.count)\\(suggestion.count.formatted())Fotos\").font(.footnote).foregroundStyle(.noteText)"))
         #expect(tile.contains("Text(verbatim:suggestion.label).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).compactLineLimit(2)"))
-        #expect(tile.contains(".buttonStyle(.plain).accessibilityElement(children:.ignore).accessibilityLabel(Text(verbatim:suggestion.label)).accessibilityValue(Text(\"\\(suggestion.count)\\(suggestion.count.formatted())Fotos\")).accessibilityAddTraits(.isButton).accessibilityIdentifier(\"search.example\")"))
+        #expect(tile.contains(".buttonStyle(.plain).accessibilityElement(children:.ignore).accessibilityLabel(Text(verbatim:suggestion.label))"
+                              + ".accessibilityValue(Text(\"\\(suggestion.count)\\(suggestion.count.formatted())Fotos\"))"
+                              + ".accessibilityAddTraits(.isButton).accessibilityIdentifier(\"search.example\")"))
     }
 
     /// The albums tab's grid: two columns on the smallest iPhone, one at the accessibility sizes;

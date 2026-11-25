@@ -228,7 +228,8 @@ struct PhotoTintSourceTests {
         let cover = try Self.code(Self.cover)
         let load = try Self.body(["enum CoverLoader", "static func load("], in: cover)
         #expect(load.contains("for (index, id) in request.ids.enumerated()"), "\(load)")
-        let cache = try Self.code("App/Albumist/Views/AssetThumbnail.swift")
+        // The cache went into files of its own (SwiftLint's file length): read as one text.
+        let cache = AppSource.code(try ThumbnailSource.read(), keepStrings: true)
         let fetch = try Self.body(["final class ThumbnailCache", "func cover(for id: AssetID, pixels: CGSize) async -> CoverFetch"], in: cache)
         let kept = try #require(fetch.range(of: "if let kept = cachedCover(for: id, pixels: pixels)"), "\(fetch)")
         let asked = try #require(fetch.range(of: "await lookUpAsset(id)"), "\(fetch)")

@@ -19,10 +19,11 @@ struct UIRunFindingsSourceTests {
         let source = AppSource.code(try AppSource.read("App/Albumist/Views/ProposalViews.swift"), keepStrings: true)
         let body = try #require(AppSource.body(of: ["struct ProposalListView", "var body: some View"], in: source), "no ProposalListView.body")
         let squeezed = Self.squeezed(body)
-        #expect(squeezed.contains(".navigationTitle(area?.title??\"AlleVorschläge\")"), "the list of every suggestion is not titled \"Alle Vorschläge\": \(squeezed.suffix(400))")
+        #expect(squeezed.contains(".navigationTitle(area?.title??\"AlleVorschläge\")"),
+                "the list of every suggestion is not titled \"Alle Vorschläge\": \(squeezed.suffix(400))")
         #expect(!squeezed.contains(".navigationTitle(area?.title??\"Vorschläge\")"), "the list of every suggestion still has the start page's title")
         // The row that opens it says the same words.
-        let start = AppSource.code(try AppSource.read("App/Albumist/Views/Start/StartSections.swift"), keepStrings: true)
+        let start = AppSource.code(try AppSource.read("App/Albumist/Views/Start/StartPageCards.swift"), keepStrings: true)
         let row = try #require(AppSource.body(of: "struct StartAllSuggestionsRow", in: start), "no StartAllSuggestionsRow")
         #expect(row.contains("\"Alle Vorschläge\""), "the start page's row no longer says \"Alle Vorschläge\"")
         // The start page itself stays "Vorschläge" (the tab's name and the UI tests' anchor).
@@ -52,7 +53,8 @@ struct UIRunFindingsSourceTests {
         let source = AppSource.code(try AppSource.read("App/Albumist/Views/RootView.swift"), keepStrings: true)
         let body = try #require(AppSource.body(of: ["struct MainTabs", "var body: some View"], in: source), "no MainTabs.body")
         let squeezed = Self.squeezed(body)
-        let read = try #require(squeezed.range(of: "letpurchase=model.quickCreatePurchase"), "the tabs do not read the purchase request in body: \(squeezed.prefix(300))")
+        let read = try #require(squeezed.range(of: "letpurchase=model.quickCreatePurchase"),
+                                "the tabs do not read the purchase request in body: \(squeezed.prefix(300))")
         let sheet = try #require(squeezed.range(of: ".sheet(item:Binding(get:{purchase},set:{model.quickCreatePurchase=$0})){requestin"),
                                  "the purchase sheet does not show what body read")
         #expect(read.lowerBound < sheet.lowerBound, "the purchase request is read after the sheet")

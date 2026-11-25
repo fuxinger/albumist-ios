@@ -160,19 +160,6 @@ extension QuickCreateMoment {
         /// Screens that show this soon after their tab came with it (seconds).
         public static let arrivalTime = 0.5
 
-        private struct Shown: Hashable, Sendable {
-            var screen: UUID
-            var place: UUID
-        }
-
-        /// A screen back on top (a pop under way, or a back swipe), with the screens it came back
-        /// over and its last reading.
-        private struct Return: Hashable, Sendable {
-            var screen: UUID
-            var over: Set<UUID>
-            var spot: ScrollSpot?
-        }
-
         /// Each tab's screen, the order they were measured in (the latest last), and the tabs
         /// that show, the one shown last at the end.
         private(set) var places: [UUID: TabPlace] = [:]
@@ -186,8 +173,8 @@ extension QuickCreateMoment {
         private var trailPlace: UUID?
         private var fedBy: UUID?
         /// The screens with cards that show, in the order they appeared, with their tabs.
-        private var screens: [Shown] = []
-        private var returning: Return?
+        private var screens: [TabWatchScreen] = []
+        private var returning: TabWatchReturn?
 
         public init() {}
 
@@ -252,9 +239,9 @@ extension QuickCreateMoment {
         public mutating func appeared(screen: UUID, on place: UUID, at spot: ScrollSpot?, again: Bool, now: Double) {
             screens.removeAll { $0.screen == screen }
             let over = Set(screens.lazy.filter { $0.place == place }.map(\.screen))
-            screens.append(Shown(screen: screen, place: place))
+            screens.append(TabWatchScreen(screen: screen, place: place))
             guard again, place == shownPlace, place == trailPlace, now - shownAt > Self.arrivalTime else { return }
-            returning = Return(screen: screen, over: over, spot: spot)
+            returning = TabWatchReturn(screen: screen, over: over, spot: spot)
             if over.isEmpty { settleReturn() }
         }
 
@@ -292,4 +279,18 @@ extension QuickCreateMoment {
             returning = nil
         }
     }
+}
+
+/// A screen with cards that shows, with its tab (`QuickCreateMoment.TabWatch`).
+private struct TabWatchScreen: Hashable, Sendable {
+    var screen: UUID
+    var place: UUID
+}
+
+/// A screen back on top (a pop under way, or a back swipe), with the screens it came back over
+/// and its last reading (`QuickCreateMoment.TabWatch`).
+private struct TabWatchReturn: Hashable, Sendable {
+    var screen: UUID
+    var over: Set<UUID>
+    var spot: QuickCreateMoment.ScrollSpot?
 }

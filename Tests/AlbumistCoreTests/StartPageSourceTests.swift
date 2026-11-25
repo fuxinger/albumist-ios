@@ -13,6 +13,11 @@ struct StartPageSourceTests {
         try AppSource.read("App/Albumist/Views/Start/StartSections.swift")
     }
 
+    /// The file of a suggestion's card on the page (`StartProposalCard`).
+    static func startCard() throws -> String {
+        try AppSource.read("App/Albumist/Views/Start/StartProposalCard.swift")
+    }
+
     /// The body of `StartSections`, its comments blanked.
     static func startBody() throws -> String {
         let file = try startSections()
@@ -88,7 +93,7 @@ struct StartPageSourceTests {
     /// "„Kyoto, Oktober 2024“ anlegen", dimmed, and nothing about the work. It says what the
     /// suggestion list says then.
     @Test func aWorkingCardSaysWhatRuns() throws {
-        let file = AppSource.code(try Self.startSections(), keepStrings: true)
+        let file = AppSource.code(try Self.startCard(), keepStrings: true)
         let card = try #require(AppSource.body(of: "struct StartProposalCard", in: file))
         #expect(card.contains(".accessibilityLabel(working ? workingLabel : text.spokenAction)"))
         let label = try #require(AppSource.body(of: "private var workingLabel", in: card))
@@ -104,7 +109,7 @@ struct StartPageSourceTests {
     /// what a two-line name cuts, and VoiceOver hears the status in words (`spokenStatus`), never
     /// the lock's symbol. The page built a line of its own, count first.
     @Test func aCardsStatusLineIsTheLists() throws {
-        let file = AppSource.code(try Self.startSections(), keepStrings: true)
+        let file = AppSource.code(try Self.startCard(), keepStrings: true)
         let card = try #require(AppSource.body(of: "struct StartProposalCard", in: file))
         #expect(card.contains("subtitle: text.styledSubtitle"), "a status line of the page's own")
         #expect(!card.contains("lock.fill"), "the lock drawn by the page")

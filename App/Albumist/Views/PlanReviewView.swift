@@ -20,10 +20,10 @@ struct PlanReviewView: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
     /// A plan built elsewhere (an album merge, a removal, one suggestion right away).
-    var prebuilt: ChangePlan? = nil
+    var prebuilt: ChangePlan?
     /// Otherwise the picks the preview plans ("Dein Startpaket", "N Alben anlegen", "Ergänzen …"
     /// in a list): exactly these (`AppModel.buildPlan(for:)`); leaving gives them back.
-    var selection: AppModel.PreviewSelection? = nil
+    var selection: AppModel.PreviewSelection?
     /// The plan this preview shows: its own, so a preview opened on another tab (a removal
     /// under "Alben", "Ergänzen …" on a card) never replaces it.
     @State private var plan: ChangePlan?
@@ -743,9 +743,9 @@ struct ResultCard: View {
     var plan: ChangePlan
     /// What the stack knows of the suggestions the plan came from, taken as it started (nil:
     /// taken now, `AppModel.resultCoverStack`).
-    var sources: ResultCoverSources? = nil
+    var sources: ResultCoverSources?
     /// The covers the screen kept as they loaded while the plan ran (nil: none).
-    var held: ResultMomentCovers? = nil
+    var held: ResultMomentCovers?
     /// The padding the screen puts around the result (above and below it): kept free when the
     /// stack fits itself to the screen.
     var screenPadding: CGFloat = 0
@@ -1150,7 +1150,7 @@ struct UnlockCard: View {
     @Environment(Purchases.self) private var purchases
     var albumsInPlan: Int
     /// Shrinks the plan to the albums that are still free ("Die ersten N jetzt kostenlos anlegen").
-    var onLimit: (() -> Void)? = nil
+    var onLimit: (() -> Void)?
     @State private var buying = false
 
     var body: some View {

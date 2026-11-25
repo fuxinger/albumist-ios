@@ -15,13 +15,7 @@ public struct ProposalDetailText: Equatable, Sendable {
     public let destination: String
 
     public init(card: ProposalCardText, days: [PhotoDay], words: ProposalWords = .german) {
-        switch card.outcome {
-        case .addsTo: pill = words.notAddedYet
-        case .alreadyIn: pill = words.alreadyInPhotos
-        case .renames, .moves: pill = words.notChangedYet
-        case .newAlbum, .needsName, .chooseAlbum: pill = words.notInPhotosYet
-        }
-
+        pill = Self.pill(of: card.outcome, words: words)
         var facts = [words.photos(card.photoCount)]
         let dated = days.compactMap(\.day)
         if let first = dated.min(), let last = dated.max() {
@@ -32,14 +26,26 @@ public struct ProposalDetailText: Equatable, Sendable {
             facts.append(words.span(from: a, to: b, withYear: !named))
         }
         self.facts = facts.joined(separator: " · ")
+        destination = Self.destination(of: card.outcome, words: words)
+    }
 
-        switch card.outcome {
-        case .newAlbum(_, let path), .needsName(let path): destination = words.newAlbum(in: path)
-        case .addsTo(_, let title, _): destination = words.addsTo(album: title)
-        case .alreadyIn(_, let title): destination = words.alreadyIn(album: title)
-        case .renames(_, let from, let to): destination = words.renamed(album: from, to: to)
-        case .moves(_, let title, let path): destination = words.moved(album: title, to: path)
-        case .chooseAlbum: destination = words.severalAlbums
+    private static func pill(of outcome: ProposalOutcome, words: ProposalWords) -> String {
+        switch outcome {
+        case .addsTo: words.notAddedYet
+        case .alreadyIn: words.alreadyInPhotos
+        case .renames, .moves: words.notChangedYet
+        case .newAlbum, .needsName, .chooseAlbum: words.notInPhotosYet
+        }
+    }
+
+    private static func destination(of outcome: ProposalOutcome, words: ProposalWords) -> String {
+        switch outcome {
+        case .newAlbum(_, let path), .needsName(let path): words.newAlbum(in: path)
+        case .addsTo(_, let title, _): words.addsTo(album: title)
+        case .alreadyIn(_, let title): words.alreadyIn(album: title)
+        case .renames(_, let from, let to): words.renamed(album: from, to: to)
+        case .moves(_, let title, let path): words.moved(album: title, to: path)
+        case .chooseAlbum: words.severalAlbums
         }
     }
 

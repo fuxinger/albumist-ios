@@ -181,7 +181,8 @@ struct LargestTextFitTests {
     /// since the verification review (V8, `SortingShowWords.number`).
     @Test func theCountsKeepTheirHeightWhileCounting() throws {
         let header = try #require(AppSource.body(of: ["struct SortingShow", "var header: some View"], in: try Self.code(Self.show)))
-        #expect(header.contains(/Text\("\\\(totalPhotos\) \\\(SortingShowWords\.number\(totalPhotos, locale: locale\)\) Fotos einsortiert"\)\s*\.hidden\(\)/), "\(header)")
+        let hidden = /Text\("\\\(totalPhotos\) \\\(SortingShowWords\.number\(totalPhotos, locale: locale\)\) Fotos einsortiert"\)\s*\.hidden\(\)/
+        #expect(header.contains(hidden), "\(header)")
         #expect(header.contains(/Text\("\\\(counted\) \\\(SortingShowWords\.number\(counted, locale: locale\)\) Fotos einsortiert"\)/), "\(header)")
     }
 

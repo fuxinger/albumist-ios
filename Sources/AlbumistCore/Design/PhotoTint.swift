@@ -200,17 +200,25 @@ public struct PhotoTint: Hashable, Sendable {
     static func calm(_ hue: OKLab, strength: Double) -> PhotoTint? {
         let lightC = min(max(strength * 0.3, lightChroma.lowerBound), lightChroma.upperBound)
         let darkC = min(max(strength * 0.3, darkChroma.lowerBound), darkChroma.upperBound)
-        guard let light = safe(hue, from: lightLightness, step: 0.004, until: 0.99, chroma: lightC, isLight: true),
-              let dark = safe(hue, from: darkLightness, step: -0.01, until: 0.08, chroma: darkC, isLight: false) else {
+        guard let light = safe(hue, in: Lightnesses(start: lightLightness, step: 0.004, end: 0.99), chroma: lightC, isLight: true),
+              let dark = safe(hue, in: Lightnesses(start: darkLightness, step: -0.01, end: 0.08), chroma: darkC, isLight: false) else {
             return nil
         }
         return PhotoTint(light: light, dark: dark)
     }
 
-    /// The first lightness from `start` towards `until` whose colour passes the checks.
-    private static func safe(_ hue: OKLab, from start: Double, step: Double, until end: Double, chroma: Double,
-                             isLight: Bool) -> SRGB? {
-        var lightness = start
+    /// The lightnesses `safe` tries: from `start` towards `end`, `step` at a time (below zero
+    /// towards the dark).
+    private struct Lightnesses {
+        var start: Double
+        var step: Double
+        var end: Double
+    }
+
+    /// The first lightness of `lightnesses` whose colour passes the checks.
+    private static func safe(_ hue: OKLab, in lightnesses: Lightnesses, chroma: Double, isLight: Bool) -> SRGB? {
+        let (step, end) = (lightnesses.step, lightnesses.end)
+        var lightness = lightnesses.start
         while step > 0 ? lightness <= end + 1e-9 : lightness >= end - 1e-9 {
             let color = hue.with(lightness: lightness, chroma: chroma).srgb
             if isLight ? passesLight(color) : passesDark(color) { return color }

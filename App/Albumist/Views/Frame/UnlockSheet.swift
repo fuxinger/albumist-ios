@@ -104,7 +104,10 @@ struct UnlockSheet: View {
         case .quickCreate:
             Text("Deine \(Purchases.freeAlbumLimit) kostenlosen Alben sind angelegt. Mit einem einmaligen Kauf legst du unbegrenzt Alben an, ohne Abo.")
         case .preview(let needed):
-            Text("Für diese Auswahl brauchst du \(needed) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums). Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.")
+            Text("""
+                Für diese Auswahl brauchst du \(needed) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums). \
+                Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.
+                """)
         }
     }
 }

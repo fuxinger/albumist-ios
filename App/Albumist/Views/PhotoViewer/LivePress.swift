@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 import UIKit.UIGestureRecognizerSubclass
 
 /// The long press that plays a Live Photo whole (design wave 2, DS-10), as in Photos. It is

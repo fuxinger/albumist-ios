@@ -75,7 +75,7 @@ struct AlbumTile: View {
                 PhotoCard(coverIDs: cover.ids, title: Text(verbatim: album.title), subtitle: Self.photoCount(album),
                           badge: mark.map { CardBadge($0) }, hidesPreview: cover.hidden, aspectRatio: 1, style: .tile,
                           placeholderSymbol: "rectangle.stack",
-                          onOpen: { Navigator.push(.album(album.id), on: navigator) }) {
+                          onOpen: openAlbum) {
                     // No buttons: a tap opens the album, the long press has the rest.
                 } menu: {
                     if hasPhotos {
@@ -98,12 +98,17 @@ struct AlbumTile: View {
                 // design wave 2, N1). Without Albumist's changes the album has no badge either.
                 PhotoCard(coverIDs: cover.ids, title: Text(verbatim: album.title), subtitle: Self.photoCount(album),
                           hidesPreview: cover.hidden, aspectRatio: 1, style: .tile, placeholderSymbol: "rectangle.stack",
-                          onOpen: { Navigator.push(.album(album.id), on: navigator) })
+                          onOpen: openAlbum)
             }
         }
         // Names the card, a container: its body ("Rom, 16 Fotos", "Neu") is the button that opens
         // the album, with the long press's items as its actions.
         .accessibilityIdentifier("album.tile")
+    }
+
+    /// Opens the album's page.
+    private func openAlbum() {
+        Navigator.push(.album(album.id), on: navigator)
     }
 
     /// The album's photos in full screen, oldest first as in the album, starting at the photo

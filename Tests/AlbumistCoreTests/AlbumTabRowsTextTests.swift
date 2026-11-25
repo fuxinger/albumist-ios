@@ -10,8 +10,8 @@ import AlbumistTestSupport
 /// the words, which get the whole width (as "Alle Vorschläge" on the start page).
 @Suite("Albums tab: the rows keep their words whole")
 struct AlbumTabRowsTextTests {
-    static let view = "App/Albumist/Views/AlbumsView.swift"
-    static let card = "private struct AlbumRowsCard"
+    static let view = "App/Albumist/Views/Albums/AlbumRowsCard.swift"
+    static let card = "struct AlbumRowsCard"
 
     static func code(of declaration: String) throws -> String {
         let source = try AppSource.read(view)

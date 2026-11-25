@@ -8,7 +8,9 @@ import AlbumistTestSupport
 @Suite("Suggestion cards speak alike")
 struct CardSpokenLabelTests {
     @Test func theStartPageUsesTheListsWords() throws {
-        let start = AppSource.code(try AppSource.read("App/Albumist/Views/Start/StartSections.swift"), keepStrings: true)
+        // The page and its card (`StartProposalCard`, a file of its own).
+        let start = try ["App/Albumist/Views/Start/StartSections.swift", "App/Albumist/Views/Start/StartProposalCard.swift"]
+            .map { AppSource.code(try AppSource.read($0), keepStrings: true) }.joined(separator: "\n")
         // While its album is made or its preview prepared, the list's words for that
         // ("Album wird angelegt", "Wird vorbereitet"; review A of design wave 1, 7).
         #expect(start.contains(".accessibilityLabel(working ? workingLabel : text.spokenAction)"))

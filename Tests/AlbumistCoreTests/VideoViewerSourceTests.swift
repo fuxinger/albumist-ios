@@ -211,7 +211,7 @@ struct VideoViewerSourceTests {
     @Test func theAutomaticStartGivesWayToWhatCameAfterIt() throws {
         let model = try Self.file("ViewerVideo.swift")
         let open = try #require(AppSource.body(of: "func open(", in: model))
-        #expect(Self.inOrder(["guard start.byItself else { return }", "startsByItself = true", "Task.sleep(for: .milliseconds(350))",
+        #expect(Self.inOrder(["guard start.byItself, startsByItself else { return }", "Task.sleep(for: .milliseconds(350))",
                               "await LiveAudio.settled()", "guard !Task.isCancelled, self.id == id, startsByItself else { return }",
                               "startsByItself = false", "guard sound.isOn || LiveAudio.isReady else { return }", "play()"], in: open),
                 "\(open)")
@@ -224,6 +224,22 @@ struct VideoViewerSourceTests {
         #expect(try #require(AppSource.body(of: "func close(", in: model)).contains("stop()"))
         let viewer = try Self.code(Self.viewerPath)
         #expect(Self.inOrder(["video.pause()", "dismiss()"], in: try #require(AppSource.body(of: "private func closeNow(", in: viewer))))
+    }
+
+    /// A pause that comes while the video is still asked for, before Photos handed it over, is
+    /// remembered too (review X5): the automatic start is planned before the loader is asked, so a
+    /// close (the button, the pull, VoiceOver's escape) or "Anhalten" in that moment cancels it,
+    /// and nothing plans it anew once the item came. Before, it was planned only after the
+    /// answer: a video swiped to and closed at once could start during the slide away, with the
+    /// sound on from an earlier video. A video only in iCloud plans nothing.
+    @Test func aPauseBeforeTheVideoCameIsRemembered() throws {
+        let model = try Self.file("ViewerVideo.swift")
+        let open = try #require(AppSource.body(of: "func open(", in: model))
+        #expect(Self.inOrder(["stop()", "if onlyInICloud.contains(id) {", "return", "startsByItself = start.byItself",
+                              "let answer = await VideoLoader.load(id)", "guard !Task.isCancelled, self.id == id else { return }",
+                              "case .item(let item):", "make(item.value)", "guard start.byItself, startsByItself else { return }",
+                              "Task.sleep(for: .milliseconds(350))"], in: open), "\(open)")
+        #expect(!open.contains("startsByItself = true"), "planned anew after the answer, a pause meanwhile is forgotten: \(open)")
     }
 
     /// A video its player cannot play (a file it cannot decode) says so calmly, as one Photos
@@ -467,8 +483,7 @@ struct VideoViewerSourceTests {
         #expect(Self.inOrder(["switch page {", "case .picture: photo(image, in: size)", "case .unavailable: unavailableNote(in: size)",
                               "case .waiting: waiting(in: size)"], in: shown), "\(shown)")
         let page = try #require(AppSource.body(of: "private var page: ViewerPage", in: zoomable))
-        #expect(Self.squeezed(page).contains("ViewerPage.shows(still:picture,playing:player!=nil,video:isVideo?videoAvailability:nil)"),
-                "\(page)")
+        #expect(Self.squeezed(page).contains("ViewerPage.shows(still:picture,playing:player!=nil,kind:kind)"), "\(page)")
         let picture = try #require(AppSource.body(of: "private var picture: ViewerPicture?", in: zoomable))
         #expect(Self.inOrder(["if image != nil { return .sharp }", "return unavailable ? .unavailable : nil"], in: picture), "\(picture)")
         let worded = try Self.code(Self.viewerPath, keepStrings: true)
@@ -476,10 +491,36 @@ struct VideoViewerSourceTests {
         #expect(Self.inOrder(["ContentUnavailableView {", "if isVideo {", "Dieses Video ist gerade nicht verfügbar.", "} else {",
                               "Dieses Foto ist gerade nicht verfügbar.", ".accessibilityIdentifier(\"viewer.unavailable\")"], in: note), "\(note)")
         let built = try #require(AppSource.body(of: "private func page(at index: Int)", in: viewer))
-        #expect(built.contains("videoAvailability: video.availability(for: id)"), "\(built)")
+        #expect(built.contains("kind: kind(of: id)"), "\(built)")
+        let kind = try #require(AppSource.body(of: "private func kind(of id: AssetID) -> PageKind", in: viewer))
+        #expect(Self.squeezed(kind).contains("video:video.availability(for:id)"), "\(kind)")
         let model = try Self.file("ViewerVideo.swift")
         let availability = try #require(AppSource.body(of: "func availability(for id: AssetID) -> VideoAvailability", in: model))
         #expect(Self.squeezed(availability) == "{self.id==id?availability:.unknown}", "\(availability)")
+    }
+
+    /// A page whose kind the photo view does not know yet (no facts, Photos not asked: a new
+    /// video beside the page on screen) waits calmly instead of saying "Dieses Foto ist gerade
+    /// nicht verfügbar" (review X6, the core's `PageKind`). The page on screen reads its kind
+    /// (`lookAtCurrent`): answered or not, it counts as asked then, so the page on screen never
+    /// waits for good. A look that a swipe on cancelled marks nothing and opens no video (it would
+    /// stop the next page's).
+    @Test func aPageWaitsUntilItsKindIsKnown() throws {
+        let viewer = try Self.code(Self.viewerPath)
+        let kind = try #require(AppSource.body(of: "private func kind(of id: AssetID) -> PageKind", in: viewer))
+        #expect(Self.squeezed(kind).contains("PageKind(isVideo:knownVideo(id),asked:kindsAsked.contains(id),video:video.availability(for:id))"),
+                "\(kind)")
+        let known = try #require(AppSource.body(of: "private func knownVideo(_ id: AssetID) -> Bool?", in: viewer))
+        #expect(Self.inOrder(["if let known = basics[id] { return known.isVideo }",
+                              "return model.factsByID[id].map { $0.asset.kind == .video }"], in: known), "\(known)")
+        let isVideo = try #require(AppSource.body(of: "private func isVideo(_ id: AssetID) -> Bool", in: viewer))
+        #expect(Self.squeezed(isVideo) == "{knownVideo(id)??false}", "\(isVideo)")
+        let look = try #require(AppSource.body(of: "private func lookAtCurrent(", in: viewer))
+        #expect(Self.inOrder(["await PhotoBasics.of(id)", "guard !Task.isCancelled else { return }", "kindsAsked.insert(id)",
+                              "await playVideo(id)", "await checkSharing(id)"], in: look), "\(look)")
+        let zoomable = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: viewer))
+        let isVideoPage = try #require(AppSource.body(of: "private var isVideo: Bool", in: zoomable))
+        #expect(Self.squeezed(isVideoPage) == "{kind.isVideo}", "\(isVideoPage)")
     }
 
     // MARK: Thumbnails
@@ -535,8 +576,10 @@ struct VideoViewerSourceTests {
         let thumbnails = try Self.code(Self.thumbnailsPath, keepStrings: true)
         #expect(Self.count(#"PHAsset\.fetchAssets\("#, in: thumbnails) == 1, "a second fetch")
         let lookUp = try #require(AppSource.body(of: "private func lookUpWaiting(", in: thumbnails))
-        #expect(lookUp.contains("asset.value.mediaType == .video"))
-        #expect(lookUp.contains("videoLengths[id] = asset.value.duration"))
+        #expect(lookUp.contains("remember(asset, for: id, at: now)"))
+        let remember = try #require(AppSource.body(of: "private func remember(", in: thumbnails))
+        #expect(Self.inOrder(["assets.setObject(asset.value, forKey: id as NSString)", "asset.value.mediaType == .video",
+                              "videoLengths[id] = asset.value.duration"], in: remember), "\(remember)")
         let length = try #require(AppSource.body(of: "func videoLength(for id: AssetID) -> VideoDuration?", in: thumbnails))
         #expect(!length.contains("await") && length.contains("videoLengths[id.rawValue]"))
         // The records keep what was looked at last: past their limit the older half goes, not
@@ -544,7 +587,7 @@ struct VideoViewerSourceTests {
         // memory: a thumbnail from the image cache passes no lookup that would write it again.
         #expect(thumbnails.contains("private var videoLengths = RecentRecords<Double>(limit: ThumbnailCache.recordLimit)"))
         #expect(thumbnails.contains("private var keptSides = RecentRecords<CGFloat>(limit: ThumbnailCache.recordLimit)"))
-        for owner in ["private func keep(", "private func lookUpWaiting(", "private func lookUpAsset("] {
+        for owner in ["private func keep(", "private func lookUpWaiting(", "private func lookUpAsset(", "private func remember("] {
             let body = try #require(AppSource.body(of: owner, in: thumbnails))
             #expect(!body.contains("removeAll()"), "\(owner): the records emptied whole")
         }
@@ -628,7 +671,8 @@ struct VideoViewerSourceTests {
         let arrived = try #require(AppSource.body(of: "func changeArrived(_ change: ThumbnailRequest.Change)", in: thumbnails))
         #expect(Self.squeezed(arrived) == "{ifbacklog.arrived(change){followChanges()}}", "\(arrived)")
         let follow = try #require(AppSource.body(of: "func followChanges()", in: thumbnails))
-        #expect(Self.inOrder(["guard let waiting = backlog.take(recordsKept: videoLengths.count > 0) else { return }", "Task {",
+        #expect(Self.inOrder(["guard let waiting = backlog.take(recordsKept: videoLengths.count > 0 || recordsWentUnchecked) else { return }",
+                              "Task {",
                               "await libraryChanged(waiting)", "if backlog.walked() { followChanges() }"], in: follow), "\(follow)")
         let refresh = try #require(AppSource.body(of: "private func libraryChanged(_ changes: [ThumbnailRequest.Change]) async", in: thumbnails))
         #expect(refresh.contains("await ThumbnailRequest.changed(kept, by: changes)"), "\(refresh)")
@@ -638,8 +682,9 @@ struct VideoViewerSourceTests {
                               "objectAfterChanges", "current = after", "found[key] = .changed(Asset(after))"], in: details), "\(details)")
     }
 
-    /// A trimmed video's cell on screen shows its new length at once, on its badge and to
-    /// VoiceOver (review V4): each record follows the core's rule (`KeptVideoLength`), and a
+    /// A trimmed video's cell on screen shows its new length, on its badge and to VoiceOver,
+    /// without being made anew, once the change was walked, some seconds after it (the watcher's
+    /// pause; review V4): each record follows the core's rule (`KeptVideoLength`), and a
     /// small observed revision, raised when a length a cell may show changed, makes the cells on
     /// screen read their record again. A record whose asset is no longer in memory cannot be
     /// checked: it goes with the thumbnail kept for it, so the next look asks Photos again (a
@@ -671,7 +716,67 @@ struct VideoViewerSourceTests {
         let shown = try #require(AppSource.body(of: ["struct AssetThumbnail", "var body: some View"], in: thumbnails))
         #expect(shown.contains(".onChange(of: ThumbnailCache.shared.lengthRevision.value) { readLengthAgain() }"), "\(shown)")
         let again = try #require(AppSource.body(of: ["struct AssetThumbnail", "private func readLengthAgain("], in: thumbnails))
-        #expect(Self.squeezed(again) == "{guardloadedID==idelse{return}video=ThumbnailCache.shared.videoLength(for:id)}", "\(again)")
+        #expect(Self.inOrder(["guard loadedID == id", "ThumbnailCache.shared.videoLength(for: id)"], in: again), "\(again)")
+    }
+
+    /// A cell on screen never loses its video's length because the thumbnails know nothing of it
+    /// (review X2): only a length they know replaces what it shows. Nothing known is not "no
+    /// video": after a memory warning, or once a record went unchecked, the records of unchanged
+    /// videos are gone too, and every older video cell alive lost its badge and its "Video, …"
+    /// for VoiceOver at the next correction, until it was made anew.
+    @Test func aCellKeepsItsLengthWhileTheThumbnailsKnowNone() throws {
+        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let again = try #require(AppSource.body(of: ["struct AssetThumbnail", "private func readLengthAgain("], in: thumbnails))
+        #expect(again.contains("video = known"), "a known length does not replace what the cell shows: \(again)")
+        #expect(!again.contains("video = ThumbnailCache.shared.videoLength(for: id)"), "nothing known takes the badge away: \(again)")
+        #expect(!again.contains("video = nil"), "\(again)")
+    }
+
+    /// A trimmed video's badge follows also when its asset was no longer in memory as the change
+    /// was walked (review X1: after a trip to Photos it may be gone, a memory warning takes all).
+    /// The walk tells the cells when it dropped a record unchecked (the core's `readsAgain`), and
+    /// the first change after a memory warning is walked without a record too, to tell them. A
+    /// cell on screen that shows a length the thumbnails no longer know keeps it and asks Photos
+    /// again, then shows what Photos said (`KeptVideoLength.reading`, `afterAsking`). The cells
+    /// that ask after one revision wait for one lookup together: no task and no lookup per cell,
+    /// one fetch for 30 video cells on screen, of Photos' metadata only (no image, no download).
+    @Test func aCellOnScreenAsksPhotosAgainForALengthThatWentUnchecked() throws {
+        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let start = try #require(AppSource.body(of: ["final class ThumbnailCache", "init()"], in: thumbnails))
+        #expect(Self.inOrder(["$0.videoLengths.removeAll()", "$0.recordsWentUnchecked = true"], in: start), "\(start)")
+        let follow = try #require(AppSource.body(of: "func followChanges()", in: thumbnails))
+        #expect(follow.contains("backlog.take(recordsKept: videoLengths.count > 0 || recordsWentUnchecked)"), "\(follow)")
+        let refresh = try #require(AppSource.body(of: "private func libraryChanged(", in: thumbnails))
+        #expect(Self.inOrder(["if recordsWentUnchecked {", "recordsWentUnchecked = false", "readAgain = true",
+                              "if readAgain { lengthRevision.raise() }"], in: refresh), "\(refresh)")
+        // The cell follows the core's rule, and asks through the cache.
+        let again = try #require(AppSource.body(of: ["struct AssetThumbnail", "private func readLengthAgain("], in: thumbnails))
+        #expect(Self.squeezed(again).contains(
+            "switchKeptVideoLength.reading(shown:showsVideoLength?video:nil,known:ThumbnailCache.shared.videoLength(for:id)){"), "\(again)")
+        #expect(Self.inOrder(["case .show(let known): video = known", "case .keep: break", "case .askAgain:", "let asked = id",
+                              "ThumbnailCache.shared.askLengthAgain(for: asked) { answer in", "guard loadedID == asked else { return }",
+                              "video = KeptVideoLength.afterAsking(shown: video, answer: answer)"], in: again), "\(again)")
+        for perCell in ["Task {", "Task.detached", "assetLookup(", "lookUp(", "image(for:"] {
+            #expect(!again.contains(perCell), "\(perCell): a lookup per cell")
+        }
+        // One lookup for the cells that ask after one revision: the first ask starts it, the
+        // others of the same moment join it before it runs.
+        let ask = try #require(AppSource.body(of: "func askLengthAgain(for id: AssetID", in: thumbnails))
+        #expect(Self.inOrder(["if lengthAsks.isEmpty { Task { await answerLengthAsks() } }",
+                              "lengthAsks[id.rawValue, default: []].append(answered)"], in: ask), "\(ask)")
+        #expect(Self.count(#"Task\s*\{"#, in: ask) == 1, "\(ask)")
+        let answer = try #require(AppSource.body(of: "private func answerLengthAsks(", in: thumbnails))
+        #expect(Self.inOrder(["let asks = lengthAsks", "lengthAsks = [:]", "Self.batchLimit", "await ThumbnailRequest.lookUp(ids)",
+                              "remember(asset, for: id, at: now)", "for answered in cells"], in: answer), "\(answer)")
+        #expect(Self.count(#"ThumbnailRequest\.lookUp\("#, in: answer) == 1, "\(answer)")
+        for request in ["requestImage(", "requestPlayerItem(", "requestAVAsset(", "isNetworkAccessAllowed"] {
+            #expect(!answer.contains(request), "\(request): more than Photos' metadata")
+        }
+        // Kept as the queue's lookups keep what they found; still one fetch in the file.
+        let waiting = try #require(AppSource.body(of: "private func lookUpWaiting(", in: thumbnails))
+        #expect(waiting.contains("remember(asset, for: id, at: now)"), "\(waiting)")
+        #expect(Self.count(#"ThumbnailRequest\.lookUp\("#, in: thumbnails) == 2)
+        #expect(Self.count(#"PHAsset\.fetchAssets\("#, in: thumbnails) == 1)
     }
 
     // MARK: Search

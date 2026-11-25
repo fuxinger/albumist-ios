@@ -2,6 +2,12 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. Fotos und Videos nach der zweiten Prüfung (Design-Welle 3, noch in keinem Build): Die Dauer eines in
+  Fotos gekürzten Videos folgt in den sichtbaren Zellen auch dann, wenn das Video nicht mehr im Speicher war oder
+  eine Speicherwarnung kam: die Zellen fragen Fotos gemeinsam neu, und keine Zelle verliert ihre Dauer, nur weil
+  gerade nichts bekannt ist. Ein Video startet nicht mehr von selbst, wenn man es schon angehalten oder geschlossen
+  hat, während Fotos es noch lieferte. Eine Nachbarseite, deren Art noch unbekannt ist, wartet ruhig, statt
+  „Dieses Foto ist gerade nicht verfügbar“ zu zeigen.
 - 21.11. Feinschliff für iOS 26 (Design-Welle 3, DS-12 und H14, noch in keinem Build): Die Suche ist ein eigener
   runder Knopf am Ende der Tab-Leiste wie in Apples Apps (Entwurf E1); ein Tipp öffnet das Suchfeld mit Tastatur,
   alles andere der Suche bleibt, wie es war. Blätter öffnen in passender Größe: kurze Erklärungen und kleine

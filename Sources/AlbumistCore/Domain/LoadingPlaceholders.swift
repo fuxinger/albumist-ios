@@ -42,10 +42,11 @@ public enum ViewerPicture: Equatable, Sendable {
 
 /// What one page of the photo view shows (DS-16, DS-18; review V1 of design wave 3): the picture
 /// once its still came sharp or its video plays over it; the calm note only once nothing will
-/// come, for a video only once the video itself is known not to play. Until then the page waits
-/// by itself with the grid's thumbnail from memory (the black page without one): a video's small
-/// poster frame made its page say "nicht verfügbar" for the moment the video took to come, before
-/// every such video and again after a swipe away and back.
+/// come, for a video only once the video itself is known not to play, and for a page whose kind is
+/// not known yet not at all (review X6). Until then the page waits by itself with the grid's
+/// thumbnail from memory (the black page without one): a video's small poster frame made its page
+/// say "nicht verfügbar" for the moment the video took to come, before every such video and again
+/// after a swipe away and back.
 public enum ViewerPage: Equatable, Sendable {
     /// The sharp still, and over it the video while it has its player.
     case picture
@@ -57,16 +58,48 @@ public enum ViewerPage: Equatable, Sendable {
     /// - Parameters:
     ///   - still: What Photos' answer for the still was (`ViewerPicture.choose`); nil until it answered.
     ///   - playing: The page's video has its player: it is its own sharp picture (review F, F6).
-    ///   - video: For a video, where it is for this page: `.unknown` while it is not asked for or
-    ///     not answered (also on a page beside the one on screen, or swiped away and back). Nil for
-    ///     a photo.
-    public static func shows(still: ViewerPicture?, playing: Bool, video: VideoAvailability?) -> ViewerPage {
+    ///   - kind: What the page is, as far as the photo view knows (`PageKind`).
+    public static func shows(still: ViewerPicture?, playing: Bool, kind: PageKind) -> ViewerPage {
         if still == .sharp || playing { return .picture }
         guard still == .unavailable else { return .waiting }
-        switch video {
-        case nil, .onlyInICloud, .unavailable: return .unavailable
-        case .unknown, .onDevice: return .waiting
+        switch kind {
+        case .photo, .video(.onlyInICloud), .video(.unavailable): return .unavailable
+        case .video(.unknown), .video(.onDevice), .unknown: return .waiting
         }
+    }
+}
+
+/// What the photo view knows of a page's kind (DS-16, DS-18): a photo or a video as Photos or
+/// Albumist's facts say. Photos is asked only for the page on screen (`PhotoBasics`), so a page
+/// beside it that Albumist has no facts of (a new video, not analysed yet) is of no known kind:
+/// it waits instead of taking a video's small still for a photo that is not available (review
+/// X6), and once it was on screen the usual rule applies.
+public enum PageKind: Equatable, Sendable {
+    /// A photo; also a page Photos was asked about on screen and could not tell (it does not know
+    /// it, or did not answer), so the page on screen never waits for good.
+    case photo
+    /// A video, and where it is for this page (`.unknown` while it is not the video on screen).
+    case video(VideoAvailability)
+    /// Not known yet: no facts of it, and Photos not asked.
+    case unknown
+
+    /// - Parameters:
+    ///   - isVideo: Whether it is a video, as Photos or Albumist's facts say; nil while neither says.
+    ///   - asked: Photos was asked what it is: the page was on screen.
+    ///   - video: Where its video is for this page, for a video.
+    public init(isVideo: Bool?, asked: Bool, video: VideoAvailability) {
+        switch isVideo {
+        case true?: self = .video(video)
+        case false?: self = .photo
+        case nil: self = asked ? .photo : .unknown
+        }
+    }
+
+    /// A video: its page says "Video" while it waits and when it is not available, and VoiceOver's
+    /// magic tap plays and pauses it.
+    public var isVideo: Bool {
+        if case .video = self { return true }
+        return false
     }
 }
 

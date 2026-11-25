@@ -27,14 +27,20 @@ final class ThumbnailCache {
     /// More entries than any grid shows between two memory warnings: past it the older half of
     /// the records goes (they are only a shortcut to what is in memory, review F, F14).
     private static let recordLimit = 20_000
-    /// Raised when a change in Photos corrected a length a thumbnail may show: the cells on
-    /// screen read theirs again (review V4).
+    /// Raised when a change in Photos corrected a length a thumbnail may show, or dropped one it
+    /// could not check: the cells on screen read theirs again (reviews V4, X1).
     let lengthRevision = VideoLengthRevision()
     /// Changes in Photos waiting for one walk over the video records (review V11).
     private var backlog = ChangeBacklog<ThumbnailRequest.Change>(limit: ThumbnailCache.changeLimit)
     /// A long iCloud sync restarts the watcher's pause with each change: with this many waiting
     /// the walk starts at once.
     private static let changeLimit = 32
+    /// A memory warning took the records unchecked, while the cells on screen keep the lengths
+    /// they show (review X1): the next change is walked even without a record, and tells them.
+    private var recordsWentUnchecked = false
+    /// The cells on screen that asked Photos again for their video's length (`askLengthAgain`),
+    /// by id, waiting for one lookup together.
+    private var lengthAsks: [String: [@MainActor (KeptVideoLength.Answer) -> Void]] = [:]
 
     static let thumbnailCostLimit = 80 * 1024 * 1024
     static let coverCostLimit = 24 * 1024 * 1024
@@ -52,6 +58,7 @@ final class ThumbnailCache {
             $0.covers.removeAllObjects()
             $0.assets.removeAllObjects()
             $0.videoLengths.removeAll()
+            $0.recordsWentUnchecked = true
             $0.keptSides.removeAll()
             $0.manager.value.stopCachingImagesForAllAssets()
         }
@@ -191,9 +198,10 @@ final class ThumbnailCache {
 
     /// The video records follow the changes that waited, all at once, one walk at a time, never
     /// once per change (review V11): from the watcher's debounced task. Nothing to walk without
-    /// a video record.
+    /// a video record, unless a memory warning took them: the walk then tells the cells on screen
+    /// (review X1).
     func followChanges() {
-        guard let waiting = backlog.take(recordsKept: videoLengths.count > 0) else { return }
+        guard let waiting = backlog.take(recordsKept: videoLengths.count > 0 || recordsWentUnchecked) else { return }
         Task {
             await libraryChanged(waiting)
             if backlog.walked() { followChanges() }
@@ -206,7 +214,9 @@ final class ThumbnailCache {
     /// memory cannot be checked, and goes with its kept thumbnail so the next look asks Photos
     /// again (`KeptVideoLength`). The rest stays, so the grids keep their badges and the photo
     /// view its waiting thumbnail (emptied, they went on each change). When a length a cell may
-    /// show changed, the cells on screen read theirs again (`lengthRevision`, review V4).
+    /// show changed or went, also unchecked or with a memory warning, the cells on screen read
+    /// theirs again (`lengthRevision`, reviews V4, X1): one that shows a length nobody knows now
+    /// asks Photos again (`askLengthAgain`).
     private func libraryChanged(_ changes: [ThumbnailRequest.Change]) async {
         var kept: [String: ThumbnailRequest.Asset] = [:]
         var readAgain = false
@@ -224,6 +234,11 @@ final class ThumbnailCache {
                 if case .changed(let asset) = answer { assets.setObject(asset.value, forKey: key as NSString) }
                 if apply(KeptVideoLength.step(kept: seconds, inMemory: true, found: answer.lengthFound), to: key) { readAgain = true }
             }
+        }
+        // The records a memory warning took went unchecked too (review X1).
+        if recordsWentUnchecked {
+            recordsWentUnchecked = false
+            readAgain = true
         }
         if readAgain { lengthRevision.raise() }
     }
@@ -245,6 +260,52 @@ final class ThumbnailCache {
             }
         }
         return step.readsAgain
+    }
+
+    /// For a cell on screen that shows a length the thumbnails no longer know (its record went
+    /// unchecked, or a memory warning took it, review X1): Photos is asked again for the video,
+    /// and `answered` gets what it said (`KeptVideoLength.afterAsking`). The cells that ask after
+    /// one revision (`lengthRevision`) wait for one lookup together: the first ask starts it, the
+    /// others of the same moment join it before it runs, so 30 video cells on screen cost one
+    /// fetch, never one each. Photos' metadata only, of what is on the iPhone: no image, no
+    /// download.
+    func askLengthAgain(for id: AssetID, answered: @escaping @MainActor (KeptVideoLength.Answer) -> Void) {
+        if lengthAsks.isEmpty { Task { await answerLengthAsks() } }
+        lengthAsks[id.rawValue, default: []].append(answered)
+    }
+
+    /// The one lookup for the cells that asked (`askLengthAgain`), at most `batchLimit` ids a
+    /// fetch as in the queue's lookups: each asset found is kept as a lookup keeps it, a video's
+    /// record with its length now, and each cell gets its answer. On the main actor only as much
+    /// as the cells that asked, never as the library.
+    private func answerLengthAsks() async {
+        let asks = lengthAsks
+        lengthAsks = [:]
+        var waiting = Array(asks.keys)
+        var answers: [String: KeptVideoLength.Answer] = [:]
+        while !waiting.isEmpty {
+            let ids = Array(waiting.prefix(Self.batchLimit))
+            waiting.removeFirst(ids.count)
+            let found = await ThumbnailRequest.lookUp(ids)
+            let now = ContinuousClock.now
+            for id in ids {
+                // Photos did not answer in time: nothing is known, the cell keeps what it shows.
+                guard let found else {
+                    answers[id] = .noAnswer
+                    continue
+                }
+                let asset = found[id]
+                remember(asset, for: id, at: now)
+                if let asset, asset.value.mediaType == .video {
+                    answers[id] = .length(seconds: asset.value.duration)
+                } else {
+                    answers[id] = .noLength
+                }
+            }
+        }
+        for (id, cells) in asks {
+            for answered in cells { answered(answers[id] ?? .noAnswer) }
+        }
     }
 
     /// `asset(for:)`, telling "Photos does not know the photo" from "Photos did not answer in
@@ -355,28 +416,35 @@ final class ThumbnailCache {
             if missing.count > 1000 { missing = missing.filter { now - $0.value < Self.missingKept } }
             for id in ids {
                 let asset = found[id]
-                if let asset {
-                    assets.setObject(asset.value, forKey: id as NSString)
-                    missing[id] = nil
-                    // A video's length comes with its asset (DS-16): no fetch of its own.
-                    if asset.value.mediaType == .video {
-                        videoLengths[id] = asset.value.duration
-                    }
-                } else {
-                    missing[id] = now
-                }
+                remember(asset, for: id, at: now)
                 let answer: AssetLookup = asset.map { .found($0) } ?? .unknown
                 for waiter in waiting.removeValue(forKey: id) ?? [] { waiter.continuation.resume(returning: answer) }
             }
         }
         lookingUp = false
     }
+
+    /// What a lookup found for `id`: its asset is kept, and a video's length with it; an id
+    /// Photos does not know is not asked again for a few seconds (`missingKept`).
+    private func remember(_ asset: ThumbnailRequest.Asset?, for id: String, at now: ContinuousClock.Instant) {
+        guard let asset else {
+            missing[id] = now
+            return
+        }
+        assets.setObject(asset.value, forKey: id as NSString)
+        missing[id] = nil
+        // A video's length comes with its asset (DS-16): no fetch of its own.
+        if asset.value.mediaType == .video {
+            videoLengths[id] = asset.value.duration
+        }
+    }
 }
 
 /// Raised when a change in Photos corrected a length a thumbnail may show (review V4 of design
 /// wave 3): the thumbnails on screen read theirs again (`AssetThumbnail`), so a video trimmed in
-/// Photos shows its new length at once, on its badge and to VoiceOver. Observed on its own: the
-/// cache itself is not.
+/// Photos shows its new length on its badge and to VoiceOver once the change was walked, some
+/// seconds after it (the photo library watcher's pause), without its cell being made anew.
+/// Observed on its own: the cache itself is not.
 @MainActor
 @Observable
 final class VideoLengthRevision {
@@ -714,11 +782,27 @@ struct AssetThumbnail: View {
         }
     }
 
-    /// A change in Photos corrected a video's length (a video trimmed in Photos, review V4): the
-    /// cell on screen reads its record again, so its badge and VoiceOver's words follow at once.
+    /// A change in Photos corrected or dropped a video's record (a video trimmed in Photos,
+    /// reviews V4 and X1): the cell on screen reads it again, so its badge and VoiceOver's words
+    /// follow without the cell being made anew, some seconds after the change: once it was
+    /// walked, after the photo library watcher's pause (3 s, up to 20 s right after an analysis).
+    /// Only a length the thumbnails know replaces what the cell shows (review X2). One it shows
+    /// and they no longer know (its record went unchecked, a memory warning took it) it keeps,
+    /// asks Photos again with the other cells that ask now, and then shows what Photos said
+    /// (`KeptVideoLength`). A cover, which shows no length, asks nothing.
     private func readLengthAgain() {
         guard loadedID == id else { return }
-        video = ThumbnailCache.shared.videoLength(for: id)
+        switch KeptVideoLength.reading(shown: showsVideoLength ? video : nil, known: ThumbnailCache.shared.videoLength(for: id)) {
+        case .show(let known): video = known
+        case .keep: break
+        case .askAgain:
+            let asked = id
+            ThumbnailCache.shared.askLengthAgain(for: asked) { answer in
+                // A cell that moved on to another photo keeps the new one's length.
+                guard loadedID == asked else { return }
+                video = KeptVideoLength.afterAsking(shown: video, answer: answer)
+            }
+        }
     }
 
     /// "Video, 15 Sekunden" for the cell around it; nil for a photo, while it loads, and where

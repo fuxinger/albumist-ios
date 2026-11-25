@@ -63,9 +63,9 @@ final class ViewerVideo {
     @ObservationIgnored private var seekSerial = 0
     /// Videos Photos said are only in iCloud: not asked again while the photo view is open.
     @ObservationIgnored private var onlyInICloud: Set<AssetID> = []
-    /// The start by itself that `open` planned still stands: what comes in its moment of waiting
-    /// cancels it (review V2), a pause (the button, VoiceOver, closing the photo view, the
-    /// background), a finger on the slider, a swipe on.
+    /// The start by itself that `open` planned still stands: what comes in its moment of waiting,
+    /// from the ask to Photos on (reviews V2, X5), cancels it: a pause (the button, VoiceOver,
+    /// closing the photo view, the background), a finger on the slider, a swipe on.
     @ObservationIgnored private var startsByItself = false
 
     /// The player of `id`'s page, while it is the video on screen.
@@ -94,14 +94,15 @@ final class ViewerVideo {
             availability = .onlyInICloud
             return
         }
+        // Planned before Photos is asked: a pause while it answers cancels it too (review X5).
+        startsByItself = start.byItself
         let answer = await VideoLoader.load(id)
         guard !Task.isCancelled, self.id == id else { return }
         switch answer {
         case .item(let item):
             availability = .onDevice
             make(item.value)
-            guard start.byItself else { return }
-            startsByItself = true
+            guard start.byItself, startsByItself else { return }
             try? await Task.sleep(for: .milliseconds(350))
             // Only once the app's sound mixes with the user's music (`LiveAudio`), or with the
             // sound the user turned on: before, even this muted start would stop their music.
@@ -169,7 +170,8 @@ final class ViewerVideo {
         isPlaying = true
     }
 
-    /// Also before the video started by itself: it then does not start (review V2).
+    /// Also before the video started by itself, while Photos is still asked for it too: it then
+    /// does not start (reviews V2, X5).
     func pause() {
         player?.value.pause()
         isPlaying = false

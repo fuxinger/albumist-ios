@@ -59,7 +59,10 @@ extension RecentRecords: Sendable where Value: Sendable {}
 /// wave 3, F14 c, V4). The thumbnails keep each video's length (`ThumbnailCache`) from the asset
 /// their lookup fetched, a snapshot: a video trimmed in Photos keeps its old length until the
 /// change corrects it, and the cells on screen read theirs again when a length they may show
-/// changed, so the badge and VoiceOver's words follow at once.
+/// changed, so the badge and VoiceOver's words follow without the cell being made anew, once the
+/// change was walked (some seconds after it, after the photo library watcher's pause). A record
+/// that cannot be checked goes, and a cell on screen that shows its length asks Photos again
+/// (review X1, `reading`).
 public enum KeptVideoLength {
     /// What the change said of a kept video whose asset was in memory.
     public enum Found: Equatable, Sendable {
@@ -77,16 +80,61 @@ public enum KeptVideoLength {
         /// The record goes. Checked: the video was deleted. Unchecked: its asset is no longer in
         /// memory, so the change cannot be checked against it; the thumbnail kept for it goes
         /// too, so the next look asks Photos again (a thumbnail from memory passes no lookup that
-        /// would write the record anew), and an old length never stays on unchecked.
+        /// would write the record anew), and an old length never stays on unchecked: a cell on
+        /// screen that shows it asks Photos again (review X1).
         case drop(checked: Bool)
 
-        /// The cells on screen read their record again: a length one may show changed or went.
+        /// The cells on screen read their record again: a length one may show changed or went,
+        /// also unchecked (review X1).
         public var readsAgain: Bool {
             switch self {
-            case .keep, .drop(checked: false): false
+            case .keep: false
             case .update(_, let shown): shown
-            case .drop(checked: true): true
+            case .drop: true
             }
+        }
+    }
+
+    /// What a cell on screen does when the cells read their lengths again (`Step.readsAgain`).
+    public enum Reading: Equatable, Sendable {
+        /// The thumbnails know its video's length: shown, the new one or the same.
+        case show(VideoDuration)
+        /// Nothing: the thumbnails know no length and the cell shows none.
+        case keep
+        /// The cell shows a length the thumbnails no longer know (its record went unchecked, or a
+        /// memory warning took it): it keeps it and asks Photos again, then shows what Photos said
+        /// (`afterAsking`, review X1).
+        case askAgain
+    }
+
+    /// Only a length the thumbnails know replaces what a cell shows (review X2): knowing none is
+    /// not "no video", as the records of unchanged videos go too (a memory warning, a record
+    /// dropped unchecked); a cell that shows a length then asks Photos again (review X1).
+    /// - Parameters:
+    ///   - shown: The length the cell shows (its badge, VoiceOver's words); nil when it shows none.
+    ///   - known: The length the thumbnails know of its photo now; nil when they know none.
+    public static func reading(shown: VideoDuration?, known: VideoDuration?) -> Reading {
+        if let known { return .show(known) }
+        return shown == nil ? .keep : .askAgain
+    }
+
+    /// What Photos said of a video a cell on screen asked about again (`Reading.askAgain`).
+    public enum Answer: Equatable, Sendable {
+        /// The video, as long as this now, in seconds (a trimmed video's new length).
+        case length(seconds: Double)
+        /// Photos no longer knows it (deleted), or it is no video: no length.
+        case noLength
+        /// Photos did not answer in time: nothing is known.
+        case noAnswer
+    }
+
+    /// The length the cell shows once Photos answered: the new one; none when the video went;
+    /// what it showed when Photos did not answer (it asks again after the next change).
+    public static func afterAsking(shown: VideoDuration?, answer: Answer) -> VideoDuration? {
+        switch answer {
+        case .length(let seconds): VideoDuration(seconds: seconds)
+        case .noLength: nil
+        case .noAnswer: shown
         }
     }
 

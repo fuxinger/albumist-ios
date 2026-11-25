@@ -80,27 +80,54 @@ struct LoadingPlaceholderTests {
     /// the page waits with the grid's thumbnail from memory (black without one).
     @Test func aPageSaysNotAvailableOnlyOnceNothingWillCome() {
         // A photo: the picture once it came sharp, the note once none will, waiting until then.
-        #expect(ViewerPage.shows(still: .sharp, playing: false, video: nil) == .picture)
-        #expect(ViewerPage.shows(still: .unavailable, playing: false, video: nil) == .unavailable)
-        #expect(ViewerPage.shows(still: nil, playing: false, video: nil) == .waiting)
+        #expect(ViewerPage.shows(still: .sharp, playing: false, kind: .photo) == .picture)
+        #expect(ViewerPage.shows(still: .unavailable, playing: false, kind: .photo) == .unavailable)
+        #expect(ViewerPage.shows(still: nil, playing: false, kind: .photo) == .waiting)
         // A video that plays is its own sharp picture (review F, F6), with its still or without.
         for still in [ViewerPicture.sharp, .unavailable, nil] {
-            #expect(ViewerPage.shows(still: still, playing: true, video: .onDevice) == .picture, "\(String(describing: still))")
+            #expect(ViewerPage.shows(still: still, playing: true, kind: .video(.onDevice)) == .picture, "\(String(describing: still))")
         }
         // Its still is not sharp while the video is asked for, or not asked yet (a page beside the
         // one on screen, a page swiped away and back): it waits.
-        #expect(ViewerPage.shows(still: .unavailable, playing: false, video: .unknown) == .waiting)
-        #expect(ViewerPage.shows(still: .unavailable, playing: false, video: .onDevice) == .waiting)
+        #expect(ViewerPage.shows(still: .unavailable, playing: false, kind: .video(.unknown)) == .waiting)
+        #expect(ViewerPage.shows(still: .unavailable, playing: false, kind: .video(.onDevice)) == .waiting)
         // Known not to play: the note, on the page itself.
         for found in [VideoAvailability.onlyInICloud, .unavailable] {
-            #expect(ViewerPage.shows(still: .unavailable, playing: false, video: found) == .unavailable, "\(found)")
+            #expect(ViewerPage.shows(still: .unavailable, playing: false, kind: .video(found)) == .unavailable, "\(found)")
         }
         // A sharp still of a video that does not play shows; the note under it says why (`VideoNoteView`).
         for found in [VideoAvailability.unknown, .onDevice, .onlyInICloud, .unavailable] {
-            #expect(ViewerPage.shows(still: .sharp, playing: false, video: found) == .picture, "\(found)")
+            #expect(ViewerPage.shows(still: .sharp, playing: false, kind: .video(found)) == .picture, "\(found)")
             // Before Photos answered for the still nothing is said, whatever the video.
-            #expect(ViewerPage.shows(still: nil, playing: false, video: found) == .waiting, "\(found)")
+            #expect(ViewerPage.shows(still: nil, playing: false, kind: .video(found)) == .waiting, "\(found)")
         }
+    }
+
+    /// A page whose kind is not known yet waits calmly (review X6): a new video Albumist has no
+    /// facts of (not analysed yet) beside the page on screen, whose still is not sharp, said
+    /// "Dieses Foto ist gerade nicht verfügbar" during the swipe and turned into the waiting video
+    /// once on screen. Its kind is read once it is the page on screen; then the usual rule
+    /// applies, and a page Photos could not tell the kind of is taken for a photo: the page on
+    /// screen never waits for good.
+    @Test func aPageWhoseKindIsNotKnownWaitsUntilItIsOnScreen() {
+        let notKnown = PageKind(isVideo: nil, asked: false, video: .unknown)
+        #expect(notKnown == .unknown)
+        #expect(ViewerPage.shows(still: .unavailable, playing: false, kind: notKnown) == .waiting)
+        #expect(ViewerPage.shows(still: nil, playing: false, kind: notKnown) == .waiting)
+        #expect(ViewerPage.shows(still: .sharp, playing: false, kind: notKnown) == .picture)
+        // On screen its kind is read: a video waits while its video may still come, a photo says it.
+        let video = PageKind(isVideo: true, asked: true, video: .unknown)
+        #expect(video == .video(.unknown))
+        #expect(ViewerPage.shows(still: .unavailable, playing: false, kind: video) == .waiting)
+        #expect(ViewerPage.shows(still: .unavailable, playing: false, kind: PageKind(isVideo: false, asked: true, video: .unknown))
+                == .unavailable)
+        // Photos could not tell what it is: taken for a photo, never an endless wait.
+        let untold = PageKind(isVideo: nil, asked: true, video: .unknown)
+        #expect(untold == .photo)
+        #expect(ViewerPage.shows(still: .unavailable, playing: false, kind: untold) == .unavailable)
+        // What Photos or Albumist's facts say counts, also before the page was on screen.
+        #expect(PageKind(isVideo: false, asked: false, video: .unknown) == .photo)
+        #expect(PageKind(isVideo: true, asked: false, video: .onlyInICloud) == .video(.onlyInICloud))
     }
 
     // MARK: Thumbnails

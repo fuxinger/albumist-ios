@@ -67,6 +67,9 @@ struct PhotoViewer: View {
     /// What Photos says of each photo looked at: its date, for the title while Albumist has no
     /// facts of it, and its kind (`PhotoBasics`).
     @State private var basics: [AssetID: PhotoBasics] = [:]
+    /// The photos whose kind Photos was asked on screen, answered or not (`lookAtCurrent`): one it
+    /// could not tell is taken for a photo, so the page on screen never waits for good (review X6).
+    @State private var kindsAsked: Set<AssetID> = []
     /// 12 or 24 hours as the iPhone is set; read again when its settings change.
     @State private var clock = AppModel.deviceClock()
     /// The clock the analysis tells photos without a place on, asked once before the first date
@@ -191,7 +194,7 @@ struct PhotoViewer: View {
     private func page(at index: Int) -> some View {
         let id = ids[index]
         let photo = ZoomablePhoto(id: id, label: label(of: id), position: position(of: index), isCurrent: id == current,
-                                  isVideo: isVideo(id), player: video.surface(for: id), videoAvailability: video.availability(for: id),
+                                  kind: kind(of: id), player: video.surface(for: id),
                                   top: top, pull: $pull, onTap: { toggleChrome() }, onClose: { closeNow() },
                                   onLive: { _ = livePhotos.insert($0) }, onZoom: { zoomChrome() },
                                   onPressing: { livePress(id, $0) }, onPicture: { pictureCame($0, sharp: $1) },
@@ -367,10 +370,24 @@ struct PhotoViewer: View {
         }
     }
 
-    /// A video, as Photos says once it is known, before that as Albumist's facts say (DS-16).
+    /// A video, as Photos or else Albumist's facts say (DS-16); not while neither says.
     private func isVideo(_ id: AssetID) -> Bool {
+        knownVideo(id) ?? false
+    }
+
+    /// Whether `id` is a video, as Photos says once it is known, before that as Albumist's facts
+    /// say; nil while neither says (a video not analysed yet beside the page on screen).
+    private func knownVideo(_ id: AssetID) -> Bool? {
         if let known = basics[id] { return known.isVideo }
-        return model.factsByID[id]?.asset.kind == .video
+        return model.factsByID[id].map { $0.asset.kind == .video }
+    }
+
+    /// What the photo view knows of the kind of `id`'s page (`PageKind`): without Photos' word or
+    /// facts it is not known until it was the page on screen and Photos was asked, and it waits
+    /// meanwhile instead of taking a video's small still for a photo that is not available
+    /// (review X6).
+    private func kind(of id: AssetID) -> PageKind {
+        PageKind(isVideo: knownVideo(id), asked: kindsAsked.contains(id), video: video.availability(for: id))
     }
 
     /// How long a video is, as Photos or else Albumist's facts say; nil for a photo.
@@ -399,7 +416,9 @@ struct PhotoViewer: View {
 
     /// The photo on screen: what Photos says of it (its date and kind, once per photo), then
     /// whether it can be shared. The home clock first, once, so a date never shows on another
-    /// clock before (review D2, N10).
+    /// clock before (review D2, N10). Once Photos was asked, its kind counts as known, also when
+    /// Photos could not tell it (review X6). A look that a swipe on cancelled goes no further:
+    /// opening its video would stop the next page's.
     private func lookAtCurrent() async {
         let id = current
         if !homeZoneAsked {
@@ -409,6 +428,8 @@ struct PhotoViewer: View {
         if basics[id] == nil, let found = await PhotoBasics.of(id), !Task.isCancelled {
             basics[id] = found
         }
+        guard !Task.isCancelled else { return }
+        if !kindsAsked.contains(id) { kindsAsked.insert(id) }
         if isVideo(id) { await playVideo(id) }
         await checkSharing(id)
     }
@@ -476,7 +497,7 @@ struct PhotoViewer: View {
 /// it is sharp at the screen's size (`ViewerPicture`); a photo of which only Photos' small
 /// preview is on the iPhone (the photo itself in iCloud) gets the calm note instead of a big
 /// blurry picture (design rule 6), a video only once the video is known not to play
-/// (`ViewerPage`, review V1).
+/// (`ViewerPage`, review V1), a page of no known kind not before it was on screen (review X6).
 private struct ZoomablePhoto: View {
     var id: AssetID
     /// What VoiceOver says: place, day and time ("München, 12. Oktober 2024, 14:32").
@@ -485,14 +506,12 @@ private struct ZoomablePhoto: View {
     var position: Text
     /// The photo on screen (the pages beside it are built too): only it loads its Live Photo.
     var isCurrent: Bool
-    /// A video: its words while it loads and when it is not available; VoiceOver's magic tap
-    /// plays and pauses it.
-    var isVideo: Bool
+    /// What it is (`PageKind`): for a video also where its video is
+    /// (`ViewerVideo.availability(for:)`), so the page waits while it may still play instead of
+    /// saying it is not available (review V1); a page of no known kind waits too (review X6).
+    var kind: PageKind
     /// The video's player while this video is on screen (`ViewerVideo`).
     var player: ViewerVideo.Player?
-    /// Where its video is (`ViewerVideo.availability(for:)`): while it may still play, the page
-    /// waits instead of saying it is not available (review V1).
-    var videoAvailability: VideoAvailability
     /// The top of the photo's area (under the bar).
     var top: CGFloat
     @Binding var pull: CGFloat
@@ -586,9 +605,15 @@ private struct ZoomablePhoto: View {
         }
     }
 
-    /// The core's rule, told where the page's video is (`.unknown` while it is not on screen).
+    /// The core's rule, told what the page is (for a video, `.unknown` while it is not on screen).
     private var page: ViewerPage {
-        ViewerPage.shows(still: picture, playing: player != nil, video: isVideo ? videoAvailability : nil)
+        ViewerPage.shows(still: picture, playing: player != nil, kind: kind)
+    }
+
+    /// A video: its words while it loads and when it is not available; VoiceOver's magic tap
+    /// plays and pauses it. A page of no known kind speaks as a photo while it waits.
+    private var isVideo: Bool {
+        kind.isVideo
     }
 
     /// What Photos' answer for the still was: sharp, none will come, or nil while it has not answered.

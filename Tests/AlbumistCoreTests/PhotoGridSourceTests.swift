@@ -155,7 +155,7 @@ struct PhotoGridSourceTests {
                 #expect(!code.contains(request), "\(path): \(request)")
             }
         }
-        #expect(try Self.code(Self.thumbnails).contains("options.isNetworkAccessAllowed = false"))
+        #expect(AppSource.code(try ThumbnailSource.read(), keepStrings: true).contains("options.isNetworkAccessAllowed = false"))
         // No image of the old size of its own on top: the thumbnail keeps it.
         #expect(!(try Self.code(Self.grid)).contains("bridgeSide"), "a second image of the old size in the grid")
     }

@@ -8,10 +8,9 @@ import AlbumistTestSupport
 /// where motion is welcome, and everything the viewer did before stays.
 @Suite("Photo view source (DS-10)")
 struct PhotoViewerSourceTests {
-    static let viewerPath = "App/Albumist/Views/PhotoViewer.swift"
     static let folder = "App/Albumist/Views/PhotoViewer"
 
-    static func viewer() throws -> String { try AppSource.read(viewerPath) }
+    static func viewer() throws -> String { try PhotoViewerSource.read() }
     static func file(_ name: String) throws -> String { try AppSource.read("\(folder)/\(name)") }
 
     /// The code of `path` with comments and strings blanked.
@@ -19,7 +18,7 @@ struct PhotoViewerSourceTests {
 
     /// The files that load photos for the photo view.
     static var loadingFiles: [String] {
-        [viewerPath, "App/Albumist/Views/AssetThumbnail.swift"] + AppSource.swiftFiles(under: folder)
+        PhotoViewerSource.views + ThumbnailSource.paths + AppSource.swiftFiles(under: folder)
     }
 
     static func count(_ pattern: String, in text: String) -> Int {
@@ -230,7 +229,7 @@ struct PhotoViewerSourceTests {
         #expect(hop.contains("Task { @MainActor in"))
         #expect(Self.count("assumeIsolated", in: player) == 1)
         // The motion at the screen's pixels: it shows only while it plays (L5).
-        let loadLive = try #require(AppSource.body(of: "private func loadLive(", in: AppSource.code(try Self.viewer())))
+        let loadLive = try #require(AppSource.body(of: "func loadLive(", in: AppSource.code(try Self.viewer())))
         #expect(loadLive.contains("LivePhotoLoader.load("))
         #expect(!loadLive.contains("* 2"))
         let viewer = AppSource.code(try Self.viewer(), keepStrings: true)
@@ -267,7 +266,7 @@ struct PhotoViewerSourceTests {
         }
         #expect(viewer.contains("Button(\"Live Photo abspielen\")"), "VoiceOver cannot play it")
         #expect(viewer.contains(".accessibilityHidden(true)"))
-        for path in [Self.viewerPath, "\(Self.folder)/LivePhotoPlayer.swift"] {
+        for path in PhotoViewerSource.paths + ["\(Self.folder)/LivePhotoPlayer.swift"] {
             #expect(!(try AppSource.read(path)).contains("\"livephoto\""), "\(path): a Live Photo sign on the photo")
         }
         #expect(try Self.file("PhotoTitleBar.swift").contains("Image(systemName: \"livephoto\")"))
@@ -309,7 +308,7 @@ struct PhotoViewerSourceTests {
         #expect(held.contains("pressing == id"), "another page's end frees the pager")
         #expect(AppSource.calls(of: "ZoomablePhoto(", in: source).allSatisfy { $0.contains("onPressing: { livePress(id, $0) }") })
         // A page that goes while pressed ends its press, so the pager is never held for good.
-        let photo = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: source))
+        let photo = try #require(AppSource.body(of: "struct ZoomablePhoto", in: source))
         let gone = try #require(AppSource.body(of: ".onDisappear", in: photo))
         #expect(gone.contains("if pressing { press(false) }"))
         // No pinch and no moving the zoomed photo while the press plays.
@@ -365,7 +364,7 @@ struct PhotoViewerSourceTests {
         // No answer from Photos is no verdict.
         let prepare = try #require(AppSource.body(of: "static func prepare(", in: share))
         #expect(prepare.contains("case .noAnswer: return .unavailable(.unknown)"))
-        let thumbnails = AppSource.code(try AppSource.read("App/Albumist/Views/AssetThumbnail.swift"))
+        let thumbnails = AppSource.code(try ThumbnailSource.read())
         #expect(thumbnails.contains("func assetLookup(for id: AssetID) async -> AssetLookup"))
         // Leftovers go at launch too, and never the folder of the sheet on screen.
         let app = AppSource.code(try AppSource.read("App/Albumist/App/AlbumistApp.swift"))
@@ -408,7 +407,7 @@ struct PhotoViewerSourceTests {
         let alert = try position(".alert(\"Das hat nicht geklappt\", isPresented: shareFailed)", in: body, after: root)
         _ = try position("Button(\"OK\", role: .cancel) {}", in: body, after: alert)
         _ = try position("Text(\"Das Foto konnte nicht zum Teilen vorbereitet werden. Versuch es gleich noch einmal.\")", in: body, after: alert)
-        for part in ["private var pager", "private var pages"] {
+        for part in ["var pager", "private var pages"] {
             #expect(!(try #require(AppSource.body(of: part, in: viewer))).contains(".alert("), "\(part) has the alert")
         }
         let failed = try #require(AppSource.body(of: "private var shareFailed", in: viewer))
@@ -427,7 +426,7 @@ struct PhotoViewerSourceTests {
         _ = try position("sharing[ticket.photo] = reason", in: share, after: kept)
         #expect(viewer.contains(".disabled(!shareState.canShare || preparation.isPreparing)"))
         // Left on a swipe, when the details open and when the view closes.
-        let leave = try #require(AppSource.body(of: "private func leaveShare(", in: viewer))
+        let leave = try #require(AppSource.body(of: "func leaveShare(", in: viewer))
         #expect(leave.contains("preparation.leave()"))
         #expect(leave.contains("shareTask?.cancel()"))
         #expect(try #require(AppSource.body(of: ".onChange(of: current)", in: viewer)).contains("leaveShare()"))
@@ -454,7 +453,7 @@ struct PhotoViewerSourceTests {
                      "DragGesture(minimumDistance: 20)", "onClose()", ".tabViewStyle(.page(indexDisplayMode: .never))"] {
             #expect(viewer.contains(kept), "\(kept) is gone")
         }
-        let thumbnails = AppSource.code(try AppSource.read("App/Albumist/Views/AssetThumbnail.swift"))
+        let thumbnails = AppSource.code(try ThumbnailSource.read())
         for kept in ["func image(for id: AssetID, side: CGFloat) async -> UIImage?",
                      "func cover(for id: AssetID, pixels: CGSize) async -> CoverFetch",
                      "func largeImage(for id: AssetID, pixels: CGSize) async -> UIImage?"] {
@@ -469,7 +468,7 @@ struct PhotoViewerSourceTests {
     /// properties of their own.
     @Test func theBodiesStayShort() throws {
         let viewer = try Self.viewer()
-        for path in [["struct PhotoViewer", "var body: some View"], ["private struct ZoomablePhoto", "var body: some View"]] {
+        for path in [["struct PhotoViewer", "var body: some View"], ["struct ZoomablePhoto", "var body: some View"]] {
             let body = try #require(AppSource.body(of: path, in: viewer), "\(path) not found")
             let lines = body.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
             #expect(lines.count <= 16, "\(path.joined(separator: " ")) has \(lines.count) lines")

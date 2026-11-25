@@ -484,7 +484,7 @@ struct LongPressSourceTests {
         #expect(!lifted.contains("CoverPhoto"), "a placeholder where the cell shows a photo, a lift counted as a cover")
         #expect(!lifted.contains("@Environment(AppModel"), "the system draws the lifted photo apart: everything handed in")
         // Sharp by the covers' rule, the same 70 % (`ThumbnailRequest.sharpShare`).
-        let thumbnails = try Self.code("App/Albumist/Views/AssetThumbnail.swift")
+        let thumbnails = AppSource.code(try ThumbnailSource.read(), keepStrings: true)
         #expect(thumbnails.contains("static let sharpShare: CGFloat = \(PhotoMenu.sharpShare)"))
     }
 

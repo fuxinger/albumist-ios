@@ -12,12 +12,20 @@ import AlbumistTestSupport
 /// `LoadingPlaceholderTests`).
 @Suite("Videos and calm placeholders source (DS-16, DS-18)")
 struct VideoViewerSourceTests {
-    static let viewerPath = "App/Albumist/Views/PhotoViewer.swift"
     static let folder = "App/Albumist/Views/PhotoViewer"
-    static let thumbnailsPath = "App/Albumist/Views/AssetThumbnail.swift"
 
     static func code(_ path: String, keepStrings: Bool = false) throws -> String {
         AppSource.code(try AppSource.read(path), keepStrings: keepStrings)
+    }
+
+    /// The photo view's code, in all the files it is in (`PhotoViewerSource`).
+    static func viewer(keepStrings: Bool = false) throws -> String {
+        AppSource.code(try PhotoViewerSource.read(), keepStrings: keepStrings)
+    }
+
+    /// The thumbnails' code, in all the files it is in (`ThumbnailSource`).
+    static func thumbnails(keepStrings: Bool = false) throws -> String {
+        AppSource.code(try ThumbnailSource.read(), keepStrings: keepStrings)
     }
 
     static func file(_ name: String, keepStrings: Bool = false) throws -> String {
@@ -81,7 +89,7 @@ struct VideoViewerSourceTests {
     /// screen (one player at most) and pauses in the background; its picture is Apple's player
     /// layer fitted as the still under it, zoomed and pulled with it, and takes no touch.
     @Test func aVideoPlaysAsInPhotos() throws {
-        let viewer = try Self.code(Self.viewerPath)
+        let viewer = try Self.viewer()
         let play = try #require(AppSource.body(of: "private func playVideo(", in: viewer))
         #expect(Self.squeezed(play).contains("VideoStart(reduceMotion:reduceMotion,autoplayVideos:UIAccessibility.isVideoAutoplayEnabled,"
                                              + "lowPowerMode:ProcessInfo.processInfo.isLowPowerModeEnabled)"), "\(play)")
@@ -92,7 +100,7 @@ struct VideoViewerSourceTests {
         #expect(try #require(AppSource.body(of: "private func closed(", in: viewer)).contains("video.close()"))
         // It pauses in the background, told by the scene's phase or by the app's notification: a
         // full-screen cover has not always been told its scene's phase (review F, F18).
-        let pager = Self.squeezed(try #require(AppSource.body(of: "private var pager", in: viewer)))
+        let pager = Self.squeezed(try #require(AppSource.body(of: "var pager", in: viewer)))
         #expect(pager.contains(".onChange(of:scenePhase){_,phaseinifphase==.background{video.pause()}}"),
                 "a video plays on in the background")
         #expect(pager.contains(".onReceive(NotificationCenter.default.publisher(for:UIApplication.didEnterBackgroundNotification)){_invideo.pause()}"),
@@ -100,7 +108,7 @@ struct VideoViewerSourceTests {
         // It stops at once when the photo view closes, by the button, the pull or VoiceOver's
         // escape: its sound does not run on over the grid while the view slides away (review F,
         // F15; `closed` lets its player go only after that).
-        let closeNow = try #require(AppSource.body(of: "private func closeNow(", in: viewer))
+        let closeNow = try #require(AppSource.body(of: "func closeNow(", in: viewer))
         #expect(Self.inOrder(["video.pause()", "dismiss()"], in: closeNow), "\(closeNow)")
         #expect(Self.count(#"(?<![\w.])dismiss\(\)"#, in: viewer) == 1, "a way to close that leaves the video playing")
         #expect(Self.count(#"(?<!func )closeNow\(\)"#, in: viewer) == 3, "the button, the pull and the escape")
@@ -157,7 +165,7 @@ struct VideoViewerSourceTests {
         // comes and when none came sharp (a small poster frame), over the grid's thumbnail from
         // memory or the black page; the page says "not available" only without a player, and for
         // a video only once it is known not to play (review V1, `ViewerPage`).
-        let zoomable = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: viewer))
+        let zoomable = try #require(AppSource.body(of: "struct ZoomablePhoto", in: viewer))
         let page = try #require(AppSource.body(of: "private var page: ViewerPage", in: zoomable))
         #expect(page.contains("playing: player != nil"), "\(page)")
         let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: zoomable))
@@ -222,8 +230,8 @@ struct VideoViewerSourceTests {
         // Closing the photo view (the button, the pull, the escape) and the background pause it
         // first; `close` stops the video.
         #expect(try #require(AppSource.body(of: "func close(", in: model)).contains("stop()"))
-        let viewer = try Self.code(Self.viewerPath)
-        #expect(Self.inOrder(["video.pause()", "dismiss()"], in: try #require(AppSource.body(of: "private func closeNow(", in: viewer))))
+        let viewer = try Self.viewer()
+        #expect(Self.inOrder(["video.pause()", "dismiss()"], in: try #require(AppSource.body(of: "func closeNow(", in: viewer))))
     }
 
     /// A pause that comes while the video is still asked for, before Photos handed it over, is
@@ -380,7 +388,7 @@ struct VideoViewerSourceTests {
         let slider = try #require(AppSource.body(of: "private var slider", in: controls))
         #expect(slider.contains("onEditingChanged:") || slider.contains("{ editing in"))
         #expect(slider.contains("video.beginScrub()") && slider.contains("video.endScrub()"))
-        let viewer = try Self.code(Self.viewerPath, keepStrings: true)
+        let viewer = try Self.viewer(keepStrings: true)
         let notes = try #require(AppSource.body(of: "private var notes", in: viewer))
         #expect(notes.contains("if chrome.isShown && video.id == current {"))
         #expect(Self.inOrder(["ShareInICloudNote()", "videoPanel", "IgnoreUndoBar()"], in: notes))
@@ -414,7 +422,7 @@ struct VideoViewerSourceTests {
         #expect(note.contains("case .unavailable: Text(\"Dieses Video lässt sich gerade nicht abspielen.\")"))
         #expect(note.contains(".floatingPanel("))
         #expect(note.contains("\"viewer.videoNote\""))
-        for path in [Self.viewerPath] + AppSource.swiftFiles(under: Self.folder) {
+        for path in PhotoViewerSource.views + AppSource.swiftFiles(under: Self.folder) {
             #expect(!(try Self.code(path)).contains("ProgressView("), "\(path): a spinner in the photo view")
         }
         let model = try Self.file("ViewerVideo.swift")
@@ -429,8 +437,9 @@ struct VideoViewerSourceTests {
     /// large picture shows only when the core calls it sharp; otherwise the calm note says why,
     /// never a big blurry picture (design rule 6).
     @Test func thePhotoViewWaitsWithTheGridsThumbnail() throws {
-        let viewer = try Self.code(Self.viewerPath, keepStrings: true)
-        let photo = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: viewer))
+        let viewer = try Self.viewer(keepStrings: true)
+        // The page of one photo: `ZoomablePhoto` and its extensions (its loading is in a file of its own).
+        let photo = AppSource.code(try PhotoViewerSource.readZoomable(), keepStrings: true)
         let waiting = try #require(AppSource.body(of: "private func waiting(in size: CGSize)", in: photo))
         #expect(waiting.contains("ThumbnailCache.shared.thumbnailInMemory(for: id)"))
         #expect(waiting.contains(".scaledToFit()"), "the preview not fitted as the photo will be")
@@ -440,7 +449,7 @@ struct VideoViewerSourceTests {
         #expect(waiting.contains("Text(\"Foto wird geladen\")") && waiting.contains("Text(\"Video wird geladen\")"))
         let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: photo))
         #expect(shown.contains("case .waiting: waiting(in: size)"), "\(shown)")
-        let load = try #require(AppSource.body(of: "private func load(in size: CGSize)", in: photo))
+        let load = try #require(AppSource.body(of: "func load(in size: CGSize)", in: photo))
         #expect(Self.inOrder(["await PhotoBasics.of(id)", "ThumbnailCache.shared.largeImage(for: id, pixels: pixels)",
                               "guard !Task.isCancelled", "ViewerPicture.choose(", "case .sharp:", "image = loaded",
                               "onPicture(id, true)", "case .unavailable:", "becameUnavailable()"], in: load), "\(load)")
@@ -449,7 +458,7 @@ struct VideoViewerSourceTests {
         #expect(Self.squeezed(load).contains("ViewerPicture.choose(delivered:loaded.map(Self.pixelSize(of:)),original:basics?.pixels,screen:screen)"),
                 "\(load)")
         #expect(!load.contains(".waiting"))
-        #expect(try #require(AppSource.body(of: "private func giveUp(", in: photo)).contains("becameUnavailable()"))
+        #expect(try #require(AppSource.body(of: "func giveUp(", in: photo)).contains("becameUnavailable()"))
         #expect(try #require(AppSource.body(of: "private func becameUnavailable(", in: photo)).contains("onPicture(id, false)"))
         // The photo view leaves out a video's note only under a page that says it is not
         // available now: a page that came sharp later (swiped away and back) has it again.
@@ -462,7 +471,7 @@ struct VideoViewerSourceTests {
         #expect(basics.contains("asset.value.mediaType == .video"))
         #expect(basics.contains("VideoDuration(seconds: asset.value.duration)"))
         // The thumbnail in memory: the side the grid kept it at, from memory only.
-        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let thumbnails = try Self.thumbnails()
         let inMemory = try #require(AppSource.body(of: "func thumbnailInMemory(for id: AssetID) -> UIImage?", in: thumbnails))
         #expect(inMemory.contains("keptSides[id.rawValue]"))
         #expect(!inMemory.contains("await"))
@@ -477,8 +486,8 @@ struct VideoViewerSourceTests {
     /// page's own video is. That is `.unknown` while it is not the video on screen (not asked for
     /// yet, or swiped away): after a swipe away and back the page waits again until Photos answers.
     @Test func aVideosPageWaitsWhileItsVideoMayStillCome() throws {
-        let viewer = try Self.code(Self.viewerPath)
-        let zoomable = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: viewer))
+        let viewer = try Self.viewer()
+        let zoomable = try #require(AppSource.body(of: "struct ZoomablePhoto", in: viewer))
         let shown = try #require(AppSource.body(of: "private func shown(in size: CGSize)", in: zoomable))
         #expect(Self.inOrder(["switch page {", "case .picture: photo(image, in: size)", "case .unavailable: unavailableNote(in: size)",
                               "case .waiting: waiting(in: size)"], in: shown), "\(shown)")
@@ -486,8 +495,8 @@ struct VideoViewerSourceTests {
         #expect(Self.squeezed(page).contains("ViewerPage.shows(still:picture,playing:player!=nil,kind:kind)"), "\(page)")
         let picture = try #require(AppSource.body(of: "private var picture: ViewerPicture?", in: zoomable))
         #expect(Self.inOrder(["if image != nil { return .sharp }", "return unavailable ? .unavailable : nil"], in: picture), "\(picture)")
-        let worded = try Self.code(Self.viewerPath, keepStrings: true)
-        let note = try #require(AppSource.body(of: ["private struct ZoomablePhoto", "private func unavailableNote(in size: CGSize)"], in: worded))
+        let worded = try Self.viewer(keepStrings: true)
+        let note = try #require(AppSource.body(of: ["struct ZoomablePhoto", "private func unavailableNote(in size: CGSize)"], in: worded))
         #expect(Self.inOrder(["ContentUnavailableView {", "if isVideo {", "Dieses Video ist gerade nicht verfügbar.", "} else {",
                               "Dieses Foto ist gerade nicht verfügbar.", ".accessibilityIdentifier(\"viewer.unavailable\")"], in: note), "\(note)")
         let built = try #require(AppSource.body(of: "private func page(at index: Int)", in: viewer))
@@ -506,7 +515,7 @@ struct VideoViewerSourceTests {
     /// waits for good. A look that a swipe on cancelled marks nothing and opens no video (it would
     /// stop the next page's).
     @Test func aPageWaitsUntilItsKindIsKnown() throws {
-        let viewer = try Self.code(Self.viewerPath)
+        let viewer = try Self.viewer()
         let kind = try #require(AppSource.body(of: "private func kind(of id: AssetID) -> PageKind", in: viewer))
         #expect(Self.squeezed(kind).contains("PageKind(isVideo:knownVideo(id),asked:kindsAsked.contains(id),video:video.availability(for:id))"),
                 "\(kind)")
@@ -518,7 +527,7 @@ struct VideoViewerSourceTests {
         let look = try #require(AppSource.body(of: "private func lookAtCurrent(", in: viewer))
         #expect(Self.inOrder(["await PhotoBasics.of(id)", "guard !Task.isCancelled else { return }", "kindsAsked.insert(id)",
                               "await playVideo(id)", "await checkSharing(id)"], in: look), "\(look)")
-        let zoomable = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: viewer))
+        let zoomable = try #require(AppSource.body(of: "struct ZoomablePhoto", in: viewer))
         let isVideoPage = try #require(AppSource.body(of: "private var isVideo: Bool", in: zoomable))
         #expect(Self.squeezed(isVideoPage) == "{kind.isVideo}", "\(isVideoPage)")
     }
@@ -530,7 +539,7 @@ struct VideoViewerSourceTests {
     /// and is there at once from memory, so a rebuilt cell never flickers. Hidden previews keep
     /// their neutral ground (design rule 9).
     @Test func thumbnailsWaitOnACalmGround() throws {
-        let thumbnails = try Self.code(Self.thumbnailsPath, keepStrings: true)
+        let thumbnails = try Self.thumbnails(keepStrings: true)
         let shown = try #require(AppSource.body(of: ["struct AssetThumbnail", "var body: some View"], in: thumbnails))
         #expect(shown.contains("ThumbnailGround()"))
         #expect(!shown.contains("tertiarySystemFill"))
@@ -554,7 +563,7 @@ struct VideoViewerSourceTests {
     /// other columns, H10's DS-06b): the task follows the id and the side, and the image it shows
     /// meanwhile stays (no flash of the ground).
     @Test func aThumbnailIsAskedForAtTheSizeItShows() throws {
-        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let thumbnails = try Self.thumbnails()
         let shown = try #require(AppSource.body(of: ["struct AssetThumbnail", "var body: some View"], in: thumbnails))
         #expect(shown.contains(".task(id: Slot(id: id, side: side)) {"))
         #expect(shown.contains("let seeded = image != nil && loadedID == id"))
@@ -573,7 +582,7 @@ struct VideoViewerSourceTests {
     /// comes from the asset the thumbnails' lookup fetches anyway: no fetch per cell (100,000
     /// photos in a grid). Covers and the mosaic of a card leave it out.
     @Test func aVideosLengthCostsNoFetch() throws {
-        let thumbnails = try Self.code(Self.thumbnailsPath, keepStrings: true)
+        let thumbnails = try Self.thumbnails(keepStrings: true)
         #expect(Self.count(#"PHAsset\.fetchAssets\("#, in: thumbnails) == 1, "a second fetch")
         let lookUp = try #require(AppSource.body(of: "private func lookUpWaiting(", in: thumbnails))
         #expect(lookUp.contains("remember(asset, for: id, at: now)"))
@@ -635,7 +644,7 @@ struct VideoViewerSourceTests {
         let watcher = try Self.code("App/Albumist/Platform/LibraryChangeWatcher.swift")
         let changed = try #require(AppSource.body(of: "private func changed(_ change: ThumbnailRequest.Change)", in: watcher))
         #expect(changed.contains("if !AppModel.shared.execution.isRunning { ThumbnailCache.shared.changeArrived(change) }"), "\(changed)")
-        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let thumbnails = try Self.thumbnails()
         let refresh = try #require(AppSource.body(of: "private func libraryChanged(_ changes: [ThumbnailRequest.Change]) async", in: thumbnails))
         #expect(Self.inOrder(["for key in videoLengths.keys", "assets.object(forKey: key as NSString)",
                               "await ThumbnailRequest.changed(kept, by: changes)",
@@ -666,7 +675,7 @@ struct VideoViewerSourceTests {
         let debounced = try #require(AppSource.body(of: "private func scheduleCatchUpNow(", in: watcher))
         #expect(Self.inOrder(["pending = Task {", "try? await Task.sleep(for: .seconds(delay))", "guard !Task.isCancelled else { return }",
                               "ThumbnailCache.shared.followChanges()", "if model.analysis.isRunning {"], in: debounced), "\(debounced)")
-        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let thumbnails = try Self.thumbnails()
         #expect(thumbnails.contains("private var backlog = ChangeBacklog<ThumbnailRequest.Change>(limit: ThumbnailCache.changeLimit)"))
         let arrived = try #require(AppSource.body(of: "func changeArrived(_ change: ThumbnailRequest.Change)", in: thumbnails))
         #expect(Self.squeezed(arrived) == "{ifbacklog.arrived(change){followChanges()}}", "\(arrived)")
@@ -690,7 +699,7 @@ struct VideoViewerSourceTests {
     /// checked: it goes with the thumbnail kept for it, so the next look asks Photos again (a
     /// thumbnail from memory passes no lookup that would write the record anew).
     @Test func aTrimmedVideosCellOnScreenShowsItsNewLength() throws {
-        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let thumbnails = try Self.thumbnails()
         let refresh = try #require(AppSource.body(of: "func libraryChanged(", in: thumbnails))
         #expect(Self.inOrder(["for key in videoLengths.keys", "if let asset = assets.object(forKey: key as NSString)",
                               "kept[key] = ThumbnailRequest.Asset(asset)", "} else if let seconds = videoLengths[key]",
@@ -725,7 +734,7 @@ struct VideoViewerSourceTests {
     /// videos are gone too, and every older video cell alive lost its badge and its "Video, …"
     /// for VoiceOver at the next correction, until it was made anew.
     @Test func aCellKeepsItsLengthWhileTheThumbnailsKnowNone() throws {
-        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let thumbnails = try Self.thumbnails()
         let again = try #require(AppSource.body(of: ["struct AssetThumbnail", "private func readLengthAgain("], in: thumbnails))
         #expect(again.contains("video = known"), "a known length does not replace what the cell shows: \(again)")
         #expect(!again.contains("video = ThumbnailCache.shared.videoLength(for: id)"), "nothing known takes the badge away: \(again)")
@@ -741,7 +750,7 @@ struct VideoViewerSourceTests {
     /// that ask after one revision wait for one lookup together: no task and no lookup per cell,
     /// one fetch for 30 video cells on screen, of Photos' metadata only (no image, no download).
     @Test func aCellOnScreenAsksPhotosAgainForALengthThatWentUnchecked() throws {
-        let thumbnails = try Self.code(Self.thumbnailsPath)
+        let thumbnails = try Self.thumbnails()
         let start = try #require(AppSource.body(of: ["final class ThumbnailCache", "init()"], in: thumbnails))
         #expect(Self.inOrder(["$0.videoLengths.removeAll()", "$0.recordsWentUnchecked = true"], in: start), "\(start)")
         let follow = try #require(AppSource.body(of: "func followChanges()", in: thumbnails))

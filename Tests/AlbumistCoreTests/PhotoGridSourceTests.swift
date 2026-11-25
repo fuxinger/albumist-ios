@@ -110,7 +110,7 @@ struct PhotoGridSourceTests {
         let state = try Self.code(Self.state)
         #expect(!state.contains("Date()"), "the wall clock can jump")
         let end = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func endDrag("], in: Self.state))
-        #expect(end.contains("ifdrag!=nil||waiting!=nil{lift.gestureEnded(at:CACurrentMediaTime())}"), "\(end)")
+        #expect(end.contains("ifdrag!=nil||waiting!=nil||endedEarly{lift.gestureEnded(at:CACurrentMediaTime())}"), "\(end)")
         let endPinch = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func endPinch("], in: Self.state))
         #expect(endPinch.contains("ifzooming!=nil{lift.gestureEnded(at:CACurrentMediaTime())}"), "\(endPinch)")
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
@@ -248,7 +248,9 @@ struct PhotoGridSourceTests {
     /// its gestures at every body (`PhotoGridShown`, compared by storage, its order made again
     /// only when it changed), and the range follows them by id where the finger goes and while
     /// the page scrolls by itself (`PhotoGridDrag.rebased`): more photos loaded at the bottom
-    /// tick on, and when the range cannot be kept the drag ends, its photos ticked as they are.
+    /// tick on, and when the range cannot be kept it ends, its photos ticked as they are. The
+    /// drag runs on until its recognizer ends (review Y3): the finger is still down, and its lift,
+    /// however long after, is no tap of its own (`PhotoGridLift`).
     @Test func aDragFollowsThePhotosTheGridShowsNow() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
         #expect(view.contains("let_:Void=gestures.show(PhotoGridShown(sections,below:limit),"), "\(view)")
@@ -257,7 +259,14 @@ struct PhotoGridSourceTests {
         let extend = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func extend("], in: Self.state))
         #expect(extend.hasPrefix("{follow()guardvarcurrent=dragelse{return}"), "\(extend)")
         let follow = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func follow("], in: Self.state))
-        #expect(follow.contains("guardletrange=current.range.rebased(from:current.ids,to:now)else{endDrag()return}"), "\(follow)")
+        #expect(follow.contains("guardletrange=current.range.rebased(from:current.ids,to:now)else{endRange()endedEarly=truereturn}"), "\(follow)")
+        #expect(!follow.contains("endDrag()") && !follow.contains("lift."), "only the range ends: \(follow)")
+        let range = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func endRange("], in: Self.state))
+        #expect(range == "{ticker.stop()drag?.scroller?.endAutoScroll()drag=nil}", "\(range)")
+        // The lift's clock starts when the recognizer ends: the finger lifted.
+        #expect(dragged.contains("case.ended:gestures.endDrag()"), "\(dragged)")
+        let end = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func endDrag("], in: Self.state))
+        #expect(end == "{ifdrag!=nil||waiting!=nil||endedEarly{lift.gestureEnded(at:CACurrentMediaTime())}endRange()waiting=nilendedEarly=false}", "\(end)")
         let step = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func scrollStep("], in: Self.state))
         #expect(step.hasSuffix("returndrag!=nil}"), "a drag that ended stops the clock: \(step)")
     }
@@ -306,9 +315,11 @@ struct PhotoGridSourceTests {
         #expect(state.contains("PhotoGridAutoScroll.speed(y: Double(current.inScrollView.y), top: area.lowerBound, bottom: area.upperBound)"))
         #expect(state.contains("scroller.scroll(by: PhotoGridAutoScroll.step(speed: speed, seconds: seconds))"))
         #expect(state.contains("extend(to: CGPoint(x: current.inGrid.x, y: current.inGrid.y + CGFloat(scroller.offset - current.offset)))"))
+        // The range's end (the finger lifted, or the range could not follow the photos) stops it.
         let end = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func endDrag("], in: Self.state))
-        #expect(end.hasPrefix("{ticker.stop()drag?.scroller?.endAutoScroll()"), "\(end)")
-        #expect(end.hasSuffix("drag=nilwaiting=nil}"), "\(end)")
+        #expect(end.contains("endRange()waiting=nil"), "\(end)")
+        let range = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func endRange("], in: Self.state))
+        #expect(range == "{ticker.stop()drag?.scroller?.endAutoScroll()drag=nil}", "\(range)")
         let ticker = try Self.code(Self.state)
         #expect(ticker.contains("CADisplayLink(target: self, selector: #selector(step(_:)))"))
         let stop = Self.squeezed(try Self.body(["final class PhotoGridTicker", "func stop("], in: Self.state))

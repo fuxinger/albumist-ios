@@ -35,11 +35,20 @@ public struct SortingShowLayout: Hashable, Sendable {
     public static let photoShare = 0.64
     /// The neighbours of the album in the centre are drawn this much smaller.
     public static let neighbourScale = 0.76
+    /// Where one of the pile's loose photos lies from the pile's centre, and how it is turned
+    /// (degrees).
+    public struct Loose: Hashable, Sendable {
+        public var x: Double
+        public var y: Double
+        public var angle: Double
+    }
+
     /// The pile's loose photos as they were made for 76 pt photos: offset x, offset y, turn in
     /// degrees (applied at 60 %). Grown with the photo; the offsets up and down at 60 %, so the
     /// bigger photos take less of the screen's height.
-    static let loosePhotos: [(x: Double, y: Double, angle: Double)] = [
-        (-54, -4, -11), (46, -12, 8), (-14, 12, -3), (60, 16, 13), (-66, 24, -16), (8, -22, 5),
+    static let loosePhotos = [
+        Loose(x: -54, y: -4, angle: -11), Loose(x: 46, y: -12, angle: 8), Loose(x: -14, y: 12, angle: -3),
+        Loose(x: 60, y: 16, angle: 13), Loose(x: -66, y: 24, angle: -16), Loose(x: 8, y: -22, angle: 5),
     ]
     static let verticalScatter = 0.6
     /// Above the pile: a turned photo reaches a little higher than its centre plus half its side.
@@ -120,10 +129,10 @@ public struct SortingShowLayout: Hashable, Sendable {
 
     /// Where the pile's `index`-th loose photo lies, from the pile's centre, and how it is turned
     /// (degrees). The pile repeats the pattern after six photos.
-    public func loose(_ index: Int) -> (x: Double, y: Double, angle: Double) {
+    public func loose(_ index: Int) -> Loose {
         let base = Self.loosePhotos[((index % Self.loosePhotos.count) + Self.loosePhotos.count) % Self.loosePhotos.count]
         let grown = photo / Self.previousPhoto
-        return (base.x * grown, base.y * grown * Self.verticalScatter * looseness, base.angle * 0.6)
+        return Loose(x: base.x * grown, y: base.y * grown * Self.verticalScatter * looseness, angle: base.angle * 0.6)
     }
 }
 

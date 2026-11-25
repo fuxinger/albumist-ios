@@ -220,7 +220,7 @@ struct FirstAnalysisMomentSourceTests {
         #expect(header.contains("JoiningBar(shares: model.analysis.widths.shares, joined: calm || joined ? 1 : 0)"), "\(header)")
         let play = try Self.body(["struct FirstAnalysisMomentHeader", "private func play() async"], in: ring)
         #expect(play.contains("if !calm {"), "\(play)")
-        #expect(play.contains("withAnimation(calm ? .easeInOut(duration: T.fade) : .smooth(duration: T.fold)) { store.ended() }"), "\(play)")
+        #expect(play.contains("withAnimation(calm ? .easeInOut(duration: Timing.fade) : .smooth(duration: Timing.fold)) { store.ended() }"), "\(play)")
         let start = try Self.body(["struct FirstAnalysisMomentHeader", "private func start()"], in: ring)
         #expect(start.contains("guard run == nil, model.isOnScreen else { return }"), "\(start)")
         let claim = try #require(start.range(of: "store.claim(onScreen: model.isOnScreen)"), "\(start)")
@@ -290,7 +290,7 @@ struct FirstAnalysisMomentSourceTests {
                 "the bar comes apart under a moment that plays: \(start)")
         #expect(apart.upperBound < claim.lowerBound, "the bar comes apart after the claim showed it: \(start)")
         let play = try Self.body(["struct FirstAnalysisMomentHeader", "private func play() async"], in: ring)
-        #expect(play.contains("withAnimation(.easeInOut(duration: T.join)) { joined = true }"), "\(play)")
+        #expect(play.contains("withAnimation(.easeInOut(duration: Timing.join)) { joined = true }"), "\(play)")
         let header = try Self.body(["struct FirstAnalysisMomentHeader"], in: ring)
         #expect(header.components(separatedBy: "joined = true").count - 1 == 1, "joined elsewhere: \(header)")
     }
@@ -306,7 +306,7 @@ struct FirstAnalysisMomentSourceTests {
                                + "else { return false }"), "\(claim)")
         let ring = try Self.code(Self.ringCard)
         let play = try Self.body(["struct FirstAnalysisMomentHeader", "private func play() async"], in: ring)
-        #expect(play.contains("let hold = UITestSupport.showsFirstFinishMoment ? T.heldForUITest : T.hold"), "\(play)")
+        #expect(play.contains("let hold = UITestSupport.showsFirstFinishMoment ? Timing.heldForUITest : Timing.hold"), "\(play)")
         // Afresh: nothing kept is read and no analysis completed before counts (the test rebuilds
         // the database, which resets the marker right after).
         let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)

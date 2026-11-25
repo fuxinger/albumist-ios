@@ -200,21 +200,36 @@ public struct PhotoTint: Hashable, Sendable {
     static func calm(_ hue: OKLab, strength: Double) -> PhotoTint? {
         let lightC = min(max(strength * 0.3, lightChroma.lowerBound), lightChroma.upperBound)
         let darkC = min(max(strength * 0.3, darkChroma.lowerBound), darkChroma.upperBound)
-        guard let light = safe(hue, from: lightLightness, step: 0.004, until: 0.99, chroma: lightC, isLight: true),
-              let dark = safe(hue, from: darkLightness, step: -0.01, until: 0.08, chroma: darkC, isLight: false) else {
+        guard let light = safe(hue, chroma: lightC, Steps(from: lightLightness, step: 0.004, until: 0.99, isLight: true)),
+              let dark = safe(hue, chroma: darkC, Steps(from: darkLightness, step: -0.01, until: 0.08, isLight: false)) else {
             return nil
         }
         return PhotoTint(light: light, dark: dark)
     }
 
-    /// The first lightness from `start` towards `until` whose colour passes the checks.
-    private static func safe(_ hue: OKLab, from start: Double, step: Double, until end: Double, chroma: Double,
-                             isLight: Bool) -> SRGB? {
-        var lightness = start
-        while step > 0 ? lightness <= end + 1e-9 : lightness >= end - 1e-9 {
+    /// The lightnesses a ground is looked for at: from `start` by `step` towards `end`, for light
+    /// mode or for dark mode.
+    private struct Steps {
+        var start: Double
+        var step: Double
+        var end: Double
+        var isLight: Bool
+
+        init(from start: Double, step: Double, until end: Double, isLight: Bool) {
+            self.start = start
+            self.step = step
+            self.end = end
+            self.isLight = isLight
+        }
+    }
+
+    /// The first lightness of `steps` whose colour at `chroma` passes the checks.
+    private static func safe(_ hue: OKLab, chroma: Double, _ steps: Steps) -> SRGB? {
+        var lightness = steps.start
+        while steps.step > 0 ? lightness <= steps.end + 1e-9 : lightness >= steps.end - 1e-9 {
             let color = hue.with(lightness: lightness, chroma: chroma).srgb
-            if isLight ? passesLight(color) : passesDark(color) { return color }
-            lightness += step
+            if steps.isLight ? passesLight(color) : passesDark(color) { return color }
+            lightness += steps.step
         }
         return nil
     }

@@ -55,7 +55,10 @@ enum UITestReport {
                 try app.performAccessibilityAudit { issue in
                     let element = issue.element
                     let frame = element.map { f in "\(Int(f.frame.minX)),\(Int(f.frame.minY)) \(Int(f.frame.width))x\(Int(f.frame.height))" } ?? "-"
-                    print("A11Y_ISSUE \(screen) | type \(issue.auditType.rawValue) | \(issue.compactDescription) | label '\(element?.label ?? "-")' | \(element?.elementType.rawValue ?? 0) | id '\(element?.identifier ?? "-")' | \(frame)")
+                    let label = element?.label ?? "-", kind = element?.elementType.rawValue ?? 0
+                    let identifier = element?.identifier ?? "-"
+                    print("A11Y_ISSUE \(screen) | type \(issue.auditType.rawValue) | \(issue.compactDescription) "
+                          + "| label '\(label)' | \(kind) | id '\(identifier)' | \(frame)")
                     return true // collect everything, the report decides
                 }
                 print("A11Y_AUDIT_DONE \(screen)")

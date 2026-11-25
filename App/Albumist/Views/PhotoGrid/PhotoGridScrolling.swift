@@ -78,6 +78,12 @@ final class PhotoGridScroller {
         Double(geometry?.contentOffset.y ?? 0)
     }
 
+    /// The scroll view's height, also what of it lies under the bars; nil before it reported
+    /// itself. The grid reads in it which of its photos are on screen (review W1).
+    var height: Double? {
+        geometry.map { Double($0.containerSize.height) }
+    }
+
     /// The part of the scroll view inside its content insets, from top to bottom in its own space
     /// (`.scrollView`): where `show` lines a photo up (`scrollTo(id:anchor:)` aligns in it). Nil
     /// before it reported itself.

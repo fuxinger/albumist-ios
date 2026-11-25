@@ -15,6 +15,14 @@ public struct GridRect: Equatable, Sendable {
         maxX = x + width
         maxY = y + height
     }
+
+    public var height: Double { maxY - minY }
+
+    /// Whether it and `other` lie over each other by more than a sliver (a point each way):
+    /// neighbours that touch or lie 2 pt apart do not.
+    public func overlaps(_ other: GridRect) -> Bool {
+        min(maxX, other.maxX) - max(minX, other.minX) > 1 && min(maxY, other.maxY) - max(minY, other.minY) > 1
+    }
 }
 
 /// Drag to select in a photo grid (design wave 3, DS-06b), as in Photos: while the grid
@@ -191,6 +199,16 @@ public enum PhotoGridHitTest {
         return best?.position
     }
 
+    /// The part of a grid that its scroll view shows, from top to bottom in the grid's space, for
+    /// a finger at `gridY` in the grid and at `scrollViewY` in the scroll view (its own space,
+    /// which moves with it), in a scroll view `height` points high (review W1). Nil while the
+    /// height is not known: every photo laid out counts then.
+    public static func visiblePart(gridY: Double, scrollViewY: Double, height: Double?) -> ClosedRange<Double>? {
+        guard let height, height > 0 else { return nil }
+        let top = gridY - scrollViewY
+        return top...(top + height)
+    }
+
     /// The position of the photo two fingers hold at (`x`, `y`), whose place a zoom keeps: the
     /// photo under them (`position(x:y:in:)`), else the nearest one (between rows, on a header,
     /// beside or past the grid); on a tie the earlier one. Nil when no photo is on screen.
@@ -209,54 +227,94 @@ public enum PhotoGridHitTest {
     }
 }
 
-/// What the photos of a grid (or its days' headers) on screen last reported of where they are,
-/// for its gestures (review L1 of design wave 3). SwiftUI reports a photo's frame in the grid
-/// only when it changes, so one that goes and comes back with nothing moved (its page left for
-/// another tab or page and shown again, or scrolled away and back while SwiftUI kept it) reports
-/// nothing anew: what it reported is kept while it is away, only the ones on screen count, and
-/// back on screen it counts again. Kept for the latest `kept` that went (at most twice as many
-/// before they are cleared), so scrolling through a large library keeps no more; a page left
-/// and shown again finds all of its photos, the latest that went.
+/// How a grid lays its photos out (review W1 of design wave 3): photos in a row and the grid's
+/// width in points (0 while it was not measured yet). Each photo's frame changes with either.
+public struct PhotoGridLayout: Equatable, Sendable {
+    public var columns: Int
+    public var width: Double
+
+    public init(columns: Int, width: Double) {
+        self.columns = columns
+        self.width = width
+    }
+}
+
+/// What of a photo grid is on screen, for its gestures: where its photos (or its days' headers)
+/// are, from the frames each one reported last (review W1 of design wave 3). On screen is what
+/// lies in the part of the grid the scroll view shows now, read from the frames themselves, never
+/// from SwiftUI's word that a view appeared or went: SwiftUI promises neither the order of those
+/// words (a rebuilt cell may appear before the old one goes, and "Auswählen" and "Fertig" rebuild
+/// every photo on screen) nor that they come in pairs (a swipe back that is called off).
+///
+/// - A frame in the grid's own space does not move while the page scrolls, and SwiftUI reports
+///   it anew whenever it changes: what a photo reported stays true while it is away (its page
+///   left for another tab or page and shown again, review L1) until the grid lays its photos out
+///   anew (`laidOut`). Then every report of before is dropped, and the photos on screen report
+///   their new frames.
+/// - One report per photo, the latest. Of two photos' reports at one place the later one counts:
+///   the other is of a photo that went before it could report its move (a day's header grew
+///   while it was away), and the photo there now reported after it.
+/// - Kept for the latest `kept` reports (at most twice as many before the older ones are
+///   cleared): scrolling through a large library keeps no more, and the photos on screen, which
+///   reported last, are always among them.
 public struct PhotoGridOnScreen<Key: Hashable, Value> {
-    /// The photos that went, whose report is kept for when they are back.
+    /// The reports kept: many more than the photos on one screen, even at seven in a row.
     public static var kept: Int { 1_000 }
 
-    /// What each one on screen reported last.
-    public private(set) var shown: [Key: Value] = [:]
-    /// What each one that went reported last, and when it went (counted in goings).
-    private var away: [Key: (value: Value, went: Int)] = [:]
-    private var goings = 0
+    private var reports: [Key: (value: Value, made: Int)] = [:]
+    /// Reports made so far, which orders them.
+    private var made = 0
+    private var layout: PhotoGridLayout?
 
     public init() {}
 
-    /// How many that went are kept.
-    public var awayCount: Int { away.count }
+    /// How many reports are kept.
+    public var count: Int { reports.count }
 
-    /// `key` reports `value`: on screen it counts at once (also before SwiftUI says it appeared);
-    /// away it is kept for when it is back.
+    /// The grid lays its photos out as `layout` (each of its bodies says so): another number in a
+    /// row or another width makes every report of before stale, and it is dropped. The grid's
+    /// first width (from 0, not measured yet) changes nothing: its photos were laid out at that
+    /// width already, and report nothing anew.
+    public mutating func laidOut(_ layout: PhotoGridLayout) {
+        let width = layout.width > 0 ? layout.width : (self.layout?.width ?? 0)
+        let now = PhotoGridLayout(columns: layout.columns, width: width)
+        if let before = self.layout,
+           before.columns != now.columns || (before.width > 0 && abs(before.width - now.width) > 0.5) {
+            reports = [:]
+        }
+        self.layout = now
+    }
+
+    /// `key` reports `value`: where it is (its frame among it), in the layout now.
     public mutating func report(_ key: Key, _ value: Value) {
-        if away[key] != nil {
-            away[key]?.value = value
-        } else {
-            shown[key] = value
+        made += 1
+        reports[key] = (value, made)
+        if reports.count > 2 * Self.kept {
+            let oldest = made - Self.kept
+            reports = reports.filter { $0.value.made > oldest }
         }
     }
 
-    /// `key` is on screen again: it counts with what it reported last, if that is kept.
-    public mutating func appeared(_ key: Key) {
-        guard let back = away.removeValue(forKey: key) else { return }
-        shown[key] = back.value
-    }
-
-    /// `key` went: it no longer counts, and what it reported is kept for a while.
-    public mutating func disappeared(_ key: Key) {
-        guard let value = shown.removeValue(forKey: key) ?? away[key]?.value else { return }
-        goings += 1
-        away[key] = (value, goings)
-        if away.count > 2 * Self.kept {
-            let oldest = goings - Self.kept
-            away = away.filter { $0.value.went > oldest }
+    /// What is on screen: of the reports that count (`counts`; a photo still at the place in the
+    /// grid's order it reported, say), the ones whose frame (`frame`) meets `visible` (the part
+    /// of the grid the scroll view shows, from top to bottom in the grid's space; nil: all of
+    /// them), less each one a later report at the same place replaced.
+    public func onScreen(_ visible: ClosedRange<Double>?, frame: (Value) -> GridRect,
+                         where counts: (Key, Value) -> Bool = { _, _ in true }) -> [(key: Key, value: Value)] {
+        var seen: [(key: Key, value: Value, frame: GridRect, made: Int)] = []
+        for (key, report) in reports {
+            let box = frame(report.value)
+            if let visible, box.maxY < visible.lowerBound || box.minY > visible.upperBound { continue }
+            guard counts(key, report.value) else { continue }
+            seen.append((key, report.value, box, report.made))
         }
+        seen.sort { $0.made > $1.made }
+        var shown: [(key: Key, value: Value, frame: GridRect)] = []
+        shown.reserveCapacity(seen.count)
+        for report in seen where !shown.contains(where: { $0.frame.overlaps(report.frame) }) {
+            shown.append((report.key, report.value, report.frame))
+        }
+        return shown.map { (key: $0.key, value: $0.value) }
     }
 }
 

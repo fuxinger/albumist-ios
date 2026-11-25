@@ -87,25 +87,6 @@ final class AlbumistLockedUITests: XCTestCase {
         return Int(match.1) ?? 0
     }
 
-    /// A suggestion in the open list that can still be created: one for a new album, else any
-    /// that is not "Schon vollständig vorhanden" (an album to extend, a similar album found ...).
-    /// UI run 45622518290 (PR #20, flow-other): after the earlier tests every suggestion was
-    /// complete except one further down the list that was not for a new album, and the test
-    /// looked only for "Neues Album" on the first screen. The list is scrolled to find one.
-    private func openSuggestionRow() -> XCUIElement {
-        let cells = app.collectionViews.cells
-        let newAlbum = cells.containing(NSPredicate(format: "label CONTAINS %@", "Neues Album")).firstMatch
-        for swipe in 0...6 {
-            if newAlbum.exists { return newAlbum }
-            for cell in cells.allElementsBoundByIndex where cell.isHittable {
-                let texts = cell.staticTexts
-                if texts.count > 0 && !texts["Schon vollständig vorhanden"].exists { return cell }
-            }
-            if swipe < 6 { app.swipeUp() }
-        }
-        return newAlbum
-    }
-
     /// Opens the suggestions and selects the recommended ones, or else one suggestion for a
     /// new album with its own "Auswählen und später anlegen" (in the "…" menu at the top right
     /// since review P3-06); true when something is then ready to be created.
@@ -123,7 +104,7 @@ final class AlbumistLockedUITests: XCTestCase {
             // it is, the return below says.
             _ = button("ausgewählte Alben anlegen").waitForExistence(timeout: 5)
         } else {
-            let row = openSuggestionRow()
+            let row = UITestSuggestions.openRow(in: app)
             print("UI_FACT locked: no recommended ones, an open suggestion \(row.exists ? row.label : "none")")
             if row.exists {
                 row.tap()

@@ -39,6 +39,22 @@ struct UITestTabsSourceTests {
         squeezed(try #require(AppSource.body(of: path, in: try screensCode()), "\(path) is not in UITestScreens' files"))
     }
 
+    /// Every file of the screens is read by the guards: the list comes from the folder, so a new
+    /// `UITestScreens+….swift` is read by itself (review T9 of H14's round 2: five paths by hand
+    /// left a sixth file unread by every guard), and these five are there.
+    @Test func everyFileOfTheScreensIsRead() throws {
+        let read = UITestScreensSource.paths
+        #expect(read == ["App/AlbumistUITests/UITestScreens.swift",
+                         "App/AlbumistUITests/UITestScreens+Analysis.swift",
+                         "App/AlbumistUITests/UITestScreens+Search.swift",
+                         "App/AlbumistUITests/UITestScreens+StartPage.swift",
+                         "App/AlbumistUITests/UITestScreens+UnsortedAndAlbums.swift"], "\(read)")
+        let folder = AppSource.swiftFiles(under: Self.folder)
+            .filter { URL(fileURLWithPath: $0).lastPathComponent.hasPrefix("UITestScreens") }
+        #expect(Set(read) == Set(folder), "these files of the screens are read by no guard: \(Set(folder).subtracting(read))")
+        #expect(try Self.screensCode().contains("enum Search"), "the files are not read as one text")
+    }
+
     /// Every class asks `UITestScreens.tabButton`: its own `tabButton` only hands the name on
     /// (review S7 of H14: only one of six copies left the search).
     @Test func everyClassTakesTheOneTabButton() throws {

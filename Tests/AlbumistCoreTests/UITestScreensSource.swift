@@ -7,14 +7,23 @@ import AlbumistTestSupport
 /// and the purchase sheet, and the tabs "Unsortiert" and "Alben" went into files beside it. A
 /// guard reads them as one text, so what it pins is found in whichever of these files it went
 /// to, and what it rules out is ruled out in all of them.
+///
+/// The files come from the folder, not from a list by hand (review T9 of H14's round 2: a sixth
+/// `UITestScreens+….swift` would have been read by no guard); `UITestTabsSourceTests` pins which
+/// five they are today.
 enum UITestScreensSource {
-    static let paths = [
-        "App/AlbumistUITests/UITestScreens.swift",
-        "App/AlbumistUITests/UITestScreens+Search.swift",
-        "App/AlbumistUITests/UITestScreens+Analysis.swift",
-        "App/AlbumistUITests/UITestScreens+StartPage.swift",
-        "App/AlbumistUITests/UITestScreens+UnsortedAndAlbums.swift",
-    ]
+    static let folder = "App/AlbumistUITests"
+    /// The main file first, the files beside it after, so a guard that pins text of both reads
+    /// them in a fixed order.
+    static let main = folder + "/UITestScreens.swift"
+
+    /// Every `UITestScreens….swift` of the folder: `main`, then the rest in the folder's order.
+    static var paths: [String] {
+        let beside = AppSource.swiftFiles(under: folder).filter {
+            $0 != main && URL(fileURLWithPath: $0).lastPathComponent.hasPrefix("UITestScreens")
+        }
+        return [main] + beside
+    }
 
     /// The files' text, joined in the order of `paths`.
     static func read() throws -> String {

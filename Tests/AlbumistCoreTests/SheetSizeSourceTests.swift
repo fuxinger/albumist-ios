@@ -58,10 +58,12 @@ struct SheetSizeSourceTests {
         for path in Self.files {
             let code = try Self.code(path)
             for content in Self.sheetContents(in: code) {
-                let sizes = AppSource.calls(of: "sheetSize(", in: content)
+                let sizes = Self.sizes(in: content)
+                let branches = Self.branches(of: content)
                 let shown = Self.shownView(in: content, file: code) ?? "?"
                 let own = Self.mapsOwn.contains(shown)
-                #expect(sizes.count == 1 || own && sizes.isEmpty, "\(path): a sheet without its size from the rule, or with two: \(content)")
+                #expect(sizes.count == branches.count || own && sizes.isEmpty,
+                        "\(path): \(branches.count) way(s) to show this sheet and \(sizes.count) size(s) from the rule: \(content)")
                 let size = sizes.first ?? (own ? "(the map's own)" : "-")
                 sheets.append("\(URL(fileURLWithPath: path).lastPathComponent): \(shown) \(size)")
             }
@@ -96,7 +98,7 @@ struct SheetSizeSourceTests {
         var short: Set<String> = []
         for path in Self.files {
             let code = try Self.code(path)
-            for content in Self.sheetContents(in: code) where AppSource.calls(of: "sheetSize(", in: content) == [".short"] {
+            for content in Self.sheetContents(in: code) where Self.sizes(in: content) == [".short"] {
                 short.insert(try #require(Self.shownView(in: content, file: code), "\(path): \(content)"))
             }
         }
@@ -159,6 +161,47 @@ struct SheetSizeSourceTests {
         #expect(Self.shownView(in: contents[2], file: code) == "Baz")
         #expect(Self.shownView(in: contents[3], file: code) == "Qux")
         #expect(AppSource.calls(of: "presentationDetents(", in: code) == ["[.medium]"])
+    }
+
+    /// Every way a sheet can be shown brings its own size, and a sheet opened inside another
+    /// sheet's content counts for itself (review T9 of H14's round 2): a size in one branch only
+    /// passed as one size, and the inner sheet's size passed for the outer one, whose own size
+    /// then read as two. A `switch` counts each case, branching inside a view of the content
+    /// (`Group { if … }`) is one way, and the inner sheet is read as a sheet of its own.
+    @Test func aSizeInOneBranchOnlyOrInsideAnotherSheetDoesNotCount() {
+        let code = """
+        .sheet(isPresented: $a) {
+            if on { Foo().sheetSize(.short) } else { Bar() }
+        }
+        .sheet(isPresented: $b) {
+            Outer().sheet(isPresented: $c) { Inner().sheetSize(.page) }
+        }
+        .sheet(isPresented: $d) {
+            switch kind {
+            case .one: One().sheetSize(.short)
+            default: Two().sheetSize(.page)
+            }
+        }
+        .sheet(isPresented: $e) {
+            Group { if on { Foo() } else { Bar() } }.sheetSize(.short)
+        }
+        """
+        let contents = Self.sheetContents(in: code)
+        #expect(contents.count == 5, "\(contents)")
+        guard contents.count == 5 else { return }
+        // A size in one branch of two: one size for two ways to show it.
+        #expect(Self.branches(of: contents[0]).count == 2, "\(Self.branches(of: contents[0]))")
+        #expect(Self.sizes(in: contents[0]) == [".short"])
+        // The outer sheet has no size of its own; the inner one is its own sheet.
+        #expect(Self.branches(of: contents[1]).count == 1)
+        #expect(Self.sizes(in: contents[1]).isEmpty, "\(Self.sizes(in: contents[1]))")
+        #expect(Self.sizes(in: contents[2]) == [".page"])
+        // A `switch`: each case is a way, and both bring a size.
+        #expect(Self.branches(of: contents[3]).count == 2, "\(Self.branches(of: contents[3]))")
+        #expect(Self.sizes(in: contents[3]) == [".short", ".page"])
+        // Branching inside a view of the content is one way, with one size after it.
+        #expect(Self.branches(of: contents[4]).count == 1, "\(Self.branches(of: contents[4]))")
+        #expect(Self.sizes(in: contents[4]) == [".short"])
     }
 
     // MARK: Reading sheets

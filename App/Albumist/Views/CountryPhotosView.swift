@@ -34,7 +34,8 @@ struct CountryPhotosView: View {
                                 Text("Ohne Datum").font(.title3.weight(.bold))
                             }
                             Spacer()
-                            Text("\(group.photos.count) \(group.photos.count.formatted()) Fotos").font(.subheadline).foregroundStyle(Theme.secondaryText).monospacedDigit() // on the photo wash
+                            Text("\(group.photos.count) \(group.photos.count.formatted()) Fotos")
+                                .font(.subheadline).foregroundStyle(Theme.secondaryText).monospacedDigit() // on the photo wash
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityAddTraits(.isHeader)

@@ -189,7 +189,10 @@ struct TripWorkshopView: View {
                 Text(title(proposal)).font(.headline)
                 Text("\(dayCount) · \(photoCount)")
                     .font(.subheadline).foregroundStyle(.noteText)
-                Text("Hat Albumist hier zwei Reisen zusammengefasst oder eine Reise zerschnitten? Das korrigierst du hier. Albumist merkt es sich auch für jede spätere Analyse.")
+                Text("""
+                    Hat Albumist hier zwei Reisen zusammengefasst oder eine Reise zerschnitten? Das korrigierst du hier. \
+                    Albumist merkt es sich auch für jede spätere Analyse.
+                    """)
                     .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -253,18 +253,23 @@ struct QuickCreateTests {
     /// Before it makes anything, „Anlegen“ asks what the preview asks, in the preview's order:
     /// the suggestion and its plan may skip the preview, nothing interrupted is open, the free
     /// albums suffice (else the purchase sheet). The suggestion is selected only for this plan
-    /// and given back afterwards, whatever happened.
+    /// and given back afterwards, whatever happened. The questions about the plan made are asked
+    /// by `quickCreateHold`, at that place.
     @Test func theAppAsksWhatThePreviewAsksFirst() throws {
         let code = AppSource.code(try AppSource.read(Self.model))
         let create = try #require(AppSource.body(of: "func createNow(", in: code))
-        let order = ["QuickCreate.mayCreateAtOnce(", "selectForPreview(", "singlePlan(for:", "QuickCreate.mayRunWithoutPreview(",
-                     "PlanGate.refusal(for:", ".allows(albums:", "execute("]
-        let positions = order.map { create.range(of: $0)?.lowerBound }
-        #expect(!positions.contains(nil), "missing: \(zip(order, positions).filter { $0.1 == nil }.map(\.0))")
-        let found = positions.compactMap { $0 }
-        #expect(found == found.sorted(), "asked in another order than \(order)")
+        let hold = try #require(AppSource.body(of: "private func quickCreateHold(", in: code))
+        func expectOrder(_ order: [String], in body: String) {
+            let positions = order.map { body.range(of: $0)?.lowerBound }
+            #expect(!positions.contains(nil), "missing: \(zip(order, positions).filter { $0.1 == nil }.map(\.0))")
+            let found = positions.compactMap { $0 }
+            #expect(found == found.sorted(), "asked in another order than \(order)")
+        }
+        expectOrder(["QuickCreate.mayCreateAtOnce(", "selectForPreview(", "singlePlan(for:",
+                     "if let held = quickCreateHold(made, for: proposal) { return held }", "execute("], in: create)
+        expectOrder(["QuickCreate.mayRunWithoutPreview(", "PlanGate.refusal(for:", ".allows(albums:"], in: hold)
         #expect(create.contains("endPreview("), "the selection of the suggestion is never given back")
-        #expect(create.contains("purchase ="), "used-up free albums do not open the purchase sheet")
+        #expect(hold.contains("purchase ="), "used-up free albums do not open the purchase sheet")
     }
 
     /// Every card's „Anlegen“ and the suggestion's own „Album anlegen“ end in `createNow`: it asks

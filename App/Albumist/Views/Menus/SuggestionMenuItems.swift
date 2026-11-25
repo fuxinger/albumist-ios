@@ -50,8 +50,8 @@ struct SuggestionMenuItems: View {
     var act: () -> Void
 
     var body: some View {
-        let menu = model.suggestionMenu(for: proposal, action: card.action, made: made, working: working,
-                                        waits: waits, selecting: selecting)
+        let state = SuggestionCardState(action: card.action, made: made, working: working, waits: waits, selecting: selecting)
+        let menu = model.suggestionMenu(for: proposal, card: state)
         if forVoiceOver {
             ForEach(menu.accessibilityItems, id: \.id) { action in
                 item(SuggestionMenu.Entry(action))

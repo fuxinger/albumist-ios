@@ -128,6 +128,17 @@ extension AppModel {
             if message == nil { route = .suggestion(proposal.id) }
             return .notNow
         }
+        if let held = quickCreateHold(made, for: proposal) { return held }
+        // A preview open on another tab keeps its own plan (`PlanReviewView`).
+        await execute(made)
+        let outcome = await finishQuickCreate(made, proposal: proposal, setAside: setAside)
+        created = outcome == .created
+        return outcome
+    }
+
+    /// What keeps the plan made from a card from running now, after it is shown or said: its
+    /// page, a message or the purchase sheet. Nil when it runs.
+    private func quickCreateHold(_ made: ChangePlan, for proposal: AlbumProposal) -> QuickCreateOutcome? {
         guard QuickCreate.mayRunWithoutPreview(made) else {
             route = .suggestion(proposal.id)
             return .needsLook
@@ -140,14 +151,10 @@ extension AppModel {
         // The free albums: used up, the purchase sheet instead of the album. The suggestion
         // stays open.
         guard Purchases.shared.allows(albums: made.freeAlbumUse(applied: false)) else {
-            state.purchase = QuickCreatePurchase(id: proposal.id)
+            QuickCreateState.shared.purchase = QuickCreatePurchase(id: proposal.id)
             return .needsPurchase
         }
-        // A preview open on another tab keeps its own plan (`PlanReviewView`).
-        await execute(made)
-        let outcome = await finishQuickCreate(made, proposal: proposal, setAside: setAside)
-        created = outcome == .created
-        return outcome
+        return nil
     }
 
     /// After the purchase the sheet asked for: the suggestion is made as tapped, in its state
@@ -156,7 +163,10 @@ extension AppModel {
     func continueQuickCreate(after purchase: QuickCreatePurchase) async {
         guard let current = proposals.first(where: { $0.id == purchase.id }) else {
             message = AppMessage(title: String(localized: "Der Vorschlag hat sich geändert"),
-                                 text: String(localized: "Während des Kaufs hat Albumist die Vorschläge aktualisiert. Angelegt wurde nichts; den neuen Stand siehst du auf der Seite „Vorschläge“."))
+                                 text: String(localized: """
+                                     Während des Kaufs hat Albumist die Vorschläge aktualisiert. Angelegt wurde nichts; \
+                                     den neuen Stand siehst du auf der Seite „Vorschläge“.
+                                     """))
             return
         }
         await createNow(current)
@@ -194,18 +204,7 @@ extension AppModel {
             UIAccessibility.post(notification: .announcement, argument: String(localized: "„\(banner.title)“ rückgängig gemacht"))
             #endif
         } else {
-            if message == nil {
-                if undoRan, let finished = execution.finished, finished.reverts == banner.plan.id {
-                    let failed = PlanReceipt(plan: finished, inventory: inventory).failedSteps
-                    message = AppMessage(title: String(localized: "Teilweise rückgängig gemacht"),
-                                         text: String(localized: "\(failed) Schritte konnten nicht ausgeführt werden. Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist."))
-                } else if undoRan, let failure = execution.failure {
-                    message = .failure(failure)
-                } else {
-                    // Nothing ran: another plan took the turn first.
-                    message = .busy
-                }
-            }
+            if message == nil { message = quickCreateUndoMessage(banner, undoRan: undoRan) }
             if state.banner?.id == banner.id {
                 state.banner?.phase = .shown
                 expireQuickCreateBanner(banner.id)
@@ -213,6 +212,24 @@ extension AppModel {
         }
         // The undo's result belongs to the banner, not to a preview opened later.
         if undoRan, !execution.isRunning { execution = ExecutionState() }
+    }
+
+    /// What is said when "Widerrufen" did not take the album back: which steps failed, why it
+    /// failed, or, when nothing ran, that another plan took the turn first.
+    private func quickCreateUndoMessage(_ banner: QuickCreateBanner, undoRan: Bool) -> AppMessage {
+        if undoRan, let finished = execution.finished, finished.reverts == banner.plan.id {
+            let failed = PlanReceipt(plan: finished, inventory: inventory).failedSteps
+            return AppMessage(title: String(localized: "Teilweise rückgängig gemacht"),
+                              text: String(localized: """
+                                  \(failed) Schritte konnten nicht ausgeführt werden. \
+                                  Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist.
+                                  """))
+        }
+        if undoRan, let failure = execution.failure {
+            return .failure(failure)
+        }
+        // Nothing ran: another plan took the turn first.
+        return .busy
     }
 
     /// What follows the run of a plan made from a card: the banner, or why there is none.
@@ -238,7 +255,10 @@ extension AppModel {
             return .failed
         case .createdWithGaps(let failed):
             message = AppMessage(title: String(localized: "Teilweise fertig"),
-                                 text: String(localized: "\(failed) Schritte konnten nicht ausgeführt werden. Die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor."))
+                                 text: String(localized: """
+                                     \(failed) Schritte konnten nicht ausgeführt werden. \
+                                     Die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.
+                                     """))
         case .created:
             break
         }
@@ -289,8 +309,14 @@ extension AppModel {
     private var quickCreateInterruptedFirst: AppMessage {
         interruptedPlan?.reverts != nil
             ? AppMessage(title: String(localized: "Erst das unterbrochene Rückgängigmachen abschließen"),
-                         text: String(localized: "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach kannst du dieses Album anlegen."))
+                         text: String(localized: """
+                             Ein früheres Rückgängigmachen wurde unterbrochen. \
+                             Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach kannst du dieses Album anlegen.
+                             """))
             : AppMessage(title: String(localized: "Erst das unterbrochene Anlegen abschließen"),
-                         text: String(localized: "Ein früheres Anlegen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach kannst du dieses Album anlegen."))
+                         text: String(localized: """
+                             Ein früheres Anlegen wurde unterbrochen. \
+                             Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach kannst du dieses Album anlegen.
+                             """))
     }
 }

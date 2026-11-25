@@ -88,7 +88,10 @@ private struct SuggestionMenuFlows: ViewModifier {
                                 presenting: flows.askingNotATrip) { proposal in
                 Button("Keine Reise, hier bin ich öfter") { answer(proposal) }
             } message: { _ in
-                Text("Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Rückgängig machen kannst du das in den Einstellungen.")
+                Text("""
+                    Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. \
+                    Albumist schlägt stattdessen ein Album für den Ort vor. Rückgängig machen kannst du das in den Einstellungen.
+                    """)
             }
     }
 

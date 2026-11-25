@@ -57,7 +57,10 @@ struct ManagedAlbumsView: View {
 
     /// How to undo one of Albumist's albums: here, and behind "Mehr erfahren" under the shelf.
     static var howToUndo: Text {
-        Text("Halte ein Album gedrückt oder tippe im Album auf „…“, um Albumists Änderungen daran rückgängig zu machen. Fotos, die du selbst hinzugefügt hast, bleiben drin.")
+        Text("""
+            Halte ein Album gedrückt oder tippe im Album auf „…“, um Albumists Änderungen daran rückgängig zu machen. \
+            Fotos, die du selbst hinzugefügt hast, bleiben drin.
+            """)
     }
 
     /// Where Albumist's new albums are in Photos: at the top level, or in the folder set for them

@@ -354,6 +354,7 @@ struct PhotoCardPiecesTests {
         tally.note(.nothing, key: "late")
         // Remembered: counted once.
         tally.note(.sharp, key: "k0")
-        #expect(tally.lines == ["covers \(limit + 2): sharp \(limit), sharp after another 0, no sharp photo on the device 2 (only a blurry preview 0, nothing 2)"])
+        #expect(tally.lines == ["covers \(limit + 2): sharp \(limit), sharp after another 0, "
+                                    + "no sharp photo on the device 2 (only a blurry preview 0, nothing 2)"])
     }
 }

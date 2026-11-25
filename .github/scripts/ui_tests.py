@@ -673,10 +673,106 @@ def settle(probe, load=lambda: os.getloadavg()[0], sleep=time.sleep, top=None,
             sleep(min(step, limit - waited))
 
 
+SIM_RUNTIME_MARKS = ("/CoreSimulator/Profiles/Runtimes/", "SimulatorRuntime")
+
+
+def short_command(command: str) -> str:
+    """A process of SIM_TOP and PASS_TOP by a name that fits the line: a process inside the
+    simulator as "sim <name>". Its whole path is longer than the 160 characters a line keeps,
+    so before 21.11. the name was cut off ("…/CoreSimulator/Profiles/Run", UI run 44890874093)."""
+    if any(mark in command for mark in SIM_RUNTIME_MARKS):
+        return "sim " + command.rstrip("/").rsplit("/", 1)[-1]
+    return command
+
+
+def top_lines(ps_output: str, count: int = 8) -> list[str]:
+    """The first `count` lines of `ps -Ao pcpu=,state=,comm= -r` with short process names."""
+    lines = []
+    for line in ps_output.splitlines()[:count]:
+        parts = line.split(None, 2)
+        if len(parts) == 3:
+            line = f"{parts[0]:>5} {parts[1]:<3} {short_command(parts[2])}"
+        lines.append(line[:160])
+    return lines
+
+
 def busiest() -> list[str]:
-    """The busiest processes on the Mac (for SIM_TOP)."""
+    """The busiest processes on the Mac (for SIM_TOP and PASS_TOP)."""
     code, out = sh(["ps", "-Ao", "pcpu=,state=,comm=", "-r"], timeout=30, quiet=True)
-    return [line[:160] for line in out.splitlines()[:8]] if code == 0 else []
+    return top_lines(out) if code == 0 else []
+
+
+class LoadSampler(threading.Thread):
+    """During a pass: the Mac's 1-minute load and its five busiest processes every `interval` s
+    (PASS_LOAD, PASS_TOP), and at the end one PASS_LOAD_SUMMARY line with the median and the
+    highest load. Report only.
+
+    Why (Fuchs 21.11.: "Gegen die Überlastung muss was gemacht werden"): the load was measured
+    only while the simulator settled (SIM_SETTLE, 200-850 on 3 cores), never during the tests,
+    so what keeps the Mac busy while a test waits was a guess. These lines say which processes
+    (the simulator's, the Mac's own services such as siriknowledged) to switch off or move."""
+
+    def __init__(self, name: str, interval: float = 120, load=lambda: os.getloadavg()[0], top=None, out=None):
+        super().__init__(daemon=True)
+        self.name_, self.interval, self.load, self.top = name, interval, load, top or busiest
+        self.out = out or (lambda line: print(line, flush=True))
+        self.stopped = threading.Event()
+        self.samples: list[float] = []
+
+    def sample(self) -> None:
+        value = self.load()
+        self.samples.append(value)
+        self.out(f"PASS_LOAD {self.name_} load(1m)={value:.2f}")
+        for line in self.top()[:5]:
+            self.out(f"PASS_TOP {line}")
+
+    def run(self) -> None:
+        while not self.stopped.wait(self.interval):
+            self.sample()
+
+    def summary(self) -> str:
+        if not self.samples:
+            return f"PASS_LOAD_SUMMARY {self.name_}: no sample (pass shorter than {self.interval:.0f} s)"
+        ordered = sorted(self.samples)
+        median = ordered[len(ordered) // 2]
+        return (f"PASS_LOAD_SUMMARY {self.name_}: {len(ordered)} samples, median load(1m) {median:.0f}, "
+                f"highest {ordered[-1]:.0f}")
+
+    def stop(self) -> None:
+        self.stopped.set()
+        self.join(timeout=60)
+        self.out(self.summary())
+
+
+# The Mac's own services that compete with the simulator on a 3-core runner and that no job needs.
+# Switched off before the simulator boots (`quiet-host`), each one best effort and logged; a
+# service that cannot be switched off changes nothing else. Measured 21.11. (UI run 44890874093,
+# device, SIM_TOP right after the boot): siriknowledged 30.9 % CPU at load 520.
+QUIET_HOST = (
+    ("Spotlight indexing", [["sudo", "-n", "mdutil", "-a", "-i", "off"]]),
+    ("Siri knowledge (siriknowledged)", [["launchctl", "bootout", "gui/{uid}/com.apple.siriknowledged"],
+                                         ["sudo", "-n", "launchctl", "bootout", "system/com.apple.siriknowledged"]]),
+)
+
+
+def quiet_host(run=None, uid: int | None = None) -> list[str]:
+    """Switches off QUIET_HOST; returns one HOST_QUIET line per service (switched off by which
+    command, or not). Never fails: these are hosted Macs whose services can change with an image."""
+    run = run or (lambda command: sh(command, timeout=60, quiet=True))
+    uid = os.getuid() if uid is None else uid
+    lines = []
+    for what, commands in QUIET_HOST:
+        tried = []
+        for command in commands:
+            command = [part.format(uid=uid) for part in command]
+            code, out = run(command)
+            if code == 0:
+                lines.append(f"HOST_QUIET {what}: off ({' '.join(command)})")
+                break
+            tried.append(f"{' '.join(command)}: exit {code} {' '.join(out.split())[:80]}".rstrip())
+        else:
+            lines.append(f"HOST_QUIET {what}: still on ({'; '.join(tried)})")
+    return lines
 
 
 def boot(udid: str) -> bool:
@@ -1206,7 +1302,10 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
         watchdog.start()
         grants = HostGrants(args.udid, log_path)
         grants.start()
+        sampler = LoadSampler(f"{args.name} {label}")
+        sampler.start()
         status, hung = wait_until(process, getattr(args, "deadline", 0) or 0)
+        sampler.stop()
         grants.stop()
         watchdog.stop()
         watchdog.join(timeout=90)
@@ -1552,6 +1651,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--out", default="build")
     r.add_argument("--deadline", type=float, default=0,
                    help="epoch second by which a pass must end (the job's limit minus a margin); 0: none")
+    sub.add_parser("quiet-host")
     w = sub.add_parser("settle")
     w.add_argument("--udid", required=True)
     w.add_argument("--limit", type=float, default=SETTLE_LIMIT)
@@ -1574,7 +1674,15 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(udid)
         return 0
+    if args.command == "quiet-host":
+        for line in quiet_host():
+            print(line, flush=True)
+        return 0
     if args.command == "boot":
+        # Before the boot, in every job that boots a simulator this way (ui.yml, ui-stress.yml,
+        # testflight.yml): the boot is when the Mac is most starved (SIM_SETTLE).
+        for line in quiet_host():
+            print(line, flush=True)
         ok = boot(args.udid)
         if BOOT_RETRIES:
             os.makedirs(args.out, exist_ok=True)

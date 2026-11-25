@@ -250,26 +250,29 @@ struct ProposalDetailTextTests {
         #expect(leap.weekday == 5, "a Thursday")
     }
 
+    /// A span from one day to another (`days`), in German and in English, each without and with
+    /// its year.
     @Test(arguments: [
-        ("2024-10-12", "2024-10-12", "12. Oktober", "12. Oktober 2024", "October 12", "October 12, 2024"),
-        ("2024-10-12", "2024-10-16", "12. bis 16. Oktober", "12. bis 16. Oktober 2024", "October 12–16", "October 12–16, 2024"),
-        ("2024-09-28", "2024-10-03", "28. September bis 3. Oktober", "28. September bis 3. Oktober 2024",
-         "September 28 – October 3", "September 28 – October 3, 2024"),
-        ("2024-12-28", "2025-01-03", "28. Dezember 2024 bis 3. Januar 2025", "28. Dezember 2024 bis 3. Januar 2025",
-         "December 28, 2024 – January 3, 2025", "December 28, 2024 – January 3, 2025"),
+        (("2024-10-12", "2024-10-12"), ("12. Oktober", "12. Oktober 2024"), ("October 12", "October 12, 2024")),
+        (("2024-10-12", "2024-10-16"), ("12. bis 16. Oktober", "12. bis 16. Oktober 2024"), ("October 12–16", "October 12–16, 2024")),
+        (("2024-09-28", "2024-10-03"), ("28. September bis 3. Oktober", "28. September bis 3. Oktober 2024"),
+         ("September 28 – October 3", "September 28 – October 3, 2024")),
+        (("2024-12-28", "2025-01-03"), ("28. Dezember 2024 bis 3. Januar 2025", "28. Dezember 2024 bis 3. Januar 2025"),
+         ("December 28, 2024 – January 3, 2025", "December 28, 2024 – January 3, 2025")),
         // 62 days still by day, 63 by month.
-        ("2024-03-01", "2024-05-02", "1. März bis 2. Mai", "1. März bis 2. Mai 2024", "March 1 – May 2", "March 1 – May 2, 2024"),
-        ("2024-03-01", "2024-05-03", "März bis Mai", "März bis Mai 2024", "March – May", "March – May 2024"),
-        ("2023-12-01", "2024-03-20", "Dezember 2023 bis März 2024", "Dezember 2023 bis März 2024",
-         "December 2023 – March 2024", "December 2023 – March 2024"),
-        ("2019-05-01", "2024-08-01", "2019 bis 2024", "2019 bis 2024", "2019 – 2024", "2019 – 2024"),
-        ("2023-01-10", "2024-03-20", "2023 bis 2024", "2023 bis 2024", "2023 – 2024", "2023 – 2024"),
+        (("2024-03-01", "2024-05-02"), ("1. März bis 2. Mai", "1. März bis 2. Mai 2024"), ("March 1 – May 2", "March 1 – May 2, 2024")),
+        (("2024-03-01", "2024-05-03"), ("März bis Mai", "März bis Mai 2024"), ("March – May", "March – May 2024")),
+        (("2023-12-01", "2024-03-20"), ("Dezember 2023 bis März 2024", "Dezember 2023 bis März 2024"),
+         ("December 2023 – March 2024", "December 2023 – March 2024")),
+        (("2019-05-01", "2024-08-01"), ("2019 bis 2024", "2019 bis 2024"), ("2019 – 2024", "2019 – 2024")),
+        (("2023-01-10", "2024-03-20"), ("2023 bis 2024", "2023 bis 2024"), ("2023 – 2024", "2023 – 2024")),
     ])
-    func spansInWords(_ example: (from: String, to: String, german: String, germanYear: String, english: String, englishYear: String)) {
-        let a = Self.day(example.from), b = Self.day(example.to)
-        #expect(ProposalWords.german.span(from: a, to: b, withYear: false) == example.german)
-        #expect(ProposalWords.german.span(from: a, to: b, withYear: true) == example.germanYear)
-        #expect(ProposalWords.english.span(from: a, to: b, withYear: false) == example.english)
-        #expect(ProposalWords.english.span(from: a, to: b, withYear: true) == example.englishYear)
+    func spansInWords(_ days: (from: String, to: String), _ german: (plain: String, withYear: String),
+                      _ english: (plain: String, withYear: String)) {
+        let a = Self.day(days.from), b = Self.day(days.to)
+        #expect(ProposalWords.german.span(from: a, to: b, withYear: false) == german.plain)
+        #expect(ProposalWords.german.span(from: a, to: b, withYear: true) == german.withYear)
+        #expect(ProposalWords.english.span(from: a, to: b, withYear: false) == english.plain)
+        #expect(ProposalWords.english.span(from: a, to: b, withYear: true) == english.withYear)
     }
 }

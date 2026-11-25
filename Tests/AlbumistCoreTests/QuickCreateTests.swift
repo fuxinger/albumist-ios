@@ -174,8 +174,10 @@ struct QuickCreateTests {
     static func ran(_ album: StepState, _ photos: StepState, unverified: Set<String> = []) -> ChangePlan {
         var plan = ChangePlan(id: AlbumistID("made"), createdAt: Date(), confirmedAt: Date(), status: .completed, baseline: [:],
                               baselineCollectionIDs: [], steps: [
-                                PlanStep(id: "0", operation: .createAlbum(key: "A", title: "Kyoto", parent: .topLevel), sourceID: AlbumistID("kyoto"), state: album),
-                                PlanStep(id: "1", operation: .addAssets(album: .planned("A"), assets: ["k1", "k2"]), sourceID: AlbumistID("kyoto"), state: photos),
+                                PlanStep(id: "0", operation: .createAlbum(key: "A", title: "Kyoto", parent: .topLevel),
+                                         sourceID: AlbumistID("kyoto"), state: album),
+                                PlanStep(id: "1", operation: .addAssets(album: .planned("A"), assets: ["k1", "k2"]),
+                                         sourceID: AlbumistID("kyoto"), state: photos),
                               ], conflicts: [], notes: [], resolvedKeys: ["A": "a1"])
         var record = ExecutionRecord()
         record.unverified = unverified

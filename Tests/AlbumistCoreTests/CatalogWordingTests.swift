@@ -114,7 +114,7 @@ struct CatalogWordingTests {
         for path in AppSource.swiftFiles(under: "App/Albumist") {
             let source = try AppSource.read(path)
             let code = AppSource.code(source, keepStrings: true)
-            for literal in Self.literals(code) where !elsewhere.contains(literal) {
+            for literal in try Self.literals(code) where !elsewhere.contains(literal) {
                 for (pattern, instead) in Self.forbiddenGerman where Self.matches(literal, pattern) {
                     found.append("\(path): „\(literal)“ (\(instead))")
                 }
@@ -131,8 +131,8 @@ struct CatalogWordingTests {
     }
 
     /// The string literals of Swift code whose comments are blanked (`AppSource.code`).
-    static func literals(_ code: String) -> [String] {
-        let pattern = try! Regex(#""((?:[^"\\\n]|\\.)*)""#)
+    static func literals(_ code: String) throws -> [String] {
+        let pattern = try Regex(#""((?:[^"\\\n]|\\.)*)""#)
         return code.matches(of: pattern).map { String($0.output[1].substring ?? "") }
     }
 
@@ -158,7 +158,8 @@ struct CatalogWordingTests {
         ("Rest rückgängig machen", "Undo the Rest"),
         // The message that points to it ("Verlauf und Rückgängig" moved from the settings to
         // the tab "Alben", design 5C).
-        ("Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen.",
+        ("Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du den "
+         + "Rest rückgängig machen.",
          "Not everything could be undone. The interrupted run is now in Albums › History and Undo, where you can undo the rest."),
         // Right after „Ignorieren“, as in iOS.
         ("Widerrufen", "Undo"),
@@ -180,7 +181,7 @@ struct CatalogWordingTests {
     /// receipt of an undo said „Vollständig angelegt“, its rows „Nicht vollständig angelegt“).
     @Test func theReceiptOfAnUndoSaysUndone() throws {
         let source = AppSource.code(try AppSource.read("App/Albumist/Views/PlanReceiptView.swift"), keepStrings: true)
-        let literals = Set(Self.literals(source))
+        let literals = Set(try Self.literals(source))
         let missing = ["Vollständig rückgängig gemacht", "Teilweise rückgängig gemacht", "Nicht vollständig rückgängig gemacht"]
             .filter { !literals.contains($0) }
         #expect(missing.isEmpty, "PlanReceiptView.swift does not say \(missing)")
@@ -200,10 +201,13 @@ struct CatalogWordingTests {
         "Albumist sieht erst %lld Fotos. Für ein Album braucht es mehr Fotos von einem Ort oder einer Reise.":
             "said only while there are too few photos for an album",
         "%lld Beispielfotos anlegen": "the sample photos, about 100",
-        "Albumist legt %lld Beispielfotos von vier Reisen in deiner Fotos-Mediathek an. Das ist nötig, damit Albumist daraus Alben anlegen kann. Du kannst sie jederzeit wieder entfernen: nur diese Beispielfotos und die Alben, die Albumist daraus gemacht hat.":
+        "Albumist legt %lld Beispielfotos von vier Reisen in deiner Fotos-Mediathek an. Das ist nötig,"
+        + " damit Albumist daraus Alben anlegen kann. Du kannst sie jederzeit wieder entfernen: nur diese Beispielfotos und die Alben,"
+        + " die Albumist daraus gemacht hat.":
             "the sample photos, about 100",
         "Legt etwa %lld Beispielfotos mit Reisen, Screenshots und Dokumenten an. Nur im Simulator.": "simulator only, about 100",
-        "%lld Fotos bleiben in Fotos: Name oder Aufnahmedatum passen nicht zu den Beispielfotos von Albumist. Albumist löscht nur, was sicher ein Beispielfoto ist.":
+        "%lld Fotos bleiben in Fotos: Name oder Aufnahmedatum passen nicht zu den Beispielfotos von Albumist. Albumist löscht nur,"
+        + " was sicher ein Beispielfoto ist.":
             "some of the sample photos",
         "%lld Fotos bleiben im Album „%@“.": "sample photos; AppModel.swift (other work)",
         "Ein Teil hat weniger als %lld Fotos mit Ort. Er wird kein eigener Reise-Vorschlag; seine Fotos bleiben in den Länder- und Orte-Alben.":

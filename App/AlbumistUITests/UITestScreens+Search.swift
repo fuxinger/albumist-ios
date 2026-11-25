@@ -59,23 +59,31 @@ extension UITestScreens {
         /// Leaves the search, so the three named tabs are back in the tab bar, hittable (iOS may
         /// fold them into one button beside an active search, and the keyboard covers them).
         /// True when no search field is left or the tabs are back; at most three taps: a photo
-        /// opened from the results, the field's own way out, and by default (where closing the
-        /// field stays on the search) the folded tabs. The way out: `wayOut`, the field's own
-        /// first, where only getting out matters (the sweep, `tabButton`).
+        /// opened from the results, the field's own way out, and the folded tabs of iOS 26. The
+        /// way out: `wayOut`, the field's own first, where only getting out matters (the sweep,
+        /// `tabButton`).
         @discardableResult
         static func leave(_ app: XCUIApplication, _ what: String) -> Bool {
-            leave(app, what, foldedTabsFirst: false).back
+            leave(app, what, keepingSearch: false).back
         }
 
-        /// `leave(_:_:)`, and the ways it tapped as the log names them. `foldedTabsFirst`: the
-        /// folded tabs before the field's own way out, as a user looks at another tab; they leave
-        /// the search as it is, where "Schließen" ends it and empties the field (review T4 of H14).
-        static func leave(_ app: XCUIApplication, _ what: String, foldedTabsFirst: Bool) -> (back: Bool, ways: [String]) {
+        /// `leave(_:_:)`, and the ways it tapped as the log names them. `keepingSearch`: as a user
+        /// looks at another tab, the search stays as it is: the folded tabs first, and never the
+        /// field's own way out, which ends the search and empties the field (review T4 of H14).
+        /// The tabs come back by themselves as the keyboard goes (iOS 27, where the field is the
+        /// page's): up to 3 s for them before any tap, unless the keyboard is up where only getting
+        /// out matters (it covers them until something is tapped). Without that wait a tap on
+        /// "Schließen" a moment too early ended the search the test meant to keep (second check
+        /// of the search, 25.11.2026).
+        static func leave(_ app: XCUIApplication, _ what: String, keepingSearch: Bool) -> (back: Bool, ways: [String]) {
             var ways: [String] = []
             for step in 0..<3 {
                 guard app.searchFields.firstMatch.exists, !tabsBack(app) else { return (true, ways) }
+                if keepingSearch || !app.keyboards.firstMatch.exists, UITestWait.holds(timeout: 3, { tabsBack(app) }) {
+                    return (true, ways)
+                }
                 if step == 0 { print("UI_FACT \(what): leaving the search; \(facts(app))") }
-                guard let way = wayOut(app, what, foldedTabsFirst: foldedTabsFirst) else { return (false, ways) }
+                guard let way = wayOut(app, what, keepingSearch: keepingSearch) else { return (false, ways) }
                 ways.append(way.said)
                 way.button.tap()
                 if UITestWait.holds(timeout: 5, { tabsBack(app) }) { return (true, ways) }
@@ -99,15 +107,16 @@ extension UITestScreens {
         /// The way out of the search, said in the log before it is tapped: a button of
         /// `leaveLabels` beside the field first (its own "Schließen"), else a "Schließen"
         /// elsewhere (a photo opened from the results), else the one button left in the tab bar
-        /// besides the search (the folded tabs, which choose a tab; review S4 and S10 of H14);
-        /// with `foldedTabsFirst` the folded tabs before the others (review T4). Never a button of
-        /// a dialog (`leaveButtons`). Nil, with what shows, when there is none.
-        private static func wayOut(_ app: XCUIApplication, _ what: String, foldedTabsFirst: Bool) -> (button: XCUIElement, said: String)? {
+        /// besides the search (the folded tabs of iOS 26, which choose a tab; review S4 and S10 of
+        /// H14). `keepingSearch`: the folded tabs first, and never the field's own way out, which
+        /// ends the search (review T4). Never a button of a dialog (`leaveButtons`). Nil, with
+        /// what shows, when there is none.
+        private static func wayOut(_ app: XCUIApplication, _ what: String, keepingSearch: Bool) -> (button: XCUIElement, said: String)? {
             let named = leaveButtons(app)
             let field = app.searchFields.firstMatch
             let row = field.exists ? field.frame.insetBy(dx: -60, dy: -12) : .null
             var ways: [(button: XCUIElement, said: String)] = []
-            if let beside = named.first(where: { row.intersects($0.frame) }) {
+            if !keepingSearch, let beside = named.first(where: { row.intersects($0.frame) }) {
                 ways.append((beside, "\"\(beside.label)\" beside its field"))
             }
             if let elsewhere = named.first(where: { closeLabels.contains($0.label) && !row.intersects($0.frame) }) {
@@ -116,7 +125,7 @@ extension UITestScreens {
             let left = app.tabBars.buttons.allElementsBoundByIndex.filter { $0.isHittable && !labels.contains($0.label) }
             if left.count == 1, let folded = left.first {
                 let way = (button: folded, said: "the one button left in the tab bar, \"\(folded.label)\"")
-                if foldedTabsFirst { ways.insert(way, at: 0) } else { ways.append(way) }
+                if keepingSearch { ways.insert(way, at: 0) } else { ways.append(way) }
             }
             if let way = ways.first {
                 print("UI_STEP_OK \(what): leave the search with \(way.said)")

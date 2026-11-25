@@ -452,11 +452,15 @@ private struct SearchFieldModifier: ViewModifier {
             // Only the field: it becomes active when it is tapped (Apple's default activation),
             // never by the tab and never by hand, and the search stays as it is while another
             // tab is chosen. Its focus is bound, so a route takes only the keyboard away when it
-            // asks (`leftInCode`), whatever the binding saw of the field's focus before.
+            // asks (`leftInCode`), whatever the binding saw of the field's focus before; and the
+            // field gives its focus up when the page leaves the screen (iOS 27, where the field is
+            // the page's: another tab, chosen by the user or in code), so the keyboard never comes
+            // back with the page, only with a tap (second check of the search, 25.11.2026).
             content
                 .searchable(text: $input.text, isPresented: $input.isPresented, placement: host.field, prompt: SearchView.prompt)
                 .searchFocused($focused)
                 .onChange(of: input.keyboardAway) { focused = false }
+                .onDisappear { focused = false }
         }
     }
 }

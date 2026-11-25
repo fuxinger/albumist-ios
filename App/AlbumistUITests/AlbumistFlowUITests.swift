@@ -1367,7 +1367,11 @@ final class AlbumistFlowUITests: XCTestCase {
         // thumbnail's value: second review F, F5.
         XCTAssertTrue(value.hasPrefix("Video, 4 Sekunden"), "VoiceOver does not hear the video's length of 4 seconds in its cell: \"\(value)\"")
         shot("14v-search-video")
-        let free = UITestWait.until("the video's cell free to tap", timeout: 5) { video.isHittable }
+        // Clear of the navigation bar and its field, where a tap would land on the bar (one
+        // video: its cell is among the first results).
+        let free = UITestWait.until("the video's cell free to tap", timeout: 5) {
+            video.isHittable && !UITestWait.underNavigationBar(video, app.navigationBars.firstMatch)
+        }
         guard free else { return }
         video.tap()
         print("UI_STEP_OK open the video")
@@ -2571,22 +2575,28 @@ final class AlbumistFlowUITests: XCTestCase {
         print("UI_FACT suggestion photos after \(after.map { String($0) } ?? "-")")
         XCTAssertEqual(after, before - 1, "Taking one photo out of the suggestion did not lower its count by one")
         guard fewer else { return }
-        // Selecting ended: the page's own bar is back and in reach; the tab bar stays hidden. The
-        // selection ends as the photo leaves (UI run 45567033486: it waited for the suggestion to
-        // be matched again, over 5 s).
+        // Selecting ended: the page's own bar is back and in reach; the tab bar stays hidden.
+        XCTAssertTrue(pageBarCameBack(after: remove), "After taking a photo out, the page's bar (\"Nicht jetzt\" and the filled button) did not come back")
+        XCTAssertFalse(tabBarHittable(), "The tab bar shows on the suggestion's page after taking a photo out (it is hidden there for good)")
+        shot("08f-photo-taken-out")
+    }
+
+    /// `testRemovePhotoFromSuggestion`: the selection ended and the page's own bar is back and in
+    /// reach within 5 s. The selection ends as the photo leaves (UI run 45567033486: it waited for
+    /// the suggestion to be matched again, over 5 s); when the bar is not back, what stood in the
+    /// way is said.
+    private func pageBarCameBack(after remove: XCUIElement) -> Bool {
         let notNow = app.buttons["proposal.notNow"]
         let create = app.buttons["proposal.create"]
-        let barBack = UITestWait.until("the page's bar back after taking the photo out", timeout: 5) {
+        let back = UITestWait.until("the page's bar back after taking the photo out", timeout: 5) {
             !remove.exists && notNow.exists && notNow.isHittable && create.exists
         }
-        if !barBack {
+        if !back {
             print("UI_FACT the page's bar after taking the photo out: remove \(remove.exists) (hittable \(remove.exists && remove.isHittable)), "
                   + "\"Nicht jetzt\" \(notNow.exists) (hittable \(notNow.exists && notNow.isHittable), enabled \(notNow.exists && notNow.isEnabled)), "
                   + "main button \(create.exists), \"Auswählen\" \(app.buttons["proposalPhotos.select"].exists)")
         }
-        XCTAssertTrue(barBack, "After taking a photo out, the page's bar (\"Nicht jetzt\" and the filled button) did not come back")
-        XCTAssertFalse(tabBarHittable(), "The tab bar shows on the suggestion's page after taking a photo out (it is hidden there for good)")
-        shot("08f-photo-taken-out")
+        return back
     }
 
     /// `testRemovePhotoFromSuggestion`: selects one photo of the suggestion in reach, taps

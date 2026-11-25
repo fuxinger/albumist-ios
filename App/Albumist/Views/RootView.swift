@@ -100,10 +100,13 @@ struct MainTabs: View {
     }
 
     /// The search tab's role: the search role on iOS 26, which iOS draws as the round button at
-    /// the bar's end; the prominent role on iOS 27, Apple's documented way to that round button
-    /// in a separate place at the bar's end ("Only one tab can receive the prominent treatment"),
-    /// where the search role alone no longer gets it (`searchField`). One role per tab: the
-    /// prominent one has no system label, so the tab names itself.
+    /// the bar's end; the prominent role on iOS 27, which Apple documents as the one tab with
+    /// the prominent treatment in a separate place at the bar's end ("Only one tab can receive
+    /// the prominent treatment"). Its shape is the system's: the frame test checks for a round
+    /// button apart from the tabs. On iOS 27 UIKit makes a search tab prominent by itself only
+    /// when choosing it starts the search with the keyboard, which the owner did not choose
+    /// (`searchField`): a step away from Apple's search tab on purpose (docs/DECISIONS.md). One
+    /// role per tab: the prominent one has no system label, so the tab names itself.
     static var searchRole: TabRole {
         if #available(iOS 27, *) { return .prominent }
         return .search

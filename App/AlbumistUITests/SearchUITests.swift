@@ -218,7 +218,7 @@ final class AlbumistSearchUITests: XCTestCase {
         if #available(iOS 27, *) {
             let place = field.frame
             print("UI_FACT search field at \(Int(place.minX)),\(Int(place.minY)), \(Int(place.width)) x \(Int(place.height)) pt")
-            XCTAssertLessThan(place.midY, app.windows.firstMatch.frame.midY, "The search field is not at the top of the search page")
+            XCTAssertLessThan(place.midY, app.frame.midY, "The search field is not at the top of the search page")
         }
         // Starting points come from the library (or examples before the analysis).
         let start = search("search.example")
@@ -303,12 +303,13 @@ final class AlbumistSearchUITests: XCTestCase {
         field.typeText("\n")
         _ = UITestWait.holds(timeout: 5) { !app.keyboards.firstMatch.exists }
 
-        // DS-12a: leave the search as a user looks at another tab (`UITestScreens.Search.leave`).
-        // On iOS 26 iOS may fold the other tabs into one button beside the active field: that
-        // button first, as it keeps the search, where the field's "Schließen" ends it and empties
-        // the field (review T4 of H14). On iOS 27 the field is the page's and the tabs are back
-        // in the bar once the keyboard has gone. Which tab shows then is said, not asserted.
-        let left = UITestScreens.Search.leave(app, "search", foldedTabsFirst: true)
+        // DS-12a: leave the search as a user looks at another tab, keeping it
+        // (`UITestScreens.Search.leave`): on iOS 26 iOS may fold the other tabs into one button
+        // beside the active field, and that button keeps the search, where the field's
+        // "Schließen" ends it and empties the field (review T4 of H14); on iOS 27 the field is the
+        // page's and the tabs come back by themselves as the keyboard goes. Which tab shows then
+        // is said, not asserted.
+        let left = UITestScreens.Search.leave(app, "search", keepingSearch: true)
         XCTAssertTrue(left.back, "Leaving the search does not bring the other tabs back")
         let before = app.tabBars.buttons["Vorschläge"]
         let backOnIt = UITestWait.holds(timeout: 3) { before.exists && before.isSelected }

@@ -103,22 +103,30 @@ struct UITestTabsSourceTests {
     /// Leaving the search waits for all three named tabs, hittable, not for "Vorschläge" alone,
     /// which a folded button may be named after (review S4 of H14). The way out is a button
     /// beside the field first (its own "Schließen"), then one elsewhere (a photo opened from the
-    /// results), then the one button left in the tab bar (the folded tabs, which choose a tab);
-    /// asked to, the folded tabs come first (review T4 of H14). The ways tapped are given back.
+    /// results), then the one button left in the tab bar (the folded tabs, which choose a tab).
+    /// Where the search is to stay (`keepingSearch`), the folded tabs come first and the field's
+    /// own way out is never taken (review T4 of H14), and before any tap the tabs get up to 3 s
+    /// to come back by themselves as the keyboard goes (second check of the search, 25.11.2026:
+    /// a "Schließen" tapped a moment too early ended the search the test kept). The ways tapped
+    /// are given back.
     @Test func leavingWaitsForAllThreeTabsAndLooksBesideTheFieldFirst() throws {
         let back = try Self.screensBody(["enum Search", "static func tabsBack(_ app: XCUIApplication) -> Bool"])
         #expect(back.contains("[Tabs.german,Tabs.english].contains"), "\(back)")
         #expect(back.contains("[tabs.suggestions,tabs.unsorted,tabs.albums].allSatisfy"), "\(back)")
         #expect(back.contains("tab.exists&&tab.isHittable"), "\(back)")
         let plain = try Self.screensBody(["enum Search", "static func leave(_ app: XCUIApplication, _ what: String) -> Bool"])
-        #expect(plain == "{leave(app,what,foldedTabsFirst:false).back}", "\(plain)")
+        #expect(plain == "{leave(app,what,keepingSearch:false).back}", "\(plain)")
         let leave = try Self.screensBody(["enum Search", Self.leaveWithWays])
-        #expect(leave.contains("guardapp.searchFields.firstMatch.exists,!tabsBack(app)else{return(true,ways)}"), "\(leave)")
-        #expect(leave.contains("guardletway=wayOut(app,what,foldedTabsFirst:foldedTabsFirst)else{return(false,ways)}"
+        let gone = try #require(leave.range(of: "guardapp.searchFields.firstMatch.exists,!tabsBack(app)else{return(true,ways)}"), "\(leave)")
+        let comes = try #require(leave.range(of: "ifkeepingSearch||!app.keyboards.firstMatch.exists,UITestWait.holds(timeout:3,{tabsBack(app)}){"
+                                             + "return(true,ways)}"), "the tabs get no moment to come back by themselves: \(leave)")
+        let tapped = try #require(leave.range(of: "way.button.tap()"), "\(leave)")
+        #expect(gone.upperBound <= comes.lowerBound && comes.upperBound <= tapped.lowerBound, "\(leave)")
+        #expect(leave.contains("guardletway=wayOut(app,what,keepingSearch:keepingSearch)else{return(false,ways)}"
                                + "ways.append(way.said)way.button.tap()ifUITestWait.holds(timeout:5,{tabsBack(app)}){return(true,ways)}"),
                 "\(leave)")
         let way = try Self.screensBody(["enum Search", Self.wayOut])
-        let steps = ["ifletbeside=named.first(where:{row.intersects($0.frame)})",
+        let steps = ["if!keepingSearch,letbeside=named.first(where:{row.intersects($0.frame)})",
                      "ifletelsewhere=named.first(where:{closeLabels.contains($0.label)&&!row.intersects($0.frame)})",
                      "letleft=app.tabBars.buttons.allElementsBoundByIndex.filter{$0.isHittable&&!labels.contains($0.label)}",
                      "ifleft.count==1,letfolded=left.first"]
@@ -126,12 +134,12 @@ struct UITestTabsSourceTests {
         #expect(!found.contains(nil), "\(way)")
         let order = found.compactMap { $0?.lowerBound }
         #expect(order == order.sorted(), "the way out is not looked for beside the field first: \(way)")
-        #expect(way.contains("iffoldedTabsFirst{ways.insert(way,at:0)}else{ways.append(way)}"), "\(way)")
+        #expect(way.contains("ifkeepingSearch{ways.insert(way,at:0)}else{ways.append(way)}"), "\(way)")
     }
 
     /// The declaration of `leave` that says the ways it took, and of `wayOut`.
-    static let leaveWithWays = "static func leave(_ app: XCUIApplication, _ what: String, foldedTabsFirst: Bool) -> (back: Bool, ways: [String])"
-    static let wayOut = "private static func wayOut(_ app: XCUIApplication, _ what: String, foldedTabsFirst: Bool)"
+    static let leaveWithWays = "static func leave(_ app: XCUIApplication, _ what: String, keepingSearch: Bool) -> (back: Bool, ways: [String])"
+    static let wayOut = "private static func wayOut(_ app: XCUIApplication, _ what: String, keepingSearch: Bool)"
 
     /// The search button is the tab bar's, or one in the tab bar's row (iOS may draw the search
     /// tab as a round button of its own beside the bar) while neither the keyboard nor a dialog
@@ -159,16 +167,17 @@ struct UITestTabsSourceTests {
 
     /// What the field kept is seen after leaving the search as a user looks at another tab
     /// (review T4 and T5 of H14): `SearchUITests` waits up to 5 s for the keyboard to go after the
-    /// return key, leaves by the folded tabs first ("Schließen" ends the search and empties the
-    /// field), and says the ways it took in the same `UI_FACT` line as the text. Since the owner's
-    /// choice of 25.11.2026 it asserts what the search kept: the query, its answer, and no
-    /// keyboard, as it asserts no keyboard when the tab is first chosen. The sweep and
-    /// `tabButton` keep the field's own way out first, where only getting out matters.
+    /// return key, leaves keeping the search (the folded tabs of iOS 26, never "Schließen", which
+    /// ends the search and empties the field), and says the ways it took in the same `UI_FACT`
+    /// line as the text. Since the owner's choice of 25.11.2026 it asserts what the search kept:
+    /// the query, its answer, and no keyboard, as it asserts no keyboard when the tab is first
+    /// chosen, and on iOS 27 the field at the top of the page. The sweep and `tabButton` keep the
+    /// field's own way out first, where only getting out matters.
     @Test func theSearchTestLeavesByTheFoldedTabsAndSaysSo() throws {
         let code = try Self.code("App/AlbumistUITests/SearchUITests.swift")
         let test = Self.squeezed(try #require(AppSource.body(of: ["func testSearchUnderstandsRealQueries()"], in: code)))
         let gone = try #require(test.range(of: #"field.typeText("\n")_=UITestWait.holds(timeout:5){!app.keyboards.firstMatch.exists}"#), "\(test)")
-        let leaves = try #require(test.range(of: #"letleft=UITestScreens.Search.leave(app,"search",foldedTabsFirst:true)"#), "\(test)")
+        let leaves = try #require(test.range(of: #"letleft=UITestScreens.Search.leave(app,"search",keepingSearch:true)"#), "\(test)")
         #expect(gone.upperBound <= leaves.lowerBound, "\(test)")
         #expect(test.contains("XCTAssertTrue(left.back,"), "\(test)")
         let said = try #require(test.range(of: #"print("UI_FACTsearchchosenagain:field\(shown),text\"\(query)\",leftby\(left.ways),"#), "\(test)")
@@ -185,7 +194,11 @@ struct UITestTabsSourceTests {
         let flow = try Self.code("App/AlbumistUITests/AlbumistFlowUITests.swift")
         #expect(flow.contains(#"UITestScreens.Search.leave(app, "sweep")"#), "the sweep does not leave the search")
         #expect(flow.contains(#"UITestScreens.Search.leave(app, "sweep, back to the start page")"#), "the sweep does not leave the search")
-        #expect(!flow.contains("foldedTabsFirst"), "the sweep leaves by the folded tabs first")
+        #expect(!flow.contains("keepingSearch"), "the sweep leaves keeping the search")
+        // iOS 27: the field on the page, at its top (`MainTabs.searchField`).
+        #expect(test.contains("if#available(iOS27,*){letplace=field.frame")
+                && test.contains(#"XCTAssertLessThan(place.midY,app.frame.midY,"Thesearchfieldisnotatthetopofthesearchpage")"#),
+                "the search test does not check the field's place on iOS 27: \(test)")
     }
 
     /// The search tab never brings the keyboard (the owner's choice of 25.11.2026): the
@@ -204,7 +217,7 @@ struct UITestTabsSourceTests {
         #expect(flow.contains(#"UITestWait.never("nokeyboardbeforethesearchfieldistapped",for:1){app.keyboards.firstMatch.exists}"#),
                 "flow test 1 does not watch for the keyboard the search tab never brings")
         let frame = Self.squeezed(try Self.code("App/AlbumistUITests/FrameUITests.swift"))
-        for check in ["letround=abs(frame.width-frame.height)<8", #"XCTAssertTrue(round,"#, #"XCTAssertGreaterThan(gap,0,"#] {
+        for check in ["letround=abs(frame.width-frame.height)<8", #"XCTAssertTrue(round,"#, #"XCTAssertGreaterThanOrEqual(gap,0,"#] {
             #expect(frame.contains(check), "the frame test does not assert the round button apart from the tabs: \(check)")
         }
         let comment = try AppSource.read("App/AlbumistUITests/FrameUITests.swift")

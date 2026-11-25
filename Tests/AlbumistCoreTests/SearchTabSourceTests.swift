@@ -111,7 +111,8 @@ struct SearchTabSourceTests {
         #expect(placement == "{casetabViewcasepagevarfield:SearchFieldPlacement{switchself{"
                 + "case.tabView:.automaticcase.page:.navigationBarDrawer(displayMode:.always)}}}", "\(placement)")
         let app = try AppSource.swiftFiles(under: "App/Albumist").map { AppSource.code(try AppSource.read($0)) }.joined()
-        for gone in ["tabViewKeepingSearch", "tabViewOpeningKeyboard", "pageFocusingField", "enum Host", ".tabViewSearchActivation("] {
+        for gone in ["tabViewKeepingSearch", "tabViewOpeningKeyboard", "pageFocusingField", "enum Host", ".tabViewSearchActivation(",
+                     "dismissSearch", "isPresented.toggle()"] {
             #expect(!app.contains(gone), "\(gone) is still in the app")
         }
     }
@@ -119,11 +120,12 @@ struct SearchTabSourceTests {
     /// The field where the system puts it, one field, which keeps the search: the system activates
     /// it when it is tapped, never the tab and never the page by hand (on iOS 26 it is the bar's,
     /// on iOS 27 it stands under the page's title); its focus is bound, so a route can take the
-    /// keyboard away (`leftInCode`).
+    /// keyboard away (`leftInCode`), and it is given up as the page leaves the screen, so the
+    /// keyboard never comes back with the page (second check of the search, 25.11.2026).
     @Test func theFieldSitsWhereTheSystemPutsItAndKeepsTheSearch() throws {
         let modifier = Self.squeezed(try Self.body(["private struct SearchFieldModifier", "func body(content: Content)"], in: Self.search))
         #expect(modifier == "{ifhost!=MainTabs.searchField{content}else{\(Self.field).searchFocused($focused)"
-                + ".onChange(of:input.keyboardAway){focused=false}}}", "\(modifier)")
+                + ".onChange(of:input.keyboardAway){focused=false}.onDisappear{focused=false}}}", "\(modifier)")
         let type = Self.squeezed(try Self.body(["private struct SearchFieldModifier"], in: Self.search))
         #expect(type.contains("@Bindablevarinput:SearchInput"), "\(type)")
         #expect(type.contains("varhost:SearchInput.Placement"), "\(type)")

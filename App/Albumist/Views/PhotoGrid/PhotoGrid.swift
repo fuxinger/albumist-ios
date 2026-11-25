@@ -93,6 +93,9 @@ struct PhotoGrid: View {
         .contentShape(Rectangle())
         .gesture(PhotoGridSelectDrag(isEnabled: selecting && !disabled, space: PhotoGridPlace.space,
                                      touchedDown: { gestures.touchedDown() }, onTouch: { touch in dragged(touch) }))
+        // `.gesture` is the only way to attach a representable, and it may wait for the photos'
+        // own gestures to fail: on a Mac two fingers on one photo made no step (UI run
+        // 45567033486). So its recognizer ends them at the second finger (`takeOver`).
         .gesture(PhotoGridPinch(isEnabled: !disabled, space: PhotoGridPlace.space,
                                 touchedDown: { gestures.touchedDown() }, onTouch: { touch in pinched(touch) }))
         .coordinateSpace(.named(PhotoGridPlace.space))
@@ -237,6 +240,8 @@ struct PhotoGrid: View {
             gestures.beginPinch(touch, columns: PhotoGridZoom.columns(stored: storedColumns), scroller: scroller)
         case .changed:
             guard let zoom = gestures.pinch(touch) else { return }
+            // For a UI run's record (`PhotoGridPinchRecord`), only while it asks for one.
+            if ProgressLineLog.isOn { ProgressLineLog.mark("grid pinch step \(zoom.from) to \(zoom.to) at " + String(format: "%.2f", touch.scale)) }
             step(to: zoom.to, from: zoom.from, keeping: zoom.photo, anchor: { side in
                 PhotoGridZoom.anchor(fingerY: zoom.fingerY, visibleHeight: zoom.visibleHeight, side: side, pointInPhoto: zoom.pointInPhoto)
             }, around: zoom.point)

@@ -42,6 +42,64 @@ extension PhotoGridSourceTests {
         #expect(grid.contains("if UITestSupport.isRunning { UserDefaults.standard.removeObject(forKey: key) }"))
     }
 
+    /// Two fingers on the grid are a pinch from the second finger on (UI run 45567033486: on a
+    /// Mac two fingers on one photo made no step and opened nothing). A representable has
+    /// `.gesture` only (`simultaneousGesture` and `highPriorityGesture` take a SwiftUI
+    /// `Gesture`), which may leave it waiting for the photos' own gestures to fail, and two
+    /// fingers on one photo never make them fail. So its recognizer ends them at the second
+    /// finger: the photo's button (tap and pressed look), the long press's menu and, while the
+    /// grid selects, the drag, whose ticks stay; pans (scrolling, the swipe back) and what is the
+    /// scroll view's or the window's go on. Beside it run only the drag (a second finger reaches
+    /// the pinch while a drag runs) and the scroll view's pan until it begins: a pinch beside the
+    /// button or the menu would let them open or lift under the fingers. What a touch did goes to
+    /// a UI run's record only while one asks for it.
+    @Test func twoFingersAreAPinchFromTheSecondFinger() throws {
+        let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
+        let drag = try #require(view.range(of: ".gesture(PhotoGridSelectDrag("), "\(view)")
+        let pinch = try #require(view.range(of: ".gesture(PhotoGridPinch("), "\(view)")
+        let space = try #require(view.range(of: ".coordinateSpace(.named(PhotoGridPlace.space))"), "\(view)")
+        #expect(drag.upperBound <= pinch.lowerBound && pinch.upperBound <= space.lowerBound, "\(view)")
+        #expect(try Self.code(Self.recognizers).contains("import UIKit.UIGestureRecognizerSubclass"), "touchesBegan is the subclass's")
+        let pinchRecognizer = "final class PhotoGridPinchRecognizer"
+        // At the second finger, right after every gesture of the fingers heard of them.
+        let touched = Self.squeezed(try Self.body([pinchRecognizer, "override func touchesBegan("], in: Self.recognizers))
+        var last = touched.startIndex
+        for step in ["super.touchesBegan(touches,with:event)", "guardnumberOfTouches>1,state==.possibleelse{return}",
+                     "letfingers=event.touches(for:self)??touches", "Task{@MainActor[weakself]inself?.takeOver(fingers)}"] {
+            let found = try #require(touched.range(of: step, range: last..<touched.endIndex), "\(step) is not in its place: \(touched)")
+            last = found.upperBound
+        }
+        let takeOver = Self.squeezed(try Self.body([pinchRecognizer, "private func takeOver("], in: Self.recognizers))
+        #expect(takeOver.hasPrefix("{letready=state==.possible&&numberOfTouches>1ifProgressLineLog.isOn{record.tookOver=ready}"
+                                   + "guardreadyelse{return}"), "\(takeOver)")
+        for rule in ["$0.gestureRecognizers??[]", "[ObjectIdentifier(self)]", "Self.givesWay(other)",
+                     "other.isEnabled=falseother.isEnabled=true"] {
+            #expect(takeOver.contains(rule), "\(rule): \(takeOver)")
+        }
+        let givesWay = Self.squeezed(try Self.body([pinchRecognizer, "private static func givesWay("], in: Self.recognizers))
+        #expect(givesWay == "{guardother.isEnabled,!(other.delegateisUIScrollView),!(other.viewisUIWindow)else{returnfalse}"
+                            + "ifotherisPhotoGridSelectRecognizer{returntrue}"
+                            + "return!(otherisUIPanGestureRecognizer)&&[.possible,.began,.changed].contains(other.state)}", "\(givesWay)")
+        let beside = Self.squeezed(try Self.body([pinchRecognizer, "shouldRecognizeSimultaneouslyWith"], in: Self.recognizers))
+        #expect(beside == "{ifotherGestureRecognizerisPhotoGridSelectRecognizer{returntrue}guardstate==.possible,"
+                          + "letscrollView=otherGestureRecognizer.viewas?UIScrollView,otherGestureRecognizer===scrollView.panGestureRecognizer"
+                          + "else{returnfalse}scrollPan=otherGestureRecognizerreturntrue}", "\(beside)")
+        // The record: one line when the fingers lift, a step's line, only while a UI run asks.
+        let reset = Self.squeezed(try Self.body([pinchRecognizer, "override func reset("], in: Self.recognizers))
+        #expect(reset == "{super.reset()ifletline=record.line,ProgressLineLog.isOn{ProgressLineLog.mark(line)}record=PhotoGridPinchRecord()}",
+                "\(reset)")
+        let pinched = Self.squeezed(try Self.body(["struct PhotoGrid: View", "private func pinched("], in: Self.grid))
+        let marked = try #require(pinched.range(of: "ifProgressLineLog.isOn{ProgressLineLog.mark("), "\(pinched)")
+        let stepped = try #require(pinched.range(of: "step(to:zoom.to,from:zoom.from"), "\(pinched)")
+        #expect(marked.upperBound <= stepped.lowerBound, "\(pinched)")
+        for path in [Self.grid, Self.recognizers, Self.state] {
+            let code = Self.squeezed(try Self.code(path))
+            let marks = code.components(separatedBy: "ProgressLineLog.mark(").count
+            let asked = code.components(separatedBy: "ProgressLineLog.isOn{ProgressLineLog.mark(").count
+            #expect(marks == asked, "\(path) writes to the record without asking whether a UI run wants it")
+        }
+    }
+
     /// After a zoom step lands the page scrolls plainly again (review L6): the scroll view finds
     /// the grid's photos by id only while a step is on its way (the scroll target layout is on
     /// only then, so it follows no photo while the user scrolls), and once the step landed (the

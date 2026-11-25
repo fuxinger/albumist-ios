@@ -373,7 +373,12 @@ class HangNamingTests(unittest.TestCase):
         # UI run 44870948643 (accessibility): naming the stack in `answered` (main thread) was
         # itself reported as a 492 ms hang of the app. The naming runs on `hangNaming` now.
         swift = open(os.path.join(ROOT, "App", "Albumist", "Platform", "UITestSupport.swift"), encoding="utf-8").read()
-        body = swift.split("private func answered() {", 1)[1].split("\n    }\n", 1)[0]
+        # Since the SwiftLint gate (25.11.) `answered` hands the naming to `nameHang`.
+        answered = swift.split("private func answered() {", 1)[1].split("\n    }\n", 1)[0]
+        self.assertIn("nameHang(", answered)
+        self.assertNotIn("Self.symbol(", answered)
+        self.assertNotIn("HangKind(frames:", answered)
+        body = swift.split("private func nameHang(", 1)[1].split("\n    }\n", 1)[0]
         naming = body.index("Self.hangNaming.async")
         self.assertLess(naming, body.index("Self.symbol("))
         self.assertLess(naming, body.index("HangKind(frames:"))

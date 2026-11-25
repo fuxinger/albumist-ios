@@ -464,7 +464,7 @@ final class MainThreadWatch: @unchecked Sendable {
         lock.unlock()
         guard asked != nil else { return }
         if waited >= Self.hangLimit - Self.tick {
-            nameHang(addresses, waited: waited, sections: hangNames, inactive: inactive, started: started, starved: starved)
+            nameHang(addresses, waited: waited, hangNames: hangNames, HangState(inactive: inactive, started: started, starved: starved))
         }
         // Written only here, on the main thread.
         if waited > 0.5, let file { writeStall(waited: waited, since: since, work: work, to: file) }
@@ -478,14 +478,19 @@ final class MainThreadWatch: @unchecked Sendable {
         }
     }
 
+    /// What the hang's kind needs besides its frames (`HangKind`).
+    private struct HangState {
+        let inactive: Bool, started: Bool, starved: Bool
+    }
+
     /// Names a hang's stack off the main thread: `dladdr` and demangling of up to 64 frames took up
     /// to half a second when the images' symbol tables were cold, and the watch reported its own
     /// naming as a hang of the app (accessibility, UI run 44870948643).
-    private func nameHang(_ addresses: [UInt], waited: Double, sections: String, inactive: Bool, started: Bool, starved: Bool) {
+    private func nameHang(_ addresses: [UInt], waited: Double, hangNames: String, _ state: HangState) {
         Self.hangNaming.async { [self] in
             let frames = addresses.enumerated().map { Self.symbol($0.element, isReturnAddress: $0.offset > 0) }
-            let kind = HangKind(frames: frames, inactive: inactive, beforeFirstActive: !started, starved: starved)
-            note("UI_MAIN_HANG \(Int(waited * 1000)) ms \(kind.rawValue) in [\(sections)]: \(HangKind.shortStack(frames))")
+            let kind = HangKind(frames: frames, inactive: state.inactive, beforeFirstActive: !state.started, starved: state.starved)
+            note("UI_MAIN_HANG \(Int(waited * 1000)) ms \(kind.rawValue) in [\(hangNames)]: \(HangKind.shortStack(frames))")
         }
     }
 

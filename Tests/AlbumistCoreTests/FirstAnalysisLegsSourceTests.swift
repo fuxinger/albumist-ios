@@ -6,7 +6,7 @@ import AlbumistTestSupport
 /// X9 as the App wires it (verification reviews X9 and Y, the lead's decisions): an analysis that
 /// may bring the first 100 % and ran in legs (paused, cut off by iOS, closed and gone on later) is
 /// one wait for "Analyse fertig" and its 100 %. The rule is `FirstAnalysisLegs` with
-/// `FirstAnalysisMoment.mayBeBrought` (tested in `FirstAnalysisLegsTests` and
+/// `FirstAnalysisMoment.mayBeBrought` and `legsGoOn` (tested in `FirstAnalysisLegsTests` and
 /// `FirstAnalysisLegsWhileOwedTests`); the model tells where a run starts, works and ends, and the
 /// moment's store keeps the legs beside the moment (`FirstAnalysisMomentStore`). The App does not
 /// build on Linux, so these tests read its code (`AppSource`, with the paths and helpers of

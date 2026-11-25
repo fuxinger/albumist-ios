@@ -115,9 +115,10 @@ struct FirstAnalysisLegsTests {
         #expect(FirstAnalysisLegs(kept: legs.kept, owed: false).kept == .none)
     }
 
-    /// A run that does not go on from the resume position starts the analysis anew (the first run,
-    /// another part of the library, "Analyse neu aufbauen", a new or restored database: the
-    /// resume position was dropped): the legs before it are dropped with it.
+    /// A run of the library as a whole that does not go on from the resume position starts the
+    /// analysis anew (the first run, another part of the library, "Analyse neu aufbauen", a new or
+    /// restored database: the resume position was dropped): the legs before it are dropped with it.
+    /// The rest after only the shared photos goes on without it (`whoseLegsGoOnAsARunStarts`).
     @Test func aNewAnalysisStartsItsLegsAnew() {
         var legs = FirstAnalysisLegs()
         _ = Self.run(&legs, 40, finished: false, goesOn: false)

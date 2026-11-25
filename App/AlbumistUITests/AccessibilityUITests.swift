@@ -566,6 +566,7 @@ final class AccessibilityUITests: XCTestCase {
         case .moving: break // failed in the wait
         case .unread: print("A11Y_WARN \(screen) | not checked at rest: no snapshot")
         }
+        answerLateNotificationAlert(before: screen)
         shot("a11y-" + slug(screen))
         let chrome = chromeFrames()
         UITestOnboarding.clock("check start \(screen)")

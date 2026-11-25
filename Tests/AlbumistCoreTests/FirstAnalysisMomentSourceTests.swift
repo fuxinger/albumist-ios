@@ -342,6 +342,23 @@ struct FirstAnalysisMomentSourceTests {
         #expect(demo.contains("+ 45 + 12 + Self.screenshots.count + Self.documents.count + 1"), "the demo library changed size")
     }
 
+    /// The UI test keeps what its wait for "Analyse fertig" saw (verification review Y, Y6): the
+    /// 20 s it waits for the card or the moment count "Analyse fertig" seen in them as celebrated,
+    /// so a run that starts in the 5 s after (it replaces the card) cannot turn a celebrated
+    /// finish into a failure.
+    @Test func theUITestKeepsWhatItsWaitSaw() throws {
+        let test = AppSource.code(try AppSource.read(Self.uiTest), keepStrings: true)
+        let watch = try Self.body(["final class ShowAndHandwritingUITests", "private func watchAnalysis("], in: test)
+        let seen = "end.celebrated = end.celebrated || finished.exists"
+        let wait = try #require(watch.range(of: "UITestWait.holds(timeout: 20) {"), "\(watch)")
+        let during = try #require(watch.range(of: seen), "the wait forgets what it saw: \(watch)")
+        let moment = try #require(watch.range(of: "end.moment = moment.waitForExistence(timeout: 5)"), "\(watch)")
+        #expect(wait.upperBound < during.lowerBound && during.upperBound < moment.lowerBound, "\(watch)")
+        let after = try #require(watch.range(of: seen, options: .backwards), "\(watch)")
+        #expect(moment.upperBound < after.lowerBound, "the end forgets what the wait saw: \(watch)")
+        #expect(!watch.contains("end.celebrated = finished.exists"), "\(watch)")
+    }
+
     /// The switches of DS-08 live with the other UI-test switches (`UITestSwitches.swift`), read
     /// through `flag`, which is false unless a debug build was started by the UI tests
     /// (`UITestSupport.isRunning` is false in a release build), and nothing else in the App reads

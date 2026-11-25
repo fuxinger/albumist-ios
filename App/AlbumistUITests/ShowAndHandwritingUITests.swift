@@ -165,13 +165,17 @@ final class ShowAndHandwritingUITests: XCTestCase {
         // line above; "Analyse fertig" comes only after the counts are made anew and the safety
         // copy, on a busy Mac more than a few seconds later: up to 20 s for the card or the moment
         // (verification review V, X7). The card claims the moment as it appears: a few seconds
-        // more for it.
+        // more for it. What the wait saw counts: a run that starts in those seconds replaces the
+        // card, and a celebrated finish stays celebrated (verification review Y, Y6).
         let finished = app.buttons["analysis.finished"]
         if end.ended && !end.moment {
-            _ = UITestWait.holds(timeout: 20) { finished.exists || moment.exists }
+            _ = UITestWait.holds(timeout: 20) {
+                end.celebrated = end.celebrated || finished.exists
+                return end.celebrated || moment.exists
+            }
             end.moment = moment.waitForExistence(timeout: 5)
         }
-        end.celebrated = finished.exists
+        end.celebrated = end.celebrated || finished.exists
         print("UI_TIMING \(what) \(end.seconds) s (its Pause seen: \(ran))")
         print(end.ended ? "UI_STEP_OK \(what) ended" : "UI_STEP_MISSING \(what) ended (timeout \(Int(timeout)) s)")
         XCTAssertTrue(end.ended, "\(what) did not end within \(Int(timeout)) s")

@@ -1913,5 +1913,37 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(seen, [70])
 
 
+class SwiftUIStreamTests(unittest.TestCase):
+    """The live system log of a pass streams at the default level (25.11.: debug level made
+    the simulator's diagnosticd the second largest process) and still sees every line the
+    gates read."""
+
+    def test_streams_at_the_default_level(self):
+        command = ui_tests.swiftui_stream_command("UDID")
+        self.assertEqual(command[:6], ["xcrun", "simctl", "spawn", "UDID", "log", "stream"])
+        self.assertNotIn("--level", command)
+        self.assertNotIn("debug", command)
+        self.assertNotIn("info", command)
+
+    def test_keeps_faults_swiftui_and_navigation_warnings(self):
+        command = ui_tests.swiftui_stream_command("UDID")
+        predicate = command[command.index("--predicate") + 1]
+        self.assertIn('process == "Albumist"', predicate)
+        self.assertIn("messageType == fault", predicate)
+        self.assertIn('subsystem == "com.apple.SwiftUI"', predicate)
+        self.assertIn("navigationDestination", predicate)
+
+    def test_the_apps_gate_lines_are_faults(self):
+        """UI_MAIN_HANG, UI_MAIN_STALL and the main thread checker line come from
+        MainThreadWatch.note; at the default level they arrive only as faults (or default)."""
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+        with open(os.path.join(root, "App", "Albumist", "Platform", "UITestSupport.swift"), encoding="utf-8") as f:
+            source = f.read()
+        note = re.search(r"private func note\(_ text: String\) \{\s*(.*?)\n\s*\}", source, re.S)
+        self.assertIsNotNone(note)
+        self.assertIn("logger.fault(", note.group(1))
+        self.assertNotRegex(source, r"logger\.(debug|info)\(")
+
+
 if __name__ == "__main__":
     unittest.main()

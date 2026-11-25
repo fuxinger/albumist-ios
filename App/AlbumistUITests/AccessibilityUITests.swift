@@ -495,11 +495,14 @@ final class AccessibilityUITests: XCTestCase {
             // The keyboard the focused field brings up, so the check sees it as it stays; not
             // asserted (without it the check runs as before, on the whole screen).
             _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+            // iOS' one-time slide-to-type tip over the keyboard is not the app's (UITestKeyboardTip).
+            UITestKeyboardTip.dismissIfShown(app, step: "\(tag) search")
             check("\(tag) search", english: english)
             let field = app.searchFields.firstMatch
             if field.waitForExistence(timeout: 5) {
                 field.tap()
                 field.typeText(w.searchQuery)
+                UITestKeyboardTip.dismissIfShown(app, step: "\(tag) search typed", timeout: 1)
                 // The search's answer before the audit: its chips, results or empty state
                 // (SearchView sets them together). What they say is checked in SearchUITests.
                 let answer = app.descendants(matching: .any)

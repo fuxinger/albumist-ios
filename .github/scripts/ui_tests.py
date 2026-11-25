@@ -1335,6 +1335,23 @@ MTC_PROBE_ON = False
 CONSOLES: list[str] = []
 
 
+def swiftui_stream_command(udid: str) -> list[str]:
+    """The live system log of a pass (`<name>-swiftui.txt`): SwiftUI's runtime warnings, the
+    app's faults (UI_MAIN_HANG, UI_MAIN_STALL and the main thread checker line are faults,
+    UITestSupport `note`) and navigation warnings.
+
+    At the default level, not `--level debug` (until 25.11.): streaming at debug level makes
+    every process of the simulator hand its debug and info messages to diagnosticd, which
+    then filters them by the predicate. In the full UI run 45662948348 the simulator's
+    diagnosticd was the second largest process after the app (PASS_TOP, about a quarter of
+    a core on average in the device group), and every line the gates read from this file was
+    a fault (UI_RUNTIME_WARNING type `F`). The default level keeps default, error and fault
+    messages, so no line the gates use is lost."""
+    return ["xcrun", "simctl", "spawn", udid, "log", "stream", "--style", "compact",
+            "--predicate", 'process == "Albumist" AND (subsystem == "com.apple.SwiftUI" OR messageType == fault '
+                           'OR eventMessage CONTAINS[c] "navigationDestination")']
+
+
 def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str, str, float, bool]:
     """One xcodebuild run; returns (status, log text, result bundle path, start time, whether
     the watchdog stopped it)."""
@@ -1354,11 +1371,7 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     # SwiftUI reports broken navigation (link without destination) and similar runtime problems
     # only in the system log, so it is recorded during the whole pass.
     with open(os.path.join(args.out, f"{args.name}-swiftui.txt"), "a") as swiftui:
-        stream = subprocess.Popen(
-            ["xcrun", "simctl", "spawn", args.udid, "log", "stream", "--style", "compact", "--level", "debug",
-             "--predicate", 'process == "Albumist" AND (subsystem == "com.apple.SwiftUI" OR messageType == fault '
-                            'OR eventMessage CONTAINS[c] "navigationDestination")'],
-            stdout=swiftui, stderr=subprocess.STDOUT)
+        stream = subprocess.Popen(swiftui_stream_command(args.udid), stdout=swiftui, stderr=subprocess.STDOUT)
     recorder = None
     if args.video and not os.path.exists(args.video):
         recorder = Recorder(args.udid, log_path, args.video)

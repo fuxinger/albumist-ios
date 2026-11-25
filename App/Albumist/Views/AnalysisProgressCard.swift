@@ -630,17 +630,19 @@ struct AnalysisFinishedView: View {
 
 /// "Analyse fertig" for VoiceOver, once per finished run (design wave 3, H14; the rule is
 /// `FinishAnnouncement`). One per app, outside the card, which is made anew between the end of a
-/// run and "Analyse fertig": the model tells it, with `FinishMoment`, when a run brings a new
-/// finish and what the end's wait showed (`AppModel`, where the notification is decided), the
-/// finished card when it is first seen (`AnalysisFinishedView.play`).
+/// run and "Analyse fertig": made at launch (`AppModel.load`), the model tells it, with
+/// `FinishMoment`, when a run brings a new finish and what the end's wait showed (`AppModel`,
+/// where the notification is decided), the finished card when it is first seen
+/// (`AnalysisFinishedView.play`).
 @MainActor
 final class FinishAnnouncementStore {
     static let shared = FinishAnnouncementStore()
     private var rule = FinishAnnouncement()
-    /// The user allows Albumist's notifications, as iOS last said: read as the store is made and
-    /// each time Albumist becomes active (back from the Settings app, after iOS's question), so
-    /// the decision after a run's wait does not wait for iOS (review T1 of H14's round 2). Not
-    /// allowed until iOS has answered: the card owes the finish then, said twice rather than never.
+    /// The user allows Albumist's notifications, as iOS last said: read as the store is made (at
+    /// launch, so long before a run ends) and each time Albumist becomes active (back from the
+    /// Settings app, after iOS's question), so the decision after a run's wait does not wait for
+    /// iOS (review T1 of H14's round 2); asked once more right then, and that answer decides
+    /// (`afterWait`, review Q2 of round 3). Not allowed until iOS has answered.
     private var notificationsAllowed = false
     private var observers: [any NSObjectProtocol] = []
 
@@ -662,11 +664,20 @@ final class FinishAnnouncementStore {
     /// What the finish moment showed after the wait: a notification said it, or the card owes it.
     /// The notification says it only where iOS shows it: with Albumist in the background, read in
     /// the same step as the model's `appActive` (in front, also while inactive, `willPresent`
-    /// shows nothing), and with its notifications allowed (review T1 of H14's round 2).
+    /// shows nothing), and with its notifications allowed (review T1 of H14's round 2). Allowed as
+    /// iOS last said, and iOS is asked once more right here (review Q2 of round 3): turned off in
+    /// Settings while Albumist was in the background, the card owes the finish again; allowed
+    /// though the value here said no, the notification said it, and the card stays silent. The
+    /// answer comes within milliseconds, long before the card can be seen (only while Albumist is
+    /// active); the rule takes it only for a notification sent in the background.
     func afterWait(_ shown: FinishMoment.Shown) {
         rule.afterWait(card: shown.card, notification: shown.notification,
                        inBackground: UIApplication.shared.applicationState == .background,
                        notificationsAllowed: notificationsAllowed)
+        Task {
+            notificationsAllowed = await Self.notificationsAllowedNow()
+            rule.notificationsAnswered(allowed: notificationsAllowed)
+        }
     }
 
     /// The finished card is seen for the first time for its run (its check mark is claimed, only

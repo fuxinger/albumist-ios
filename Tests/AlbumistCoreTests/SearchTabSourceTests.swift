@@ -111,7 +111,7 @@ struct SearchTabSourceTests {
         let modifier = Self.squeezed(try Self.body(["private struct SearchFieldModifier", "func body(content: Content)"], in: Self.search))
         #expect(modifier == "{ifhost!=MainTabs.searchField.host{content}"
                 + "elseifMainTabs.searchField==.tabViewKeepingSearch{\(Self.field).searchFocused($focused)"
-                + ".onChange(of:focused){_,nowininput.isFocused=now}.onChange(of:input.isFocused){_,nowinif!now{focused=false}}}"
+                + ".onChange(of:input.keyboardAway){focused=false}}"
                 + "elseifMainTabs.searchField==.tabViewOpeningKeyboard{\(Self.field).tabViewSearchActivation(.searchTabSelection)}"
                 + "else{\(Self.field).onAppear{ifinput.text.isEmpty{input.isPresented=true}}}}", "\(modifier)")
         let type = Self.squeezed(try Self.body(["private struct SearchFieldModifier"], in: Self.search))
@@ -176,7 +176,11 @@ struct SearchTabSourceTests {
     /// field's focus bound with `.searchFocused`, and the query, the hits and the scroll position
     /// stay, as after a look at another tab; ending the search there emptied the field (Apple:
     /// dismissing a search clears its text). With the other two placements the search ends, so
-    /// neither its field nor the keyboard stays up over "Vorschläge".
+    /// neither its field nor the keyboard stays up over "Vorschläge". The keyboard is taken away
+    /// by a request, a counter the route raises (review Q3 of round 3), not by a mirrored focus:
+    /// had the binding not seen the field of the tab bar focused, the mirror was false already,
+    /// nothing changed, and the keyboard stayed. Asking a field without focus to give it up costs
+    /// nothing.
     @Test func aRouteLeavesTheSearchAsItsPlacementSays() throws {
         let body = Self.squeezed(try Self.body(["struct MainTabs", "var body: some View"], in: Self.root))
         let route = try #require(body.range(of: ".onChange(of:model.route,initial:true){_,targetin"), "\(body)")
@@ -186,9 +190,14 @@ struct SearchTabSourceTests {
         #expect(leaves.upperBound <= chosen.lowerBound, "the search is left after the tab changed")
         #expect(!body.contains("search.isPresented"), "the tabs end the search themselves, whatever the placement: \(body)")
         let input = try Self.body(["final class SearchInput"], in: Self.search)
-        #expect(input.contains("    var isFocused = false\n"), "\(input)")
+        #expect(input.contains("    private(set) var keyboardAway = 0\n"), "\(input)")
+        #expect(!input.contains("isFocused"), "the keyboard follows a mirrored focus: \(input)")
         let left = Self.squeezed(try Self.body(["final class SearchInput", "func leftInCode()"], in: Self.search))
-        #expect(left == "{ifMainTabs.searchField==.tabViewKeepingSearch{isFocused=false}else{isPresented=false}}", "\(left)")
+        #expect(left == "{ifMainTabs.searchField==.tabViewKeepingSearch{keyboardAway&+=1}else{isPresented=false}}", "\(left)")
+        // Raised there only, and only the field's modifier answers it.
+        let code = Self.squeezed(try Self.code(Self.search))
+        #expect(code.components(separatedBy: "keyboardAway&+=1").count - 1 == 1, "\(code)")
+        #expect(code.components(separatedBy: "input.keyboardAway").count - 1 == 1, "\(code)")
         // Its comment says what becomes of the query in each placement.
         let comment = try Self.docComment(above: "func leftInCode()", in: Self.search)
         for word in ["only the keyboard", "the query", "stay", "ends", "empties"] {
@@ -201,10 +210,12 @@ struct SearchTabSourceTests {
 
     /// Coming back to the search tab does not search again (review T3 of H14's round 2): the
     /// page's task starts again each time its page appears, so it asks `SearchAnswer` at its top,
-    /// right after the empty check, with the text and the facts' revision (`model.factsVersion`),
-    /// and does nothing when the answer on the page is the finished one for both: no second
-    /// question to Apple Intelligence, no "Verstanden als" going away and back, the pages of hits
-    /// shown stay. Only a new text shows the hits from the first page again.
+    /// right after the empty check, with the text and the revision of everything a search reads
+    /// (`model.searchRevisionNow()`, review Q1 of round 3: not only the photos' facts), and does
+    /// nothing when the answer on the page is the finished one for both: no second question to
+    /// Apple Intelligence, no "Verstanden als" going away and back, the pages of hits shown stay.
+    /// Only a new text shows the hits from the first page again. The task's id is the text alone:
+    /// a change is searched when the tab is chosen again, never while the page stays open.
     @Test func comingBackToTheTabDoesNotSearchAgain() throws {
         let type = try Self.body(["struct SearchView"], in: Self.search)
         #expect(type.contains("@State private var answer = SearchAnswer()"), "\(type)")
@@ -214,10 +225,20 @@ struct SearchTabSourceTests {
         let rest = String(page[task.upperBound...])
         #expect(rest.hasPrefix("lettext=queryguard!text.trimmingCharacters(in:.whitespaces).isEmptyelse{"
                 + "result=SearchResult();answer.emptied();suggestions=[]return}"
-                + "letfacts=model.factsVersionguardanswer.starts(text,facts:facts)else{return}"), "\(rest)")
-        #expect(rest.contains("result=found.beside(completions,for:text)ifanswer.shows(text,facts:facts){shown=Self.page}}"), "\(rest)")
+                + "letrevision=awaitmodel.searchRevisionNow()guard!Task.isCancelledelse{return}"
+                + "guardanswer.starts(text,revision:revision)else{return}"), "\(rest)")
+        #expect(rest.contains("result=found.beside(completions,for:text)ifanswer.shows(text,revision:revision){shown=Self.page}}"), "\(rest)")
+        #expect(!rest.contains("factsVersion"), "the answer keys on the photos' facts alone: \(rest)")
+        // The revision is asked by this task only, and is no task's id: no search of its own while
+        // the page stays open (during an analysis it would ask Apple Intelligence again and again).
+        let view = Self.squeezed(try Self.code(Self.search))
+        #expect(view.components(separatedBy: "searchRevision").count - 1 == 1, "\(view)")
+        #expect(page.components(separatedBy: ".task(id:").count - 1 == 2, "\(page)")
+        #expect(page.contains(".task(id:model.factsVersion){") && page.contains(".task(id:query){"), "\(page)")
         #expect(page.components(separatedBy: "shown=Self.page").count - 1 == 1, "\(page)")
         #expect(page.contains("ifletrewrite=model.lastSearchRewrite,!answer.searching{"), "\(page)")
+        // The core's two calls with the revision, nothing of the facts' revision.
+        #expect(!view.contains("facts:facts"), "\(view)")
         #expect(page.contains("ifanswer.text.isEmpty{"), "\(page)")
         let parts = Self.squeezed(try Self.body(["extension SearchView"], in: Self.search))
         #expect(parts.contains("ContentUnavailableView.search(text:answer.text)"), "\(parts)")

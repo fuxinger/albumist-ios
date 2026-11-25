@@ -187,17 +187,18 @@ final class PhotoGridGestureState {
     func endDrag() {
         ticker.stop()
         drag?.scroller?.endAutoScroll()
-        if drag != nil || waiting != nil { lift.gestureEnded() }
+        if drag != nil || waiting != nil { lift.gestureEnded(at: CACurrentMediaTime()) }
         drag = nil
         waiting = nil
     }
 
     /// Whether a tap on a photo now is the lift that ends a drag or a pinch (UIKit may hand it to
     /// the photo's button too, before or right after the gesture's end): it neither ticks nor
-    /// opens a photo of its own. A tap after the next finger touched is a tap again
-    /// (`PhotoGridLift`).
+    /// opens a photo of its own. A tap after the next finger touched is a tap again, and so is an
+    /// activation without a touch half a second after the end (`PhotoGridLift`), on the screen's
+    /// clock, which never jumps.
     var swallowsTap: Bool {
-        lift.swallowsTap
+        lift.swallowsTap(at: CACurrentMediaTime())
     }
 
     /// A finger touched the grid (either gesture's recognizer tells).
@@ -338,7 +339,7 @@ final class PhotoGridGestureState {
     }
 
     func endPinch() {
-        if zooming != nil { lift.gestureEnded() }
+        if zooming != nil { lift.gestureEnded(at: CACurrentMediaTime()) }
         zooming = nil
     }
 }

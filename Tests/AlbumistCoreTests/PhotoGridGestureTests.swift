@@ -113,31 +113,31 @@ struct PhotoGridGestureTests {
         #expect(selection == ["a", "b", "c"])
     }
 
-    // MARK: A gesture's lift (review L8)
+    // MARK: A gesture's lift (review L8, W3)
 
     /// The lift that ends a drag or a pinch is no tap (UIKit may hand it to the photo's button
     /// too, before or right after the gesture's end); a tap after the next finger touched down is
     /// one of its own, however soon: a tap right after a drag ticks, one right after a pinch opens.
     @Test func onlyTheLiftOfTheGestureThatEndedIsNoTap() {
         var lift = PhotoGridLift()
-        #expect(!lift.swallowsTap, "a plain tap")
+        #expect(!lift.swallowsTap(at: 0), "a plain tap")
         // A drag: its finger touches down, then it begins.
         lift.touchedDown()
         lift.gestureBegan()
-        #expect(lift.swallowsTap, "a tap while it runs")
-        lift.gestureEnded()
-        #expect(lift.swallowsTap, "its own lift")
-        #expect(lift.swallowsTap, "its lift, however late, until a finger touches again")
+        #expect(lift.swallowsTap(at: 1), "a tap while it runs")
+        lift.gestureEnded(at: 2)
+        #expect(lift.swallowsTap(at: 2), "its own lift")
+        #expect(lift.swallowsTap(at: 2.3), "its lift, a few frames later")
         lift.touchedDown()
-        #expect(!lift.swallowsTap, "a tap right after the drag ticks or unticks")
+        #expect(!lift.swallowsTap(at: 2.3), "a tap right after the drag ticks or unticks")
         // A pinch: its second finger touches down while it runs, which is no tap of its own.
         lift.gestureBegan()
         lift.touchedDown()
-        #expect(lift.swallowsTap)
-        lift.gestureEnded()
-        #expect(lift.swallowsTap, "the lift of its fingers")
+        #expect(lift.swallowsTap(at: 3))
+        lift.gestureEnded(at: 4)
+        #expect(lift.swallowsTap(at: 4.1), "the lift of its fingers")
         lift.touchedDown()
-        #expect(!lift.swallowsTap, "a tap right after the pinch opens")
+        #expect(!lift.swallowsTap(at: 4.1), "a tap right after the pinch opens")
     }
 
     /// A drag and a pinch at once: a tap is their lift until both ended and a finger touched again.
@@ -145,17 +145,35 @@ struct PhotoGridGestureTests {
         var lift = PhotoGridLift()
         lift.gestureBegan()
         lift.gestureBegan()
-        lift.gestureEnded()
+        lift.gestureEnded(at: 1)
         lift.touchedDown()
-        #expect(lift.swallowsTap, "the other one still runs")
-        lift.gestureEnded()
-        #expect(lift.swallowsTap)
+        #expect(lift.swallowsTap(at: 2), "the other one still runs")
+        lift.gestureEnded(at: 3)
+        #expect(lift.swallowsTap(at: 3.1))
         lift.touchedDown()
-        #expect(!lift.swallowsTap)
+        #expect(!lift.swallowsTap(at: 3.1))
         // An end without a beginning leaves nothing running.
-        lift.gestureEnded()
+        lift.gestureEnded(at: 5)
         lift.touchedDown()
-        #expect(!lift.swallowsTap)
+        #expect(!lift.swallowsTap(at: 5))
+    }
+
+    /// An activation that comes without a touch (VoiceOver's double tap, Switch Control's
+    /// "Tippen") a while after a drag or a pinch is a tap of its own: the lift UIKit hands the
+    /// button comes with the gesture's end, within half a second of it (review W3).
+    @Test func anActivationWithoutATouchLaterIsATapOfItsOwn() {
+        var lift = PhotoGridLift()
+        lift.gestureBegan()
+        lift.gestureEnded(at: 10)
+        #expect(lift.swallowsTap(at: 10), "right after the end: its lift")
+        #expect(lift.swallowsTap(at: 10 + PhotoGridLift.window - 0.01))
+        #expect(!lift.swallowsTap(at: 11), "no touch down and a second later: a tap of its own")
+        #expect(!lift.swallowsTap(at: 10 + PhotoGridLift.window))
+        // After a touch down: at once.
+        lift.gestureBegan()
+        lift.gestureEnded(at: 20)
+        lift.touchedDown()
+        #expect(!lift.swallowsTap(at: 20.01))
     }
 
     // MARK: The photo under the finger

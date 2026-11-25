@@ -97,20 +97,22 @@ struct PhotoGridSourceTests {
     /// The lift that ends a drag or a pinch (UIKit may hand it to the photo's button too) is no
     /// tap: the drag ticked its first photo already, and a pinch opens nothing. Only that lift
     /// (`PhotoGridLift`, review L8): both gestures tell of each finger that touches the grid, and
-    /// a tap after it is one of its own, however soon after a drag or a pinch.
+    /// a tap after it is one of its own, however soon after a drag or a pinch; so is an
+    /// activation without a touch half a second or more after the gesture's end (VoiceOver's
+    /// double tap, review W3), read on the screen's monotonic clock.
     @Test func aPhotoOpensAndTicksAsBefore() throws {
         let cell = try Self.body(["struct PhotoGrid: View", "private func cell("], in: Self.grid)
         let tap = Self.squeezed(cell)
         #expect(tap.contains("returnButton{guard!gestures.swallowsTapelse{return}guardselectingelse{open(id)return}"
                              + "ifisSelected{selection.remove(id)}else{selection.insert(id)}}"), "\(tap)")
         let lift = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "var swallowsTap: Bool"], in: Self.state))
-        #expect(lift == "{lift.swallowsTap}", "\(lift)")
+        #expect(lift == "{lift.swallowsTap(at:CACurrentMediaTime())}", "\(lift)")
         let state = try Self.code(Self.state)
-        #expect(!state.contains("Date()"), "a time window swallows the taps after the lift too")
+        #expect(!state.contains("Date()"), "the wall clock can jump")
         let end = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func endDrag("], in: Self.state))
-        #expect(end.contains("ifdrag!=nil||waiting!=nil{lift.gestureEnded()}"), "\(end)")
+        #expect(end.contains("ifdrag!=nil||waiting!=nil{lift.gestureEnded(at:CACurrentMediaTime())}"), "\(end)")
         let endPinch = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "func endPinch("], in: Self.state))
-        #expect(endPinch.contains("ifzooming!=nil{lift.gestureEnded()}"), "\(endPinch)")
+        #expect(endPinch.contains("ifzooming!=nil{lift.gestureEnded(at:CACurrentMediaTime())}"), "\(endPinch)")
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
         #expect(view.components(separatedBy: "touchedDown:{gestures.touchedDown()}").count - 1 == 2, "\(view)")
         for recognizer in ["final class PhotoGridSelectRecognizer", "final class PhotoGridPinchRecognizer"] {

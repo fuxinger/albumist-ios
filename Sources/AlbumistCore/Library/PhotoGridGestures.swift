@@ -148,12 +148,18 @@ public struct PhotoGridDrag: Equatable, Sendable {
 /// before or right after the gesture's end (review L8 of design wave 3): it neither ticks nor
 /// opens a photo, as the drag ticked its first photo already and a pinch opens nothing. Only
 /// that lift: once no gesture runs, the next finger that touches the grid begins a tap of its
-/// own, however soon (a tap right after a drag ticks or unticks, one right after a pinch opens).
+/// own, however soon (a tap right after a drag ticks or unticks, one right after a pinch opens),
+/// and so does an activation that comes later without a touch (VoiceOver's double tap, Switch
+/// Control): the lift comes with the gesture's end, within `window` of it (review W3).
 public struct PhotoGridLift: Equatable, Sendable {
+    /// How long after a gesture's end a tap may still be its lift, in seconds: UIKit hands the
+    /// lift to the button with the end, or a frame or two after it.
+    public static let window = 0.5
     /// The gestures running (a drag and a pinch may run at once).
     private var running = 0
-    /// A gesture ended and no finger touched since: a tap now is its lift.
-    private var lifting = false
+    /// When the last gesture ended (seconds on a clock that never jumps), while no finger touched
+    /// the grid since.
+    private var ended: Double?
 
     public init() {}
 
@@ -161,20 +167,24 @@ public struct PhotoGridLift: Equatable, Sendable {
         running += 1
     }
 
-    public mutating func gestureEnded() {
+    /// A gesture ended at `time`.
+    public mutating func gestureEnded(at time: Double) {
         running = max(0, running - 1)
-        lifting = true
+        ended = time
     }
 
     /// A finger touched the grid: once no gesture runs, what follows is no gesture's lift. A
     /// finger that touches while one runs (a pinch's second finger) is part of it.
     public mutating func touchedDown() {
-        if running == 0 { lifting = false }
+        if running == 0 { ended = nil }
     }
 
-    /// Whether a tap on a photo now is a gesture's, not one of its own.
-    public var swallowsTap: Bool {
-        running > 0 || lifting
+    /// Whether a tap on a photo at `time` is a gesture's, not one of its own: while one runs, and
+    /// within `window` of the last one's end before a finger touched again.
+    public func swallowsTap(at time: Double) -> Bool {
+        if running > 0 { return true }
+        guard let ended else { return false }
+        return time - ended < Self.window
     }
 }
 

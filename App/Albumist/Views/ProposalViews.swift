@@ -718,13 +718,14 @@ struct ProposalDetailView: View {
                 // that no one has any more (review C2 of design wave 2, N4).
                 guard isCurrent else { return }
                 let chosen = selected
-                Task {
-                    await model.removeFromProposal(chosen, proposal: proposal)
-                    withAnimation(.snappy) {
-                        selected = []
-                        selecting = false
-                    }
+                // The selection ends as the photos leave the page, at once, as in Photos; the
+                // suggestion is matched again behind it (UI run 45567033486: the selection's bar
+                // stayed over 5 s while that ran).
+                withAnimation(.snappy) {
+                    selected = []
+                    selecting = false
                 }
+                Task { await model.removeFromProposal(chosen, proposal: proposal) }
             }
         } message: {
             Text("Sie kommen nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleiben sie.")

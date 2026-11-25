@@ -255,6 +255,11 @@ extension LongPressSourceTests {
         // Both questions: for the photos ticked with "Auswählen", and for one photo's long press.
         let several = try #require(detail.range(of: "Button(\"Entfernen\",role:.destructive){"), "\(detail)")
         #expect(detail[several.upperBound...].hasPrefix("guardisCurrentelse{return}letchosen=selected"), "\(detail)")
+        // The selection ends as the photos leave the page, before the suggestion is matched
+        // again: the selection's bar stayed over 5 s while that ran (UI run 45567033486).
+        #expect(detail[several.upperBound...].hasPrefix("guardisCurrentelse{return}letchosen=selected"
+                                                        + "withAnimation(.snappy){selected=[]selecting=false}"
+                                                        + "Task{awaitmodel.removeFromProposal(chosen,proposal:proposal)}}"), "\(detail)")
         let one = try #require(detail.range(of: ".photoRemovalQuestion($removingPhoto){idin"), "\(detail)")
         #expect(detail[one.upperBound...].hasPrefix("guardisCurrentelse{return}Task{"), "\(detail)")
         // Their buttons wait, as "Nicht jetzt" and the main button do (only "Fertig" stays).

@@ -2,6 +2,9 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. Fotos aus einem Vorschlag entfernen (Design-Welle 3, noch in keinem Build): Nach „Entfernen“ endet das
+  Auswählen sofort, mit dem Foto, das die Seite verlässt; vorher blieb die Leiste „1 aus Vorschlag entfernen“
+  stehen, bis Albumist den Vorschlag neu abgeglichen hatte, auf dem Mac-Simulator über 5 Sekunden.
 - 25.11. Suche nach der Wahl von Fuchs „Runder Knopf, Suche bleibt“ (Design-Welle 3, DS-12a, noch in keinem
   Build): Die Suche ist ein eigener runder Knopf am Ende der Tab-Leiste. Ihre Wahl zeigt die Startpunkte und das
   Suchfeld, die Tastatur kommt erst beim Tippen ins Feld, und Suchtext und Treffer bleiben beim Blick in einen

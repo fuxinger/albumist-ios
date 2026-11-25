@@ -96,6 +96,9 @@ struct PhotoGrid: View {
         .gesture(PhotoGridPinch(isEnabled: !disabled, space: PhotoGridPlace.space,
                                 touchedDown: { gestures.touchedDown() }, onTouch: { touch in pinched(touch) }))
         .coordinateSpace(.named(PhotoGridPlace.space))
+        // A grid that goes while it scrolls by itself (its page went, the days were made anew)
+        // ends the drag as a lift does, so no page's next run starts from this one (review Z2).
+        .onDisappear { gestures.endDrag() }
         // After a pinch's step the grid settles from the old size around the fingers, so the
         // step looks like a zoom; not under Reduce Motion (`step(to:)`).
         .keyframeAnimator(initialValue: 1.0, trigger: settle.count) { content, scale in

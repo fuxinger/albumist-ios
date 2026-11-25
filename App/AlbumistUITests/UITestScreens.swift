@@ -126,11 +126,12 @@ enum UITestScreens {
 
         /// Leaves the search, so the three named tabs are back in the tab bar, hittable (iOS may
         /// fold them into one button beside an active search, and the keyboard covers them).
-        /// True when no search field is left or the tabs are back; at most two taps (the first
-        /// may close a photo opened from the results). The way out: `wayOut`.
+        /// True when no search field is left or the tabs are back; at most three taps: a photo
+        /// opened from the results, the field's own way out, and by default (where closing the
+        /// field stays on the search) the folded tabs. The way out: `wayOut`.
         @discardableResult
         static func leave(_ app: XCUIApplication, _ what: String) -> Bool {
-            for step in 0..<2 {
+            for step in 0..<3 {
                 guard app.searchFields.firstMatch.exists, !tabsBack(app) else { return true }
                 if step == 0 { print("UI_FACT \(what): leaving the search; \(facts(app))") }
                 guard let way = wayOut(app, what) else { return false }

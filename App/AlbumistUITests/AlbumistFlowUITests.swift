@@ -2120,16 +2120,17 @@ final class AlbumistFlowUITests: XCTestCase {
         // tapped, and the rest of the test ran under the settings sheet: every later step missed.
         // Now the dialog has 20 s, and the settings must close, both said by name when they do not.
         UITestWait.disappears(confirmRebuild, "rebuild dialog closed", timeout: 20)
-        // The rebuild is a run the user started, so the app may ask for notifications now; that
-        // system question took the "Fertig" tap in full UI run 45567316233 (flow-other, load 563):
-        // the settings stayed open for 20 s. As for the trial year (1c1f39d): answer it first,
+        // The rebuild is a run the user started, so the app asks for notifications now; that
+        // system question took the "Fertig" tap in full UI run 45567316233 (flow-other): its
+        // screenshot 60 shows the settings open under "“Albumist” Would Like to Send You
+        // Notifications", still there 58 s after the rebuild (`system alert in front before the Home press`). As for the trial year (1c1f39d): answer it first,
         // and tap once more, with a screenshot, when the settings did not close within 10 s.
         UITestWait.clearSystemAlert("after the rebuild, before closing the settings")
         let settingsDone = app.buttons["Fertig"]
         let settingsBar = app.navigationBars["Einstellungen"]
         if settingsDone.exists { settingsDone.tap() }
         if !UITestWait.holds(timeout: 10, { !settingsBar.exists }) {
-            print("UI_FACT settings still open 10 s after \"Fertig\" after the rebuild, trying again")
+            print("UI_FLAKY_RETRY \(UITestWait.testID(self)) settings still open 10 s after \"Fertig\" after the rebuild, tapped again")
             UITestWait.clearSystemAlert("after a \"Fertig\" that closed nothing")
             shot("x-settings-not-closed-rebuild")
             if settingsDone.exists { settingsDone.tap() }
@@ -2226,7 +2227,7 @@ final class AlbumistFlowUITests: XCTestCase {
         if tap(app.buttons["Einstellungen"], "settings for trial year") {
             let settingsBar = app.navigationBars["Einstellungen"]
             if !UITestWait.holds(timeout: 10, { settingsBar.exists }) {
-                print("UI_FACT settings did not open 10 s after the tap for the trial year, trying again")
+                print("UI_FLAKY_RETRY \(UITestWait.testID(self)) settings did not open 10 s after the tap for the trial year, tapped again")
                 UITestWait.clearSystemAlert("after a settings tap that opened nothing")
                 shot("x-settings-not-open-trial-year")
                 if app.buttons["Einstellungen"].exists { app.buttons["Einstellungen"].tap() }

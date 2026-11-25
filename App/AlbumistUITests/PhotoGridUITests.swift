@@ -6,12 +6,13 @@ import UIKit
 /// first it touched to the one under it, across rows and days, and a drag that starts on a
 /// ticked photo takes the ticks away; a vertical swipe scrolls and ticks nothing; a tap right
 /// after a drag ticks; from the left screen edge a suggestion's page goes back. Two fingers
-/// show three, five or seven photos in a row, one step per pinch, the same size in a
-/// suggestion's photos, and three again after a relaunch (a UI run starts at the standard
-/// size, `PhotoGridMemory`). Each test brings the app to an onboarded, analysed demo library
-/// with every year taken in by itself; in CI the class runs in the group flow-other
-/// (.github/ui-groups.json). Log conventions as in AlbumistFlowUITests: `UI_STEP_OK` /
-/// `UI_STEP_MISSING`, `UI_FACT`, screenshots as `PREVIEW_JPEG ui-grid-…` chunks.
+/// show three, five or seven photos in a row, one step per pinch, keep the photo under them
+/// also after the page was out of sight, show the same size in a suggestion's photos, and
+/// three again after a relaunch (a UI run starts at the standard size, `PhotoGridMemory`).
+/// Each test brings the app to an onboarded, analysed demo library with every year taken in by
+/// itself; in CI the class runs in the group flow-other (.github/ui-groups.json). Log
+/// conventions as in AlbumistFlowUITests: `UI_STEP_OK` / `UI_STEP_MISSING`, `UI_FACT`,
+/// screenshots as `PREVIEW_JPEG ui-grid-…` chunks.
 @MainActor
 final class PhotoGridUITests: XCTestCase {
     private var app = XCUIApplication()
@@ -117,10 +118,11 @@ final class PhotoGridUITests: XCTestCase {
         return photos
     }
 
-    /// A photo of a grid as one snapshot saw it.
+    /// A photo of a grid as one snapshot saw it; its label is when it was taken (to the minute).
     private struct Seen {
         var frame: CGRect
         var selected: Bool
+        var label: String
     }
 
     /// The photos `identifier` in the grid's order (depth first, as they lie in the grid), from
@@ -132,7 +134,7 @@ final class PhotoGridUITests: XCTestCase {
         var stack: [any XCUIElementSnapshot] = [root]
         while let node = stack.popLast() {
             if node.elementType == .button, node.identifier == identifier {
-                found.append(Seen(frame: node.frame, selected: node.isSelected))
+                found.append(Seen(frame: node.frame, selected: node.isSelected, label: node.label))
             }
             stack.append(contentsOf: node.children.reversed())
         }
@@ -321,8 +323,11 @@ final class PhotoGridUITests: XCTestCase {
     // MARK: 2 Pinch to zoom
 
     /// Two fingers change how many photos a row shows, one step per pinch: three, then five and
-    /// seven when they pinch, five again when they spread. A suggestion's photos show the same
-    /// size (one for both grids), and a relaunch of a UI run starts at three again.
+    /// seven when they pinch, five again when they spread. On a page a few screens down that was
+    /// out of sight (another tab, and back) the photo under the fingers stays under them, right
+    /// after the step and a second later (review W5 of H10: the page finds its photos again, L1,
+    /// and the step lands without a jump, L6). A suggestion's photos show the same size (one for
+    /// both grids), and a relaunch of a UI run starts at three again.
     func test2_TwoFingersShowThreeFiveOrSevenInARow() {
         continueAfterFailure = true
         let test = "PhotoGridUITests.test2"
@@ -336,33 +341,68 @@ final class PhotoGridUITests: XCTestCase {
             return met
         }
         guard shown(3, "at the start") else { return }
+        // A few screens down, then back by about one, so the page is away from its end (there the
+        // scroll view cannot keep a photo in place when the rows get smaller); then away to
+        // another tab and back, which shows the page again without building its photos anew.
+        for _ in 0..<3 { app.swipeUp() }
+        for _ in 0..<2 { app.swipeDown(velocity: .slow) }
+        UITestWait.screenAtRest(app, "\(test): the page at rest a few screens down")
+        let suggestions = UITestScreens.Tabs.german.suggestions
+        let unsorted = UITestScreens.Tabs.german.unsorted
+        if tap(tabButton(suggestions), "\(test): tab \(suggestions) for a moment") {
+            UITestWait.until("\(test): tab \(suggestions) shown", timeout: 5) { app.tabBars.buttons[suggestions].isSelected }
+            tap(tabButton(unsorted), "\(test): back to \(unsorted)")
+            UITestWait.appears(photos.firstMatch, "\(test): its photos again", timeout: 10)
+        }
         // Two fingers on the photo nearest the middle of the screen (the grid, not its bars). The
         // element is the one the snapshot saw there: checked by its frame, else the first photo
-        // of the query that lies in the middle third of the screen.
-        func pinch(_ scale: CGFloat, _ what: String) {
+        // of the query that lies in the middle third of the screen. What was seen of it, read
+        // before the pinch.
+        func pinch(_ scale: CGFloat, _ what: String) -> Seen? {
             let window = app.windows.firstMatch.frame
-            let all = self.photos("library.photo").map(\.frame)
-            guard let nearest = all.indices.min(by: { abs(all[$0].midY - window.midY) < abs(all[$1].midY - window.midY) }) else {
+            let all = self.photos("library.photo")
+            guard let nearest = all.indices.min(by: {
+                abs(all[$0].frame.midY - window.midY) < abs(all[$1].frame.midY - window.midY)
+            }) else {
                 XCTFail("\(test): no photo to pinch (\(what))")
-                return
+                return nil
             }
             var target = photos.element(boundBy: nearest)
-            if target.frame != all[nearest],
+            var held = all[nearest]
+            if target.frame != held.frame,
                let middle = (0..<min(photos.count, 40)).lazy.map({ photos.element(boundBy: $0) }).first(where: {
                    abs($0.frame.midY - window.midY) < window.height / 6
                }) {
                 target = middle
+                held = Seen(frame: middle.frame, selected: false, label: middle.label)
             }
-            print("UI_STEP_OK \(test): pinch \(scale) on the photo at \(Int(target.frame.minX)),\(Int(target.frame.minY)) (\(what))")
+            print("UI_STEP_OK \(test): pinch \(scale) on '\(held.label)' at \(Int(held.frame.minX)),\(Int(held.frame.minY)) (\(what))")
             target.pinch(withScale: scale, velocity: scale < 1 ? -1 : 1)
+            return held
         }
-        pinch(0.75, "to five")
+        // The photo the fingers held is under them again, within about a row of where it was:
+        // right after the step, and still a second later, after the step landed (0.35 s).
+        func keepsItsPlace(_ held: Seen, _ what: String) {
+            let row = held.frame.height + 2
+            func there() -> Bool {
+                self.photos("library.photo").contains { $0.label == held.label && abs($0.frame.midY - held.frame.midY) <= row }
+            }
+            guard UITestWait.until("\(test): the photo pinched on still under the fingers \(what)", timeout: 5, { there() }) else {
+                let now = self.photos("library.photo").filter { $0.label == held.label }.map { Int($0.frame.midY) }
+                print("UI_FACT \(test): '\(held.label)' was at y \(Int(held.frame.midY)), now at \(now)")
+                shot("x-place-lost")
+                return
+            }
+            UITestWait.never("\(test): the photo pinched on leaves the fingers a second later \(what)", for: 1) { !there() }
+        }
+        let held = pinch(0.75, "to five")
         XCTAssertTrue(shown(5, "after one pinch"), "\(test): one pinch does not show five photos in a row")
+        if let held { keepsItsPlace(held, "after the page was away") }
         shot("pg-02-five")
-        pinch(0.75, "to seven")
+        _ = pinch(0.75, "to seven")
         XCTAssertTrue(shown(7, "after a second pinch"), "\(test): a second pinch does not show seven photos in a row")
         shot("pg-03-seven")
-        pinch(1.4, "back to five")
+        _ = pinch(1.4, "back to five")
         XCTAssertTrue(shown(5, "after spreading"), "\(test): spreading two fingers does not go back to five photos in a row")
 
         // A suggestion's photos: the same grid, at the same size.

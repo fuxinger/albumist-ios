@@ -80,7 +80,8 @@ extension PhotoGridUITests {
     /// three causes UI run 45567033486 left open it was: one finger or none on the grid at a time
     /// is where XCTest put them (the fingers); two and the pinch never began is another gesture
     /// that held it back (the arbitration); it began and made no step is UIKit's scale, counted
-    /// from where it began, staying short of a step's 0.8 or 1.25 (the threshold).
+    /// from where it began, staying short of a step's 0.8 or 1.25 (the threshold). A pinch whose
+    /// scale went past a step's and still made none points at the grid's own handling of it.
     func explainPinch(_ what: String, since: Date, stepped: Bool, _ test: String) {
         guard let marks = pinchMarks(since: since) else {
             if !stepped { print("UI_FACT \(test): pinch \(what): no record of the app's pinches at \(Self.pinchRecord)") }
@@ -96,6 +97,8 @@ extension PhotoGridUITests {
             verdict = "the fingers: \(lifts.isEmpty ? "none" : "one at a time") on the grid"
         } else if lifts.allSatisfy({ Self.field("began", of: $0) == "-" }) {
             verdict = "the arbitration: two fingers on the grid, and the pinch never began"
+        } else if lifts.contains(where: { Self.field("scale", of: $0).flatMap(Double.init).map { $0 <= 0.8 || $0 >= 1.25 } ?? false }) {
+            verdict = "the grid: UIKit's scale went past a step's, and the grid made no step"
         } else {
             verdict = "the threshold: the pinch began, and UIKit's scale stayed short of a step"
         }

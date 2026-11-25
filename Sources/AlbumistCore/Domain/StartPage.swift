@@ -231,32 +231,58 @@ public struct StartPage: Equatable, Sendable {
         if input.showsMosaic { sections.append(.mosaic) }
 
         // The one big part. Trips come newest first (`inDisplayOrder`).
-        let trips = shown.filter { $0.kind.area == .trips }
-        var big: [AlbumistID] = []
         let starter = starterSet(input, made: made)
-        if !input.analysedOnce {
-            big = pick(trips.map(\.id), keeping: visit.highlighted)
-            if !big.isEmpty { sections.append(.earlyTrips(big)) }
-        } else if !starter.isEmpty {
-            sections.append(.starterSet(starter))
-        } else {
-            let fresh = trips.filter { trip in
-                guard let since = visit.lastMade else { return true }
-                guard let end = trip.dateRange?.end else { return false }
-                return end > since
-            }
-            big = pick(fresh.map(\.id), keeping: visit.highlighted)
-            if !big.isEmpty { sections.append(.newTrips(big)) }
-        }
+        let big = bigPart(input, trips: shown.filter { $0.kind.area == .trips }, starter: starter)
+        if let section = big.section { sections.append(section) }
 
         // The rows: trips, then "Deine Welt", then places and the other areas.
-        let bigSet = Set(big)
+        let rowSections = rows(input, shown: shown, big: Set(big.cards), made: made)
+        let tripsRow = areas.contains(.trips) ? rowSections.trips : nil
+
+        // Nothing open: why, in one calm card.
+        let nothingOpen = big.cards.isEmpty && tripsRow == nil && rowSections.others.isEmpty && starter.isEmpty
+        if nothingOpen, let why = nothingOpenCard(input) { sections.append(why) }
+        if let tripsRow { sections.append(tripsRow) }
+        sections.append(.atlas)
+        sections += rowSections.others
+        if !input.proposals.isEmpty {
+            sections.append(.allSuggestions(AllSuggestions(total: input.proposals.count, inYourAlbums: input.inYourAlbums,
+                                                           rebuilding: input.rebuilding)))
+        }
+        return StartPage(sections: sections, made: made.intersection(shown.map(\.id)),
+                         seenDone: visit.awaitingDone.subtracting(input.open))
+    }
+
+    /// The one big part and its cards: the first trips before the first analysis ended, else
+    /// "Dein Startpaket" (its cards are no big cards), else the trips that ended since the last
+    /// album made here. No section when it has no cards.
+    private static func bigPart(_ input: Input, trips: [AlbumProposal],
+                                starter: [AlbumistID]) -> (cards: [AlbumistID], section: Section?) {
+        let visit = input.visit
+        if !input.analysedOnce {
+            let big = pick(trips.map(\.id), keeping: visit.highlighted)
+            return (big, big.isEmpty ? nil : .earlyTrips(big))
+        }
+        if !starter.isEmpty { return ([], .starterSet(starter)) }
+        let fresh = trips.filter { trip in
+            guard let since = visit.lastMade else { return true }
+            guard let end = trip.dateRange?.end else { return false }
+            return end > since
+        }
+        let big = pick(fresh.map(\.id), keeping: visit.highlighted)
+        return (big, big.isEmpty ? nil : .newTrips(big))
+    }
+
+    /// The rows of the page: the trips' row, and the others in order, places first; each with at
+    /// most `rowLimit` cards that are not big, and the count of its area's open suggestions.
+    private static func rows(_ input: Input, shown: [AlbumProposal], big: Set<AlbumistID>,
+                             made: Set<AlbumistID>) -> (trips: Section?, others: [Section]) {
         var openCounts: [OrganizationArea: Int] = [:]
         for proposal in input.proposals where input.open.contains(proposal.id) && !made.contains(proposal.id) {
             openCounts[proposal.kind.area, default: 0] += 1
         }
         var cardsByArea: [OrganizationArea: [AlbumistID]] = [:]
-        for proposal in shown where !bigSet.contains(proposal.id) {
+        for proposal in shown where !big.contains(proposal.id) {
             if cardsByArea[proposal.kind.area, default: []].count < rowLimit {
                 cardsByArea[proposal.kind.area, default: []].append(proposal.id)
             }
@@ -267,30 +293,17 @@ public struct StartPage: Equatable, Sendable {
         }
         let others = input.areas.filter { $0 != .trips }
         let rest = others.filter { $0 == .places } + others.filter { $0 != .places }
-        let otherRows = rest.compactMap(row)
-        let tripsRow = areas.contains(.trips) ? row(.trips) : nil
+        return (row(.trips), rest.compactMap(row))
+    }
 
-        // Nothing open: why, in one calm card. "Alles erledigt" only when every suggestion is
-        // decided and none can come meanwhile.
-        let nothingOpen = big.isEmpty && tripsRow == nil && otherRows.isEmpty && starter.isEmpty
-        if nothingOpen, input.analysedOnce, !input.libraryHint {
-            if input.rebuilding {
-                sections.append(.rebuilding)
-            } else if input.proposals.isEmpty {
-                sections.append(.noSuggestionsYet(analysing: input.analysing))
-            } else if !input.analysing {
-                sections.append(.caughtUp)
-            }
-        }
-        if let tripsRow { sections.append(tripsRow) }
-        sections.append(.atlas)
-        sections += otherRows
-        if !input.proposals.isEmpty {
-            sections.append(.allSuggestions(AllSuggestions(total: input.proposals.count, inYourAlbums: input.inYourAlbums,
-                                                           rebuilding: input.rebuilding)))
-        }
-        return StartPage(sections: sections, made: made.intersection(shown.map(\.id)),
-                         seenDone: visit.awaitingDone.subtracting(input.open))
+    /// Why nothing is open, in one calm card, after the first analysis and without the
+    /// library's hint. "Alles erledigt" only when every suggestion is decided and none can come
+    /// meanwhile.
+    private static func nothingOpenCard(_ input: Input) -> Section? {
+        guard input.analysedOnce, !input.libraryHint else { return nil }
+        if input.rebuilding { return .rebuilding }
+        if input.proposals.isEmpty { return .noSuggestionsYet(analysing: input.analysing) }
+        return input.analysing ? nil : .caughtUp
     }
 
     /// "Dein Startpaket": once shown in this visit, the same with what of it is still open
@@ -319,79 +332,5 @@ public struct StartPage: Equatable, Sendable {
             picked.append(id)
         }
         return picked
-    }
-}
-
-/// What the start page keeps while it is on screen, so nothing moves under the user's finger:
-/// begun afresh each time the page is back on top (back from a list once the swipe has ended,
-/// another tab, the app opened again from the background).
-public struct StartVisit: Equatable, Sendable {
-    /// When the last album was made before this visit; nil while none was made. "Neue Reisen"
-    /// are the trips that ended after it.
-    public var lastMade: Date?
-    /// Cards whose "Anlegen" was tapped in this visit: they keep their place, say "Angelegt"
-    /// once made, and "Anlegen" again after "Widerrufen".
-    public var created: [AlbumistID]
-    /// Made from a card in this visit, and not yet seen done by the page: the run clears the
-    /// pick before the suggestions are matched again, and a run with gaps leaves the album
-    /// short of photos. Their cards say "Angelegt" meanwhile, never "Anlegen" again, until the
-    /// plan that made them is taken back (`undone`).
-    public var awaitingDone: Set<AlbumistID>
-    /// The plan that made each card of `awaitingDone`, where it is known.
-    public var madeBy: [AlbumistID: AlbumistID]
-    /// The big cards shown in this visit: they stay while they exist.
-    public var highlighted: [AlbumistID]
-    /// "Dein Startpaket" as first shown in this visit: it stays, with what is left of it, when
-    /// a card's "Anlegen" makes one of its albums or the first album, and goes the next time
-    /// the page appears.
-    public var shownStarterSet: [AlbumistID]?
-
-    public init(lastMade: Date? = nil) {
-        self.lastMade = lastMade
-        self.created = []
-        self.awaitingDone = []
-        self.madeBy = [:]
-        self.highlighted = []
-        self.shownStarterSet = nil
-    }
-
-    /// "Anlegen" on a card: it keeps its place from now on.
-    public mutating func create(_ id: AlbumistID) {
-        if !created.contains(id) { created.append(id) }
-    }
-
-    /// The album of a card's "Anlegen" is in Photos, made by `plan` (nil when unknown).
-    public mutating func made(_ id: AlbumistID, by plan: AlbumistID?) {
-        create(id)
-        awaitingDone.insert(id)
-        madeBy[id] = plan
-    }
-
-    /// The banner "„Name“ angelegt" for suggestion `id`, made by `plan`: a card whose "Anlegen"
-    /// was tapped in this visit says "Angelegt", also when its album was made only after the
-    /// purchase sheet (`AppModel.continueQuickCreate`, review A of design wave 1). A banner for a
-    /// suggestion made elsewhere changes nothing.
-    public mutating func announced(_ id: AlbumistID, by plan: AlbumistID) {
-        guard created.contains(id) else { return }
-        made(id, by: plan)
-    }
-
-    /// Plans taken back ("Widerrufen", the history): their cards say "Anlegen" again.
-    public mutating func undone(_ plans: Set<AlbumistID>) {
-        let taken = madeBy.filter { plans.contains($0.value) }.keys
-        for id in taken {
-            awaitingDone.remove(id)
-            madeBy[id] = nil
-        }
-    }
-
-    /// Remembers what the page shows now (after it is drawn).
-    public mutating func saw(_ page: StartPage) {
-        if !page.bigCards.isEmpty { highlighted = page.bigCards }
-        if shownStarterSet == nil, let set = page.starterSet { shownStarterSet = set }
-        for id in page.seenDone {
-            awaitingDone.remove(id)
-            madeBy[id] = nil
-        }
     }
 }

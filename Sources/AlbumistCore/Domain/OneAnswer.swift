@@ -68,36 +68,32 @@ public final class OneAnswer<Value: Sendable, Request: Sendable>: @unchecked Sen
     /// was the answer.
     @discardableResult
     public func finish(_ value: Value, stop: Bool = false) -> Bool {
-        let (first, waiting, running, limit): (Bool, CheckedContinuation<Value, Never>?, Request?, Task<Void, Never>?) = lock.withLock {
-            guard !over else { return (false, nil, nil, nil) }
+        let (first, ending): (Bool, Ending) = lock.withLock {
+            guard !over else { return (false, Ending()) }
             over = true
-            let waiting = continuation, limit = limitTask
+            let ending = Ending(waiting: continuation, running: stop ? request : nil, limit: limitTask)
             continuation = nil
             limitTask = nil
             // Kept only for a caller that has not begun to wait yet.
-            if waiting == nil { early = value }
-            return (true, waiting, stop ? request : nil, limit)
+            if ending.waiting == nil { early = value }
+            return (true, ending)
         }
-        limit?.cancel()
-        waiting?.resume(returning: value)
-        if let running { stopRequest(running) }
+        ending.end(answering: value, stopRequest: stopRequest)
         return first
     }
 
     /// The caller went away, or the time ran out: the fallback, and the request stops. After
     /// the answer nothing happens.
     public func cancel() {
-        let (waiting, running, limit): (CheckedContinuation<Value, Never>?, Request?, Task<Void, Never>?) = lock.withLock {
-            guard !over else { return (nil, nil, nil) }
+        let ending: Ending = lock.withLock {
+            guard !over else { return Ending() }
             over = true
-            let waiting = continuation, limit = limitTask
+            let ending = Ending(waiting: continuation, running: request, limit: limitTask)
             continuation = nil
             limitTask = nil
-            return (waiting, request, limit)
+            return ending
         }
-        limit?.cancel()
-        waiting?.resume(returning: fallback)
-        if let running { stopRequest(running) }
+        ending.end(answering: fallback, stopRequest: stopRequest)
     }
 
     /// Gives up after `duration` (`cancel`): Photos may never answer while it is busy. A second
@@ -118,6 +114,20 @@ public final class OneAnswer<Value: Sendable, Request: Sendable>: @unchecked Sen
             return before
         }
         replaced?.cancel()
+    }
+
+    /// What is left to do once it is over, outside the lock: the time limit ends, the caller
+    /// gets its answer, the request stops. Empty when it was over already.
+    private struct Ending {
+        var waiting: CheckedContinuation<Value, Never>?
+        var running: Request?
+        var limit: Task<Void, Never>?
+
+        func end(answering value: Value, stopRequest: (Request) -> Void) {
+            limit?.cancel()
+            waiting?.resume(returning: value)
+            if let running { stopRequest(running) }
+        }
     }
 
     deinit {

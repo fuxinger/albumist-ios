@@ -10,9 +10,9 @@ extension AppModel {
     /// uses, what each one shows, and the days without photos between it and them.
     func tripTimeline(of trip: AlbumProposal, before: AlbumProposal?, after: AlbumProposal?) async -> TripTimeline.Content {
         let photos = trip.assetIDs, earlier = before?.assetIDs, later = after?.assetIDs
-        let facts = factsByID, ranks = previewRanks, dates = creationDates, calendar = Calendar.current
+        let library = TripTimeline.Library(facts: factsByID, ranks: previewRanks, dates: creationDates, calendar: Calendar.current)
         return await Task.detached(priority: .userInitiated) {
-            TripTimeline.content(of: photos, before: earlier, after: later, facts: facts, ranks: ranks, dates: dates, calendar: calendar)
+            TripTimeline.content(of: photos, before: earlier, after: later, in: library)
         }.value
     }
 }

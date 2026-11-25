@@ -186,13 +186,13 @@ struct PhotoTintSourceTests {
         #expect(measured.upperBound < seeded.lowerBound && seeded.upperBound < kept.lowerBound, "\(reader)")
         let seed = try Self.body(["struct CoverTintReader", "private func seed(width: CGFloat)"], in: file)
         #expect(seed.contains("guard !hidden, tint == nil, width >= 1 else { return }"), "\(seed)")
-        #expect(seed.contains("if case .tint(let known?) = PhotoTints.shared.known(for: CoverPhoto.candidates(ids), pixels: pixels(at: width))"),
+        #expect(seed.contains("if case .tint(let known?) = PhotoTints.shared.atOnce(for: CoverPhoto.candidates(ids), pixels: pixels(at: width))"),
                 "\(seed)")
         #expect(seed.contains("tint = known"), "\(seed)")
         #expect(!seed.contains("withAnimation"), "a known colour fades in: \(seed)")
         // Kept while the cover is still to tell; gone for a hidden preview or another cover.
         let notSharp = try #require(reader.range(of: "guard key.sharp else {"), "\(reader)")
-        let stays = try #require(reader.range(of: "if tint != nil, hidden || PhotoTints.shared.known(for: key.ids, pixels: key.pixels) != .tint(tint) {"),
+        let stays = try #require(reader.range(of: "if tint != nil, hidden || PhotoTints.shared.atOnce(for: key.ids, pixels: key.pixels) != .tint(tint) {"),
                                  "a seeded colour goes before the cover told: \(reader)")
         #expect(notSharp.upperBound < stays.lowerBound, "\(reader)")
         #expect(reader.contains("Key(ids: CoverPhoto.candidates(ids), pixels: pixels, sharp: sharp && !hidden)"), "\(reader)")
@@ -200,6 +200,39 @@ struct PhotoTintSourceTests {
         let page = try Self.code(Self.page)
         let cover = try Self.body(["struct ProposalDetailView", "private func cover("], in: page)
         #expect(cover.contains(".coverTint(of: ids, aspectRatio: ratio, sharp: coverIsPhoto, hidden: card.hidesPreview, into: $tint)"), "\(cover)")
+    }
+
+    /// The colour taken before the cover tells is only ever that of the photo `CoverPhoto` shows
+    /// at once, without asking Photos: the first candidate's, when its cover is kept at this size
+    /// (verification review X4). A later candidate's kept cover shows only after Photos answered
+    /// for the ones before it (`CoverLoader.load` tries them in order; only a kept cover comes
+    /// without a word from Photos), which it may not do: the cover then stays the calm
+    /// placeholder, and the page must not stand in another photo's colour ("never of the
+    /// placeholder"). Once the cover told that a sharp photo shows, `follow` takes the colour of
+    /// whichever candidate it is.
+    @Test func theSeedIsOnlyTheFirstCandidatesColour() throws {
+        let file = try Self.code(Self.ground)
+        let atOnce = try Self.body(["final class PhotoTints", "func atOnce(for ids: [AssetID], pixels: CGSize) -> Known"], in: file)
+        #expect(atOnce.contains("known(for: Array(ids.prefix(1)), pixels: pixels)"), "\(atOnce)")
+        let seed = try Self.body(["struct CoverTintReader", "private func seed(width: CGFloat)"], in: file)
+        #expect(!seed.contains(".known(for:"), "the seed takes a later candidate's colour: \(seed)")
+        let reader = try Self.body(["struct CoverTintReader", "func body(content: Content)"], in: file)
+        let notSharp = try #require(reader.range(of: "guard key.sharp else {"), "\(reader)")
+        let follows = try #require(reader.range(of: "await follow(key)"), "\(reader)")
+        #expect(!reader[notSharp.upperBound..<follows.lowerBound].contains(".known(for:"),
+                "a later candidate's colour stays before the cover told: \(reader)")
+        let follow = try Self.body(["struct CoverTintReader", "private func follow("], in: file)
+        #expect(follow.contains("PhotoTints.shared.known(for: key.ids, pixels: key.pixels)"), "\(follow)")
+        // Why the first one: the cover tries the candidates in order, and only a kept cover needs
+        // no word from Photos.
+        let cover = try Self.code(Self.cover)
+        let load = try Self.body(["enum CoverLoader", "static func load("], in: cover)
+        #expect(load.contains("for (index, id) in request.ids.enumerated()"), "\(load)")
+        let cache = try Self.code("App/Albumist/Views/AssetThumbnail.swift")
+        let fetch = try Self.body(["final class ThumbnailCache", "func cover(for id: AssetID, pixels: CGSize) async -> CoverFetch"], in: cache)
+        let kept = try #require(fetch.range(of: "if let kept = cachedCover(for: id, pixels: pixels)"), "\(fetch)")
+        let asked = try #require(fetch.range(of: "await lookUpAsset(id)"), "\(fetch)")
+        #expect(kept.upperBound < asked.lowerBound, "a kept cover waits for Photos: \(fetch)")
     }
 
     /// The one new place (DS-11): the ground of a suggestion's page, under its cover, header,

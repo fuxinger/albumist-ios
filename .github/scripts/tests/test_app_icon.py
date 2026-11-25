@@ -13,6 +13,7 @@ The format (Xcode 26 and later): a folder with `icon.json` and `Assets/`. `group
 Icon Composer wrote in public projects.
 """
 import json
+import math
 import os
 import pathlib
 import re
@@ -207,6 +208,71 @@ class LayerTests(unittest.TestCase):
             if path:
                 with self.subTest(layer=name):
                     self.assertRegex(path.group(1), r"^[MLHVAZ0-9 .\-]+$")
+
+    def test_the_hills_end_at_the_front_cards_round_corners(self):
+        """The landscape lies on the front card and ends where the card does: the hills reached
+        about 12 px past its bottom right corner and 4 px past the left one, also in the App
+        Store's large icon (design wave 3, owner's list point 26). Every point of the hills lies on
+        the card or its edge, so the straight lines between them do too (the card is convex), and
+        each arc of the hills is the card's own corner: its radius, both ends on the card's edge."""
+        corners = points(layer_path("3-front-card"))
+        left, right = min(x for x, _, _ in corners), max(x for x, _, _ in corners)
+        top, bottom = min(y for _, y, _ in corners), max(y for _, y, _ in corners)
+        arcs = {arc for _, _, arc in corners if arc}
+        self.assertEqual(len(arcs), 1, "the card has one corner radius")
+        (rx, ry), = arcs
+        self.assertEqual(rx, ry)
+        radius = rx
+
+        def beyond(x, y):
+            """How far (x, y) lies past the card's rounded edge (zero or less: on the card)."""
+            centre = (min(max(x, left + radius), right - radius), min(max(y, top + radius), bottom - radius))
+            return math.dist((x, y), centre) - radius
+
+        hills = points(layer_path("5-hills"))
+        for index, (x, y, arc) in enumerate(hills):
+            with self.subTest(point=(x, y)):
+                self.assertLessEqual(beyond(x, y), 0.05, "a point of the hills lies past the front card's edge")
+                if arc:
+                    self.assertEqual(arc, (radius, radius), "an arc of the hills is not the card's corner")
+                    start = hills[index - 1]
+                    for end in ((start[0], start[1]), (x, y)):
+                        self.assertAlmostEqual(beyond(*end), 0, delta=0.05, msg="an arc of the hills leaves the card's edge")
+
+
+def layer_path(name: str) -> str:
+    """The `d` of a layer's one path, as the icon's document holds it."""
+    return re.search(r' d="([^"]*)"', (ICON / "Assets" / f"{name}.svg").read_text(encoding="utf-8")).group(1)
+
+
+def points(d: str) -> list:
+    """The points a path of absolute M, L, H, V, A and Z commands goes to, each with its arc's
+    radii (rx, ry), or None for a straight line."""
+    tokens = re.findall(r"[MLHVAZ]|-?\d+(?:\.\d+)?", d)
+    found, x, y, index = [], 0.0, 0.0, 0
+    while index < len(tokens):
+        command = tokens[index]
+        index += 1
+        if command in ("M", "L"):
+            x, y = float(tokens[index]), float(tokens[index + 1])
+            index += 2
+            found.append((x, y, None))
+        elif command == "H":
+            x = float(tokens[index])
+            index += 1
+            found.append((x, y, None))
+        elif command == "V":
+            y = float(tokens[index])
+            index += 1
+            found.append((x, y, None))
+        elif command == "A":
+            arc = (float(tokens[index]), float(tokens[index + 1]))
+            x, y = float(tokens[index + 5]), float(tokens[index + 6])
+            index += 7
+            found.append((x, y, arc))
+        elif command != "Z":
+            raise ValueError(f"unexpected {command!r} in {d!r}")
+    return found
 
 
 class ProjectTests(unittest.TestCase):

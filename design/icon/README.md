@@ -16,5 +16,11 @@ Gewählt am 14.11.2026. Drei Albumkarten übereinander, die vordere aus Milchgla
 - `icon-light.svg`, `icon-dark.svg`, `icon-tinted.svg`: die fertigen Icons (1024 px) als Bild, so
   wie sie am 14.11. gewählt wurden. Aus ihnen entstanden die PNGs des alten App-Icons (bis DS-20 im
   Asset-Katalog); jetzt sind sie die Vorlage, an der das neue Icon auf dem Mac gemessen wird.
+- 25.11.2026: Die Hügel enden an den runden Ecken der vorderen Karte, wo ihre Linien die Ecken treffen (vorher
+  ragten sie unten rechts etwa 12 und links 4 von 1024 Pixeln darüber hinaus, auch im gewählten Bild). Sonst ist
+  alles wie am 14.11.; `test_app_icon.py` prüft, dass die Hügel auf der Karte bleiben. Die Bilder
+  `AppIconImage` der App (Willkommen, Kauf, Über; hell und dunkel, 336 und 224 px) kamen neu aus
+  `icon-light.svg` und `icon-dark.svg`: mit Chromium in 1024 px gerendert und mit LANCZOS verkleinert, wie
+  die bisherigen (pixelgleich nachgeprüft).
 - `make_icon.py <ausgabe> <ebenen>`: erzeugt alle SVGs neu. Gerendert wurde mit Chromium (Playwright).
   Ändert sich eine Ebene, kommt sie danach wieder nach `AppIcon.icon/Assets/`.

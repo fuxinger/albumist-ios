@@ -11,8 +11,11 @@ def rr(x, y, w, h, r):
 BACK = rr(338, 214, 492, 392, 92)
 MID = rr(266, 316, 492, 392, 92)
 FRONT = rr(194, 418, 492, 392, 92)
-# Landscape inside the front card (follows its rounded bottom corners).
-HILLS = "M 194 744 L 326 606 L 424 694 L 494 636 L 686 766 L 686 718 A 92 92 0 0 1 594 810 H 286 A 92 92 0 0 1 194 718 Z"
+# Landscape inside the front card: the hills start and end on its rounded bottom corners, where
+# their lines meet the corner arcs, and follow them down (25.11.2026: they had reached about 12 px
+# past the right corner and 4 px past the left one, also in the App Store's large icon).
+HILLS = ("M 196.92 740.96 L 326 606 L 424 694 L 494 636 L 676.18 759.35 A 92 92 0 0 1 594 810 H 286 "
+         "A 92 92 0 0 1 196.92 740.96 Z")
 SUN = (566, 528, 46)
 
 THEMES = {

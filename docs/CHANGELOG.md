@@ -2,6 +2,9 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. App-Symbol (Design-Welle 3, noch in keinem Build): Die Hügel enden jetzt an den runden Ecken der vorderen
+  Karte. Vorher ragten sie unten rechts etwa 12 und unten links 4 von 1024 Pixeln darüber hinaus, auch im großen
+  Symbol im App Store.
 - 25.11. Fotos aus einem Vorschlag entfernen (Design-Welle 3, noch in keinem Build): Nach „Entfernen“ endet das
   Auswählen sofort, mit dem Foto, das die Seite verlässt; vorher blieb die Leiste „1 aus Vorschlag entfernen“
   stehen, bis Albumist den Vorschlag neu abgeglichen hatte, auf dem Mac-Simulator über 5 Sekunden.

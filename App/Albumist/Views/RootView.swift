@@ -84,12 +84,18 @@ struct MainTabs: View {
 
     enum MainTab: Hashable { case suggestions, unsorted, albums, search }
 
-    /// Where the search field sits (design wave 3, DS-12a, draft E1). `.tabView`: Apple's search
-    /// tab, the field on the tab view, so iOS shows the search as a round button of its own at
-    /// the end of the tab bar and opens the field as the tab is chosen. `.page`: the field on
-    /// the search page's own stack, as until wave 3. One line to switch back, should the
-    /// screenshots on iOS 27.2 show the round button worse than the tab in the row.
-    static let searchField: SearchInput.Host = .tabView
+    /// Where the search field sits, and so how the search behaves (design wave 3, DS-12a, draft
+    /// E1; review S1 of H14): a choice between behaviours, not only looks.
+    /// `.tabViewKeepingSearch`: Apple's search tab, the field on the tab view, which iOS may draw
+    /// as a round button of its own at the bar's end; choosing it shows the page with its
+    /// starting points and the field, the keyboard comes when the field is tapped, and the query,
+    /// the hits and the scroll position stay while another tab is looked at.
+    /// `.tabViewOpeningKeyboard`: the same place, and choosing the tab brings the keyboard every
+    /// time, also over an earlier query; closing the field goes back to the tab before and
+    /// empties it. `.pageFocusingField`: the field on the search page's own stack, as until
+    /// wave 3, focused as the page opens with nothing typed. Each is this one line, until the
+    /// screenshots on iOS 27.2 and the owner decide.
+    static let searchField: SearchInput.Placement = .tabViewKeepingSearch
 
     /// Two cards for "Vorschläge", as in the draft: never sparkles, which stand for AI at Apple.
     /// The fanned portrait cards came with iOS 17; should iOS not have them, the fanned cards
@@ -121,7 +127,8 @@ struct MainTabs: View {
                     .showsQuickCreateBanner()
             }
             // The search role, never `.prominent` (one role per tab): with the field on the tab
-            // view it makes this tab the round button at the bar's end.
+            // view iOS may draw this tab as the round button at the bar's end (the screenshots on
+            // iOS 27.2 tell).
             Tab(value: MainTab.search, role: .search) {
                 NavigationRoot(quickCreate: true) { SearchView(input: search) }
                     .showsQuickCreateBanner()

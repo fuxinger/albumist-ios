@@ -28,8 +28,11 @@ extension MomentsSourceTests {
             #expect(!file.contains("oldsTabBar"), "\(path) switches the tab bar for the moment")
         }
         #expect(layers == 1, "the moment is drawn somewhere else too")
+        // The layer and its sources (`QuickCreateMomentSources`, once in the layer's file).
+        for path in [Self.layer, Self.sources] {
+            #expect(!(try Self.code(path)).contains("sensoryFeedback"), "\(path): the moment has a haptic of its own")
+        }
         let file = try Self.code(Self.layer)
-        #expect(!file.contains("sensoryFeedback"), "the moment has a haptic of its own")
         let layer = try Self.body(["struct QuickCreateMomentLayer", "var body: some View"], in: file)
         for part in [".allowsHitTesting(false)", ".accessibilityHidden(true)", ".ignoresSafeArea()"] {
             #expect(layer.contains(part), "\(part): \(layer)")

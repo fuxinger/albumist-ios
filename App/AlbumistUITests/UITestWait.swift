@@ -251,6 +251,34 @@ enum UITestWait {
         }
     }
 
+    /// One look at the app's screen right after a launch, where a missing accessibility server of
+    /// the app is no answer yet: device test01 in UI run 45552393361 (load over 300, the process
+    /// took two minutes to show) failed with "Failed to get matching snapshots: Error getting main
+    /// window kAXErrorServerNotFound" while waiting for the tab bar, with nothing wrong in the app.
+    /// Only that message is taken as expected (non-strict); the look then counts as "not yet",
+    /// the caller's wait looks again, and every such look is a counted flaky retry
+    /// (`UI_FLAKY_RETRY <Class.test>`), never silent. Any other failure stays a failure.
+    static func lookAfterLaunch(_ what: String, in test: XCTestCase, _ look: () -> Bool) -> Bool {
+        final class Seen: @unchecked Sendable { var serverMissing = false }
+        let seen = Seen()
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = false
+        options.issueMatcher = { issue in
+            let match = issue.compactDescription.contains("kAXErrorServerNotFound")
+            if match { seen.serverMissing = true }
+            return match
+        }
+        var answer = false
+        XCTExpectFailure("The app's accessibility server was not there yet on a busy simulator", options: options) {
+            answer = look()
+        }
+        guard !seen.serverMissing else {
+            print("UI_FLAKY_RETRY \(testID(test)) the app's accessibility server was not found \(what), looked again")
+            return false
+        }
+        return answer
+    }
+
     /// Brings `app` back to the front and waits until iOS has it there. On a starved CI Mac
     /// XCTest's `activate()` can fail on its own: device test03 in UI run 44582675590 (load 674)
     /// stopped with "Failed to activate application ... (current state: Running Background)"

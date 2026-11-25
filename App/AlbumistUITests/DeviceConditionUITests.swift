@@ -687,10 +687,14 @@ final class DeviceConditionUITests: XCTestCase {
         // process started 15 s after the launch and its code 15 s later still (load after the
         // boot), and the 20 s for the tap ran out on the launch screen. Wait for the tab bar
         // first, as long as a slow Mac needs, and say how long it took.
+        // The process state needs no look at the screen; a look before the app's accessibility
+        // server is up failed test01 in UI run 45552393361 (kAXErrorServerNotFound, load over 300).
         let settings = app.buttons["Einstellungen"]
         let asked = Date()
+        let front = app.wait(for: .runningForeground, timeout: 180)
+        print("UI_TIMING app in the foreground for rebuild \(Int(Date().timeIntervalSince(asked))) s (\(front ? "yes" : "no"))")
         let ready = waitStable("app ready for rebuild", timeout: 180, stableChecks: 1) {
-            app.tabBars.firstMatch.exists || settings.exists
+            UITestWait.lookAfterLaunch("for the rebuild", in: self) { app.tabBars.firstMatch.exists || settings.exists }
         }
         print("UI_TIMING app ready for rebuild \(Int(Date().timeIntervalSince(asked))) s (\(ready ? "ready" : "not ready"))")
         guard tap(settings, "settings for rebuild", timeout: 20) else { return false }

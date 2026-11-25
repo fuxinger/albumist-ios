@@ -483,8 +483,7 @@ struct VideoViewerSourceTests {
         #expect(Self.inOrder(["switch page {", "case .picture: photo(image, in: size)", "case .unavailable: unavailableNote(in: size)",
                               "case .waiting: waiting(in: size)"], in: shown), "\(shown)")
         let page = try #require(AppSource.body(of: "private var page: ViewerPage", in: zoomable))
-        #expect(Self.squeezed(page).contains("ViewerPage.shows(still:picture,playing:player!=nil,video:isVideo?videoAvailability:nil)"),
-                "\(page)")
+        #expect(Self.squeezed(page).contains("ViewerPage.shows(still:picture,playing:player!=nil,kind:kind)"), "\(page)")
         let picture = try #require(AppSource.body(of: "private var picture: ViewerPicture?", in: zoomable))
         #expect(Self.inOrder(["if image != nil { return .sharp }", "return unavailable ? .unavailable : nil"], in: picture), "\(picture)")
         let worded = try Self.code(Self.viewerPath, keepStrings: true)
@@ -492,10 +491,36 @@ struct VideoViewerSourceTests {
         #expect(Self.inOrder(["ContentUnavailableView {", "if isVideo {", "Dieses Video ist gerade nicht verfügbar.", "} else {",
                               "Dieses Foto ist gerade nicht verfügbar.", ".accessibilityIdentifier(\"viewer.unavailable\")"], in: note), "\(note)")
         let built = try #require(AppSource.body(of: "private func page(at index: Int)", in: viewer))
-        #expect(built.contains("videoAvailability: video.availability(for: id)"), "\(built)")
+        #expect(built.contains("kind: kind(of: id)"), "\(built)")
+        let kind = try #require(AppSource.body(of: "private func kind(of id: AssetID) -> PageKind", in: viewer))
+        #expect(Self.squeezed(kind).contains("video:video.availability(for:id)"), "\(kind)")
         let model = try Self.file("ViewerVideo.swift")
         let availability = try #require(AppSource.body(of: "func availability(for id: AssetID) -> VideoAvailability", in: model))
         #expect(Self.squeezed(availability) == "{self.id==id?availability:.unknown}", "\(availability)")
+    }
+
+    /// A page whose kind the photo view does not know yet (no facts, Photos not asked: a new
+    /// video beside the page on screen) waits calmly instead of saying "Dieses Foto ist gerade
+    /// nicht verfügbar" (review X6, the core's `PageKind`). The page on screen reads its kind
+    /// (`lookAtCurrent`): answered or not, it counts as asked then, so the page on screen never
+    /// waits for good. A look that a swipe on cancelled marks nothing and opens no video (it would
+    /// stop the next page's).
+    @Test func aPageWaitsUntilItsKindIsKnown() throws {
+        let viewer = try Self.code(Self.viewerPath)
+        let kind = try #require(AppSource.body(of: "private func kind(of id: AssetID) -> PageKind", in: viewer))
+        #expect(Self.squeezed(kind).contains("PageKind(isVideo:knownVideo(id),asked:kindsAsked.contains(id),video:video.availability(for:id))"),
+                "\(kind)")
+        let known = try #require(AppSource.body(of: "private func knownVideo(_ id: AssetID) -> Bool?", in: viewer))
+        #expect(Self.inOrder(["if let known = basics[id] { return known.isVideo }",
+                              "return model.factsByID[id].map { $0.asset.kind == .video }"], in: known), "\(known)")
+        let isVideo = try #require(AppSource.body(of: "private func isVideo(_ id: AssetID) -> Bool", in: viewer))
+        #expect(Self.squeezed(isVideo) == "{knownVideo(id)??false}", "\(isVideo)")
+        let look = try #require(AppSource.body(of: "private func lookAtCurrent(", in: viewer))
+        #expect(Self.inOrder(["await PhotoBasics.of(id)", "guard !Task.isCancelled else { return }", "kindsAsked.insert(id)",
+                              "await playVideo(id)", "await checkSharing(id)"], in: look), "\(look)")
+        let zoomable = try #require(AppSource.body(of: "private struct ZoomablePhoto", in: viewer))
+        let isVideoPage = try #require(AppSource.body(of: "private var isVideo: Bool", in: zoomable))
+        #expect(Self.squeezed(isVideoPage) == "{kind.isVideo}", "\(isVideoPage)")
     }
 
     // MARK: Thumbnails

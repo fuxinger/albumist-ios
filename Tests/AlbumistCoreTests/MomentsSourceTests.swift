@@ -15,6 +15,7 @@ struct MomentsSourceTests {
     static let show = "App/Albumist/Views/SortingShow.swift"
     static let stack = "App/Albumist/Views/Moments/ResultCoverMoment.swift"
     static let layer = "App/Albumist/Views/Moments/QuickCreateMomentLayer.swift"
+    static let sources = "App/Albumist/Views/Moments/QuickCreateMomentSources.swift"
     static let model = "App/Albumist/Model/AppModel+Moments.swift"
     static let tabs = "App/Albumist/Views/RootView.swift"
     static let banner = "App/Albumist/Views/Frame/QuickCreateBar.swift"
@@ -129,7 +130,7 @@ struct MomentsSourceTests {
     /// keeps. No second image loader. They load while the plan runs; the result takes them from
     /// the covers' store and never waits for Photos (review E of design wave 2, finding 1).
     @Test func theCoversComeOnlyFromTheDevice() throws {
-        for path in [Self.stack, Self.layer] {
+        for path in [Self.stack, Self.layer, Self.sources] {
             let file = try Self.code(path)
             for loader in ["PHImageManager", "PHCachingImageManager", "requestImage", "isNetworkAccessAllowed", "ThumbnailRequest"] {
                 #expect(!file.contains(loader), "\(path) asks Photos itself: \(loader)")
@@ -166,8 +167,8 @@ struct MomentsSourceTests {
         }
         let waits = view.components(separatedBy: "await ").dropFirst().map { String($0.prefix(10)) }
         #expect(waits.allSatisfy { $0.hasPrefix("Task.sleep") || $0.hasPrefix("play()") }, "\(waits)")
-        let layer = try Self.code(Self.layer)
-        let kept = try Self.body(["final class QuickCreateMomentSources", "func keptCover("], in: layer)
+        let sources = try Self.code(Self.sources)
+        let kept = try Self.body(["final class QuickCreateMomentSources", "func keptCover("], in: sources)
         #expect(kept.contains("QuickCreateMoment.coverPixels(") && kept.contains("ThumbnailCache.shared.cachedCover("), "\(kept)")
         #expect(kept.contains("prefix(CoverLoader.attempts)"), "\(kept)")
         // The size the card asked for: `coverPixels` follows `CoverPhoto` and `PhotoCard`.
@@ -195,8 +196,8 @@ struct MomentsSourceTests {
         #expect(stack.contains("resultCoverSources(for: plan)"), "\(stack)")
         #expect(!stack.contains(".subtracting("), "the stack decides personal sources a second way: \(stack)")
         #expect(stack.contains("personalSources: sources.personal"), "\(stack)")
-        let layer = try Self.code(Self.layer)
-        let photo = try Self.body(["final class QuickCreateMomentSources", "func photo(for"], in: layer)
+        let sources = try Self.code(Self.sources)
+        let photo = try Self.body(["final class QuickCreateMomentSources", "func photo(for"], in: sources)
         #expect(photo.contains("proposal.isSensitive || model.previewHidden(for: proposal)"), "\(photo)")
         #expect(photo.contains("personal ? nil : keptCover("), "\(photo)")
         // The card's own suggestion, whether or not the analysis still has it as the banner comes.
@@ -204,6 +205,7 @@ struct MomentsSourceTests {
         // As the card shows it now: a suggestion the analysis updates in place while its card
         // rests is noted anew, so the flying photo is never an older cover (review E2 of design
         // wave 2, N5).
+        let layer = try Self.code(Self.layer)
         let source = try Self.body(["struct QuickCreateMomentSource:", "func body(content: Content)"], in: layer)
         let changed = try #require(AppSource.body(of: ".onChange(of: proposal)", in: source), "\(source)")
         #expect(changed.contains("if let frame { note(frame) }"), "\(changed)")
@@ -376,15 +378,18 @@ struct MomentsSourceTests {
         #expect(motion.contains("case .tracking, .interacting, .decelerating: .user"), "\(motion)")
         #expect(motion.contains("default: .other"), "\(motion)")
         // The app keeps no trail of its own: the core's watch decides.
-        #expect(!layer.contains("BarTrail(") && !layer.contains("anchor") && !layer.contains("lostSight"), "a trail in the app")
-        let note = try Self.body(["final class QuickCreateMomentSources", "func note(_ source: Source"], in: layer)
+        let sources = try Self.code(Self.sources)
+        for file in [layer, sources] {
+            #expect(!file.contains("BarTrail(") && !file.contains("anchor") && !file.contains("lostSight"), "a trail in the app")
+        }
+        let note = try Self.body(["final class QuickCreateMomentSources", "func note(_ source: Source"], in: sources)
         #expect(!note.contains("trail") && !note.contains("watch"), "the cards' frames feed the trail again: \(note)")
-        let open = try Self.body(["final class QuickCreateMomentSources", "var barOpen: Bool"], in: layer)
+        let open = try Self.body(["final class QuickCreateMomentSources", "var barOpen: Bool"], in: sources)
         #expect(open.contains("watch.barOpen"), "\(open)")
-        let show = try Self.body(["final class QuickCreateMomentSources", "func show(place"], in: layer)
+        let show = try Self.body(["final class QuickCreateMomentSources", "func show(place"], in: sources)
         #expect(show.contains("watch.show(place: token, shown, now: Self.now)"), "\(show)")
         // A tab chosen in code (Siri, Spotlight, the analysis card) may come with a shrunk bar.
-        let chosen = try Self.body(["final class QuickCreateMomentSources", "func tabChosenInCode()"], in: layer)
+        let chosen = try Self.body(["final class QuickCreateMomentSources", "func tabChosenInCode()"], in: sources)
         #expect(chosen.contains("watch.tabChosenInCode()"), "\(chosen)")
         let tabs = try Self.code(Self.tabs)
         let route = try #require(AppSource.body(of: [".onChange(of: model.route, initial: true)"], in: tabs), "the route is gone")
@@ -415,7 +420,7 @@ struct MomentsSourceTests {
             #expect(line.contains(".quickCreateMomentSource(proposal, aspectRatio: \(ratio))"), "\(line)")
         }
         // The ratios are the ones the cards draw their covers at.
-        let start = try Self.code(Self.start)
+        let start = try Self.code("App/Albumist/Views/Start/StartProposalCard.swift")
         // The start card is built from small typed parts (Xcode's type checker, wave 2 H7): its
         // photo card takes the ratio from its own property.
         let startCard = try Self.body(["struct StartProposalCard", "private var photoCard: some View"], in: start)
@@ -462,7 +467,7 @@ struct MomentsSourceTests {
         let note = try Self.body(["struct QuickCreateMomentSource:", "func note("], in: layer)
         #expect(note.contains("place: place"), "\(note)")
         // Pruned in the core (`QuickCreateMomentBarTests.theTabsScreensArePruned`).
-        let places = try Self.body(["final class QuickCreateMomentSources", "func note(_ place: Place"], in: layer)
+        let places = try Self.body(["final class QuickCreateMomentSources", "func note(_ place: Place"], in: try Self.code(Self.sources))
         #expect(places.contains("watch.measured("), "the tabs' screens are never pruned: \(places)")
     }
 }

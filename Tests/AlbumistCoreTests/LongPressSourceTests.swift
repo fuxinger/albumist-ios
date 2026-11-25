@@ -12,6 +12,7 @@ import AlbumistTestSupport
 @Suite("Long press in the app (source)")
 struct LongPressSourceTests {
     static let start = "App/Albumist/Views/Start/StartSections.swift"
+    static let startCard = "App/Albumist/Views/Start/StartProposalCard.swift"
     static let suggestions = "App/Albumist/Views/ProposalViews.swift"
     static let library = "App/Albumist/Views/LibraryView.swift"
     /// The grid of "Unsortiert" and of a suggestion's photos (design wave 3, DS-06b).
@@ -92,10 +93,10 @@ struct LongPressSourceTests {
     /// itself (review C of design wave 2, M2), no second mechanism, each part a typed property of
     /// its own (Xcode gave up on long expressions with several trailing closures, CI 44847306162).
     @Test func startCardsHaveTheMenuAndTheLiftedCard() throws {
-        let card = try Self.body(["struct StartProposalCard"], in: Self.start)
-        let body = Self.squeezed(try Self.body(["struct StartProposalCard", "var body: some View"], in: Self.start))
+        let card = try Self.body(["struct StartProposalCard"], in: Self.startCard)
+        let body = Self.squeezed(try Self.body(["struct StartProposalCard", "var body: some View"], in: Self.startCard))
         #expect(body == "{photoCard.accessibilityIdentifier(identifier)}", "the body is short: \(body)")
-        let shown = Self.squeezed(try Self.body(["struct StartProposalCard", "private var photoCard: some View"], in: Self.start))
+        let shown = Self.squeezed(try Self.body(["struct StartProposalCard", "private var photoCard: some View"], in: Self.startCard))
         #expect(shown.contains("}menu:{menuItems}.menuOffered("), "\(shown)")
         #expect(!shown.contains("preview:"), "a second card lifted: \(shown)")
         #expect(shown.contains("aspectRatio:aspectRatio,") && !shown.contains("?"), "no condition in the card's call: \(shown)")
@@ -106,9 +107,9 @@ struct LongPressSourceTests {
         // VoiceOver the items without the card's word (its own button, L3).
         #expect(shown.contains(".menuOffered(SuggestionMenu.isOffered(made:made,working:working,selecting:false))"), "\(shown)")
         #expect(shown.contains(".menuAccessibilityActions(voiceOverItems)"), "\(shown)")
-        let spoken = Self.squeezed(try Self.body(["struct StartProposalCard", "private var voiceOverItems: SuggestionMenuItems"], in: Self.start))
+        let spoken = Self.squeezed(try Self.body(["struct StartProposalCard", "private var voiceOverItems: SuggestionMenuItems"], in: Self.startCard))
         #expect(spoken.contains("forVoiceOver:true") && spoken.contains("act:onAction"), "\(spoken)")
-        let items = Self.squeezed(try Self.body(["struct StartProposalCard", "private var menuItems"], in: Self.start))
+        let items = Self.squeezed(try Self.body(["struct StartProposalCard", "private var menuItems"], in: Self.startCard))
         // The word does what the card's button does (`perform`, `quickCreateAtOnce`, the
         // purchase sheet), in the card's state.
         #expect(items.contains("act:onAction"), "\(items)")
@@ -120,7 +121,9 @@ struct LongPressSourceTests {
         // The page shows what the menu opens ("Anpassen", the trip workshop, "Keine Reise?"): on
         // its scroll view, so the question comes from the screen, not from the middle of all the
         // cards (review C of design wave 2, M1).
-        #expect(!(try Self.code(Self.start)).contains(".suggestionMenuFlows("), "on the cards' tall stack")
+        for path in [Self.start, Self.startCard] {
+            #expect(!(try Self.code(path)).contains(".suggestionMenuFlows("), "on the cards' tall stack: \(path)")
+        }
         let overview = Self.squeezed(try Self.body(["struct OverviewView", "var body: some View"], in: Self.overview))
         // Right after the scroll trail of the small moment, which sits on the scroll view itself so
         // that no scroll inside these sheets can reach it (`MomentsSourceTests`).
@@ -374,7 +377,7 @@ struct LongPressSourceTests {
         for path in AppSource.swiftFiles(under: "App/Albumist") where path != Self.photoCard {
             if !AppSource.calls(of: "menuOffered(", in: try AppSource.read(path)).isEmpty { switched.append(path) }
         }
-        #expect(switched == [Self.suggestions, Self.start], "\(switched)")
+        #expect(switched == [Self.suggestions, Self.startCard], "\(switched)")
         let actions = Self.squeezed(try Self.body(["struct PhotoCard<", "private func describedAsBody("], in: Self.photoCard))
         #expect(actions.contains("described.accessibilityActions{ifisMenuOffered{accessibilityMenuItems??menuItems}}"), "\(actions)")
         let code = try Self.code(Self.photoCard)
@@ -406,7 +409,8 @@ struct LongPressSourceTests {
         let suggestion = Self.squeezed(try Self.body(["struct ProposalPhotosView"], in: Self.suggestions))
         #expect(suggestion.contains("place:.suggestion,selecting:selecting,") && suggestion.contains("available:!disabled&&isCurrent,"),
                 "\(suggestion)")
-        for (path, type) in [(Self.library, "struct LibraryView"), (Self.suggestions, "struct ProposalPhotosView")] {
+        for (path, type) in [(Self.library, "struct LibraryView"), (Self.library, "extension LibraryView"),
+                             (Self.suggestions, "struct ProposalPhotosView")] {
             let page = try Self.body([type], in: path)
             #expect(!page.contains("AssetThumbnail(") && !page.contains(".photoMenu("), "\(path): photos of its own")
         }

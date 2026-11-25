@@ -22,7 +22,7 @@ struct UIRunFindingsSourceTests {
         #expect(squeezed.contains(".navigationTitle(area?.title??\"AlleVorschläge\")"), "the list of every suggestion is not titled \"Alle Vorschläge\": \(squeezed.suffix(400))")
         #expect(!squeezed.contains(".navigationTitle(area?.title??\"Vorschläge\")"), "the list of every suggestion still has the start page's title")
         // The row that opens it says the same words.
-        let start = AppSource.code(try AppSource.read("App/Albumist/Views/Start/StartSections.swift"), keepStrings: true)
+        let start = AppSource.code(try AppSource.read("App/Albumist/Views/Start/StartPageCards.swift"), keepStrings: true)
         let row = try #require(AppSource.body(of: "struct StartAllSuggestionsRow", in: start), "no StartAllSuggestionsRow")
         #expect(row.contains("\"Alle Vorschläge\""), "the start page's row no longer says \"Alle Vorschläge\"")
         // The start page itself stays "Vorschläge" (the tab's name and the UI tests' anchor).

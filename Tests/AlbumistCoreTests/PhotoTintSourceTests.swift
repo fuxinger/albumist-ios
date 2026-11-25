@@ -134,19 +134,42 @@ struct PhotoTintSourceTests {
         }
     }
 
-    /// A colour worked out before shows with its cover, without the slow fade: a page opened
-    /// again starts in its colour, not on grey that turns into it. Only a colour worked out now
-    /// fades in (second review, K8).
-    @Test func aKnownColourShowsAtOnce() throws {
+    /// A colour worked out before comes with its cover, in the cover's own short fade
+    /// (`CoverPhoto.fade`), never from one frame to the next: a page opened again after its cover
+    /// left the covers' store starts on the neutral ground while its cover comes from Photos and
+    /// fades in (verification review X3). Not the slow cross-fade of a colour worked out now (K8),
+    /// which stays for a change from one colour to another. Only `seed`, in the pass of the page's
+    /// first measure, sets a colour without a fade (V5). Both fades stay with Reduce Motion, as
+    /// the cover's: a colour changes, nothing moves.
+    @Test func aKnownColourComesWithItsCoversFade() throws {
         let file = try Self.code(Self.ground)
         let follow = try Self.body(["struct CoverTintReader", "private func follow("], in: file)
         let known = try #require(follow.range(of: "case .tint(let known):"), "\(follow)")
         let notYet = try #require(follow.range(of: "case .notYet:"), "\(follow)")
-        #expect(follow[known.upperBound..<notYet.lowerBound].contains("if tint == nil { tint = known }"), "\(follow)")
+        let taken = follow[known.upperBound..<notYet.lowerBound]
+        #expect(taken.contains("withAnimation(tint == nil ? CoverPhoto.fade : PhotoTintGround.arrival) { tint = known }"), "\(follow)")
         let worked = follow[notYet.upperBound...]
         let asked = try #require(worked.range(of: "await PhotoTints.shared.tint(for: key.ids, pixels: key.pixels)"), "\(follow)")
         let faded = try #require(worked.range(of: "withAnimation(PhotoTintGround.arrival) { tint = found }"), "\(follow)")
         #expect(asked.upperBound < faded.lowerBound, "\(follow)")
+        // Every colour the reader sets fades in, except the seed's.
+        let reader = try Self.body(["struct CoverTintReader"], in: file)
+        let seed = try Self.body(["struct CoverTintReader", "private func seed(width: CGFloat)"], in: file)
+        #expect(seed.contains("tint = known"), "\(seed)")
+        for line in reader.replacingOccurrences(of: seed, with: "").split(separator: "\n") {
+            var rest = line[...]
+            while let set = rest.range(of: "tint = ") {
+                let before = line[..<set.lowerBound]
+                #expect(before.contains("withAnimation(") && before.hasSuffix(") { "), "a colour set without a fade: \(line)")
+                rest = line[set.upperBound...]
+            }
+        }
+        // The cover's own fade, named once: the cover comes in with it when it took a moment.
+        let cover = try Self.code(Self.cover)
+        #expect(cover.contains("static let fade = Animation.easeOut(duration: 0.2)"), "the cover's fade is not named")
+        let show = try Self.body(["struct CoverPhoto", "private func show("], in: cover)
+        #expect(show.contains("withAnimation(Self.fade) { loaded = result }"), "\(show)")
+        #expect(!file.contains("accessibilityReduceMotion"), "the page's colour switches with Reduce Motion")
     }
 
     /// A page opened again is in its colour from its first frame, with no switch from the neutral

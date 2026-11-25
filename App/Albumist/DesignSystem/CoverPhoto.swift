@@ -116,11 +116,14 @@ struct CoverPhoto: View {
             .accessibilityHidden(true)
     }
 
-    /// A cover from the cache is there at once; one that took a moment fades in (a cross-fade,
-    /// calm with Reduce Motion too).
+    /// How a cover that took a moment comes in: a short cross-fade, calm with Reduce Motion too
+    /// (nothing moves). A suggestion's page brings its colour in with it (`CoverTintReader`).
+    static let fade = Animation.easeOut(duration: 0.2)
+
+    /// A cover from the cache is there at once; one that took a moment fades in (`fade`).
     private func show(_ result: CoverLoader.Loaded, since started: ContinuousClock.Instant) {
         if ContinuousClock.now - started > .milliseconds(60) {
-            withAnimation(.easeOut(duration: 0.2)) { loaded = result }
+            withAnimation(Self.fade) { loaded = result }
         } else {
             loaded = result
         }

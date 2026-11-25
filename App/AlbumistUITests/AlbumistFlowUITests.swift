@@ -578,11 +578,16 @@ final class AlbumistFlowUITests: XCTestCase {
         // about notifications; with access the analysis starts by itself).
         let letsGo = app.buttons["onboarding.letsGo"]
         let welcome = letsGo.waitForExistence(timeout: 20)
+        let welcomeAt = Date()
         if !welcome {
             print("UI_STEP_MISSING welcome screen")
             XCTFail("test1_FullFlow must start on a fresh simulator: no welcome screen, so the onboarding checks did not run")
         }
         if welcome {
+            // The button is there from the start, the icon, the headline and the promises come in
+            // one after the other (`WelcomePage`, about 1.2 s; no frame shows the end): at least
+            // 2 s for the screenshot (UI run 45567033486 showed an empty page above the button).
+            UITestWait.atLeast(2, since: welcomeAt)
             shot("01-welcome"); audit("welcome")
             tap(letsGo, "welcome")
             shot("03-access")

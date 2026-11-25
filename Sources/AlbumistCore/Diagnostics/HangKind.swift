@@ -89,6 +89,22 @@ public enum HangKind: String, Sendable, CaseIterable {
         return (below + own).joined(separator: " | ")
     }
 
+    /// A demangled symbol name of at most `limit` characters for a hang line. A cut keeps what
+    /// names our code: in UI run 45589509156 seven hangs of up to 2.3 s read "protocol witness
+    /// for static SwiftUI.View._makeViewList(view: …, inputs: …) -> SwiftUI._ViewListOu…", cut
+    /// at 140 characters before "in conformance Albumist.<View>", so no line said which view it
+    /// was. The conformance (and for a closure, the function it is in) stays; the middle goes.
+    public static func shortSymbol(_ symbol: String, limit: Int = 140) -> String {
+        guard symbol.count > limit else { return symbol }
+        for marker in [" in conformance ", " in "] {
+            guard let range = symbol.range(of: marker, options: marker == " in " ? .backwards : []) else { continue }
+            let tail = String(symbol[range.lowerBound...])
+            let room = max(limit - tail.count - 1, 40)
+            return String(symbol[..<range.lowerBound].prefix(room)) + "…" + tail
+        }
+        return String(symbol.prefix(limit)) + "…"
+    }
+
     /// "Albumist.debug.dylib AppModel.tick(run:) + 120" → "Albumist.debug.dylib AppModel.tick(run:)".
     static func withoutOffset(_ frame: String) -> String {
         guard let range = frame.range(of: " + ", options: .backwards),

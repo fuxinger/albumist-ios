@@ -10,7 +10,8 @@
     "budget_min: minutes for the group's test passes (ui_tests.py budget_check); over it the run shows a warning, never red. Report-only, so not in the fingerprint.",
     "Measured in TestFlight run 44461253154 (19.11.): device 62, flow-full 12, flow-other 52, accessibility 20, contrast 15 min (the step Run UI tests).",
     "Rebalanced 20.11. (tempo plan): DeviceConditionUITests 05, 07, 08 left other flows and 11 left device conditions for the new group device-flows; quick runs measured before: other flows 55.8, device 43.3 min (job, median since 18.11.).",
-    "Rebalanced 21.11. by the full UI run 44828248004 (test minutes): other flows 47.2, device-flows 36.3, accessibility 22.8, device 21.0, contrast 9.3, flow-full 8.7. AlbumistFlowUITests/test1b (11.6) left other flows for flow-full: other flows about 36, flow-full about 20. The small gate (flow-full and contrast) grows by those 11.6 minutes."
+    "Rebalanced 21.11. by the full UI run 44828248004 (test minutes): other flows 47.2, device-flows 36.3, accessibility 22.8, device 21.0, contrast 9.3, flow-full 8.7. AlbumistFlowUITests/test1b (11.6) left other flows for flow-full: other flows about 36, flow-full about 20. The small gate (flow-full and contrast) grows by those 11.6 minutes.",
+    "Rebalanced 25.11. by the full UI run 45589509156 and UI run 45552393361 (step Run UI tests): other flows 52 and 44 min (over its budget of 40; test1c 7.7, test1d 7.1, test6 6.9 min), device 31, device-flows 41, flow-full 22-31, accessibility 17, contrast 14. AlbumistFlowUITests/test1d_TripWorkshop (7.1 min, the Pro iPhone like both groups) left other flows for device conditions: other flows about 37-45, device about 38 of 45."
   ],
   "groups": [
     {
@@ -26,19 +27,19 @@
       "group": "device",
       "budget_min": 45,
       "title": "device conditions",
-      "_why": "The device-condition switches (App/Albumist/Platform/UITestSwitches.swift) on the Pro simulator. A test that resets the photo access asks the Mac to give it back (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07, 08 and 11 run in the group device-flows (tempo plan 20.11.: the longest group sets the run's time); test12 is the stress test and skips itself here (ui-stress.yml).",
+      "_why": "The device-condition switches (App/Albumist/Platform/UITestSwitches.swift) on the Pro simulator. A test that resets the photo access asks the Mac to give it back (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07, 08 and 11 run in the group device-flows (tempo plan 20.11.: the longest group sets the run's time); test12 is the stress test and skips itself here (ui-stress.yml). AlbumistFlowUITests/test1d_TripWorkshop runs here since 25.11. (other flows took 52 min of 40; it needs the Pro iPhone and its own onboarded demo library, which every flow test makes itself).",
       "device": "pro",
-      "only": "DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline",
+      "only": "AlbumistFlowUITests/test1d_TripWorkshop DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline",
       "skip": ""
     },
     {
       "group": "flow-other",
       "budget_min": 40,
       "title": "other flows, purchase and search",
-      "_why": "Every other UI test except the accessibility tests (flow tests 1b-7, locked purchase, search). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
+      "_why": "Every other UI test except the accessibility tests (flow tests 1c and 2-7, locked purchase, search; 1d runs in device conditions since 25.11.). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
       "device": "pro",
       "only": "",
-      "skip": "AlbumistFlowUITests/test1_FullFlow AlbumistFlowUITests/test1b_AtlasLibrarySearch PerformanceUITests AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo"
+      "skip": "AlbumistFlowUITests/test1_FullFlow AlbumistFlowUITests/test1b_AtlasLibrarySearch AlbumistFlowUITests/test1d_TripWorkshop PerformanceUITests AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo"
     },
     {
       "group": "accessibility",

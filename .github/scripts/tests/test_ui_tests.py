@@ -1334,6 +1334,10 @@ class HostTerminateTests(unittest.TestCase):
         self.assertIn("isStrict = false", body)
         self.assertRegex(body, r'print\("UI_FLAKY_RETRY \\\(testID\(test\)\) ')
         self.assertIn("XCTFail(", body)
+        # Device test03 in UI run 45552393361 (25.11.): the app wrote "active" a second after the
+        # activation while XCTest read state 3 for 15 s more; the stale state alone made the
+        # counted retry. The app's own lifecycle line counts, as it does for the Home press.
+        self.assertIn("UITestLifecycle.inForeground(", body)
 
     def test_every_home_press_goes_through_the_wait_that_tries_again(self):
         # UI run 44497741096 (19.11.): after the Home press the app stayed in the foreground

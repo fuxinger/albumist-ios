@@ -294,6 +294,7 @@ enum UITestWait {
         let start = Date()
         for attempt in 1...3 {
             let seen = Seen()
+            let asked = Date()
             let options = XCTExpectedFailure.Options()
             options.isStrict = false
             options.issueMatcher = { issue in
@@ -304,7 +305,7 @@ enum UITestWait {
             XCTExpectFailure("XCTest could not activate the app on a busy simulator", options: options) {
                 app.activate()
             }
-            let front = app.wait(for: .runningForeground, timeout: 15)
+            let front = inForeground(app, since: asked, within: 15)
             if front {
                 if attempt > 1 || seen.failedActivation {
                     print("UI_TIMING wait app in the foreground \(why) \(Int(Date().timeIntervalSince(start) * 1000)) ms, attempt \(attempt)")
@@ -321,6 +322,22 @@ enum UITestWait {
         print("UI_STEP_MISSING app in the foreground \(why) (3 activations, \(Int(Date().timeIntervalSince(start))) s)")
         XCTFail("The app did not come to the front \(why) (3 activations, state \(app.state.rawValue))", file: file, line: line)
         return false
+    }
+
+    /// True once XCTest reads `app` in the foreground or the app wrote that it became active after
+    /// `since` (its watch file, `UITestLifecycle.inForeground`), whichever comes first; false
+    /// after `seconds`. In UI run 45552393361 (device test03) the app was active a second after
+    /// it was brought to the front while XCTest read state 3 for 15 s more: that stale state alone
+    /// made the counted retry, as the stale state 4 after a Home press did (`toBackground`).
+    private static func inForeground(_ app: XCUIApplication, since: Date, within seconds: TimeInterval) -> Bool {
+        holds(timeout: seconds, interval: 0.25) {
+            let state = app.state
+            if state == .runningForeground { return true }
+            guard let text = try? String(contentsOfFile: UITestStalls.path, encoding: .utf8),
+                  let active = UITestLifecycle.inForeground(text, since: since.timeIntervalSince1970) else { return false }
+            print("UI_FACT app reported active at \(UITestLifecycle.clock(active)) UTC, XCTest state \(state.rawValue)")
+            return true
+        }
     }
 
     /// "DeviceConditionUITests.test03_…" for UI_FLAKY_RETRY (XCTest's name is "-[Module.Class test]").

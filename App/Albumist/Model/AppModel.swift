@@ -702,14 +702,17 @@ final class AppModel {
     private func load() async {
         guard phase == .loading else { return }
         do {
-            if UITestSupport.rebuildsDatabase, let url = try? Self.databaseURL() {
-                AlbumistStore.quarantineDatabase(at: url)
+            // The folder is made and marked off the main thread: in UI run 45589509156 its file
+            // calls (setResourceValues) held the main thread at launch.
+            let real = try await Task.detached(priority: .userInitiated) { try Self.databaseURL() }.value
+            if UITestSupport.rebuildsDatabase {
+                AlbumistStore.quarantineDatabase(at: real)
                 // Where the analysis got to belongs to the database set aside (review of d612bc0:
                 // the stale "64 %" was the stress run's drop to 38 %).
                 AnalysisMarker.reset()
             }
             // Opened off the main thread: the integrity check and migrations read the file.
-            let url = UITestSupport.databaseURL(try Self.databaseURL())
+            let url = UITestSupport.databaseURL(real)
             let store = try await Task.detached(priority: .userInitiated) { try AlbumistStore(url: url) }.value
             self.store = store
             // Where the analysis got to (UserDefaults, restored by a device backup) belongs to
@@ -986,7 +989,8 @@ final class AppModel {
         saveSafetyBackup()
     }
 
-    static func databaseURL() throws -> URL {
+    /// Off the main thread (it creates and marks the folder; `load`).
+    nonisolated static func databaseURL() throws -> URL {
         let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent(AppInfo.supportFolderName, isDirectory: true)
         // The database holds recognized text of screenshots and documents: encrypted at rest
@@ -2819,6 +2823,8 @@ final class AppModel {
         }
         // The free albums are checked here too, not only on the review screen.
         let wanted = plan.freeAlbumUse(applied: false)
+        // After a new install the count comes from the keychain, read off the main thread.
+        await Purchases.shared.keychainRead()
         if plan.reverts == nil, !resume, !Purchases.shared.allows(albums: wanted) {
             execution = ExecutionState(planID: plan.id, failure: String(localized: "Die Gratis-Alben reichen für diese Änderungen nicht. Schalte Albumist frei, um weiterzumachen."))
             return

@@ -23,7 +23,7 @@ final class Purchases {
             }
             return purchases
         }
-        return Purchases(keepsCopyInKeychain: true)
+        return Purchases(keychain: .device)
     }()
 
     /// Albums Albumist may create or extend before the unlock is needed. Change here only.
@@ -39,8 +39,11 @@ final class Purchases {
     let productID: String
     private let defaults: UserDefaults
     /// The shipped app keeps a second copy in the keychain, which survives deleting and
-    /// installing Albumist again (plugin review N4). Tests and UI runs keep only their defaults.
-    private let keepsCopyInKeychain: Bool
+    /// installing Albumist again (plugin review N4). Tests and UI runs keep only their defaults
+    /// (unit tests pass a stand-in).
+    private let keychain: LedgerKeychain.Copy?
+    /// Reads the keychain copy and merges it in; `keychainRead()` waits for it.
+    @ObservationIgnored private var keychainMerge: Task<Void, Never>?
 
     private(set) var isUnlocked = false
     private(set) var product: Product?
@@ -55,18 +58,36 @@ final class Purchases {
     private(set) var reserved: [AlbumistID: Int] = [:]
 
     /// `defaults` and `productID` are for tests; the app uses the standard ones.
-    init(defaults: UserDefaults = .standard, productID: String = Purchases.unlockProductID, keepsCopyInKeychain: Bool = false) {
+    init(defaults: UserDefaults = .standard, productID: String = Purchases.unlockProductID, keychain: LedgerKeychain.Copy? = nil) {
         self.defaults = defaults
         self.productID = productID
-        self.keepsCopyInKeychain = keepsCopyInKeychain
-        let stored = Self.loadLedger(from: defaults)
-        ledger = stored
-        if keepsCopyInKeychain {
+        self.keychain = keychain
+        ledger = Self.loadLedger(from: defaults)
+        if let keychain {
             // After a new install the defaults are empty and the keychain still knows the count.
-            let saved = LedgerKeychain.load()
-            ledger = stored.merged(with: saved ?? FreeAlbumLedger())
-            if ledger != stored || saved != ledger { saveLedger() }
+            // Read off the main thread: in UI run 45589509156 this read held the main thread for
+            // 2.3 s at launch (the keychain answers through another process). The read is queued
+            // here, before any write of this object, and the copy's queue runs them in order: a
+            // count made while the read waits is never what it sees, and the merge writes both back.
+            let answer = keychain.beginLoad()
+            keychainMerge = Task { [weak self] in
+                let saved = await answer()
+                self?.merge(keychainCopy: saved)
+            }
         }
+    }
+
+    /// Waits until the keychain copy is read and merged (at once without one). Every check that
+    /// lets a plan use free albums waits for it (`AppModel.run`), so a new install never gets
+    /// the albums the keychain already counted.
+    func keychainRead() async {
+        await keychainMerge?.value
+    }
+
+    private func merge(keychainCopy saved: FreeAlbumLedger?) {
+        let before = ledger
+        ledger = before.merged(with: saved ?? FreeAlbumLedger())
+        if ledger != before || saved != ledger { saveLedger() }
     }
 
     /// Albums created or extended so far. A completed undo gives its albums back.
@@ -126,7 +147,7 @@ final class Purchases {
     private func saveLedger() {
         guard let data = try? JSONEncoder().encode(ledger) else { return }
         defaults.set(data, forKey: Self.ledgerKey)
-        if keepsCopyInKeychain { LedgerKeychain.save(ledger) }
+        keychain?.save(ledger)
     }
 
     // MARK: StoreKit

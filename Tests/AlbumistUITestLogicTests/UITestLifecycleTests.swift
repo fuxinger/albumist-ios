@@ -51,6 +51,29 @@ struct UITestLifecycleTests {
         #expect(UITestLifecycle.inBackground("", since: press) == nil)
     }
 
+    /// UI run 45552393361, device test03 (25.11.): brought to the front at about 05:53:48, the app
+    /// wrote foreground at 05:53:49.0 and active at 49.5, while XCTest read state 3 for 15 s more
+    /// and the test brought it to the front once more (a counted flaky retry, 67 s in all).
+    @Test func theAppsActiveLineAfterTheActivationCounts() throws {
+        let activated = 1_795_586_028.0 // 05:53:48.0
+        let file = UITestLifecycle.line("resign-active", at: activated - 6.1) + UITestLifecycle.line("background", at: activated - 5.2)
+            + "1795586022.700 2800\n" + UITestLifecycle.line("foreground", at: activated + 1.0)
+            + UITestLifecycle.line("active", at: activated + 1.5)
+        let since = try #require(UITestLifecycle.inForeground(file, since: activated))
+        #expect(UITestLifecycle.clock(since) == "05:53:49.5")
+    }
+
+    @Test func noActiveLineAfterTheActivationMeansNotYet() {
+        let activated = 1_795_586_028.0
+        // Only willEnterForeground (not active yet), an active from before, or gone again since.
+        #expect(UITestLifecycle.inForeground(UITestLifecycle.line("foreground", at: activated + 1), since: activated) == nil)
+        #expect(UITestLifecycle.inForeground(UITestLifecycle.line("active", at: activated - 30)
+            + UITestLifecycle.line("background", at: activated - 20), since: activated) == nil)
+        #expect(UITestLifecycle.inForeground(UITestLifecycle.line("active", at: activated + 1)
+            + UITestLifecycle.line("resign-active", at: activated + 2), since: activated) == nil)
+        #expect(UITestLifecycle.inForeground("", since: activated) == nil)
+    }
+
     @Test func theClockIsTheOneOfTheTestsClockLines() {
         #expect(UITestLifecycle.clock(seconds) == "03:43:07.4")
         #expect(UITestLifecycle.clock(86_400 * 3 + 5) == "00:00:05.0")

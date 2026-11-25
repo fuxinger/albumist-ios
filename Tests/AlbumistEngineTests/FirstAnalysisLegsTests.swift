@@ -156,7 +156,7 @@ struct FirstAnalysisLegsTests {
         #expect(shared.mayBeBrought(by: check), "after only the shared photos: the rest with every photo")
         #expect(!shared.mayBeBrought(by: FirstAnalysisMoment.Run(wholeLibrary: false, fullAccess: false)))
         var away = fresh
-        away.completedAway(first: true)
+        away.completedAway(first: true, fullAccess: true)
         #expect(!away.mayBeBrought(by: Self.whole))
         // Completed overnight while legs were kept: nothing left to count.
         var overnight = FirstAnalysisLegs()

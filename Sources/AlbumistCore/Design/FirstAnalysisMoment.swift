@@ -119,9 +119,15 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// The analysis was completed where no run of the app ended (the overnight refinement, which
     /// iOS runs without the screen). `first`: it had not been completed before
     /// (`AnalysisMarker.completedOnce`, read before this sets it): its first 100 % happened
-    /// without the user, spent. After a quick first analysis it changes nothing.
-    public mutating func completedAway(first: Bool) {
-        guard first else { return }
+    /// without the user, spent. Otherwise, with every photo allowed (`fullAccess`) after a quick
+    /// first analysis of only the shared photos, it analysed the rest of the library: that chance
+    /// is used up, as by the first run in the app with every photo (`runEnded`; verification
+    /// review Y, Y4). Nothing else changes after a quick first analysis.
+    public mutating func completedAway(first: Bool, fullAccess: Bool) {
+        guard first else {
+            if fullAccess { sharedOnly = false }
+            return
+        }
         kept = .spent
         firstCompleted = nil
         sharedOnly = false

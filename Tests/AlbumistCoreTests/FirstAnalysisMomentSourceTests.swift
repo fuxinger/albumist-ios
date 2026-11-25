@@ -55,7 +55,8 @@ struct FirstAnalysisMomentSourceTests {
             #expect(told.upperBound < at.lowerBound, "told after \(later)")
         }
         #expect(model.components(separatedBy: "firstAnalysisRunEnded(").count - 1 == 1, "told from another place too")
-        #expect(model.components(separatedBy: "FirstAnalysisMomentStore.shared.").count - 1 == 2, "told from another place too")
+        #expect(model.components(separatedBy: "FirstAnalysisMomentStore.shared.").count - 1 == 1, "told from another place too")
+        #expect(model.components(separatedBy: "firstAnalysisCompletedAway()").count - 1 == 1, "told from another place too")
         #expect(raw.components(separatedBy: "\(Self.mark): the first 100 %").count - 1 == 8, "the marked lines of DS-08 in AppModel.swift changed")
         // And one of the sorting show's "Anlegen" (verification review V13), nothing else of H13.
         #expect(raw.components(separatedBy: Self.mark).count - 1 == 9, "the marked lines of H13 in AppModel.swift changed")
@@ -86,11 +87,15 @@ struct FirstAnalysisMomentSourceTests {
     @Test func theRefinementThatCompletesTheAnalysisTellsTheStore() throws {
         let model = try Self.code(Self.model)
         let refine = try Self.body(["private func refinePass("], in: model)
-        let told = try #require(refine.range(of: "FirstAnalysisMomentStore.shared.completedAway(first: !AnalysisMarker.completedOnce)"),
-                                "the refinement does not tell the moment: \(refine)")
+        let told = try #require(refine.range(of: "firstAnalysisCompletedAway()"), "the refinement does not tell the moment: \(refine)")
         let marked = try #require(refine.range(of: "AnalysisMarker.finished()"), "\(refine)")
         #expect(told.upperBound < marked.lowerBound, "told after the marker says completed")
+        // Whether it was completed before, and whether every photo is allowed: after only the
+        // shared photos, a completion with every photo analysed the rest (verification review Y).
         let store = try Self.code(Self.store)
+        let away = try Self.body(["extension AppModel", "func firstAnalysisCompletedAway()"], in: store)
+        #expect(away.contains("FirstAnalysisMomentStore.shared.completedAway(first: !AnalysisMarker.completedOnce, fullAccess: access == .full)"),
+                "\(away)")
         #expect(!store.contains("willEnterForegroundNotification"), "coming to the front spends it by the marker")
         #expect(!store.contains("cameToFront"), "coming to the front spends it by the marker")
     }
@@ -168,8 +173,8 @@ struct FirstAnalysisMomentSourceTests {
         #expect(initializer.contains("UIApplication.didEnterBackgroundNotification") && initializer.contains("self?.leftScreen()"))
         let launched = try Self.body(["final class FirstAnalysisMomentStore", "func launched()"], in: store)
         #expect(launched.trimmingCharacters(in: .whitespacesAndNewlines) == "{}", "\(launched)")
-        let away = try Self.body(["final class FirstAnalysisMomentStore", "func completedAway(first: Bool)"], in: store)
-        #expect(away.contains("moment.completedAway(first: first)") && away.contains("keep()"), "\(away)")
+        let away = try Self.body(["final class FirstAnalysisMomentStore", "func completedAway(first: Bool, fullAccess: Bool)"], in: store)
+        #expect(away.contains("moment.completedAway(first: first, fullAccess: fullAccess)") && away.contains("keep()"), "\(away)")
         for database in ["AlbumistStore", "store.value(", "store.set(", "setValue("] {
             #expect(!store.contains(database), "the moment is kept in the database: \(database)")
         }

@@ -145,17 +145,37 @@ struct FirstAnalysisMomentTests {
     /// the first finish that is celebrated.
     @Test func completedAwayForTheFirstTimeItNeverComes() {
         var moment = Self.fresh()
-        moment.completedAway(first: true)
+        moment.completedAway(first: true, fullAccess: true)
         #expect(moment.kept == .spent)
         Self.end(&moment, after: 60)
         #expect(!moment.isDue(at: Self.at(61)))
         // After a quick first analysis: still owed, and the long analysis on screen brings it.
         var quick = Self.fresh()
         Self.end(&quick, celebrates: false)
-        quick.completedAway(first: false)
+        quick.completedAway(first: false, fullAccess: true)
         #expect(quick.kept == .owed)
         Self.end(&quick, after: 120)
         #expect(quick.isDue(at: Self.at(121)))
+    }
+
+    /// After a quick first analysis of only the shared photos, an overnight refinement that
+    /// completes the analysis with every photo allowed analysed the rest of the library without
+    /// the user: like the first run in the app with every photo, it uses up that chance, so a later
+    /// check for new photos never brings the 100 % (verification review Y, Y4). With only the
+    /// shared photos still allowed it changes nothing.
+    @Test func completedAwayWithEveryPhotoUsesUpTheSharedChance() {
+        var moment = Self.fresh()
+        Self.end(&moment, celebrates: false, fullAccess: false)
+        var limited = moment
+        limited.completedAway(first: false, fullAccess: false)
+        #expect(limited.kept == .owed && limited.sharedOnly)
+        moment.completedAway(first: false, fullAccess: true)
+        #expect(moment.kept == .owed && !moment.sharedOnly && moment.firstCompleted == Self.start)
+        Self.end(&moment, wholeLibrary: false, fullAccess: true, after: 3600)
+        #expect(!moment.isDue(at: Self.at(3601)), "a check brought it after the rest was analysed overnight")
+        // A run of the library as a whole within the week still can.
+        Self.end(&moment, after: 7200)
+        #expect(moment.isDue(at: Self.at(7201)))
     }
 
     /// Due, but Albumist left the screen before the card showed it (the wait for the overview, or
@@ -402,7 +422,7 @@ struct FirstAnalysisMomentTests {
         lapsed.lapse(at: Self.at(Self.week + 1))
         #expect(lapsed.kept == .spent && !lapsed.sharedOnly)
         var away = kept
-        away.completedAway(first: true)
+        away.completedAway(first: true, fullAccess: true)
         #expect(away.kept == .spent && !away.sharedOnly)
     }
 
@@ -522,7 +542,7 @@ struct FirstAnalysisMomentTests {
                 }
             }
         }
-        for first in [true, false] { moment.completedAway(first: first) }
+        for first in [true, false] { moment.completedAway(first: first, fullAccess: true) }
         moment.leftScreen()
         moment.cardWent(at: Self.at(2))
         moment.ended()

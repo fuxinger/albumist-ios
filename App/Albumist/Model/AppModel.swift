@@ -1930,7 +1930,7 @@ final class AppModel {
             if end.isFinished, analysis.outcome.refined(with: ended) {
                 // Complete now: nothing to go on with (review of c772325: the card read 100 %
                 // and then "Macht da weiter · 37 %" from the marker of the run before).
-                FirstAnalysisMomentStore.shared.completedAway(first: !AnalysisMarker.completedOnce) // Design W3 H13: the first 100 % (DS-08) happened unseen
+                firstAnalysisCompletedAway() // Design W3 H13: the first 100 % (DS-08) happened unseen
                 AnalysisMarker.finished()
                 analysis.resumeFrom = nil
                 analysis.resumed = nil

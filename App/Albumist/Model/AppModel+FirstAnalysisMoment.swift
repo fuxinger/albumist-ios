@@ -79,10 +79,10 @@ final class FirstAnalysisMomentStore {
 
     /// The analysis was completed where no run of the app ended (the overnight refinement):
     /// `first`, it had not been completed before (`AnalysisMarker.completedOnce`, read before the
-    /// refinement sets it).
-    func completedAway(first: Bool) {
-        guard first, moment.kept == .owed else { return }
-        moment.completedAway(first: first)
+    /// refinement sets it); `fullAccess`, every photo is allowed. No legs are left to count.
+    func completedAway(first: Bool, fullAccess: Bool) {
+        guard moment.kept == .owed else { return }
+        moment.completedAway(first: first, fullAccess: fullAccess)
         legs.drop()
         keep()
     }
@@ -194,6 +194,13 @@ extension AppModel {
     /// (`analysis.resumeFrom`, read from `AnalysisMarker.unfinished`).
     func firstAnalysisLegStarted() {
         FirstAnalysisMomentStore.shared.legStarted(firstAnalysisRun, goesOn: analysis.resumeFrom != nil)
+    }
+
+    /// The analysis was completed where no run of the app ended (the overnight refinement,
+    /// `refinePass`), told before the marker says so: whether it had been completed before, and
+    /// whether every photo is allowed (after only the shared photos, it analysed the rest).
+    func firstAnalysisCompletedAway() {
+        FirstAnalysisMomentStore.shared.completedAway(first: !AnalysisMarker.completedOnce, fullAccess: access == .full)
     }
 
     /// What the moment asks of a run as it starts and as it ends (`FirstAnalysisMoment.Run`).

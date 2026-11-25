@@ -99,7 +99,7 @@ struct FirstAnalysisLegsSourceTests {
         #expect(written.contains("UserDefaults.standard.removeObject(forKey: Self.legSecondsKey)"), "\(written)")
         let keep = try Source.body(["final class FirstAnalysisMomentStore", "private func keep()"], in: store)
         #expect(keep.contains("keepLegs(exactly: true)"), "\(keep)")
-        let away = try Source.body(["final class FirstAnalysisMomentStore", "func completedAway(first: Bool)"], in: store)
+        let away = try Source.body(["final class FirstAnalysisMomentStore", "func completedAway(first: Bool, fullAccess: Bool)"], in: store)
         let dropped = try #require(away.range(of: "legs.drop()"), "the legs outlive an overnight completion: \(away)")
         let keptAway = try #require(away.range(of: "keep()"), "\(away)")
         #expect(dropped.upperBound < keptAway.lowerBound, "\(away)")

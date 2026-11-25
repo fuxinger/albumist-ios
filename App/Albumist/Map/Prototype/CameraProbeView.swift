@@ -30,6 +30,12 @@ struct CameraProbeView: View {
         .background(Color.black)
         .environment(\.colorScheme, .dark)
         .statusBarHidden()
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            model.interrupted()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            model.resumed()
+        }
     }
 
     private var plate: some View {
@@ -92,11 +98,15 @@ struct CameraProbeView: View {
     private(set) var flightState = ""
     /// The flight shown last is measured (its result is the last of `flights`).
     private(set) var flightDone = false
+    /// The flight shown last was given up: the app left the foreground in the middle.
+    private(set) var flightAbandoned = false
     private(set) var copied = false
 
     @ObservationIgnored private weak var mapView: MKMapView?
     @ObservationIgnored private var shownAt: CFTimeInterval = 0
     @ObservationIgnored private var renderingSinceShown = false
+    /// MapKit is rendering now (between its "will start" and its "did finish"), whatever camera.
+    @ObservationIgnored private var mapRendering = false
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var wait: Task<Void, Never>?
     @ObservationIgnored private var run: CameraProbeFlightRun?
@@ -127,7 +137,7 @@ struct CameraProbeView: View {
         }
     }
 
-    var canFlyAgain: Bool { step == .flight && flightDone }
+    var canFlyAgain: Bool { step == .flight && (flightDone || flightAbandoned) }
 
     private var step: CameraProbeStep { CameraProbe.steps[index] }
 
@@ -165,6 +175,7 @@ struct CameraProbeView: View {
     }
 
     func renderingStarted() {
+        mapRendering = true
         renderingSinceShown = true
         run?.renderingStarted(at: CACurrentMediaTime())
     }
@@ -173,6 +184,7 @@ struct CameraProbeView: View {
     /// the flight take off.
     func renderingFinished(fully: Bool) {
         let now = CACurrentMediaTime()
+        mapRendering = false
         if var run {
             run.renderingFinished(at: now, fully: fully)
             self.run = run
@@ -181,6 +193,28 @@ struct CameraProbeView: View {
         }
         guard case .still = step, fully, renderingSinceShown, results[index] == nil else { return }
         finish(readySeconds: now - shownAt)
+    }
+
+    /// The app leaves the foreground: the display link pauses, so a flight would count the pause.
+    /// A flight in the air or landing is given up; a still camera still waiting is measured anew
+    /// when the app is back (`resumed`).
+    func interrupted() {
+        if var run, run.phase != .done {
+            generation += 1
+            wait?.cancel()
+            run.abandon()
+            stopFlight()
+            flightAbandoned = true
+            setFlightLines(got: "Flug abgebrochen: Albumist war nicht mehr im Vordergrund", state: "„Nochmal fliegen“ misst neu")
+        } else if case .still = step, results[index] == nil {
+            generation += 1
+            wait?.cancel()
+        }
+    }
+
+    /// The app is back in the foreground: a still camera without a result waits anew.
+    func resumed() {
+        if case .still = step, results[index] == nil { show() }
     }
 
     func copy() {
@@ -194,7 +228,8 @@ struct CameraProbeView: View {
         generation += 1
         stopFlight()
         wait?.cancel()
-        renderingSinceShown = false
+        // A rendering MapKit already runs gets no new "will start" for this camera: its finish counts.
+        renderingSinceShown = mapRendering
         shownAt = CACurrentMediaTime()
         let mine = generation
         switch step {
@@ -208,7 +243,8 @@ struct CameraProbeView: View {
             }
         case .flight:
             flightDone = false
-            run = CameraProbeFlightRun(shownAt: shownAt)
+            flightAbandoned = false
+            run = CameraProbeFlightRun(shownAt: shownAt, renderingInProgress: mapRendering)
             setFlightLines(got: "Der Flug startet, sobald die Karte steht", state: "Karte lädt …")
             mapView.setCamera(TripPlaybackCameraDriver.mapCamera(CameraProbe.flight.camera(at: 0)), animated: false)
             wait = Task { [weak self] in

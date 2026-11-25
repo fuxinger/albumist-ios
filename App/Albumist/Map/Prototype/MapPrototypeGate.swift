@@ -7,16 +7,18 @@ import SwiftUI
 /// `-AlbumistUITestMapPrototype`. Never the App Store build.
 ///
 /// TestFlight is told by StoreKit: its app transaction comes from the sandbox environment
-/// (verified or not, both count). That answer is asynchronous, so the last one is kept in the
-/// user defaults and the entry shows at once on the next visit; the App Store build always
-/// answers "production" and so never shows it.
+/// (verified or not, both count). That answer is asynchronous, so the entry appears once
+/// StoreKit has answered in this launch. No answer is kept across launches: a tester who moves
+/// to the App Store build would otherwise see the entry from an old answer, and when StoreKit
+/// cannot answer (offline) the entry stays hidden.
 ///
 /// App Review runs its builds in the sandbox environment too, so a reviewer would see the
 /// entry: the prototype (this gate, `MapPrototypeView` and its files) has to leave the app
 /// before the first build goes to App Review. It exists for wave 0 only.
 @MainActor
 enum MapPrototypeGate {
-    private static let testFlightKey = "mapPrototype.isTestFlight"
+    /// Where builds before 25.11.2026 kept the last answer; removed at the first check.
+    private static let oldTestFlightKey = "mapPrototype.isTestFlight"
     /// The answer of this launch, once StoreKit gave it.
     private static var resolved: Bool?
 
@@ -35,20 +37,25 @@ enum MapPrototypeGate {
 
     /// The answer now, without waiting: in a UI run only with the argument (the other UI tests
     /// and their screenshots keep the atlas as it is), in a debug build always, else the last
-    /// answer StoreKit gave.
+    /// answer StoreKit gave in this launch (hidden until then).
     static var isVisible: Bool {
         if UITestSupport.isRunning { return ProcessInfo.processInfo.arguments.contains(uiTestArgument) }
         if isDebugBuild { return true }
-        return resolved ?? UserDefaults.standard.bool(forKey: testFlightKey)
+        return releaseAnswer(resolved)
+    }
+
+    /// A release build's answer: only what StoreKit said in this launch, never a stored one.
+    static func releaseAnswer(_ storeKit: Bool?) -> Bool {
+        storeKit ?? false
     }
 
     /// The answer after asking StoreKit once per launch (release builds only).
     static func checkVisible() async -> Bool {
         if UITestSupport.isRunning || isDebugBuild { return isVisible }
         if let resolved { return resolved }
-        guard let testFlight = await isTestFlightBuild() else { return isVisible }
+        UserDefaults.standard.removeObject(forKey: oldTestFlightKey)
+        guard let testFlight = await isTestFlightBuild() else { return releaseAnswer(nil) }
         resolved = testFlight
-        UserDefaults.standard.set(testFlight, forKey: testFlightKey)
         return testFlight
     }
 

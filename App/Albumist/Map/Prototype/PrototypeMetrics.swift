@@ -277,8 +277,9 @@ extension MetricEvent {
         super.init()
     }
 
-    /// Idempotent. Asks for the display's full rate (120 Hz with ProMotion, which needs
-    /// `CADisableMinimumFrameDurationOnPhone` in the Info.plist).
+    /// Idempotent. Asks for up to 120 Hz; iPhones stay at 60 Hz, because the app does not set
+    /// `CADisableMinimumFrameDurationOnPhone` (it would change every animation of the app; the
+    /// map decides that in wave 1, see docs/IMPROVEMENTS.md).
     func start() {
         guard link == nil else { return }
         let target = DisplayLinkTarget(sampler: self)

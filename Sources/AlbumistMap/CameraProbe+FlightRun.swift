@@ -30,9 +30,10 @@ public struct CameraProbeFlightResult: Hashable, Sendable {
 /// `CACurrentMediaTime`. The app sets the first camera and makes the run (`starting`); once that
 /// map is fully rendered (`readyToTakeOff`) or the wait is over it takes off and sets the
 /// flight's camera on every frame (`flying`); after the last it lands (`landing`) and asks
-/// `settle(at:)` until the map has been at rest for `restSeconds` (`done`, with `result`).
+/// `settle(at:)` until the map has been at rest for `restSeconds` (`done`, with `result`). A run
+/// the app left in the middle is `abandoned` and measures nothing.
 public struct CameraProbeFlightRun: Hashable, Sendable {
-    public enum Phase: Hashable, Sendable { case starting, flying, landing, done }
+    public enum Phase: Hashable, Sendable { case starting, flying, landing, done, abandoned }
 
     /// After the landing the map counts as ready once no rendering started for this long.
     public static let restSeconds = 0.5
@@ -53,14 +54,19 @@ public struct CameraProbeFlightRun: Hashable, Sendable {
     private var landedAt: Double?
     private var lastFrame: Double?
     /// The last event after the landing (a rendering started or finished), and whether the last
-    /// rendering then finished whole.
+    /// rendering of the flight or the landing finished whole.
     private var lastLandingEvent: Double?
     private var lastFinishedWhole = true
     private var lastWholeFinish: Double?
 
-    /// The first camera was set at `shownAt`.
-    public init(shownAt: Double) {
+    /// The first camera was set at `shownAt`. `renderingInProgress`: MapKit was still rendering
+    /// then; it sends no new "will start" for the new camera, so its next whole finish counts.
+    public init(shownAt: Double, renderingInProgress: Bool = false) {
         self.shownAt = shownAt
+        if renderingInProgress {
+            renderingSince = shownAt
+            renderedSinceShown = true
+        }
     }
 
     /// The first map is fully rendered: the flight may start.
@@ -87,11 +93,14 @@ public struct CameraProbeFlightRun: Hashable, Sendable {
         switch phase {
         case .starting:
             if fully, renderedSinceShown, startReadySeconds == nil { startReadySeconds = max(0, time - shownAt) }
+        case .flying:
+            lastFinishedWhole = fully
+            if fully { lastWholeFinish = time }
         case .landing:
             lastLandingEvent = time
             lastFinishedWhole = fully
             if fully { lastWholeFinish = time }
-        case .flying, .done:
+        case .done, .abandoned:
             break
         }
     }
@@ -124,6 +133,13 @@ public struct CameraProbeFlightRun: Hashable, Sendable {
         }
         phase = .landing
         landedAt = time
+    }
+
+    /// The app left the foreground: the display link paused, so the times would hold the pause.
+    /// The run ends without a measurement.
+    public mutating func abandon() {
+        guard phase != .done else { return }
+        phase = .abandoned
     }
 
     /// After the landing: done once the map rested `restSeconds` (ready when its last rendering

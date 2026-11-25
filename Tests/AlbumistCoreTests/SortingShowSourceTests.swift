@@ -331,7 +331,8 @@ struct SortingShowSourceTests {
         let header = try Self.body(["struct SortingShow", "var header: some View"], in: show)
         for text in ["Text(\"\\(totalPhotos) \\(SortingShowWords.number(totalPhotos, locale: locale)) Fotos einsortiert\")",
                      "Text(\"\\(counted) \\(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert\")",
-                     ".accessibilityValue(Text(\"\\(landed.count) von \\(albums.count) Alben fertig, \\(counted) \\(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert\"))"] {
+                     ".accessibilityValue(Text(\"\\(landed.count) von \\(albums.count) Alben fertig, \\(counted) "
+                         + "\\(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert\"))"] {
             #expect(header.contains(text), "missing: \(text)")
         }
         #expect(!header.contains(".formatted("), "the header formats a number of its own: \(header)")

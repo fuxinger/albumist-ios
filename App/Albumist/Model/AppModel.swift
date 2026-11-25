@@ -3370,6 +3370,7 @@ final class AppModel {
         }
         lines += BackgroundRunLog.summary
         lines += BatteryLog.summary + EnergyMetricsSubscriber.summary
+        lines += MapPrototypeDiagnostics.lines()
         return lines.joined(separator: "\n")
     }
 

@@ -2,13 +2,21 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. Suche und „Analyse fertig“ nach der zweiten Prüfung (Design-Welle 3, H14, noch in keinem Build): Zurück
+  auf dem Such-Tab sucht Albumist neu, wenn sich seitdem etwas geändert hat, das die Suche liest (ein ignoriertes
+  Foto, ein Album, der Name eines Orts, das Zuhause, neue Ergebnisse der Analyse oder ein neuer Tag), sonst bleibt
+  alles stehen wie zuletzt; solange die Suche offen bleibt, ändern sich ihre Treffer nie von selbst. VoiceOver sagt
+  „Analyse fertig“ auch dann, wenn die Mitteilungen ausgeschaltet wurden, während Albumist im Hintergrund war, und
+  nie zweimal, wenn sie inzwischen erlaubt sind. Öffnet eine Mitteilung oder Siri einen anderen Tab, nimmt Albumist
+  die Tastatur der Suche jedes Mal weg.
 - 25.11. Raster nach der zweiten Nachprüfung (Design-Welle 3, H10, noch in keinem Build): Beim Auswählen am Rand
   lernt die Seite auch dann nicht falsch herum, wie sie von selbst weiterläuft, wenn die Scroll-Ansicht ihre
   Schritte bis zu drei Bilder spät meldet (kein Sprung um die Leistenhöhe mehr); dafür hält sie je Weiterlaufen
   höchstens sechs Bilder an. Verschwindet das Raster dabei, endet das Weiterlaufen wie beim Loslassen.
 - 25.11. Suche, Blätter und „Analyse fertig“ nach der Prüfung der Welle-3-Arbeit (Design-Welle 3, H14, noch in
   keinem Build): Öffnet eine Mitteilung oder Siri einen anderen Tab, verschwindet nur die Tastatur — Suchtext,
-  Treffer und die Stelle in der Liste bleiben. Zurück auf dem Such-Tab sucht Albumist nicht noch einmal:
+  Treffer und die Stelle in der Liste bleiben. Zurück auf dem Such-Tab sucht Albumist nicht noch einmal,
+  solange sich nichts geändert hat:
   „Verstanden als“ bleibt stehen, die geladenen Treffer bleiben, und eine ganze Frage geht nicht zweimal an Apple
   Intelligence. VoiceOver sagt „Analyse fertig“ jetzt auch dann, wenn die Analyse endete, während das
   Kontrollzentrum offen war oder Siri gefragt wurde, und wenn Mitteilungen ausgeschaltet sind: gesagt wird es

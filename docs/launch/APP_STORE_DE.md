@@ -32,7 +32,7 @@ ein Foto“ (die App löscht auf Wunsch ihre eigenen Beispielfotos); keine Fachw
 
 **Kategorie:** Foto & Video (Haupt), Reisen (zweite).
 
-**Preis:** 6,99 € einmalig (Entscheidung Fuchs 25.11.2026); Startwoche: Vorschlag 4,99 €, noch nicht entschieden. Der Preis steht nur in App Store Connect, in keinem Text und keinem Bild.
+**Preis:** 6,99 € einmalig (Entscheidung Fuchs 25.11.2026); Startwoche 4,99 € (Entscheidung Fuchs 25.11.2026). Der Preis steht nur in App Store Connect, in keinem Text und keinem Bild.
 
 **Werbetext (max. 170, ohne neue Prüfung änderbar). Ohne Preis**, weil derselbe Text auch in
 Österreich und der Schweiz (Franken) erscheint und nach der Startwoche sonst falsch wäre:

@@ -14,7 +14,7 @@ Alternative if search data after launch says "organizer" is too crowded: `Albumi
 
 **Category:** Photo & Video (primary), Travel (secondary).
 
-**Price:** 6.99 € one-time (decided 25 Nov 2026); launch week: 4.99 € proposed, not decided. Apple maps the euro tier to other currencies; the price appears only in App Store Connect.
+**Price:** 6.99 € one-time (decided 25 Nov 2026); launch week 4.99 € (decided 25 Nov 2026). Apple maps the euro tier to other currencies; the price appears only in App Store Connect.
 
 **Promotional text (max 170). No price** (the English text shows in dozens of currencies):
 - Launch week: `Launch price for a short time. Pay once, no subscription. Albumist finds your trips and turns them into real albums in your Photos app.` (135)

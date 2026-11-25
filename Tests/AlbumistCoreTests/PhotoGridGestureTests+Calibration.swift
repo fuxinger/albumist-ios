@@ -168,6 +168,42 @@ extension PhotoGridGestureTests {
         #expect(calibration.convention == .contentOffset, "a step on its way, no probe")
     }
 
+    /// The run's wait for the steps before its probe is spent only by a probe after it (review
+    /// Z2): where the step right after it cannot tell (a shorter frame, a finger that eased back),
+    /// the next step that can tell, with that one on its way, waits once more; only once more.
+    @Test func theWaitBeforeTheProbeIsSpentOnlyByAProbe() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        // Reports a frame late: a step too small to tell, then one that can tell waits.
+        calibration.asked(701, from: 700, insetTop: 100, range: range)
+        var asks = [calibration.mayAsk()]
+        calibration.asked(704, from: 700, insetTop: 100, range: range)
+        calibration.reported(701)
+        asks.append(calibration.mayAsk())
+        calibration.reported(704)
+        // Answered; the step right after it cannot tell (1 pt), so it is no probe.
+        asks.append(calibration.mayAsk())
+        calibration.asked(705, from: 704, insetTop: 100, range: range)
+        asks.append(calibration.mayAsk())
+        calibration.asked(708, from: 704, insetTop: 100, range: range)
+        calibration.reported(705)
+        asks.append(calibration.mayAsk())
+        #expect(asks == [true, false, true, true, false], "the next step that can tell waits once more")
+        calibration.reported(708)
+        // Again a step that cannot tell, then one that could: no third wait.
+        calibration.asked(709, from: 708, insetTop: 100, range: range)
+        calibration.asked(712, from: 708, insetTop: 100, range: range)
+        asks = [calibration.mayAsk()]
+        calibration.reported(709)
+        calibration.reported(712)
+        // All answered: the next step that can tell probes.
+        calibration.asked(715, from: 712, insetTop: 100, range: range)
+        asks.append(calibration.mayAsk())
+        calibration.reported(715)
+        #expect(asks == [true, false], "only once more")
+        #expect(calibration.convention == .contentOffset)
+    }
+
     /// The review's case (Y1): a finger selects into the bottom edge, and the scroll view reports
     /// each step in the same frame, one or two frames late, or never. Whichever way `scrollTo(y:)`
     /// counts, how fast the finger comes and at 60 or 120 frames a second, the run learns that

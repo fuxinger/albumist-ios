@@ -100,7 +100,8 @@ public enum PhotoGridAutoScroll {
 /// Where the scroll view reports a step a frame or two late, a step is always on its way
 /// (review Y1): then the run's first step that could tell lets the steps before the probe be
 /// answered first. It waits as a probe does, teaching nothing, and the next step that can tell
-/// probes.
+/// probes. Where the step right after it cannot tell (a shorter frame, a finger that eased back),
+/// the run lets them be answered first once more (review Z2), only once more.
 ///
 /// A report answers a waiting step only when it is the step's own (review Z1): the scroll view
 /// reports the steps in their order, one report for each step that moved it, so it is the
@@ -112,8 +113,9 @@ public enum PhotoGridAutoScroll {
 /// whose wait ran out while older steps' reports came is the run's last: they come later than
 /// `patience`, so would the next probe's.
 ///
-/// So each run's probe pauses the page for up to two frames (`patience`), and where the
-/// reports come late the steps before it pause it for up to two more, once a run.
+/// So a probe pauses the page for up to two frames (`patience`), and where the reports come
+/// late the steps before it pause it for up to two more, again where the step right after them
+/// could not probe.
 public struct PhotoGridScrollCalibration: Equatable, Sendable {
     public enum Convention: Equatable, Sendable {
         /// `y` is the content offset.
@@ -141,6 +143,12 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
     private var checked = false
     /// This run let the steps before its probe be answered first (review Y1).
     private var cleared = false
+    /// How often this run let the steps before its probe be answered first: a second time only
+    /// where the step right after the first time could not probe (review Z2).
+    private var clearings = 0
+    /// The steps before the probe were answered just now: the next step decides whether that was
+    /// spent (a probe) or not (review Z2).
+    private var afterClearing = false
 
     private struct Step: Equatable, Sendable {
         var y: Double
@@ -204,7 +212,8 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
     /// when the run has no answered probe yet, the step before was answered, and the step can
     /// tell (`tells`). With the step before still on its way (review Y1), a step that can tell,
     /// also from where that one lands either way (so can the probe after it), lets the steps
-    /// be answered first, once a run.
+    /// be answered first, once a run; once more where the step right after that is no probe
+    /// (review Z2).
     public mutating func asked(_ y: Double, from: Double, insetTop: Double, range: ClosedRange<Double>) {
         let teaches = !checked && Self.tells(y, from: from, insetTop: insetTop, range: range)
         var wait: Wait?
@@ -214,10 +223,13 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
                Self.tells(y, from: before.landing(.fromRestingTop), insetTop: insetTop, range: range) {
                 wait = .clearing
                 cleared = true
+                clearings += 1
             }
         } else if teaches {
             wait = .probe
         }
+        if afterClearing, wait == nil, clearings < 2 { cleared = false }
+        afterClearing = false
         last = Step(y: y, insetTop: insetTop, wait: wait)
         onTheirWay += 1
         position = from
@@ -256,6 +268,7 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
             convention = way
             checked = true
         }
+        afterClearing = step.wait == .clearing
         // A wait that ended with its answer: no step is on its way.
         if step.wait != nil { onTheirWay = 0 }
         last = nil
@@ -269,5 +282,7 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
         position = nil
         checked = false
         cleared = false
+        clearings = 0
+        afterClearing = false
     }
 }

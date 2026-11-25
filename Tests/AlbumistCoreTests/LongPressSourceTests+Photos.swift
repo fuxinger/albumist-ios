@@ -13,6 +13,9 @@ extension LongPressSourceTests {
         var call: String
         var side: Int
         var photo: String
+        /// Extensions of the type in the same file (parts moved out of the struct's body for
+        /// SwiftLint): no second side there either.
+        var extensions: [String] = []
     }
 
     /// A page that shows photos: its type, the function that does a menu item, and how a tap on
@@ -54,7 +57,8 @@ extension LongPressSourceTests {
             GridOfItsOwn(path: Self.albums, declaration: ["struct AlbumScreen", "private func tile("],
                          call: ".photoMenu(photo, place: .album, side: Self.photoSide)", side: 110, photo: "photo"),
             GridOfItsOwn(path: Self.search, declaration: ["struct SearchView", "private func thumbnail("],
-                         call: ".photoMenu(id, place: .search, side: Self.photoSide, available: hit != nil)", side: 110, photo: "id"),
+                         call: ".photoMenu(id, place: .search, side: Self.photoSide, available: hit != nil)", side: 110, photo: "id",
+                         extensions: ["extension SearchView"]),
         ]
         for grid in grids {
             let cell = try Self.body(grid.declaration, in: grid.path)
@@ -65,6 +69,10 @@ extension LongPressSourceTests {
             #expect(type.contains("private static let photoSide: CGFloat = \(grid.side)"), "\(grid.path)")
             #expect(type.contains("AssetThumbnail(id: \(grid.photo), side: Self.photoSide)"), "\(grid.path)")
             #expect(!type.contains("AssetThumbnail(id: \(grid.photo), side: \(grid.side))"), "\(grid.path): a second side")
+            for declaration in grid.extensions {
+                let parts = try Self.body([declaration], in: grid.path)
+                #expect(!parts.contains("AssetThumbnail(id: \(grid.photo), side: \(grid.side))"), "\(declaration): a second side")
+            }
         }
         let country = try Self.code("App/Albumist/Views/CountryPhotosView.swift")
         #expect(!country.contains(".photoMenu("), "the map's files are not this strand's")

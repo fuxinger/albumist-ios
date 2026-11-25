@@ -621,7 +621,7 @@ struct AnalysisFinishedView: View {
     private func play() {
         guard model.claimFinishMoment() else { return }
         // Heard once per finished run, also with Reduce Motion (design wave 3, H14).
-        FinishAnnouncementStore.shared.cardSeen(active: model.isOnScreen)
+        FinishAnnouncementStore.shared.cardSeen()
         guard !reduceMotion else { return }
         bounce += 1
     }
@@ -649,11 +649,12 @@ final class FinishAnnouncementStore {
         rule.afterWait(card: shown.card, notification: shown.notification)
     }
 
-    /// The finished card is seen for the first time for its run (its check mark is claimed):
-    /// "Analyse fertig", quietly (low priority, as the card's other announcements), unless the
-    /// first 100 % on the card says it itself ("Analyse fertig: 100 %", DS-08).
-    func cardSeen(active: Bool) {
-        guard rule.cardSeen(voiceOver: UIAccessibility.isVoiceOverRunning, active: active,
+    /// The finished card is seen for the first time for its run (its check mark is claimed, only
+    /// while Albumist is on screen): "Analyse fertig", quietly (low priority, as the card's other
+    /// announcements), unless the first 100 % on the card says it itself ("Analyse fertig:
+    /// 100 %", DS-08).
+    func cardSeen() {
+        guard rule.cardSeen(voiceOver: UIAccessibility.isVoiceOverRunning,
                             saidByFirstMoment: FirstAnalysisMomentStore.shared.moment.shows(at: Date())) else { return }
         var spoken = AttributedString(String(localized: "Analyse fertig"))
         spoken.accessibilitySpeechAnnouncementPriority = .low

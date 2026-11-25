@@ -20,8 +20,9 @@ import Foundation
 /// - Only a finish of a run that celebrates (`AnalysisCardState.celebratesFinish`: a wait of
 ///   30 s and more): never the check for new photos ("Sucht neue Fotos") alone. A short run that
 ///   slips in after a long one shows the long one's finish, as its card does.
-/// - Once: the first sight of the card decides, also when VoiceOver is off then or Albumist not
-///   active (turning VoiceOver on later brings no old "fertig").
+/// - Once: the first sight of the card decides, also when VoiceOver is off then (turning
+///   VoiceOver on later brings no old "fertig"). The card is seen only while Albumist is on
+///   screen (`AppModel.claimFinishMoment`), so whether it is active is not asked (review S8).
 /// - Not beside the first 100 %, which says "Analyse fertig: 100 %" itself.
 public struct FinishAnnouncement: Sendable, Equatable {
     /// The card shows a finish no notification said, and was not seen yet.
@@ -52,10 +53,10 @@ public struct FinishAnnouncement: Sendable, Equatable {
     }
 
     /// The card with "Analyse fertig" is seen for the first time for its finish. True: VoiceOver
-    /// says "Analyse fertig" now. `voiceOver`: VoiceOver is on; `active`: Albumist is active;
-    /// `saidByFirstMoment`: the first 100 % shows on the card and says it itself.
-    public mutating func cardSeen(voiceOver: Bool, active: Bool, saidByFirstMoment: Bool) -> Bool {
+    /// says "Analyse fertig" now. `voiceOver`: VoiceOver is on; `saidByFirstMoment`: the first
+    /// 100 % shows on the card and says it itself.
+    public mutating func cardSeen(voiceOver: Bool, saidByFirstMoment: Bool) -> Bool {
         defer { owed = false }
-        return owed && voiceOver && active && !saidByFirstMoment
+        return owed && voiceOver && !saidByFirstMoment
     }
 }

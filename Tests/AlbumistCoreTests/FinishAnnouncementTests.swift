@@ -34,10 +34,11 @@ struct FinishAnnouncementTests {
         rule.afterWait(card: false, notification: false)
     }
 
-    /// The first sight of the card, with VoiceOver on and Albumist active.
-    private static func seen(_ rule: inout FinishAnnouncement, voiceOver: Bool = true, active: Bool = true,
+    /// The first sight of the card, with VoiceOver on. Always while Albumist is on screen (the
+    /// card's claim, `AppModel.claimFinishMoment`), so the rule does not ask (review S8 of H14).
+    private static func seen(_ rule: inout FinishAnnouncement, voiceOver: Bool = true,
                              saidByFirstMoment: Bool = false) -> Bool {
-        rule.cardSeen(voiceOver: voiceOver, active: active, saidByFirstMoment: saidByFirstMoment)
+        rule.cardSeen(voiceOver: voiceOver, saidByFirstMoment: saidByFirstMoment)
     }
 
     @Test func aRunWatchedToItsEndIsSaidOnce() {
@@ -164,17 +165,13 @@ struct FinishAnnouncementTests {
         #expect(rule.owed)
     }
 
-    /// VoiceOver off or Albumist not active as the card is first seen: not said, and not later
-    /// either (turning VoiceOver on does not bring an old "fertig").
-    @Test func onlyWithVoiceOverWhileActiveAndNotLater() {
+    /// VoiceOver off as the card is first seen: not said, and not later either (turning
+    /// VoiceOver on does not bring an old "fertig").
+    @Test func onlyWithVoiceOverAndNotLater() {
         var rule = FinishAnnouncement()
         Self.longRunEnded(&rule)
         Self.shownInFront(&rule)
         #expect(!Self.seen(&rule, voiceOver: false))
-        #expect(!Self.seen(&rule))
-        Self.longRunEnded(&rule)
-        Self.shownInFront(&rule)
-        #expect(!Self.seen(&rule, active: false))
         #expect(!Self.seen(&rule))
     }
 

@@ -71,9 +71,10 @@ struct FinishAnnouncementSourceTests {
     }
 
     /// The store lives outside the card (one per app), so the card made anew keeps what the end
-    /// of the run said. It asks the rule with VoiceOver, whether Albumist is active, and whether
-    /// the first 100 % says it ("Analyse fertig: 100 %", DS-08); then says "Analyse fertig"
-    /// quietly, as the card's other announcements.
+    /// of the run said. It asks the rule with VoiceOver and whether the first 100 % says it
+    /// ("Analyse fertig: 100 %", DS-08); then says "Analyse fertig" quietly, as the card's other
+    /// announcements. Not whether Albumist is active: the card's claim needs it on screen
+    /// (`AppModel.claimFinishMoment`), so the question was always answered yes (review S8 of H14).
     @Test func theStoreAsksTheRuleAndSaysItQuietly() throws {
         let card = try Self.code(Self.card)
         let store = try Self.body(["final class FinishAnnouncementStore"], in: card)
@@ -83,9 +84,10 @@ struct FinishAnnouncementSourceTests {
         #expect(ended == "{rule.runEnded(finished:finished,celebrates:celebrates)}", "\(ended)")
         let shown = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "func afterWait(_ shown: FinishMoment.Shown)"], in: card))
         #expect(shown == "{rule.afterWait(card:shown.card,notification:shown.notification)}", "\(shown)")
-        let seen = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "func cardSeen("], in: card))
-        let asks = try #require(seen.range(of: "guardrule.cardSeen(voiceOver:UIAccessibility.isVoiceOverRunning,active:active,saidByFirstMoment:FirstAnalysisMomentStore.shared.moment.shows(at:Date()))else{return}"),
-                                "\(seen)")
+        let seen = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "func cardSeen()"], in: card))
+        let question = "guardrule.cardSeen(voiceOver:UIAccessibility.isVoiceOverRunning,"
+            + "saidByFirstMoment:FirstAnalysisMomentStore.shared.moment.shows(at:Date()))else{return}"
+        let asks = try #require(seen.range(of: question), "\(seen)")
         let words = try #require(seen.range(of: "varspoken=AttributedString(String(localized:\"Analysefertig\"))"), "\(seen)")
         let quiet = try #require(seen.range(of: "spoken.accessibilitySpeechAnnouncementPriority=.low"), "\(seen)")
         let said = try #require(seen.range(of: "AccessibilityNotification.Announcement(spoken).post()"), "\(seen)")
@@ -99,7 +101,7 @@ struct FinishAnnouncementSourceTests {
     @Test func theFinishedCardSaysItOnceAsItIsClaimed() throws {
         let card = try Self.code(Self.card)
         let play = Self.squeezed(try Self.body(["struct AnalysisFinishedView", "private func play()"], in: card))
-        #expect(play == "{guardmodel.claimFinishMoment()else{return}FinishAnnouncementStore.shared.cardSeen(active:model.isOnScreen)guard!reduceMotionelse{return}bounce+=1}",
+        #expect(play == "{guardmodel.claimFinishMoment()else{return}FinishAnnouncementStore.shared.cardSeen()guard!reduceMotionelse{return}bounce+=1}",
                 "\(play)")
         let announcement = Self.squeezed(try Self.body(["struct AnalysisProgressCard", "private var announcement: String?"], in: card))
         #expect(announcement.contains("case.finished:nil"), "\(announcement)")

@@ -13,6 +13,9 @@ import AlbumistTestSupport
 struct LongPressSourceTests {
     static let start = "App/Albumist/Views/Start/StartSections.swift"
     static let startCard = "App/Albumist/Views/Start/StartProposalCard.swift"
+    /// The start page's other cards ("Dein Startpaket", the quiet card, "Alle Vorschläge"),
+    /// once in `StartSections.swift`.
+    static let startCards = "App/Albumist/Views/Start/StartPageCards.swift"
     static let suggestions = "App/Albumist/Views/ProposalViews.swift"
     static let library = "App/Albumist/Views/LibraryView.swift"
     /// The grid of "Unsortiert" and of a suggestion's photos (design wave 3, DS-06b).
@@ -121,7 +124,7 @@ struct LongPressSourceTests {
         // The page shows what the menu opens ("Anpassen", the trip workshop, "Keine Reise?"): on
         // its scroll view, so the question comes from the screen, not from the middle of all the
         // cards (review C of design wave 2, M1).
-        for path in [Self.start, Self.startCard] {
+        for path in [Self.start, Self.startCard, Self.startCards] {
             #expect(!(try Self.code(path)).contains(".suggestionMenuFlows("), "on the cards' tall stack: \(path)")
         }
         let overview = Self.squeezed(try Self.body(["struct OverviewView", "var body: some View"], in: Self.overview))

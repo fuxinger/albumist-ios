@@ -219,7 +219,9 @@ extension PhotoGridSourceTests {
         #expect(shown.contains("try?awaitTask.sleep(for:PhotoGridScroller.landing)guardletself,self.steps==stepelse{return}self.land()"),
                 "only the last step lands: \(shown)")
         let land = Self.squeezed(try Self.body(["final class PhotoGridScroller", "private func land("], in: Self.scrolling))
-        #expect(land == "{anchor=nilfindsPhotos=falseposition=ScrollPosition(idType:AssetID.self)}", "\(land)")
+        // Only a UI run's record (`ProgressLineLog`, off in the app) comes before it.
+        #expect(land == "{ifProgressLineLog.isOn{ProgressLineLog.mark(\"gridpinchlanded\"+placeForRecord(unitY:nil))}"
+                + "anchor=nilfindsPhotos=falseposition=ScrollPosition(idType:AssetID.self)}", "\(land)")
         let scrolling = try Self.code(Self.scrolling)
         #expect(scrolling.contains("static let landing: Duration = .milliseconds(350)"), "after the grid settled (0.3 s)")
     }

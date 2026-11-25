@@ -2623,15 +2623,28 @@ final class AlbumistFlowUITests: XCTestCase {
             print("UI_FACT the page's bar after taking the photo out: remove \(remove.exists) (hittable \(remove.exists && remove.isHittable)), "
                   + "\"Nicht jetzt\" \(notNow.exists) (hittable \(notNow.exists && notNow.isHittable), enabled \(notNow.exists && notNow.isEnabled)), "
                   + "main button \(create.exists), \"Auswählen\" \(app.buttons["proposalPhotos.select"].exists); "
-                  + "\"Nicht jetzt\" at \(notNow.exists ? "\(notNow.frame)" : "-"), bottom bars "
-                  + "\(app.toolbars.allElementsBoundByIndex.map { "\($0.frame) hittable \($0.isHittable)" })")
+                  + "\"Nicht jetzt\" at \(notNow.exists ? "\(notNow.frame)" : "-"), bars \(barsForRecord())")
         }
         return back
+    }
+
+    /// The toolbars XCTest sees, for the record of `testRemovePhotoFromSuggestion`: frame,
+    /// identifier, whether hittable, and the identifiers of their buttons (UI run 45640160193:
+    /// one as large as the screen stood over "Nicht jetzt", none visible on its picture).
+    private func barsForRecord() -> String {
+        app.toolbars.allElementsBoundByIndex.map { bar in
+            let buttons = bar.buttons.allElementsBoundByIndex.map { $0.identifier.isEmpty ? $0.label : $0.identifier }
+            return "\(bar.frame) id '\(bar.identifier)' hittable \(bar.isHittable) buttons \(buttons)"
+        }.description
     }
 
     /// `testRemovePhotoFromSuggestion`: selects one photo of the suggestion in reach, taps
     /// "1 aus Vorschlag entfernen" once it is free to tap and confirms. False when a step failed.
     private func takeOnePhotoOut() -> Bool {
+        // Before anything was picked: whether "Nicht jetzt" is in reach already, and the bars
+        // XCTest sees, to compare with after (UI run 45640160193).
+        let notNow = app.buttons["proposal.notNow"]
+        print("UI_FACT before picking: \"Nicht jetzt\" \(notNow.exists) (hittable \(notNow.exists && notNow.isHittable)), bars \(barsForRecord())")
         guard tap(UITestScreens.SuggestionPage.selectPhotos(app), "select a photo to take out", timeout: 5) else { return false }
         guard let photo = UITestScreens.SuggestionPage.photoInReach(app) else {
             print("UI_STEP_MISSING a photo of the suggestion in reach")

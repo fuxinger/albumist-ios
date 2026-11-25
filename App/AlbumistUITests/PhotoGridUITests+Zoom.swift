@@ -126,6 +126,10 @@ extension PhotoGridUITests {
         guard UITestWait.until("\(test): the photo pinched on still under the fingers \(what)", timeout: 5, { there() }) else {
             let now = self.photos("library.photo").filter { $0.label == held.label }.map { Int($0.frame.midY) }
             print("UI_FACT \(test): '\(held.label)' was at y \(Int(held.frame.midY)), now at \(now)")
+            // Where the scroll view was when the step asked for the photo, and where it landed.
+            for mark in pinchMarks(since: Date().addingTimeInterval(-20)) ?? [] where !mark.hasPrefix("grid pinch:") {
+                print("UI_FACT \(test): \(what): the app saw '\(mark)'")
+            }
             shot("x-place-lost")
             return
         }

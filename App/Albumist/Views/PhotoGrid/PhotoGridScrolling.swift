@@ -145,6 +145,9 @@ final class PhotoGridScroller {
     /// scroll view keeps the photo there as the grid lays out its new size).
     func show(_ photo: AssetID, unitY: Double) {
         let point = UnitPoint(x: 0.5, y: unitY)
+        // For a UI run's record (`PhotoGridPinchRecord`): where the scroll view was when the step
+        // asked for the photo, to compare with where it landed (`land`).
+        if ProgressLineLog.isOn { ProgressLineLog.mark("grid pinch show " + placeForRecord(unitY: unitY)) }
         findsPhotos = true
         anchor = point
         position.scrollTo(id: photo, anchor: point)
@@ -161,9 +164,21 @@ final class PhotoGridScroller {
     /// is left, its position names no photo (one that goes leaves nothing behind), and it finds
     /// and follows none while the user scrolls (review L6).
     private func land() {
+        if ProgressLineLog.isOn { ProgressLineLog.mark("grid pinch landed " + placeForRecord(unitY: nil)) }
         anchor = nil
         findsPhotos = false
         position = ScrollPosition(idType: AssetID.self)
+    }
+}
+
+extension PhotoGridScroller {
+    /// Where the scroll view is, for a UI run's record of a zoom step: "unitY 0.42, offset 1830,
+    /// visible 103-874, content 9120" (points; "-" before it reported itself).
+    func placeForRecord(unitY: Double?) -> String {
+        let unit = unitY.map { String(format: "unitY %.2f, ", $0) } ?? ""
+        let area = visibleArea.map { "\(Int($0.lowerBound))-\(Int($0.upperBound))" } ?? "-"
+        let content = geometry.map { "\(Int($0.contentSize.height))" } ?? "-"
+        return unit + "offset \(Int(offset)), visible \(area), content \(content)"
     }
 }
 

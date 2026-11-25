@@ -56,6 +56,46 @@ class TestKeysTests(unittest.TestCase):
         self.assertEqual(found(src), [])
 
 
+def found_in_app(app_source):
+    with tempfile.TemporaryDirectory() as root:
+        os.makedirs(f"{root}/App/Albumist")
+        with open(f"{root}/App/Albumist/SomeView.swift", "w") as f:
+            f.write(app_source)
+        return check_strings.missing_in_app(root, {check_strings.norm(k) for k in CATALOG["strings"]})
+
+
+class MultiLineLiteralTests(unittest.TestCase):
+    """A text too long for one line of code (SwiftLint's line_length) is a multi-line literal whose
+    lines end in a backslash: it is the same key, and it is checked like any other."""
+
+    def test_a_continued_literal_is_the_key_of_its_joined_lines(self):
+        src = ('let a = Text("""\n'
+               '    Gleich \\\n'
+               '    fertig\n'
+               '    """)\n'
+               'let b = String(localized: """\n'
+               '        von \\(n) \\(n.formatted()) \\\n'
+               '        Fotos\n'
+               '        """)\n')
+        self.assertEqual(found_in_app(src), {})
+
+    def test_a_continued_literal_missing_from_the_catalog_is_found(self):
+        src = 'let a = Text("""\n    Bald \\\n    fertig, \"wirklich\"\n    """)\n'
+        self.assertEqual(found_in_app(src), {'Bald fertig, "wirklich"': "SomeView.swift"})
+
+    def test_a_line_break_in_a_literal_stays_in_its_key(self):
+        src = 'let a = Text("""\n    Gleich\n    fertig\n    """)\n'
+        self.assertEqual(found_in_app(src), {"Gleich\\nfertig": "SomeView.swift"})
+
+    def test_the_lines_after_a_literal_keep_their_numbers(self):
+        src = ('#expect(a == String(localized: """\n'
+               '    Gleich \\\n'
+               '    fertig\n'
+               '    """))\n'
+               '#expect(b == String(localized: "Bald fertig"))\n')
+        self.assertEqual(found(src), [("App/AlbumistTests/SomeTests.swift:5", "Bald fertig")])
+
+
 class RealRepositoryTests(unittest.TestCase):
     def test_every_key_the_app_tests_look_up_is_in_the_catalog(self):
         catalog = check_strings.load(REPO)

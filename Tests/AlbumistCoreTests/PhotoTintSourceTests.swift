@@ -13,6 +13,7 @@ struct PhotoTintSourceTests {
     static let page = "App/Albumist/Views/ProposalViews.swift"
     static let theme = "App/Albumist/DesignSystem/Theme.swift"
     static let cover = "App/Albumist/DesignSystem/CoverPhoto.swift"
+    static let loader = "App/Albumist/DesignSystem/CoverLoader.swift"
     static let accent = "App/Albumist/Resources/Assets.xcassets/AccentColor.colorset/Contents.json"
     static let mark = "// Design W3 H13: photo tint"
 
@@ -225,8 +226,8 @@ struct PhotoTintSourceTests {
         #expect(follow.contains("PhotoTints.shared.known(for: key.ids, pixels: key.pixels)"), "\(follow)")
         // Why the first one: the cover tries the candidates in order, and only a kept cover needs
         // no word from Photos.
-        let cover = try Self.code(Self.cover)
-        let load = try Self.body(["enum CoverLoader", "static func load("], in: cover)
+        let loader = try Self.code(Self.loader)
+        let load = try Self.body(["enum CoverLoader", "static func load("], in: loader)
         #expect(load.contains("for (index, id) in request.ids.enumerated()"), "\(load)")
         let cache = try Self.code("App/Albumist/Views/AssetThumbnail.swift")
         let fetch = try Self.body(["final class ThumbnailCache", "func cover(for id: AssetID, pixels: CGSize) async -> CoverFetch"], in: cache)

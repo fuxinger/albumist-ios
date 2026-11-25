@@ -527,8 +527,8 @@ final class AccessibilityUITests: XCTestCase {
             UITestWait.appears(app.searchFields.firstMatch, "\(tag) search field shown", timeout: 10)
             // The keyboard where the tab brings it (`MainTabs.searchField`), so the check sees
             // it as it stays; not asserted: by default it comes only with the tap below, and the
-            // check runs on the whole screen.
-            _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+            // check runs on the whole screen. Up to a second, as flow test 1 (review T6 of H14).
+            _ = UITestWait.holds(timeout: 1) { app.keyboards.firstMatch.exists }
             check("\(tag) search", english: english)
             let field = app.searchFields.firstMatch
             if field.waitForExistence(timeout: 5) {

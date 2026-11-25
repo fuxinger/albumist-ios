@@ -159,6 +159,21 @@ struct UITestTabsSourceTests {
         #expect(!flow.contains("foldedTabsFirst"), "the sweep leaves by the folded tabs first")
     }
 
+    /// The default never brings the keyboard with the search tab: the accessibility walk waits up
+    /// to a second for it, as flow test 1 does, not five seconds once per walk and language; and
+    /// the frame test's comment counts three placements, not two (review T6 of H14).
+    @Test func theWalkWaitsASecondForAKeyboardTheDefaultNeverBrings() throws {
+        let walk = Self.squeezed(try Self.code("App/AlbumistUITests/AccessibilityUITests.swift"))
+        let tab = try #require(walk.range(of: #"tap(searchTabButton(),"\(tag)searchtab")"#), "no search step in the walk")
+        let check = try #require(walk.range(of: #"check("\(tag)search",english:english)"#, range: tab.upperBound..<walk.endIndex))
+        let wait = String(walk[tab.upperBound..<check.lowerBound])
+        #expect(wait.contains("_=UITestWait.holds(timeout:1){app.keyboards.firstMatch.exists}"), "\(wait)")
+        #expect(!wait.contains("waitForExistence(timeout:5)"), "\(wait)")
+        let frame = try AppSource.read("App/AlbumistUITests/FrameUITests.swift")
+        #expect(!frame.contains("between the two"), "the frame test still counts two placements")
+        #expect(frame.contains("among the three placements"), "the frame test does not count three placements")
+    }
+
     /// What iOS shows is printed as the search is left, and when no way out or no tab is found:
     /// the tab bar's buttons, whether the tabs are folded, the field, the keyboard and the
     /// buttons beside the field.

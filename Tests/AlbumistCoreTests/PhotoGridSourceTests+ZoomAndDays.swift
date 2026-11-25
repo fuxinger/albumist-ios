@@ -119,6 +119,15 @@ extension PhotoGridSourceTests {
         #expect(detail.contains(".ignoresSafeArea(edges:.top).photoGridScrolling()"), "\(detail)")
     }
 
+    /// A grid that goes while it scrolls by itself (its page went, "Unsortiert" made its days
+    /// anew, a suggestion's preview was hidden) ends the drag as a lifted finger does (review Z2):
+    /// the clock stops, its page's scroller scrolls by itself no more, and the app's lesson starts
+    /// the next run afresh, on any page (`endDrag()` ends the range, `endAutoScroll()` resets them).
+    @Test func aGridThatGoesEndsItsRun() throws {
+        let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
+        #expect(view.contains(".onDisappear{gestures.endDrag()}"), "\(view)")
+    }
+
     // MARK: The days of "Unsortiert"
 
     /// The days are made off the main thread (`AppModel.inboxDays`, as the areas themselves),

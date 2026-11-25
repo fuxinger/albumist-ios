@@ -41,7 +41,9 @@ struct PhotoGridSourceTests {
     /// it its days, the place of its long press, its selection and its way to open a photo, and
     /// draws no photos of its own.
     @Test func bothPagesShareTheGrid() throws {
-        let library = Self.squeezed(try Self.body(["struct LibraryView"], in: Self.library))
+        // "Unsortiert" is its struct and its extension in the same file (the selection's bar, the
+        // empty area): photos of its own in either are drawn beside the grid.
+        let library = Self.squeezed(try Self.body(["struct LibraryView"], in: Self.library) + Self.body(["extension LibraryView"], in: Self.library))
         #expect(library.contains("PhotoGrid(sections:days,limit:limit,place:.unsorted,selecting:selecting,selection:$selection,"
                                  + "pinsHeaders:true,zoom:zoom,identifier:\"library.photo\"){idinopen(id,in:days,limit:limit)}"
                                  + "perform:{item,idinperform(item,on:id,in:days,limit:limit)}"), "\(library)")

@@ -228,7 +228,9 @@ final class PhotoGridGestureState {
     }
 
     /// The finger is at `point` in the grid: the range runs to the photo under it; between rows
-    /// and on a header (also one pinned over photos) it keeps the photo it has.
+    /// and on a header in its own place it keeps the photo it has. On a header pinned over photos
+    /// it runs to the first row below the header, which the page brings out while it scrolls up
+    /// under the finger (review W2).
     private func extend(to point: CGPoint) {
         follow()
         guard var current = drag else { return }
@@ -237,7 +239,7 @@ final class PhotoGridGestureState {
         let seen = self.seen(at: point, current.inScrollView, in: current.scroller)
         let covered = self.covered(seen)
         guard let position = PhotoGridHitTest.position(x: Double(point.x), y: Double(point.y), in: cells(in: current.ids, seen),
-                                                       covered: covered)
+                                                       covered: covered, onCovered: .rowBelow)
         else { return }
         let change = current.range.move(to: position)
         drag = current

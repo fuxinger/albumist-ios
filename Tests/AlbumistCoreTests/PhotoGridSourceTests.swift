@@ -210,9 +210,11 @@ struct PhotoGridSourceTests {
     /// A day's header pinned over the photos scrolling under it hides them: each header reports
     /// where it is in the grid (pinned: where it is pinned), kept as the photos' frames are, and a
     /// finger on one is on no photo where a drag begins (`PhotoGridHitTest.position(…covered:)`),
-    /// so it ticks nothing the user cannot see (review L4). Only where the grid pins its headers,
-    /// and only one at the top of what the user sees, where SwiftUI pins it: a header in its own
-    /// place lies over no photo, and one reported before the days moved is not there any more.
+    /// so it ticks nothing the user cannot see (review L4); a running drag goes on with the first
+    /// row below it, while the page scrolls up under the finger (review W2). Only where the grid
+    /// pins its headers, and only one at the top of what the user sees, where SwiftUI pins it: a
+    /// header in its own place lies over no photo, and one reported before the days moved is not
+    /// there any more.
     @Test func aPinnedHeaderHidesThePhotosUnderIt() throws {
         let view = Self.squeezed(try Self.body(["struct PhotoGrid: View", "var body: some View"], in: Self.grid))
         #expect(view.contains("}header:{header(section,pinned:pinned)}"), "\(view)")
@@ -230,6 +232,10 @@ struct PhotoGridSourceTests {
         #expect(seen.contains("barsEnd:visible.lowerBound+(scroller.seenArea?.lowerBound??0)"), "\(seen)")
         let hits = state.components(separatedBy: "PhotoGridHitTest.position(").count - 1
         #expect(hits == 2 && state.components(separatedBy: "covered: covered").count - 1 == hits, "\(hits)")
+        let start = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func start("], in: Self.state))
+        #expect(start.contains("in:onScreen,covered:covered)}"), "a drag that begins on a header waits: \(start)")
+        let extend = Self.squeezed(try Self.body(["final class PhotoGridGestureState", "private func extend("], in: Self.state))
+        #expect(extend.contains("covered:covered,onCovered:.rowBelow)"), "a running drag goes on below it: \(extend)")
     }
 
     /// A running drag follows the photos the grid shows now (review L3): the grid hands them to

@@ -201,6 +201,39 @@ struct PhotoGridGestureTests {
         #expect(PhotoGridHitTest.position(x: 50, y: 50, in: Self.cells, covered: [between]) == 0)
     }
 
+    /// While a drag runs, a finger on a day's header that lies over photos (pinned at the top
+    /// while the page scrolls up under it) is on the first row below the header, at the finger's
+    /// place across, so the range goes on with the rows that come out below it (review W2). A drag
+    /// that begins there still waits (`noPhotoUnderAPinnedHeader`), and a header in its own place
+    /// between the days, over no photo, is on none.
+    @Test func aRunningDragOnAPinnedHeaderGoesOnBelowIt() {
+        func running(_ x: Double, _ y: Double, _ covered: [GridRect]) -> Int? {
+            PhotoGridHitTest.position(x: x, y: y, in: Self.cells, covered: covered, onCovered: .rowBelow)
+        }
+        // Pinned over the first row, from 40 to 90: that row reaches below its bottom.
+        let pinned = GridRect(x: 0, y: 40, width: 304, height: 50)
+        #expect(running(50, 60, [pinned]) == 0)
+        #expect(running(250, 45, [pinned]) == 2)
+        #expect(running(150, 90, [pinned]) == 1, "its edge")
+        // Its bottom in the gap below the first row: the next day's first row.
+        let low = GridRect(x: 0, y: 0, width: 304, height: 120)
+        #expect(running(50, 110, [low]) == 3)
+        #expect(running(280, 20, [low]) == 4, "beside a short row: its last photo")
+        // Pushed up by the next day's header, in its own place from 100 to 150: below the pushed
+        // one the next day's first row; the next one lies over no photo.
+        let pushed = GridRect(x: 0, y: 50, width: 304, height: 50)
+        let next = GridRect(x: 0, y: 100, width: 304, height: 50)
+        #expect(running(150, 70, [pushed, next]) == 4)
+        #expect(running(150, 120, [pushed, next]) == nil, "a header in its own place")
+        // Over the last row, with no row below it: no photo.
+        #expect(running(50, 200, [GridRect(x: 0, y: 140, width: 304, height: 120)]) == nil)
+        // Off the header the photos count as before.
+        #expect(running(150, 95, [pinned]) == 1)
+        #expect(running(50, 160, [pinned]) == 3)
+        // Where a drag begins: no photo.
+        #expect(PhotoGridHitTest.position(x: 50, y: 60, in: Self.cells, covered: [pinned]) == nil)
+    }
+
     /// Two fingers always hold a photo, the one whose place the zoom keeps: the one under them,
     /// else the nearest (between rows, on a header, beside the grid); on a tie the earlier one.
     @Test func twoFingersHoldTheNearestPhoto() {

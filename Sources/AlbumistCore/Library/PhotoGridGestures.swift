@@ -180,15 +180,40 @@ public struct PhotoGridLift: Equatable, Sendable {
 
 /// Which photo of a grid is under a finger, from the frames of the photos on screen.
 public enum PhotoGridHitTest {
+    /// What a finger on what lies over the photos (a day's header pinned over the photos
+    /// scrolling under it) is on.
+    public enum Covered: Sendable {
+        /// No photo: the drag ticks nothing the user cannot see, and one that begins there waits
+        /// for the finger to reach a photo (review L4).
+        case noPhoto
+        /// The first row below it, at the finger's place across: a running drag goes on with the
+        /// rows that come out below the header while the page scrolls up under the finger
+        /// (review W2). One that lies over no photo (a header in its own place) is on none.
+        case rowBelow
+    }
+
     /// The position of the photo at (`x`, `y`) among `cells` (position and frame, in one space):
     /// the photo under it; in the gap between two photos of a row the nearer one; beside a row
     /// its first or last photo (a short last row of a day: its last). Nil between rows, on a
     /// day's header and where no photo is: the drag keeps the photo it has. `covered`: what lies
-    /// over the photos there (a day's header pinned over the photos scrolling under it, review
-    /// L4): a point on it is on no photo, so the drag ticks nothing the user cannot see.
+    /// over the photos there (a day's header pinned over the photos scrolling under it); a point
+    /// on it is on what `onCovered` says.
     public static func position(x: Double, y: Double, in cells: [(position: Int, frame: GridRect)],
-                                covered: [GridRect] = []) -> Int? {
-        if covered.contains(where: { $0.minX <= x && x <= $0.maxX && $0.minY <= y && y <= $0.maxY }) { return nil }
+                                covered: [GridRect] = [], onCovered: Covered = .noPhoto) -> Int? {
+        let over = covered.filter { $0.minX <= x && x <= $0.maxX && $0.minY <= y && y <= $0.maxY }
+        guard !over.isEmpty else { return under(x: x, y: y, in: cells) }
+        guard onCovered == .rowBelow,
+              let bottom = over.filter({ header in cells.contains { $0.frame.overlaps(header) } }).map(\.maxY).max(),
+              let top = cells.lazy.filter({ $0.frame.maxY > bottom }).map(\.frame.minY).min()
+        else { return nil }
+        // The first row below it: of the photos that reach below its bottom, the highest ones.
+        let row = cells.filter { $0.frame.maxY > bottom && $0.frame.minY - top < 0.5 }
+        guard let first = row.first else { return nil }
+        return under(x: x, y: (first.frame.minY + first.frame.maxY) / 2, in: row)
+    }
+
+    /// The photo at (`x`, `y`) among `cells`, nothing lying over them.
+    private static func under(x: Double, y: Double, in cells: [(position: Int, frame: GridRect)]) -> Int? {
         var best: (position: Int, distance: Double)?
         for cell in cells where cell.frame.minY <= y && y <= cell.frame.maxY {
             let distance = x < cell.frame.minX ? cell.frame.minX - x : (x > cell.frame.maxX ? x - cell.frame.maxX : 0)

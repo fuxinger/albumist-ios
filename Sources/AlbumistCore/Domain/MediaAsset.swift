@@ -47,15 +47,6 @@ public struct MediaSubtypes: OptionSet, Hashable, Sendable, Codable {
     public static let burst           = MediaSubtypes(rawValue: 1 << 17)
 }
 
-/// Where the pixel data needed for content analysis is available.
-public enum AnalysisAvailability: String, Sendable, Codable {
-    case unknown
-    case local            // a local derivative could be read without network
-    case cloudOnly        // only in iCloud; download needed
-    case downloadFailed
-    case notAnalyzable    // e.g. audio, corrupt
-}
-
 /// Immutable snapshot of one asset's metadata, as read from the photo library.
 public struct AssetSnapshot: Hashable, Sendable, Codable, Identifiable {
     public var id: AssetID

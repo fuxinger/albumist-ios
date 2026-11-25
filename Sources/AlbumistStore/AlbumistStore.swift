@@ -521,10 +521,6 @@ public actor AlbumistStore: PlanJournal {
         ])
     }
 
-    public func placeCacheCount() throws -> Int {
-        try db.query("SELECT COUNT(*) AS n FROM place_cache").first?["n"]?.int ?? 0
-    }
-
     public func setPlace(_ place: ResolvedPlace?, for asset: AssetID) throws {
         placesRevision += 1
         if let place {

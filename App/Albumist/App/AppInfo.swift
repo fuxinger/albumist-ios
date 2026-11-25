@@ -4,7 +4,6 @@ import Foundation
 /// The display name lives here and in project.yml (Info.plist).
 enum AppInfo {
     static let name = "Albumist"
-    static let bundleID = "app.albumist.ios"
     static let refinementTaskID = "app.albumist.ios.refinement"
     static let continuedAnalysisTaskPrefix = "app.albumist.ios.analysis"
     static let supportFolderName = "Albumist"

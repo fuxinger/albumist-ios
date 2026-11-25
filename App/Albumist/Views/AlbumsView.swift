@@ -1,6 +1,5 @@
 import SwiftUI
 import AlbumistCore
-import AlbumistEngine
 
 /// Existing albums and folders as Photos shows them, plus merge suggestions for albums
 /// that hold mostly the same photos (prompt §3).

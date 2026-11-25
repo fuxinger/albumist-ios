@@ -34,13 +34,6 @@ public enum TextMinimizer {
     /// What stands in a stored text where a card number was.
     static let cardMask = "•••• ••••"
 
-    /// Whether a stored text had an IBAN or a card number masked: the photo shows a bank card,
-    /// a statement or a banking app, also when no document type was recognised in it (a card
-    /// says "Visa Debit", not "Kontoauszug"). Such a photo is never a preview (`PreviewRank`).
-    public static func showsMaskedNumber(_ storedText: String) -> Bool {
-        storedText.contains(cardMask) || storedText.contains(ibanMask)
-    }
-
     /// Whether a stored text (`storable`) shows that the picture is a bank card, a statement, a
     /// banking app or another sensitive paper: a masked card number or IBAN, a financial,
     /// identity or medical word, or a card word ("Visa Debit", "girocard"; `DocumentAnalyzer.

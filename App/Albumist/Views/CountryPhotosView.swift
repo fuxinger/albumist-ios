@@ -1,6 +1,5 @@
 import SwiftUI
 import AlbumistCore
-import AlbumistEngine
 
 /// Opened from the travel atlas: every photo taken in one country, newest year first,
 /// with the places photographed most and, if Albumist has one, the album suggestion.

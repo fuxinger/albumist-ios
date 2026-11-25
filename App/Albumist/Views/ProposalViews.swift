@@ -1,6 +1,5 @@
 import SwiftUI
 import AlbumistCore
-import AlbumistEngine
 
 /// All suggestions, or those of one area (the start page's "Alle 41"; design E1, E6): photo
 /// cards two in a row, one at the accessibility text sizes, grouped by area, the album's name and

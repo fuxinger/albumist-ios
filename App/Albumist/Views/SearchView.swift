@@ -1,6 +1,5 @@
 import SwiftUI
 import AlbumistCore
-import AlbumistEngine
 
 /// Natural search over the analysed library (prompt §14), e.g. "Hunde Italien 2023".
 /// Every search runs on a prepared index in a few milliseconds, so results follow the

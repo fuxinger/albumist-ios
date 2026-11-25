@@ -1597,6 +1597,118 @@ class SettleTests(unittest.TestCase):
         self.assertLessEqual(now[0], 120 + 30)
 
 
+class HostLoadTests(unittest.TestCase):
+    """PASS_LOAD/PASS_TOP during a pass and HOST_QUIET before the boot (Fuchs 21.11.: overload)."""
+
+    SIM = ("/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.2.8117.0.P0I1oG"
+           "/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.2.simruntime/Contents/Resources/RuntimeRoot"
+           "/usr/libexec/backboardd")
+
+    def test_a_simulator_process_keeps_its_name(self):
+        # UI run 44890874093: the whole path was cut at 160 characters before the name.
+        self.assertEqual(ui_tests.short_command(self.SIM), "sim backboardd")
+        self.assertEqual(ui_tests.short_command("/usr/libexec/siriknowledged"), "/usr/libexec/siriknowledged")
+
+    def test_top_lines_parse_ps_with_spaces_in_the_path(self):
+        out = f" 38.1 Rs   {self.SIM}\n 30.9 Rs   /usr/libexec/siriknowledged\n 1.0 S /bin/a\n"
+        self.assertEqual(ui_tests.top_lines(out, count=2),
+                         [" 38.1 Rs  sim backboardd", " 30.9 Rs  /usr/libexec/siriknowledged"])
+
+    def test_sampler_reports_load_top_and_summary(self):
+        lines, loads = [], iter([520.0, 300.0, 700.0])
+        sampler = ui_tests.LoadSampler("device first", load=lambda: next(loads), top=lambda: ["a"] * 7, out=lines.append)
+        for _ in range(3):
+            sampler.sample()
+        sampler.stopped.set()
+        lines.append(sampler.summary())
+        self.assertEqual(lines.count("PASS_TOP a"), 15)
+        self.assertIn("PASS_LOAD device first load(1m)=520.00", lines)
+        self.assertEqual(lines[-1], "PASS_LOAD_SUMMARY device first: 3 samples, median load(1m) 520, highest 700")
+
+    def test_sampler_without_sample_says_so(self):
+        sampler = ui_tests.LoadSampler("x", interval=120, out=lambda _: None)
+        self.assertIn("no sample", sampler.summary())
+
+    def test_sampler_thread_stops_and_prints_summary(self):
+        lines = []
+        sampler = ui_tests.LoadSampler("x", interval=0.01, load=lambda: 1.0, top=lambda: [], out=lines.append)
+        sampler.start()
+        time.sleep(0.05)
+        sampler.stop()
+        self.assertFalse(sampler.is_alive())
+        self.assertTrue(lines[-1].startswith("PASS_LOAD_SUMMARY x: "))
+
+    def test_quiet_host_tries_the_next_command_and_never_fails(self):
+        calls = []
+
+        def run(command):
+            calls.append(command)
+            return (0, "") if command[0] == "sudo" and "system/com.apple.siriknowledged" in command else (3, "Boot-out failed: 3: No such process")
+
+        lines = ui_tests.quiet_host(run=run, uid=501)
+        self.assertIn(["launchctl", "bootout", "gui/501/com.apple.siriknowledged"], calls)
+        self.assertTrue(lines[0].startswith("HOST_QUIET Spotlight indexing: still on (sudo -n mdutil -a -i off: exit 3"))
+        self.assertEqual(lines[1], "HOST_QUIET Siri knowledge (siriknowledged): off "
+                                   "(sudo -n launchctl bootout system/com.apple.siriknowledged)")
+
+    def test_quiet_host_that_hangs_does_not_hold_the_boot(self):
+        # Second review of PR #20: a root child (sudo) cannot be killed by sh's timeout, so a
+        # stalled mdutil would keep `boot` from booting and turn the job red.
+        lines = []
+        started = time.monotonic()
+        ui_tests.quiet_host_bounded(limit=0.2, quiet=lambda: time.sleep(5) or [], out=lines.append)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(lines, ["HOST_QUIET gave up after 0 s; the boot goes on"])
+
+    def test_quiet_host_that_raises_does_not_stop_the_boot(self):
+        lines = []
+
+        def broken():
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad")
+
+        ui_tests.quiet_host_bounded(quiet=broken, out=lines.append)
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("HOST_QUIET failed (UnicodeDecodeError"), lines[0])
+
+    def test_quiet_host_checks_what_it_did(self):
+        def run(command):
+            if command[:2] == ["mdutil", "-s"]:
+                return 0, "/:\n\tIndexing disabled.\n"
+            if command[0] == "pgrep":
+                return 1, ""
+            return 0, ""
+
+        lines = ui_tests.quiet_host(run=run, uid=501)
+        self.assertEqual(lines[-1], "HOST_QUIET check: Spotlight on /: Indexing disabled.; siriknowledged running: no")
+
+    def test_sampler_halts_at_once_and_prints_nothing_after_its_summary(self):
+        lines = []
+        sampler = ui_tests.LoadSampler("x", interval=0.01, load=lambda: 1.0, top=lambda: [], out=lines.append)
+        sampler.start()
+        time.sleep(0.05)
+        sampler.halt()
+        sampler.finish(timeout=5)
+        count = len(lines)
+        time.sleep(0.05)
+        sampler.sample()
+        self.assertEqual(len(lines), count)
+        self.assertTrue(lines[-1].startswith("PASS_LOAD_SUMMARY x: "))
+
+    def test_boot_quiets_the_host_first(self):
+        order = []
+        with mock.patch.object(ui_tests, "quiet_host", side_effect=lambda: order.append("quiet") or []), \
+                mock.patch.object(ui_tests, "boot", side_effect=lambda udid: order.append("boot") or True), \
+                mock.patch.object(ui_tests, "prepare"), tempfile.TemporaryDirectory() as out:
+            self.assertEqual(ui_tests.main(["boot", "--udid", "U", "--out", out]), 0)
+        self.assertEqual(order, ["quiet", "boot"])
+
+    def test_quiet_host_command_prints_and_exits_zero(self):
+        with mock.patch.object(ui_tests, "quiet_host", return_value=["HOST_QUIET a: off (x)"]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ui_tests.main(["quiet-host"]), 0)
+        self.assertIn("HOST_QUIET a: off (x)", out.getvalue())
+
+
 class SettleCommandTests(unittest.TestCase):
     """`ui_tests.py settle`: ci.yml's "Fresh simulator" waits like a UI pass (CI 44437759869:
     the load never went under 3.5, so the step always waited its whole 5 min)."""

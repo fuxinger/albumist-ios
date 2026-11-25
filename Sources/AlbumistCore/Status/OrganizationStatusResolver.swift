@@ -289,7 +289,6 @@ public struct OrganizationStatusResolver: Sendable {
         public static func shownShare(_ fraction: Double) -> Double {
             fraction < 1 ? min(fraction, 0.99) : 1
         }
-        public var partiallyShare: Double { total == 0 ? 0 : Double(partially) / Double(total) }
     }
 
     /// The ring over `states` (the photos in the part of the library it counts), each photo

@@ -393,8 +393,8 @@ struct PurchaseRulesTests {
 
     // MARK: Price
 
-    /// The price shown is always StoreKit's (`product.displayPrice`): 2,99 € in the launch
-    /// week and 4,99 € after are set in App Store Connect. No price may be written into the
+    /// The price shown is always StoreKit's (`product.displayPrice`): 4,99 € in the launch week
+    /// and 6,99 € after (owner's decisions 25.11.) are set in App Store Connect. No price may be written into the
     /// app's code or strings, or the launch week would show the wrong one.
     @Test func noPriceIsWrittenIntoTheApp() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

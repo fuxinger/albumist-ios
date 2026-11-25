@@ -22,10 +22,6 @@ public struct MoneyAmount: Hashable, Sendable, Codable {
     /// Amount in minor units (cents) to avoid floating point errors.
     public var minorUnits: Int
     public var currency: String
-
-    public var decimalString: String {
-        String(format: "%d.%02d", minorUnits / 100, abs(minorUnits % 100))
-    }
 }
 
 /// Structured information extracted from recognized document text.

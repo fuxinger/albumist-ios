@@ -1,6 +1,5 @@
 import SwiftUI
 import AlbumistCore
-import AlbumistEngine
 
 /// The tab "Alben" (design 5C, approved 20.11.2026, draft E4): on top a shelf of what Albumist
 /// created or extended ("Von Albumist", "angelegt oder ergänzt", "Alle 12"), then rows for the

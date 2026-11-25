@@ -732,6 +732,7 @@ final class AppModel {
     private func load() async {
         guard phase == .loading else { return }
         FirstAnalysisMomentStore.shared.launched() // Design W3 H13: the first 100 % (DS-08), read before the marker may be reset below
+        _ = FinishAnnouncementStore.shared // Design W3 H14: made at launch, iOS says long before a run ends if notifications are allowed (Q2)
         do {
             if UITestSupport.rebuildsDatabase, let url = try? Self.databaseURL() {
                 AlbumistStore.quarantineDatabase(at: url)

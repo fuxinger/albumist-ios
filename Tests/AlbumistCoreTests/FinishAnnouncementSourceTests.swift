@@ -35,8 +35,9 @@ struct FinishAnnouncementSourceTests {
     /// that ended as the user left was said twice (owed in front, then the notification), and a
     /// check that ended in front after a finish overtaken in the background said nothing. Before
     /// the wait, next to `FinishMoment.runEnded`, the end of a run only tells that a new finish
-    /// began, which no notification has said yet. Two marked lines in `AppModel.swift` for it, and
-    /// five of the search's revision (review Q1 of round 3, pinned in `SearchTabSourceTests`):
+    /// began, which no notification has said yet. Three marked lines in `AppModel.swift` for it
+    /// (the third makes the store at launch, `iOSIsAskedAtLaunchAndOnceMoreAsTheNotificationGoesOut`),
+    /// and five of the search's revision (review Q1 of round 3, pinned in `SearchTabSourceTests`):
     /// nothing else of H14 there.
     @Test func theModelDecidesWhereTheNotificationIsDecided() throws {
         let raw = try AppSource.read(Self.model)
@@ -63,12 +64,12 @@ struct FinishAnnouncementSourceTests {
             #expect(decided.upperBound < at.lowerBound, "decided after \(later)")
         }
         #expect(!run.contains("inBackground"), "decided before the wait as well")
-        #expect(model.components(separatedBy: "FinishAnnouncementStore").count - 1 == 2, "told from another place too")
-        for call in ["FinishAnnouncementStore.shared.runEnded(", "FinishAnnouncementStore.shared.afterWait("] {
+        #expect(model.components(separatedBy: "FinishAnnouncementStore").count - 1 == 3, "told from another place too")
+        for call in ["FinishAnnouncementStore.shared.runEnded(", "FinishAnnouncementStore.shared.afterWait(", "_ = FinishAnnouncementStore.shared "] {
             let line = try #require(raw.split(separator: "\n").first { $0.contains(call) }, "\(call)")
             #expect(line.contains(Self.mark), "unmarked: \(line)")
         }
-        #expect(raw.components(separatedBy: Self.mark).count - 1 == 2 + 5, "more of H14 in AppModel.swift")
+        #expect(raw.components(separatedBy: Self.mark).count - 1 == 3 + 5, "more of H14 in AppModel.swift")
     }
 
     /// The store lives outside the card (one per app), so the card made anew keeps what the end
@@ -84,8 +85,8 @@ struct FinishAnnouncementSourceTests {
         let ended = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "func runEnded("], in: card))
         #expect(ended == "{rule.runEnded(finished:finished,celebrates:celebrates)}", "\(ended)")
         let shown = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "func afterWait(_ shown: FinishMoment.Shown)"], in: card))
-        #expect(shown == "{rule.afterWait(card:shown.card,notification:shown.notification,"
-                + "inBackground:UIApplication.shared.applicationState==.background,notificationsAllowed:notificationsAllowed)}", "\(shown)")
+        #expect(shown.hasPrefix("{rule.afterWait(card:shown.card,notification:shown.notification,"
+                + "inBackground:UIApplication.shared.applicationState==.background,notificationsAllowed:notificationsAllowed)"), "\(shown)")
         let seen = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "func cardSeen()"], in: card))
         let question = "guardrule.cardSeen(voiceOver:UIAccessibility.isVoiceOverRunning,"
             + "saidByFirstMoment:FirstAnalysisMomentStore.shared.moment.shows(at:Date()))else{return}"
@@ -100,11 +101,13 @@ struct FinishAnnouncementSourceTests {
     /// Albumist in the background as the moment decides, read in the same step as the model's
     /// `appActive` (inactive is not enough: in front of Control Centre, the app switcher, Siri or
     /// a system alert iOS hands the notification to Albumist, whose `willPresent` shows nothing),
-    /// and with its notifications allowed. That is cached, read from iOS as the store is made and
-    /// each time Albumist becomes active (back from the Settings app, after iOS's question), so
-    /// the decision after the wait does not wait for iOS; until iOS answers it counts as not
-    /// allowed (said twice rather than never). Only `.authorized` shows the notification at once:
-    /// Albumist asks for alerts and sound, never for quiet (provisional) notifications.
+    /// and with its notifications allowed. That is cached, read from iOS as the store is made (at
+    /// launch) and each time Albumist becomes active (back from the Settings app, after iOS's
+    /// question), so the decision after the wait does not wait for iOS; iOS's answer to the
+    /// question asked once more right then decides (review Q2 of round 3,
+    /// `iOSIsAskedAtLaunchAndOnceMoreAsTheNotificationGoesOut`). Only `.authorized` shows the
+    /// notification at once: Albumist asks for alerts and sound, never for quiet (provisional)
+    /// notifications.
     @Test func aNotificationCountsOnlyWhereIOSShowsIt() throws {
         let raw = try AppSource.read(Self.card)
         #expect(raw.contains("\nimport UserNotifications\n"), "the card's file does not import UserNotifications")
@@ -125,6 +128,37 @@ struct FinishAnnouncementSourceTests {
         let platform = try Self.code("App/Albumist/Platform/ContinuedAnalysis.swift")
         let present = Self.squeezed(try Self.body(["final class NotificationRouter", "willPresent notification: UNNotification"], in: platform))
         #expect(present == "{[]}", "notifications show in front of Albumist: \(present)")
+    }
+
+    /// Review Q2 of H14's round 3: the cached value is the one iOS gave when Albumist was last
+    /// active. Turned off in Settings while Albumist was in the background, the notification
+    /// counted as said, and nobody said the finish; and the store, made at the first run's end,
+    /// could decide before iOS had answered the first time, so the finish was said twice. Now the
+    /// store is made at launch, right after the first 100 %'s store and before anything else of
+    /// the load (no run starts before it), so its first answer is long there; and where `afterWait`
+    /// decides, iOS is asked once more and its answer decides either way
+    /// (`FinishAnnouncement.notificationsAnswered`). It comes within milliseconds; the card is seen
+    /// only while Albumist is active (`AppModel.claimFinishMoment`).
+    @Test func iOSIsAskedAtLaunchAndOnceMoreAsTheNotificationGoesOut() throws {
+        let raw = try AppSource.read(Self.model)
+        let load = try Self.body(["private func load() async"], in: try Self.code(Self.model))
+        let first = try #require(load.range(of: "FirstAnalysisMomentStore.shared.launched()"), "\(load)")
+        let made = try #require(load.range(of: "_ = FinishAnnouncementStore.shared"), "the store is not made at launch: \(load)")
+        #expect(load[first.upperBound..<made.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                "something runs before the store is made: \(load)")
+        let rest = load[made.upperBound...].prefix { $0 != "\n" }
+        #expect(rest.trimmingCharacters(in: .whitespaces).isEmpty, "the store is not only made there: \(rest)")
+        let line = try #require(raw.split(separator: "\n").first { $0.contains("_ = FinishAnnouncementStore.shared ") }, "\(raw.count)")
+        #expect(line.hasPrefix("        _ = FinishAnnouncementStore.shared \(Self.mark)"), "\(line)")
+        // Asked again where the notification is decided, and the answer told to the rule there only.
+        let card = try Self.code(Self.card)
+        let shown = Self.squeezed(try Self.body(["final class FinishAnnouncementStore", "func afterWait(_ shown: FinishMoment.Shown)"], in: card))
+        #expect(shown == "{rule.afterWait(card:shown.card,notification:shown.notification,"
+                + "inBackground:UIApplication.shared.applicationState==.background,notificationsAllowed:notificationsAllowed)"
+                + "Task{notificationsAllowed=awaitSelf.notificationsAllowedNow()rule.notificationsAnswered(allowed:notificationsAllowed)}}",
+                "\(shown)")
+        #expect(card.components(separatedBy: "notificationsAnswered(").count - 1 == 1, "told from another place too")
+        #expect(card.components(separatedBy: "Self.notificationsAllowedNow()").count - 1 == 2, "asked from another place too")
     }
 
     /// The finished card says it as its check mark is claimed, once per run (the claim is), also

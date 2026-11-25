@@ -237,4 +237,100 @@ struct FinishAnnouncementTests {
         #expect(!rule.owed)
         #expect(!Self.seen(&rule))
     }
+
+    /// Review Q2 of H14's round 3: VoiceOver on, a long analysis runs in the background, and the
+    /// user turns Albumist's notifications off in Settings meanwhile. The value `afterWait` decides
+    /// with is the one iOS gave when Albumist was last active (allowed), so the notification counted
+    /// as said; iOS showed nothing, and back in Albumist the card said nothing either. iOS is asked
+    /// once more as the notification goes out, and its answer decides: not allowed, the card owes
+    /// the finish again and says it once.
+    @Test func notificationsTurnedOffInTheBackgroundLeaveTheCardOwing() {
+        var rule = FinishAnnouncement()
+        Self.longRunEnded(&rule)
+        Self.notified(&rule)
+        #expect(!rule.owed)
+        rule.notificationsAnswered(allowed: false)
+        #expect(rule.owed)
+        #expect(Self.seen(&rule))
+        #expect(!Self.seen(&rule))
+    }
+
+    /// The other way round: the value `afterWait` decides with says no (the first answer of iOS
+    /// had not come yet in the first run, or the notifications were turned on in the background),
+    /// so the card owes the finish; iOS answers that they are allowed, so the notification said it,
+    /// and the card stays silent, also when a check after it shows the card again: once, not twice.
+    @Test func notificationsAllowedThoughTheValueSaidNoAreNotSaidTwice() {
+        var rule = FinishAnnouncement()
+        Self.longRunEnded(&rule)
+        Self.notifiedWithNotificationsOff(&rule)
+        #expect(rule.owed)
+        rule.notificationsAnswered(allowed: true)
+        #expect(!rule.owed)
+        Self.checkEnded(&rule)
+        Self.shownInFront(&rule)
+        #expect(!rule.owed)
+        #expect(!Self.seen(&rule))
+    }
+
+    /// The answer decides only for a notification that went out with Albumist in the background:
+    /// in front no notification goes out, and while Albumist is only inactive iOS hands it to
+    /// Albumist, which shows nothing; either way the card owes the finish, whatever iOS answers.
+    /// The same answer as the value `afterWait` decided with changes nothing either.
+    @Test func theAnswerDecidesOnlyForANotificationSentInTheBackground() {
+        for allowed in [true, false] {
+            var front = FinishAnnouncement()
+            Self.longRunEnded(&front)
+            Self.shownInFront(&front)
+            front.notificationsAnswered(allowed: allowed)
+            #expect(front.owed)
+            var inactive = FinishAnnouncement()
+            Self.longRunEnded(&inactive)
+            Self.notifiedWhileInactive(&inactive)
+            inactive.notificationsAnswered(allowed: allowed)
+            #expect(inactive.owed)
+        }
+        var agreed = FinishAnnouncement()
+        Self.longRunEnded(&agreed)
+        Self.notified(&agreed)
+        agreed.notificationsAnswered(allowed: true)
+        #expect(!agreed.owed)
+        #expect(!Self.seen(&agreed))
+        var off = FinishAnnouncement()
+        Self.longRunEnded(&off)
+        Self.notifiedWithNotificationsOff(&off)
+        off.notificationsAnswered(allowed: false)
+        #expect(off.owed)
+        #expect(Self.seen(&off))
+    }
+
+    /// An answer that comes after the card was seen changes nothing (its first sight decided:
+    /// never a late "fertig"); one that comes after a new finish began is not that finish's; and
+    /// one nobody waits for (a second answer, or none asked) changes nothing either.
+    @Test func aLateAnswerChangesNothing() {
+        var seenFirst = FinishAnnouncement()
+        Self.longRunEnded(&seenFirst)
+        Self.notified(&seenFirst)
+        #expect(!Self.seen(&seenFirst))
+        seenFirst.notificationsAnswered(allowed: false)
+        #expect(!seenFirst.owed)
+        #expect(!Self.seen(&seenFirst))
+        var newFinish = FinishAnnouncement()
+        Self.longRunEnded(&newFinish)
+        Self.notified(&newFinish)
+        Self.longRunEnded(&newFinish)
+        newFinish.notificationsAnswered(allowed: false)
+        #expect(!newFinish.owed)
+        Self.notified(&newFinish)
+        #expect(!newFinish.owed)
+        var twice = FinishAnnouncement()
+        Self.longRunEnded(&twice)
+        Self.notified(&twice)
+        twice.notificationsAnswered(allowed: true)
+        twice.notificationsAnswered(allowed: false)
+        #expect(!twice.owed)
+        var none = FinishAnnouncement()
+        none.notificationsAnswered(allowed: false)
+        #expect(!none.owed)
+        #expect(none == FinishAnnouncement())
+    }
 }

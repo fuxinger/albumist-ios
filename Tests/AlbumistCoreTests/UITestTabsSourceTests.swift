@@ -194,16 +194,25 @@ struct UITestTabsSourceTests {
 
     /// Flow test 6 measures the sheet "Analyse" as soon as it is open, whatever its line says,
     /// and fails without its "Fertig" (review S6 of H14: inside `if said` the check was skipped
-    /// without a word when the line came late), then checks that it opened half high.
+    /// without a word when the line came late), then checks that it opened half high, once the
+    /// sheet stands still: two equal reads of its "Fertig" half a second apart (review T8 of
+    /// round 2: read at once, a sheet still sliding up could pass). A check that did not finish
+    /// fails as such, not as a sheet that is not open.
     @Test func flowTest6MeasuresTheSheetWhateverItsLineSays() throws {
         let flow = try Self.code("App/AlbumistUITests/AlbumistFlowUITests.swift")
-        let test6 = try #require(AppSource.body(of: ["func test6_AnalysisKeepsGoingThroughBackgroundAndTabs("], in: flow))
-        let opened = try #require(test6.range(of: "let opened = idle && UITestScreens.Analysis.openSheet(app)"), "\(test6)")
-        let there = try #require(test6.range(of: "XCTAssertTrue(sheetDone.exists,"), "a missing Fertig is not a failure")
-        let high = try #require(test6.range(of: "XCTAssertGreaterThan(top, app.frame.height * 0.4,"))
-        let line = try #require(test6.range(of: "anything(\"keine neuen Fotos\")"))
-        #expect(opened.upperBound < there.lowerBound && there.upperBound < high.lowerBound, "\(test6)")
-        #expect(high.upperBound < line.lowerBound, "the sheet is measured only after its line")
-        #expect(!test6.contains("if said"), "the measure still waits for the line")
+        let test6 = Self.squeezed(try #require(AppSource.body(of: ["func test6_AnalysisKeepsGoingThroughBackgroundAndTabs("], in: flow)))
+        let steps = [#"XCTAssertTrue(idle,"Thecheckdidnotfinish"#,
+                     "letopened=idle&&UITestScreens.Analysis.openSheet(app)",
+                     "ifidle{XCTAssertTrue(sheetDone.exists,",
+                     "ifsheetDone.exists{varlast:CGFloat?letstill=UITestWait.holds(timeout:5){letnow=sheetDone.frame.minY"
+                         + "defer{last=now}returnnow==last}lettop=last??sheetDone.frame.minY",
+                     "XCTAssertTrue(still,",
+                     "XCTAssertGreaterThan(top,app.frame.height*0.4,",
+                     #"anything("keineneuenFotos")"#]
+        let found = steps.map { test6.range(of: $0) }
+        #expect(!found.contains(nil), "\(zip(steps, found).filter { $0.1 == nil }.map(\.0)): \(test6)")
+        let order = found.compactMap { $0?.lowerBound }
+        #expect(order == order.sorted(), "flow test 6 does not finish the check, open, measure the sheet still and then read its line in turn")
+        #expect(!test6.contains("ifsaid"), "the measure still waits for the line")
     }
 }

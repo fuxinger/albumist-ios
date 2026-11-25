@@ -11,7 +11,8 @@ import AlbumistCore
 /// - A flat colour, no gradient, no glow; pale in light mode, deep in dark mode.
 /// - Increase Contrast wins: the plain grouped background then, whatever the photo.
 /// - Not known yet, or no colour of its own: the plain grouped background (`Theme.background`),
-///   which the tint replaces in a slow cross-fade, never a jump.
+///   which the tint replaces in a cross-fade, never a jump: with its cover when it was worked out
+///   before, slowly when it is worked out now.
 enum PhotoTintGround {
     /// The page's ground for `tint`: its light or dark colour, the grouped background without a
     /// tint or with Increase Contrast.
@@ -62,8 +63,8 @@ final class PhotoTints {
         case noCover
     }
 
-    /// The colour of the cover that shows for `ids` at `pixels`, when it is known: a page opened
-    /// again takes it at once (`CoverTintReader`).
+    /// The colour of the cover that shows for `ids` at `pixels`, when it is known: once the cover
+    /// told that a sharp photo shows, the first of them kept at that size (`CoverTintReader`).
     func known(for ids: [AssetID], pixels: CGSize) -> Known {
         for id in ids {
             guard ThumbnailCache.shared.cachedCover(for: id, pixels: pixels) != nil else { continue }
@@ -72,6 +73,16 @@ final class PhotoTints {
             return .notYet
         }
         return .noCover
+    }
+
+    /// The colour of the cover `CoverPhoto` shows at once for `ids` at `pixels`, before Photos is
+    /// asked anything: the first one's, when its cover is kept at that size, so a page opened again
+    /// starts in it (`CoverTintReader.seed`). A later one's kept cover shows only after Photos
+    /// answered for the ones before it (`CoverLoader.load` tries them in order), which it may not
+    /// do: the cover then stays the calm placeholder, never in that photo's colour (verification
+    /// review X4).
+    func atOnce(for ids: [AssetID], pixels: CGSize) -> Known {
+        known(for: Array(ids.prefix(1)), pixels: pixels)
     }
 
     /// The tint of the cover that shows for `ids` at `pixels`: the first of them whose cover is
@@ -119,14 +130,16 @@ private struct SampledImage: @unchecked Sendable {
 }
 
 /// Reads the tint of the cover this view draws (`CoverPhoto` with `ids` at `aspectRatio`, as
-/// wide as this view) while it shows a sharp photo (`sharp`), into `tint`: at once when the
-/// photo's tint is known, in a slow cross-fade when it was just worked out
-/// (`PhotoTintGround.arrival`). The page's own ground again (in the cross-fade) when the cover
-/// stops being a sharp photo or its preview becomes hidden (second review, K5 and K8).
+/// wide as this view) while it shows a sharp photo (`sharp`), into `tint`: with the cover's own
+/// fade when the photo's tint is known (`CoverPhoto.fade`; X3), in a slow cross-fade when it was
+/// just worked out (`PhotoTintGround.arrival`). The page's own ground again (in the cross-fade)
+/// when the cover stops being a sharp photo or its preview becomes hidden (second review, K5 and
+/// K8).
 ///
-/// A colour known for the cover kept at this size is there from the page's first frame: taken as
-/// the page is measured for the first time, before the cover tells that it shows a photo, never
-/// for a hidden preview (`seed`; verification review V5).
+/// A colour known for the cover `CoverPhoto` shows at once (its first candidate's, kept at this
+/// size) is there from the page's first frame: taken as the page is measured for the first time,
+/// before the cover tells that it shows a photo, never for a hidden preview (`seed`; verification
+/// reviews V5 and X4).
 struct CoverTintReader: ViewModifier {
     let ids: [AssetID]
     let aspectRatio: CGFloat
@@ -169,11 +182,11 @@ struct CoverTintReader: ViewModifier {
             }
             .task(id: key) {
                 guard !Task.isCancelled, key.pixels.width >= 1 else { return }
-                // Not a sharp photo: a colour taken for the cover kept at this size stays while
-                // the cover is still to tell (`seed`); otherwise (the placeholder, "Vorschau
+                // Not a sharp photo: a colour taken for the cover shown at once stays while the
+                // cover is still to tell (`seed`); otherwise (the placeholder, "Vorschau
                 // ausgeblendet", its photos taken out) the page's own ground again.
                 guard key.sharp else {
-                    if tint != nil, hidden || PhotoTints.shared.known(for: key.ids, pixels: key.pixels) != .tint(tint) {
+                    if tint != nil, hidden || PhotoTints.shared.atOnce(for: key.ids, pixels: key.pixels) != .tint(tint) {
                         withAnimation(PhotoTintGround.arrival) { tint = nil }
                     }
                     return
@@ -183,25 +196,30 @@ struct CoverTintReader: ViewModifier {
     }
 
     /// The page is measured for the first time (`width` points): the colour known for the cover
-    /// kept at that size, the one `CoverPhoto` is about to show, at once, without the fade, so a
-    /// page opened again starts in it instead of switching to it a few frames later, once the
-    /// cover told (verification review V5). Nothing for a hidden preview or a cover not kept yet.
+    /// `CoverPhoto` shows at once at that size, without asking Photos (its first candidate's, kept
+    /// there), at once, without the fade, so a page opened again starts in it instead of switching
+    /// to it a few frames later, once the cover told (verification review V5). Nothing for a hidden
+    /// preview, a cover not kept yet, or a later candidate's kept cover: that one shows only once
+    /// Photos answered for the first (verification review X4).
     private func seed(width: CGFloat) {
         guard !hidden, tint == nil, width >= 1 else { return }
-        if case .tint(let known?) = PhotoTints.shared.known(for: CoverPhoto.candidates(ids), pixels: pixels(at: width)) {
+        if case .tint(let known?) = PhotoTints.shared.atOnce(for: CoverPhoto.candidates(ids), pixels: pixels(at: width)) {
             tint = known
         }
     }
 
-    /// The colour of the cover on screen: one worked out before at once, with its cover (a page
-    /// opened again starts in its colour, not on grey); one worked out now, and a change from one
-    /// colour to another, in the slow cross-fade.
+    /// The colour of the cover on screen: one worked out before with its cover, in the cover's own
+    /// short fade (`CoverPhoto.fade`), so a page opened again after its cover left the covers'
+    /// store does not switch from the neutral ground to its colour from one frame to the next
+    /// (verification review X3); one worked out now, and a change from one colour to another, in
+    /// the slow cross-fade. Only `seed` sets a colour without a fade. Both fades stay with Reduce
+    /// Motion, as the cover's: a colour changes, nothing moves.
     private func follow(_ key: Key) async {
         for _ in 0..<Self.coverWaits {
             switch PhotoTints.shared.known(for: key.ids, pixels: key.pixels) {
             case .tint(let known):
                 guard known != tint else { return }
-                if tint == nil { tint = known } else { withAnimation(PhotoTintGround.arrival) { tint = known } }
+                withAnimation(tint == nil ? CoverPhoto.fade : PhotoTintGround.arrival) { tint = known }
                 return
             case .notYet:
                 let found = await PhotoTints.shared.tint(for: key.ids, pixels: key.pixels)

@@ -60,6 +60,7 @@ extension AppModel {
     /// the receipt's.
     func previewCovers(for plan: ChangePlan) async -> [String: PlanCovers.Cover]? {
         guard !facts.isEmpty else { return nil }
+        await makeDatesAndRanksOffMain() // Design W3 H13: the preview never makes the two tables on the main actor
         let dates = creationDates, ranks = previewRanks
         return await Task.detached(priority: .userInitiated) {
             PlanCovers.albums(of: plan, applied: false, dates: dates, ranks: ranks)

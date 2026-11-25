@@ -2,6 +2,13 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. Zweite Nachprüfung der ruhigen Farben und der ersten 100 % (Design-Welle 3, H13, noch in keinem Build):
+  Lief die erste Analyse in Etappen (pausiert, von iOS beendet, später weiter), zählen ihre Etappen zusammen: dauert
+  die letzte nur Sekunden, endet sie trotzdem mit „Analyse fertig“ und den 100 %. Nach wenigen freigegebenen Fotos
+  verbraucht ein Lauf mit allen Fotos, der zu kurz für „Analyse fertig“ ist, die 100 % nicht mehr. Spielen die
+  100 % ein zweites Mal, schließt sich ihr Balken wieder sichtbar. Eine wieder geöffnete Vorschlagsseite blendet
+  ihre Farbe mit dem Titelbild ein, auch wenn es nicht mehr im Speicher war, und vorher nur die Farbe des Fotos,
+  das sie gleich zeigt. Die Vorschau vor „Anlegen“ rechnet nichts Großes mehr auf dem Hauptthread.
 - 25.11. Raster in „Unsortiert“ und in Vorschlägen nach der Prüfung der zweiten Runde (Design-Welle 3, noch in
   keinem Build): Ziehen zum Auswählen findet die Fotos auch gleich nach „Auswählen“ und „Fertig“ und hakt über einer
   angehefteten Tagesüberschrift weiter ab; VoiceOvers Doppeltippen nach Ziehen oder Zoom zählt wieder; das
@@ -57,7 +64,8 @@
 - 21.11. Nachprüfung der Sortier-Show, der ruhigen Farben und der ersten 100 % (Design-Welle 3, H13, noch in
   keinem Build): Eine wieder geöffnete Vorschlagsseite steht vom ersten Bild an in ihrer Farbe. War die erste
   Analyse zu schnell für „Analyse fertig“, kommen die ersten 100 % noch sieben Tage lang mit einer Analyse der
-  ganzen Mediathek (auch mit dem ersten Lauf nach „Zugriff auf alle Fotos“), nie mit der Suche nach neuen
+  ganzen Mediathek (auch mit einem Lauf nach „Zugriff auf alle Fotos“, der lange genug für „Analyse fertig“
+  läuft), nie mit der Suche nach neuen
   Fotos. Ersetzt ein neuer Lauf die Karte, während die 100 % noch spielen, kommen sie danach noch einmal.
   „Anlegen“ rechnet nichts Großes mehr auf dem Hauptthread. Die Mac-Tests sind strenger: die zweite volle
   Analyse wird gefeiert, die Show sagt genau „0“ und „2 Fotos einsortiert“, die Seite ist hell blass und

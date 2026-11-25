@@ -236,11 +236,14 @@ struct FirstAnalysisMomentHeader: View {
     private static var spoken: String { String(localized: "Analyse fertig: \(percent)") }
 
     /// The card with "Analyse fertig" is there: plays once, while due and on screen. It comes in
-    /// with a fade, as "Analyse fertig" gives its check mark and its success tap.
+    /// with a fade, as "Analyse fertig" gives its check mark and its success tap. Played again
+    /// after its card went within the hold (V12), its bar joins again: this header's state lived
+    /// on while its card was away (verification review X10).
     private func start() {
         typealias T = FirstAnalysisMoment.Timing
         guard run == nil, model.isOnScreen else { return }
         if again, !store.moment.cutShort { return }
+        joined = false
         let claimed = withAnimation(calm ? .easeInOut(duration: T.fade) : .smooth(duration: T.fade)) {
             store.claim(onScreen: model.isOnScreen)
         }

@@ -406,9 +406,10 @@ final class AppModel {
         return ranks
     }
 
-    /// "Anlegen" (the sorting show, the result's stack): the capture dates and the preview ranks
-    /// where they are not kept (before the first refresh, the dates after a memory warning), made
-    /// off the main thread first, so the tap never makes them here (verification review V13 of H13).
+    /// "Anlegen" (the sorting show, the result's stack) and the preview before it (its albums'
+    /// covers): the capture dates and the preview ranks where they are not kept (before the first
+    /// refresh, the dates after a memory warning), made off the main thread first, so neither
+    /// makes them here (verification review V13 of H13, and its remark on `previewCovers`).
     func makeDatesAndRanksOffMain() async { // Design W3 H13: "Anlegen" never makes the two tables on the main actor
         guard datesCache == nil || previewRanksCache == nil else { return }
         let facts = self.facts
@@ -1292,9 +1293,10 @@ final class AppModel {
             let reason = end.report?.pausedBecause
             // The last reports of this run, before it is shown as ended.
             tick(run: generation)
+            let leg = firstAnalysisLeg(ended: end.isFinished, since: runClockStart, showedBar: runShowedBar) // Design W3 H13: the first 100 % (DS-08), X9
             let celebrate = AnalysisCardState.celebratesFinish(isComplete: end.isFinished,
-                                                               wasQuickCheck: !runShowedBar,
-                                                               ranFor: ContinuousClock.now - runClockStart)
+                                                               wasQuickCheck: !leg.showedBar, // Design W3 H13: the first 100 % (DS-08), X9
+                                                               ranFor: .seconds(leg.seconds)) // Design W3 H13: the first 100 % (DS-08), X9
             // Owed before the wait below: a run that starts meanwhile (a trip change, new photos,
             // "Neu prüfen") no longer drops "Analyse fertig" (`FinishMoment`).
             finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)
@@ -1500,6 +1502,7 @@ final class AppModel {
         lastStepRemainingCheck = nil
         lastEarlyLook = nil
         runShowedBar = false
+        firstAnalysisLegStarted() // Design W3 H13: the first 100 % (DS-08), a leg of the first analysis starts (X9)
         analysisBar = glide.value(at: .now, gliding: false)
         analysisFinish = nil
         analysisStepRemaining = nil
@@ -1596,6 +1599,7 @@ final class AppModel {
             }
         }
         if let progress = taken.progress { receive(progress, at: now) }
+        if taken.progress != nil { firstAnalysisLegRuns(since: runClockStart, showedBar: runShowedBar) } // Design W3 H13: the first 100 % (DS-08), X9
         // Hot iPhone, battery nearly empty: as the pipeline said last, after its reports.
         if taken.waiting != analysis.waiting { analysis.waiting = taken.waiting }
         // "Schon fertig": the early suggestions are read once they are saved (the report that
@@ -1926,7 +1930,7 @@ final class AppModel {
             if end.isFinished, analysis.outcome.refined(with: ended) {
                 // Complete now: nothing to go on with (review of c772325: the card read 100 %
                 // and then "Macht da weiter · 37 %" from the marker of the run before).
-                FirstAnalysisMomentStore.shared.completedAway(first: !AnalysisMarker.completedOnce) // Design W3 H13: the first 100 % (DS-08) happened without the user
+                FirstAnalysisMomentStore.shared.completedAway(first: !AnalysisMarker.completedOnce) // Design W3 H13: the first 100 % (DS-08) happened unseen
                 AnalysisMarker.finished()
                 analysis.resumeFrom = nil
                 analysis.resumed = nil

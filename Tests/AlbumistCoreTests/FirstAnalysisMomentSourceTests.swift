@@ -31,8 +31,9 @@ struct FirstAnalysisMomentSourceTests {
     /// Launch: what is kept is read while `AnalysisMarker` still says whether an analysis was
     /// completed before (the load resets it for a restored backup or a new database). End of a
     /// run: told before the wait for the overview, with whether Albumist is on screen. The
-    /// overnight refinement that completes the analysis tells it too (second review, K7). Three
-    /// marked lines in `AppModel.swift`, nothing else there.
+    /// overnight refinement that completes the analysis tells it too (second review, K7). Eight
+    /// marked lines of DS-08 in `AppModel.swift` (three of the moment, five of the legs of the
+    /// first analysis, X9) and one of V13, nothing else there.
     @Test func theModelTellsTheRuleAtLaunchAndAtTheEndOfARun() throws {
         let raw = try AppSource.read(Self.model)
         let model = try Self.code(Self.model)
@@ -55,9 +56,9 @@ struct FirstAnalysisMomentSourceTests {
         }
         #expect(model.components(separatedBy: "firstAnalysisRunEnded(").count - 1 == 1, "told from another place too")
         #expect(model.components(separatedBy: "FirstAnalysisMomentStore.shared.").count - 1 == 2, "told from another place too")
-        #expect(raw.components(separatedBy: "\(Self.mark): the first 100 %").count - 1 == 3, "the marked lines of DS-08 in AppModel.swift changed")
+        #expect(raw.components(separatedBy: "\(Self.mark): the first 100 %").count - 1 == 8, "the marked lines of DS-08 in AppModel.swift changed")
         // And one of the sorting show's "Anlegen" (verification review V13), nothing else of H13.
-        #expect(raw.components(separatedBy: Self.mark).count - 1 == 4, "the marked lines of H13 in AppModel.swift changed")
+        #expect(raw.components(separatedBy: Self.mark).count - 1 == 9, "the marked lines of H13 in AppModel.swift changed")
     }
 
     /// "On screen" as a run ends means not in the background (second review, K7 b): Control
@@ -107,9 +108,12 @@ struct FirstAnalysisMomentSourceTests {
         // Every photo readable as the run ends: after a quick first analysis of only the shared
         // photos, the first such run analyses the rest of the library (K7's case).
         #expect(tell.contains("fullAccess: access == .full"), "\(tell)")
-        let ended = try Self.body(["final class FirstAnalysisMomentStore", "func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, fullAccess: Bool, onScreen: Bool)"], in: store)
+        let ended = try Self.body(["final class FirstAnalysisMomentStore",
+                                   "func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, fullAccess: Bool, onScreen: Bool)"],
+                                  in: store)
         #expect(ended.contains("guard finished else { return }"), "\(ended)")
-        #expect(ended.contains("moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, fullAccess: fullAccess, onScreen: onScreen, at: Date())"), "\(ended)")
+        #expect(ended.contains("moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, "
+                               + "fullAccess: fullAccess, onScreen: onScreen, at: Date())"), "\(ended)")
         let type = try Self.body(["final class FirstAnalysisMomentStore"], in: store)
         #expect(type.contains("private static let firstCompletedKey = \"analysis.firstFinishMoment.firstCompleted\""), "\(type)")
         let initializer = try Self.body(["final class FirstAnalysisMomentStore", "private init()"], in: store)
@@ -261,6 +265,27 @@ struct FirstAnalysisMomentSourceTests {
         #expect(went.contains("moment.cardWent(at: Date())"), "\(went)")
     }
 
+    /// A 100 % played again (its card went within the hold and came back, V12) shows its bar
+    /// joining again (verification review X10): the header's state lives on while its card is
+    /// away (another tab, a pushed page), so `start` sets the bar apart again before the claim,
+    /// after the guards that keep a header that plays from starting anew. Only `play` joins it.
+    /// The header's state is SwiftUI's, which does not run here: the order is read from the code.
+    @Test func aMomentPlayedAgainJoinsItsBarAgain() throws {
+        let ring = try Self.code(Self.ringCard)
+        let start = try Self.body(["struct FirstAnalysisMomentHeader", "private func start()"], in: ring)
+        let playing = try #require(start.range(of: "guard run == nil, model.isOnScreen else { return }"), "\(start)")
+        let cut = try #require(start.range(of: "if again, !store.moment.cutShort { return }"), "\(start)")
+        let apart = try #require(start.range(of: "joined = false"), "a second play starts with its bar joined: \(start)")
+        let claim = try #require(start.range(of: "store.claim(onScreen: model.isOnScreen)"), "\(start)")
+        #expect(playing.upperBound < apart.lowerBound && cut.upperBound < apart.lowerBound,
+                "the bar comes apart under a moment that plays: \(start)")
+        #expect(apart.upperBound < claim.lowerBound, "the bar comes apart after the claim showed it: \(start)")
+        let play = try Self.body(["struct FirstAnalysisMomentHeader", "private func play() async"], in: ring)
+        #expect(play.contains("withAnimation(.easeInOut(duration: T.join)) { joined = true }"), "\(play)")
+        let header = try Self.body(["struct FirstAnalysisMomentHeader"], in: ring)
+        #expect(header.components(separatedBy: "joined = true").count - 1 == 1, "joined elsewhere: \(header)")
+    }
+
     /// UI runs show it only when a test asks for it (`-AlbumistUITestFirstFinishMoment`), held
     /// long enough to be found; otherwise the start page would change under the audits after
     /// the first analysis. A test may also start it afresh (`-AlbumistUITestFirstFinishOwed`):
@@ -268,7 +293,8 @@ struct FirstAnalysisMomentSourceTests {
     @Test func uiRunsShowItOnlyWhenATestAsks() throws {
         let store = try Self.code(Self.store)
         let claim = try Self.body(["final class FirstAnalysisMomentStore", "func claim(onScreen: Bool)"], in: store)
-        #expect(claim.contains("guard moment.dueSince != nil, !UITestSupport.isRunning || UITestSupport.showsFirstFinishMoment else { return false }"), "\(claim)")
+        #expect(claim.contains("guard moment.dueSince != nil, !UITestSupport.isRunning || UITestSupport.showsFirstFinishMoment "
+                               + "else { return false }"), "\(claim)")
         let ring = try Self.code(Self.ringCard)
         let play = try Self.body(["struct FirstAnalysisMomentHeader", "private func play() async"], in: ring)
         #expect(play.contains("let hold = UITestSupport.showsFirstFinishMoment ? T.heldForUITest : T.hold"), "\(play)")

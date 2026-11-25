@@ -156,13 +156,22 @@ final class ShowAndHandwritingUITests: XCTestCase {
                 return true
             }
             // Before the run shows its "Pause" the page may show a line already: the end counts
-            // once the run was seen, or after half a minute.
-            return line.exists && (ran || Date().timeIntervalSince(start) > 30)
+            // once the run was seen, or after a minute and a half (both runs here are slowed to
+            // well over 30 s, so their "Pause" shows long enough to be seen on a busy Mac).
+            return line.exists && (ran || Date().timeIntervalSince(start) > 90)
         }
         end.seconds = Int(Date().timeIntervalSince(start))
-        // The card claims the moment as it appears: a few seconds more for it.
-        if end.ended && !end.moment { end.moment = moment.waitForExistence(timeout: 5) }
-        end.celebrated = app.buttons["analysis.finished"].exists
+        // Between the run's end and its card the page shows the done row, which counts as the
+        // line above; "Analyse fertig" comes only after the counts are made anew and the safety
+        // copy, on a busy Mac more than a few seconds later: up to 20 s for the card or the moment
+        // (verification review V, X7). The card claims the moment as it appears: a few seconds
+        // more for it.
+        let finished = app.buttons["analysis.finished"]
+        if end.ended && !end.moment {
+            _ = UITestWait.holds(timeout: 20) { finished.exists || moment.exists }
+            end.moment = moment.waitForExistence(timeout: 5)
+        }
+        end.celebrated = finished.exists
         print("UI_TIMING \(what) \(end.seconds) s (its Pause seen: \(ran))")
         print(end.ended ? "UI_STEP_OK \(what) ended" : "UI_STEP_MISSING \(what) ended (timeout \(Int(timeout)) s)")
         XCTAssertTrue(end.ended, "\(what) did not end within \(Int(timeout)) s")

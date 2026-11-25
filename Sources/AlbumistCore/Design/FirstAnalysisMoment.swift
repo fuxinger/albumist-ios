@@ -8,10 +8,10 @@ import Foundation
 ///
 /// "Reaches 100 %" means the user sees it happen: the first run in the app that finishes the
 /// analysis after a wait long enough to celebrate (`AnalysisCardState.celebratesFinish`: the
-/// "Analyse fertig" card it rides on; for the first completion on this installation the legs of
-/// a first analysis that ran in several runs count together, `FirstAnalysisLegs`, verification
-/// review X9), with Albumist on screen as it ends (not in the background: Control Center or a
-/// call banner in front only make the card wait). Finished in the background, or completed for
+/// "Analyse fertig" card it rides on; the legs of a run that may bring it and ran in several runs
+/// count together, `FirstAnalysisLegs`, verification reviews X9 and Y, Y2 and Y4), with Albumist
+/// on screen as it ends (not in the background: Control Center or a call banner in front only
+/// make the card wait). Finished in the background, or completed for
 /// the first time overnight (`completedAway`), or left before the card showed it, the user comes
 /// back to "Analyse fertig" and the notification as before, and the moment is gone for good: a
 /// 100 % that happened without them is not replayed hours later.
@@ -70,18 +70,6 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// the first run to end once every photo is allowed analyses the library as a whole too. Kept
     /// next to `firstCompleted`; false once such a run ended, celebrated or not, and once spent.
     public private(set) var sharedOnly = false
-    /// No analysis was completed on this installation yet, as far as the moment knows: owed, and
-    /// no first analysis too quick for "Analyse fertig" (`firstCompleted`). Until then the legs of
-    /// the first analysis count together for "Analyse fertig" and its 100 % (`FirstAnalysisLegs`;
-    /// verification review X9).
-    public var firstCompletionAhead: Bool { kept == .owed && firstCompleted == nil }
-
-    /// Whether a run that starts now may bring the moment when it ends, so its legs count together
-    /// with the legs before it (`FirstAnalysisLegs`): the first analysis on this installation,
-    /// while its first completion is ahead (verification review X9).
-    public func mayBeBrought(by run: Run) -> Bool {
-        firstCompletionAhead && run.wholeLibrary
-    }
     /// The first full analysis finished on screen then; the card shows the moment from then until
     /// `window` has passed. In memory only.
     public private(set) var dueSince: Date?
@@ -139,6 +127,24 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
         sharedOnly = false
     }
 
+    /// Whether a run that starts now may bring the moment when it ends, so its legs count together
+    /// with the legs before it (`FirstAnalysisLegs`; verification reviews X9 and Y, Y2 and Y4):
+    /// while it is owed, a run that takes in the library as a whole (`takesInWholeLibrary`). The
+    /// first analysis is one; after a quick first analysis, one of another part of the library or
+    /// "Analyse neu aufbauen", and after one of only the shared photos the first run with every
+    /// photo allowed, which analyses the rest. Never a check for new photos or a catch-up of new
+    /// imports. A wait that is over (`lapse`) is looked at first, where the run starts.
+    public func mayBeBrought(by run: Run) -> Bool {
+        kept == .owed && takesInWholeLibrary(run)
+    }
+
+    /// The run takes in the library as a whole: it analyses it as a whole (`Run.wholeLibrary`),
+    /// or, after a quick first analysis of only the shared photos, it is the first with every
+    /// photo allowed, which analyses the rest.
+    private func takesInWholeLibrary(_ run: Run) -> Bool {
+        run.wholeLibrary || (sharedOnly && run.fullAccess)
+    }
+
     /// The end of a run in the app, decided before it waits for the overview. `run`: what it
     /// analysed, the library as a whole or not (`Run.wholeLibrary`), with every photo allowed as
     /// it ends or not (`Run.fullAccess`): after a quick first analysis of only the shared photos
@@ -155,7 +161,7 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
         guard finished, kept == .owed else { return }
         lapse(at: now)
         guard kept == .owed else { return }
-        let whole = run.wholeLibrary || (sharedOnly && run.fullAccess)
+        let whole = takesInWholeLibrary(run)
         // Only the first run to end with every photo allowed takes in the rest of the library.
         if run.fullAccess { sharedOnly = false }
         guard celebrates, whole else {
@@ -277,22 +283,23 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     }
 }
 
-/// The legs of the first analysis (verification review X9, the lead's decision): a first analysis
-/// that was paused, cut off by iOS or closed and went on later is one wait for "Analyse fertig"
-/// and its 100 %. Each run was decided alone before (`AnalysisCardState.celebratesFinish`: 30 s or
-/// more with the bar shown), so an analysis of an hour whose last leg took 20 s ended without
-/// "Analyse fertig", and its first 100 % was lost for good.
+/// The legs of an analysis that may bring the first 100 % (verification reviews X9 and Y, the
+/// lead's decisions): an analysis that was paused, cut off by iOS or closed and went on later is
+/// one wait for "Analyse fertig" and its 100 %. Each run was decided alone before
+/// (`AnalysisCardState.celebratesFinish`: 30 s or more with the bar shown), so an analysis of an
+/// hour whose last leg took 20 s ended without "Analyse fertig", and its first 100 % was lost.
 ///
-/// - For the first completion on this installation only (`FirstAnalysisMoment.firstCompletionAhead`,
-///   no analysis completed since `AnalysisMarker.reset`), the legs count together: their summed
-///   time and whether one showed the bar. Every later run is decided alone, as before.
+/// - For every run that may bring the moment while it is owed (`FirstAnalysisMoment.mayBeBrought`:
+///   the first analysis; after a quick first analysis, one of the library as a whole; after one of
+///   only the shared photos, the first with every photo allowed), the legs count together: their
+///   summed time and whether one showed the bar. Every other run is decided alone, as before.
 /// - Kept with the resume position (`AnalysisMarker.unfinished`): written while a run works, as
 ///   that is, so a leg that iOS ended with the app (no end of its run) still counts. A run that goes
 ///   on from the resume position goes on with the legs; one that starts the analysis anew (the
 ///   first run, another part of the library, "Analyse neu aufbauen", a new or restored database,
 ///   which drop the resume position) drops them too.
-/// - Done once the first completion came, celebrated or not, or the analysis was completed where no
-///   run of the app ended (`drop`: the overnight refinement).
+/// - Done once such a run finished, celebrated or not, or the analysis was completed where no run
+///   of the app ended (`drop`: the overnight refinement).
 public struct FirstAnalysisLegs: Sendable, Equatable {
     /// How long a run or legs ran, in seconds, and whether the card showed one of them as a full
     /// analysis (the bar, not the quick check): what "Analyse fertig" is decided on.
@@ -321,10 +328,10 @@ public struct FirstAnalysisLegs: Sendable, Equatable {
     /// The legs before the run now. In memory only.
     private var before: Leg
 
-    /// At launch: the legs kept, while the first completion is still ahead
-    /// (`FirstAnalysisMoment.firstCompletionAhead`); none otherwise.
-    public init(kept: Leg = .none, firstCompletionAhead: Bool = false) {
-        self.kept = firstCompletionAhead ? kept : .none
+    /// At launch: the legs kept, while the moment is owed (`FirstAnalysisMoment.kept`, its wait
+    /// looked at first); none otherwise.
+    public init(kept: Leg = .none, owed: Bool = false) {
+        self.kept = owed ? kept : .none
         before = self.kept
     }
 
@@ -357,7 +364,7 @@ public struct FirstAnalysisLegs: Sendable, Equatable {
     }
 
     /// The analysis was completed where no run of the app ended (the overnight refinement): no
-    /// first completion is ahead any more.
+    /// legs are left to count.
     public mutating func drop() {
         kept = .none
         before = .none

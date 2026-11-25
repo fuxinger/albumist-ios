@@ -7,9 +7,10 @@ import Testing
 /// wait for "Analyse fertig" and its 100 % (verification review X9, the lead's decision). Before,
 /// each run was decided alone (`AnalysisCardState.celebratesFinish`: 30 s or more with the bar
 /// shown): an analysis of an hour whose last leg took 20 s ended without "Analyse fertig", and its
-/// first 100 % was lost for good. Now, for the first completion on this installation only, the
-/// legs count together (`FirstAnalysisLegs`): their summed time and whether one showed the bar,
-/// kept with the resume position. Every later run is decided alone, as before.
+/// first 100 % was lost for good. Now the legs count together (`FirstAnalysisLegs`): their summed
+/// time and whether one showed the bar, kept with the resume position, for the first analysis and
+/// every other run that may bring the moment while it is owed (verification review Y, Y2 and Y4:
+/// `FirstAnalysisLegsWhileOwedTests`). Every other run is decided alone, as before.
 @Suite("First analysis in legs (X9)")
 struct FirstAnalysisLegsTests {
     typealias Leg = FirstAnalysisLegs.Leg
@@ -36,7 +37,7 @@ struct FirstAnalysisLegsTests {
     /// last leg alone would not have been celebrated.
     @Test func aFirstAnalysisWhoseLastLegIsShortIsCelebrated() {
         var moment = FirstAnalysisMoment(kept: nil, completedBefore: false)
-        #expect(moment.firstCompletionAhead)
+        #expect(moment.mayBeBrought(by: Self.whole))
         var legs = FirstAnalysisLegs()
         let paused = Self.run(&legs, 3600, finished: false, goesOn: false)
         #expect(!Self.celebrates(paused, finished: false))
@@ -47,7 +48,7 @@ struct FirstAnalysisLegsTests {
         #expect(!Self.celebrates(Leg(seconds: 20, showedBar: true)), "the last leg alone is celebrated")
         moment.runEnded(Self.whole, finished: true, celebrates: Self.celebrates(last), onScreen: true, at: Self.start)
         #expect(moment.isDue(at: Self.start) && moment.kept == .spent)
-        // Done with the first completion.
+        // Done once it finished.
         #expect(legs.kept == .none && !legs.counting)
     }
 
@@ -61,7 +62,8 @@ struct FirstAnalysisLegsTests {
         #expect(!Self.celebrates(only))
         moment.runEnded(Self.whole, finished: true, celebrates: Self.celebrates(only), onScreen: true, at: Self.start)
         #expect(!moment.isDue(at: Self.start) && moment.kept == .owed && moment.firstCompleted == Self.start)
-        #expect(!moment.firstCompletionAhead)
+        // From now on only a run of the library as a whole may bring it, never a check.
+        #expect(!moment.mayBeBrought(by: FirstAnalysisMoment.Run(wholeLibrary: false, fullAccess: true)))
     }
 
     /// Legs that add up to less than 30 s are a quick first analysis too; from 30 s on, with the
@@ -105,12 +107,12 @@ struct FirstAnalysisLegsTests {
         legs.runs(Leg(seconds: 40, showedBar: true))
         #expect(legs.kept == Leg(seconds: 40, showedBar: true))
         // The app ends here. Next launch: what was kept, and the run goes on from the resume position.
-        var relaunched = FirstAnalysisLegs(kept: legs.kept, firstCompletionAhead: true)
+        var relaunched = FirstAnalysisLegs(kept: legs.kept, owed: true)
         let last = Self.run(&relaunched, 5, finished: true)
         #expect(last == Leg(seconds: 45, showedBar: true))
         #expect(Self.celebrates(last))
-        // Kept across launches only while the first completion is ahead.
-        #expect(FirstAnalysisLegs(kept: legs.kept, firstCompletionAhead: false).kept == .none)
+        // Kept across launches only while the moment is owed.
+        #expect(FirstAnalysisLegs(kept: legs.kept, owed: false).kept == .none)
     }
 
     /// A run that does not go on from the resume position starts the analysis anew (the first run,
@@ -124,29 +126,38 @@ struct FirstAnalysisLegsTests {
         #expect(anew == Leg(seconds: 10, showedBar: true))
         #expect(!Self.celebrates(anew))
         // Also after a relaunch.
-        var kept = FirstAnalysisLegs(kept: Leg(seconds: 40, showedBar: true), firstCompletionAhead: true)
+        var kept = FirstAnalysisLegs(kept: Leg(seconds: 40, showedBar: true), owed: true)
         let fresh = Self.run(&kept, 10, finished: true, goesOn: false)
         #expect(fresh.seconds == 10)
     }
 
-    /// Once the analysis was completed on this installation (celebrated or quick, or overnight),
-    /// every run is decided alone, as before: a check for new photos, a catch-up, "Analyse neu
-    /// aufbauen" or another part of the library, also when they run in legs.
-    @Test func laterRunsAreDecidedAlone() {
+    /// A run that cannot bring the moment is decided alone, as before, also when it runs in legs:
+    /// once the moment was spent (celebrated, lapsed, completed overnight for the first time) and,
+    /// while it is owed after a quick first analysis, a check for new photos or a catch-up of new
+    /// imports. Every run that may bring it counts its legs (verification review Y, Y2 and Y4;
+    /// `FirstAnalysisLegsWhileOwedTests`).
+    @Test func runsThatCannotBringItAreDecidedAlone() {
         var legs = FirstAnalysisLegs()
         _ = Self.run(&legs, 3600, finished: false, firstCompletion: false, goesOn: false)
         #expect(legs.kept == .none && !legs.counting)
-        let check = Self.run(&legs, 20, finished: true, firstCompletion: false)
-        #expect(check == Leg(seconds: 20, showedBar: true))
-        #expect(!Self.celebrates(check))
-        // Which installations have the first completion ahead.
-        #expect(FirstAnalysisMoment(kept: nil, completedBefore: false).firstCompletionAhead)
-        #expect(!FirstAnalysisMoment(kept: nil, completedBefore: true).firstCompletionAhead)
-        #expect(!FirstAnalysisMoment(kept: .spent, completedBefore: false).firstCompletionAhead)
-        #expect(!FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: Self.start).firstCompletionAhead)
-        var away = FirstAnalysisMoment(kept: nil, completedBefore: false)
+        let alone = Self.run(&legs, 20, finished: true, firstCompletion: false)
+        #expect(alone == Leg(seconds: 20, showedBar: true))
+        #expect(!Self.celebrates(alone))
+        // Which runs may bring it.
+        let check = FirstAnalysisMoment.Run(wholeLibrary: false, fullAccess: true)
+        let fresh = FirstAnalysisMoment(kept: nil, completedBefore: false)
+        #expect(fresh.mayBeBrought(by: Self.whole))
+        #expect(!FirstAnalysisMoment(kept: nil, completedBefore: true).mayBeBrought(by: Self.whole))
+        #expect(!FirstAnalysisMoment(kept: .spent, completedBefore: false).mayBeBrought(by: Self.whole))
+        let quick = FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: Self.start)
+        #expect(quick.mayBeBrought(by: Self.whole), "after a quick first analysis: the library as a whole")
+        #expect(!quick.mayBeBrought(by: check), "after a quick first analysis: a check for new photos")
+        let shared = FirstAnalysisMoment(kept: .owed, completedBefore: true, firstCompleted: Self.start, sharedOnly: true)
+        #expect(shared.mayBeBrought(by: check), "after only the shared photos: the rest with every photo")
+        #expect(!shared.mayBeBrought(by: FirstAnalysisMoment.Run(wholeLibrary: false, fullAccess: false)))
+        var away = fresh
         away.completedAway(first: true)
-        #expect(!away.firstCompletionAhead)
+        #expect(!away.mayBeBrought(by: Self.whole))
         // Completed overnight while legs were kept: nothing left to count.
         var overnight = FirstAnalysisLegs()
         _ = Self.run(&overnight, 40, finished: false, goesOn: false)

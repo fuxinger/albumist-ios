@@ -497,7 +497,7 @@ struct PhotoGridGestureTests {
         #expect(fromTop.y(for: 520, insetTop: 100) == 620)
         #expect(fromTop.y(for: 2_000, insetTop: 100) == 2_100, "the last rows are reached")
         #expect(fromTop.y(for: -100, insetTop: 100) == 0, "the top")
-        // Learned once: a later step changes nothing.
+        // One probe a run: a later step of the same run changes nothing.
         fromTop.asked(700, from: 520, insetTop: 100, range: range)
         fromTop.reported(700)
         #expect(fromTop.convention == .fromRestingTop)
@@ -528,6 +528,134 @@ struct PhotoGridGestureTests {
         calibration.asked(510, from: 500, insetTop: 100, range: range)
         calibration.reported(510)
         #expect(calibration.convention == .contentOffset, "the next step that can tell")
+    }
+
+    /// A probe waits alone for its answer (review W4): nothing else is asked in the two frames
+    /// after it, so no later step's report can pass where the other way would have put it. Not
+    /// answered by then, it is dropped and teaches nothing, and the steps go on. (`mayAsk()`
+    /// counts a frame, so it is called outside `#expect`.)
+    @Test func aProbeWaitsAloneForItsAnswer() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        var asks = calibration.mayAsk()
+        #expect(asks)
+        calibration.asked(980, from: 1_000, insetTop: 100, range: range)
+        calibration.reported(1_000)
+        let frames = (1...3).map { _ in calibration.mayAsk() }
+        #expect(frames == [false, false, true], "two frames ask nothing; then it is dropped, the steps go on")
+        calibration.reported(980)
+        #expect(calibration.convention == nil, "a dropped probe teaches nothing")
+        // The next step that can tell, with nothing else on its way, probes again.
+        calibration.asked(960, from: 980, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(!asks)
+        calibration.reported(960)
+        #expect(calibration.convention == .contentOffset)
+        asks = calibration.mayAsk()
+        #expect(asks, "answered: the steps go on at once")
+    }
+
+    /// A probe is taken only when no other step is on its way (review W4): that step's report
+    /// can land where one of the two ways would put the probe.
+    @Test func aProbeIsTakenOnlyWhenNoOtherStepIsOnItsWay() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        // A step too small to tell, on its way.
+        calibration.asked(700.5, from: 700, insetTop: 100, range: range)
+        // The next frame's step could tell, but the one before has not been reported: no probe,
+        // and it holds nothing back.
+        var asks = calibration.mayAsk()
+        #expect(asks)
+        calibration.asked(800, from: 700, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(asks, "no probe waits")
+        // The step before lands where counting from the top would have put this one.
+        calibration.reported(700.5)
+        #expect(calibration.convention == nil, "no probe, no lesson")
+        calibration.reported(800)
+        // Nothing on its way now: the next step that can tell probes.
+        calibration.asked(820, from: 800, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(!asks)
+        calibration.reported(820)
+        #expect(calibration.convention == .contentOffset)
+    }
+
+    /// No lesson stands unchecked (review W4): each run of scrolling by itself probes once more,
+    /// and a probe that lands where the other way puts it flips the lesson; one that lands where
+    /// the lesson puts it keeps it. One probe a run: the rest of the run is not held back.
+    @Test func eachRunChecksTheLessonAndFlipsAWrongOne() {
+        let range = -100.0...2_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        // A wrong lesson: the probe's report came from something else that moved the scroll view.
+        calibration.asked(510, from: 500, insetTop: 100, range: range)
+        calibration.reported(410)
+        #expect(calibration.convention == .fromRestingTop)
+        // The rest of the run: a step's report where the other way puts it changes nothing yet.
+        calibration.asked(calibration.y(for: 430, insetTop: 100), from: 410, insetTop: 100, range: range)
+        var asks = calibration.mayAsk()
+        #expect(asks, "no probe: nothing waits")
+        calibration.reported(530)
+        #expect(calibration.convention == .fromRestingTop, "one probe a run")
+        calibration.reset()
+        // The next run's first step that can tell is a probe: the scroll view goes to `y` as the
+        // content offset.
+        let y = calibration.y(for: 550, insetTop: 100)
+        #expect(y == 650)
+        calibration.asked(y, from: 530, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(!asks)
+        calibration.reported(650)
+        #expect(calibration.convention == .contentOffset, "flipped")
+        #expect(calibration.y(for: 670, insetTop: 100) == 670)
+        calibration.reset()
+        // A lesson that holds stays.
+        calibration.asked(670, from: 650, insetTop: 100, range: range)
+        asks = calibration.mayAsk()
+        #expect(!asks)
+        calibration.reported(670)
+        #expect(calibration.convention == .contentOffset)
+        asks = calibration.mayAsk()
+        #expect(asks)
+    }
+
+    /// The review's case (W4): the probe's own report never comes (two steps applied in one
+    /// update, a report merged with the next) while the page scrolls on. Whatever the step and
+    /// whichever way `scrollTo(y:)` counts, what is learned is that way.
+    @Test func aMissedAnswerTeachesNothingWrong() {
+        typealias Convention = PhotoGridAutoScroll.Calibration.Convention
+        for truth in [Convention.contentOffset, .fromRestingTop] {
+            for step in [-25.0, -20, -12.5, -10, -5, 5, 10, 12.5, 20, 25] {
+                for missed in [Set<Int>(), [0], [0, 3, 4]] {
+                    let learned = Self.scrollByItself(truth: truth, step: step, missed: missed)
+                    #expect(learned == truth, "\(truth), \(step) a frame, missed \(missed.sorted())")
+                }
+            }
+        }
+    }
+
+    /// Scrolls a scroll view that takes `scrollTo(y:)` the way `truth` says by itself, frame by
+    /// frame as `PhotoGridScroller.scroll(by:)` does, `step` points a frame from 2,000 (under
+    /// 100 pt of bars); it reports where it is after each step, except after the frames in
+    /// `missed`. What the calibration learned.
+    private static func scrollByItself(truth: PhotoGridAutoScroll.Calibration.Convention, step: Double,
+                                       missed: Set<Int>) -> PhotoGridAutoScroll.Calibration.Convention? {
+        let insetTop = 100.0, range = -insetTop...5_000
+        var calibration = PhotoGridAutoScroll.Calibration()
+        var target = PhotoGridAutoScroll.Target()
+        var reported = 2_000.0
+        for frame in 0..<24 {
+            guard calibration.mayAsk(),
+                  let wanted = target.next(by: step, offset: reported, range: range) else { continue }
+            let y = calibration.y(for: wanted, insetTop: insetTop)
+            calibration.asked(y, from: reported, insetTop: insetTop, range: range)
+            let landed = min(max(truth == .contentOffset ? y : y - insetTop, range.lowerBound), range.upperBound)
+            guard !missed.contains(frame) else { continue }
+            reported = landed
+            target.reported(landed)
+            calibration.reported(landed)
+        }
+        return calibration.convention
     }
 
     // MARK: Pinch to zoom

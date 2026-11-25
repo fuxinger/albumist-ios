@@ -313,14 +313,17 @@ struct PhotoGridSourceTests {
         #expect(state.contains("self?.scrollStep(seconds) ?? false"))
         let scroll = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func scroll(by"], in: Self.scrolling))
         #expect(scroll.contains("guardletwanted=target.next(by:step,offset:offset,range:top...bottom)else{return}"), "\(scroll)")
-        // What `scrollTo(y:)` takes is learned from the scroll view, not assumed (review L5).
+        // What `scrollTo(y:)` takes is learned from the scroll view, not assumed (review L5), and
+        // checked in each run: while a probe waits for its answer, a frame asks nothing (review W4).
+        #expect(scroll.hasPrefix("{guardletgeometry,Self.calibration.mayAsk()else{return}scrollsByItself=true"), "\(scroll)")
         #expect(scroll.contains("lety=Self.calibration.y(for:wanted,insetTop:insetTop)"
                                 + "Self.calibration.asked(y,from:offset,insetTop:insetTop,range:top...bottom)"
                                 + "position.scrollTo(y:CGFloat(y))"), "\(scroll)")
+        // The lesson is the app's: only the scroll view that scrolls by itself answers its steps.
         let reported = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func reported(_ geometry"], in: Self.scrolling))
-        #expect(reported.contains("Self.calibration.reported(offset)"), "\(reported)")
+        #expect(reported.hasSuffix("ifscrollsByItself{Self.calibration.reported(offset)}}"), "\(reported)")
         let ended = Self.squeezed(try Self.body(["final class PhotoGridScroller", "func endAutoScroll("], in: Self.scrolling))
-        #expect(ended == "{target.reset()Self.calibration.reset()}", "\(ended)")
+        #expect(ended == "{scrollsByItself=falsetarget.reset()Self.calibration.reset()}", "\(ended)")
         #expect(try Self.code(Self.scrolling).contains("private static var calibration = PhotoGridAutoScroll.Calibration()"))
     }
 

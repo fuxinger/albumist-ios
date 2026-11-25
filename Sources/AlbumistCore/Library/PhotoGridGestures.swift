@@ -432,11 +432,17 @@ public enum PhotoGridAutoScroll {
     /// How `ScrollPosition.scrollTo(y:)` counts, learned from the scroll view (review L5 of
     /// design wave 3): SwiftUI's documentation does not say whether `y` is the scroll view's
     /// content offset (minus the top inset at rest at the top, as `ScrollGeometry` reports it)
-    /// or counts from where the scroll view rests at the top. A step asked as the content offset
-    /// tells: the scroll view then reports the same, or less by the top inset. Until a step told
-    /// (and where the top inset is too small to tell, so both ways agree) `y` is taken as the
-    /// content offset; once known, for the app's life, the steps ask so the scroll view goes
-    /// where they mean, at most one step off on the way.
+    /// or counts from where the scroll view rests at the top. A step tells: the scroll view
+    /// reports `y`, or less by the top inset. Until a step told (and where the top inset is too
+    /// small to tell, so both ways agree) `y` is taken as the content offset; once known, the
+    /// steps ask so the scroll view goes where they mean.
+    ///
+    /// Only a probe teaches, and no lesson stands unchecked (review W4): a step is a probe when
+    /// it can tell and no other step is on its way (whose report could land where one of the two
+    /// ways puts it), and nothing else is asked until its report came or `patience` frames
+    /// passed (then it is dropped and teaches nothing, so no later step's report passes where the
+    /// other way would have put it). Each run of scrolling by itself probes until one probe is
+    /// answered: a lesson is learned, kept, or flipped where the probe lands the other way.
     public struct Calibration: Equatable, Sendable {
         public enum Convention: Equatable, Sendable {
             /// `y` is the content offset.
@@ -445,13 +451,28 @@ public enum PhotoGridAutoScroll {
             case fromRestingTop
         }
 
-        public private(set) var convention: Convention?
-        /// A step asked while the convention is not known, which can tell it.
-        private var probe: Probe?
+        /// The frames after a probe that ask nothing while it waits for its report; at the next
+        /// one it is dropped. The scroll view takes a step with the next frame and reports it.
+        public static let patience = 2
 
-        private struct Probe: Equatable, Sendable {
+        public private(set) var convention: Convention?
+        /// The last step asked, until a report answers it (lands where one of the two ways puts it).
+        private var last: Step?
+        /// A probe of this run of scrolling by itself was answered.
+        private var checked = false
+
+        private struct Step: Equatable, Sendable {
             var y: Double
             var insetTop: Double
+            /// It teaches when answered, and nothing else is asked while it waits.
+            var probe: Bool
+            /// The frames it has waited, as a probe.
+            var frames = 0
+
+            /// Where the scroll view goes if `scrollTo(y:)` counts the way `convention` says.
+            func landing(_ convention: Convention) -> Double {
+                convention == .contentOffset ? y : y - insetTop
+            }
         }
 
         public init() {}
@@ -462,35 +483,53 @@ public enum PhotoGridAutoScroll {
             convention == .fromRestingTop ? offset + insetTop : offset
         }
 
-        /// `y` was asked while the scroll view was at `from`, in content offsets `range`. While the
-        /// convention is not known it is a step that tells, when the two ways' answers are apart
-        /// from each other (a top inset of 2 pt or more) and from no move at all, and neither is
-        /// cut at an end of the content.
+        /// A frame of scrolling by itself begins (once a frame, before its step): whether its step
+        /// may be asked. Not while a probe waits for its report, for `patience` frames; at the
+        /// next frame it is dropped.
+        public mutating func mayAsk() -> Bool {
+            guard var step = last, step.probe else { return true }
+            step.frames += 1
+            if step.frames > Self.patience { step.probe = false }
+            last = step
+            return !step.probe
+        }
+
+        /// `y` is asked while the scroll view is at `from`, in content offsets `range`. A probe
+        /// when the run has no answered probe yet, the step before was answered, and the step can
+        /// tell: the two ways' landings are apart from each other (a top inset of 2 pt or more)
+        /// and from no move at all, and neither is cut at an end of the content.
         public mutating func asked(_ y: Double, from: Double, insetTop: Double, range: ClosedRange<Double>) {
-            guard convention == nil, probe == nil, insetTop >= 2 else { return }
             let asOffset = y, fromTop = y - insetTop
-            guard fromTop >= range.lowerBound + 1, asOffset <= range.upperBound - 1,
-                  abs(asOffset - from) >= 2, abs(fromTop - from) >= 2 else { return }
-            probe = Probe(y: y, insetTop: insetTop)
+            let tells = insetTop >= 2 && fromTop >= range.lowerBound + 1 && asOffset <= range.upperBound - 1
+                && abs(asOffset - from) >= 2 && abs(fromTop - from) >= 2
+            last = Step(y: y, insetTop: insetTop, probe: tells && !checked && last == nil)
         }
 
-        /// The scroll view reports the content offset `offset`: at the step's `y` it takes the
-        /// content offset, less by the top inset it counts from the top; anything else (not moved
-        /// yet, moved by something else) waits for the next report.
+        /// The scroll view reports the content offset `offset`. Where one of the two ways puts the
+        /// last step, it answered it, and a probe teaches that way; anything else (not moved yet,
+        /// moved by something else) waits for the next report.
         public mutating func reported(_ offset: Double) {
-            guard let probe else { return }
-            if abs(offset - probe.y) < 1 {
-                convention = .contentOffset
-                self.probe = nil
-            } else if abs(offset - (probe.y - probe.insetTop)) < 1 {
-                convention = .fromRestingTop
-                self.probe = nil
+            guard let step = last else { return }
+            let answer: Convention
+            if abs(offset - step.landing(.contentOffset)) < 1 {
+                answer = .contentOffset
+            } else if abs(offset - step.landing(.fromRestingTop)) < 1 {
+                answer = .fromRestingTop
+            } else {
+                return
             }
+            if step.probe {
+                convention = answer
+                checked = true
+            }
+            last = nil
         }
 
-        /// The grid stopped scrolling by itself: a step not answered tells nothing.
+        /// The grid stopped scrolling by itself: a step not answered tells nothing, and the next
+        /// run probes again.
         public mutating func reset() {
-            probe = nil
+            last = nil
+            checked = false
         }
     }
 }

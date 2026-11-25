@@ -180,13 +180,39 @@ extension PhotoGridGestureTests {
             for late in [0, 1, 2, nil] as [Int?] {
                 for rate in [60.0, 120] {
                     for fingerSpeed in [50.0, 100, 200, 400, 800, 1_600] {
-                        let run = Self.selectIntoTheEdge(truth: truth, fingerSpeed: fingerSpeed, rate: rate, late: late)
+                        let run = Self.selectIntoTheEdge(EdgeRun(truth: truth, late: late, rate: rate, fingerSpeed: fingerSpeed))
                         let label = "\(truth), \(late.map { "\($0) late" } ?? "never"), \(rate) Hz, \(fingerSpeed) pt/s"
                         #expect(run.learned == (late == nil ? nil : truth), "\(label)")
                         #expect(run.still <= min(2 * (late ?? most), most), "\(label): \(run.still) frames still")
                     }
                 }
             }
+        }
+    }
+
+    /// The review's case (Z1): where the scroll view reports each step three frames late, beyond
+    /// `patience`, the report of a step three before lands where counting from the top puts the
+    /// latest one when the steps between add up to the top inset (three steps of 23.3 pt under
+    /// 70 pt of bars). A report answers a waiting step only when no step before it is still on its
+    /// way: the run learns nothing then, and never the wrong way, and as its probe's wait ran out
+    /// while older steps' reports came, it probes no more (the page stands still for at most
+    /// three waits). Two frames late it learns the right way, also where two steps add up to the
+    /// top inset (47 pt, from the resting top).
+    @Test func aLateReportAnswersOnlyItsOwnStep() {
+        typealias Convention = PhotoGridAutoScroll.Calibration.Convention
+        for truth in [Convention.contentOffset, .fromRestingTop] {
+            for start in [nil, 3_000] as [Double?] {
+                for fingerSpeed in [50, 400, EdgeRun.atOnce] {
+                    for rate in [60.0, 120] {
+                        let run = EdgeRun(truth: truth, late: 3, rate: rate, fingerSpeed: fingerSpeed, insetTop: 70, start: start)
+                        let result = Self.selectIntoTheEdge(run)
+                        #expect(result.learned == nil, "\(run)")
+                        #expect(result.still <= 3 * PhotoGridAutoScroll.Calibration.patience, "\(run): \(result.still) frames still")
+                    }
+                }
+            }
+            let run = EdgeRun(truth: truth, late: 2, fingerSpeed: EdgeRun.atOnce, insetTop: 47, start: nil)
+            #expect(Self.selectIntoTheEdge(run).learned == truth, "\(run)")
         }
     }
 
@@ -267,30 +293,48 @@ extension PhotoGridGestureTests {
         return calibration.convention
     }
 
-    /// A finger that selects into the bottom edge at `fingerSpeed` points a second, on to 20 pt
-    /// past it, for two seconds of frames at `rate` a second; the grid scrolls by itself from
-    /// 3,000 (under 116 pt of bars) as `PhotoGridScroller.scroll(by:)` does, and the scroll view
-    /// goes where `scrollTo(y:)` takes it the way `truth` says and reports each move `late`
-    /// frames later (nil: never), in the update after that frame's step. What the calibration
+    /// A finger that selects into the bottom edge, and the scroll view the grid is in
+    /// (`selectIntoTheEdge`).
+    private struct EdgeRun {
+        /// How the scroll view takes `scrollTo(y:)`.
+        var truth: PhotoGridAutoScroll.Calibration.Convention
+        /// The frames after a step's that report it; nil: never.
+        var late: Int?
+        /// Frames a second.
+        var rate = 60.0
+        /// Points a second the finger moves into the edge's zone (`atOnce`: at the edge from the
+        /// first frame on).
+        var fingerSpeed = 400.0
+        /// The bars over the scroll view: its top inset. Below them 468 pt are seen.
+        var insetTop = 116.0
+        /// The content offset the run starts at; nil: at rest at the top.
+        var start: Double? = 3_000
+
+        static let atOnce = 100_000.0
+    }
+
+    /// A finger that selects into the bottom edge (`run`), on to 20 pt past it, for two seconds of
+    /// frames; the grid scrolls by itself as `PhotoGridScroller.scroll(by:)` does, and the scroll
+    /// view goes where `scrollTo(y:)` takes it the way `run.truth` says and reports each move
+    /// `run.late` frames later, in the update after that frame's step. What the calibration
     /// learned, and the frames it asked nothing.
-    private static func selectIntoTheEdge(truth: PhotoGridAutoScroll.Calibration.Convention, fingerSpeed: Double,
-                                          rate: Double, late: Int?) -> (learned: PhotoGridAutoScroll.Calibration.Convention?, still: Int) {
-        let insetTop = 116.0, seen = 116.0...584, range = -insetTop...20_000
+    private static func selectIntoTheEdge(_ run: EdgeRun) -> (learned: PhotoGridAutoScroll.Calibration.Convention?, still: Int) {
+        let seen = run.insetTop...(run.insetTop + 468), range = -run.insetTop...20_000
         var calibration = PhotoGridAutoScroll.Calibration()
         var target = PhotoGridAutoScroll.Target()
-        var reported = 3_000.0, position = reported, still = 0
+        var reported = run.start ?? -run.insetTop, position = reported, still = 0
         var due: [(frame: Int, offset: Double)] = []
-        for frame in 0..<Int(2 * rate) {
-            let finger = min(seen.upperBound - PhotoGridAutoScroll.edge + fingerSpeed * Double(frame) / rate, seen.upperBound + 20)
+        for frame in 0..<Int(2 * run.rate) {
+            let finger = min(seen.upperBound - PhotoGridAutoScroll.edge + run.fingerSpeed * Double(frame) / run.rate, seen.upperBound + 20)
             let speed = PhotoGridAutoScroll.speed(y: finger, top: seen.lowerBound, bottom: seen.upperBound)
             if speed != 0, !calibration.mayAsk() {
                 still += 1
             } else if speed != 0,
-                      let wanted = target.next(by: PhotoGridAutoScroll.step(speed: speed, seconds: 1 / rate), offset: reported, range: range) {
-                let y = calibration.y(for: wanted, insetTop: insetTop)
-                calibration.asked(y, from: reported, insetTop: insetTop, range: range)
-                let landed = min(max(truth == .contentOffset ? y : y - insetTop, range.lowerBound), range.upperBound)
-                if let late, landed != position { due.append((frame + late, landed)) }
+                      let wanted = target.next(by: PhotoGridAutoScroll.step(speed: speed, seconds: 1 / run.rate), offset: reported, range: range) {
+                let y = calibration.y(for: wanted, insetTop: run.insetTop)
+                calibration.asked(y, from: reported, insetTop: run.insetTop, range: range)
+                let landed = min(max(run.truth == .contentOffset ? y : y - run.insetTop, range.lowerBound), range.upperBound)
+                if let late = run.late, landed != position { due.append((frame + late, landed)) }
                 position = landed
             }
             // The frame's update: the reports due now, in order.

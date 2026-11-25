@@ -100,8 +100,20 @@ public enum PhotoGridAutoScroll {
 /// Where the scroll view reports a step a frame or two late, a step is always on its way
 /// (review Y1): then the run's first step that could tell lets the steps before the probe be
 /// answered first. It waits as a probe does, teaching nothing, and the next step that can tell
-/// probes. So each run's probe pauses the page for up to two frames (`patience`), and where
-/// the reports come late the steps before it pause it for up to two more, once a run.
+/// probes.
+///
+/// A report answers a waiting step only when it is the step's own (review Z1): the scroll view
+/// reports the steps in their order, one report for each step that moved it, so it is the
+/// step's own when no step before it is still on its way. A report of an older step can land
+/// where one of the two ways puts the waiting step (where the steps between add up to the top
+/// inset). Where a report did not come (two steps in one update, a step that did not move the
+/// scroll view), the step's wait ends with where the scroll view came to rest meanwhile: its
+/// last report then, if it lands where one of the two ways puts the step, answers it. A probe
+/// whose wait ran out while older steps' reports came is the run's last: they come later than
+/// `patience`, so would the next probe's.
+///
+/// So each run's probe pauses the page for up to two frames (`patience`), and where the
+/// reports come late the steps before it pause it for up to two more, once a run.
 public struct PhotoGridScrollCalibration: Equatable, Sendable {
     public enum Convention: Equatable, Sendable {
         /// `y` is the content offset.
@@ -118,7 +130,14 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
     public private(set) var convention: Convention?
     /// The last step asked, until a report answers it (lands where one of the two ways puts it).
     private var last: Step?
-    /// A probe of this run of scrolling by itself was answered.
+    /// The steps asked whose reports have not come (review Z1): each report that moved the scroll
+    /// view is the oldest one's.
+    private var onTheirWay = 0
+    /// Where the scroll view is, as the last step was asked or as it reported itself since: a
+    /// report that did not move it (its content grew) is no step's.
+    private var position: Double?
+    /// This run of scrolling by itself probes no more: a probe was answered, or its wait ran out
+    /// while older steps' reports came (review Z1).
     private var checked = false
     /// This run let the steps before its probe be answered first (review Y1).
     private var cleared = false
@@ -130,10 +149,19 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
         var wait: Wait?
         /// The frames it has waited.
         var frames = 0
+        /// The last report while it waits: where the scroll view came to rest when the wait ends.
+        var heard: Double?
 
         /// Where the scroll view goes if `scrollTo(y:)` counts the way `convention` says.
         func landing(_ convention: Convention) -> Double {
             convention == .contentOffset ? y : y - insetTop
+        }
+
+        /// The way that puts it at `offset`; nil where neither does.
+        func way(to offset: Double) -> Convention? {
+            if abs(offset - landing(.contentOffset)) < 1 { return .contentOffset }
+            if abs(offset - landing(.fromRestingTop)) < 1 { return .fromRestingTop }
+            return nil
         }
     }
 
@@ -156,13 +184,20 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
 
     /// A frame of scrolling by itself begins (once a frame, before its step): whether its step
     /// may be asked. Not while a step waits for its report (the probe, or the last step before
-    /// it), for `patience` frames; at the next frame it is dropped, and stays a step on its way.
+    /// it), for `patience` frames; at the next frame the wait ends: where the scroll view came to
+    /// rest answers it (review Z1), or it is dropped and stays a step on its way.
     public mutating func mayAsk() -> Bool {
         guard var step = last, step.wait != nil else { return true }
         step.frames += 1
-        if step.frames > Self.patience { step.wait = nil }
         last = step
-        return step.wait == nil
+        guard step.frames > Self.patience else { return false }
+        if let heard = step.heard, let way = step.way(to: heard) {
+            answer(step, way)
+        } else {
+            if step.wait == .probe, step.heard != nil { checked = true }
+            last?.wait = nil
+        }
+        return true
     }
 
     /// `y` is asked while the scroll view is at `from`, in content offsets `range`. A probe
@@ -184,6 +219,8 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
             wait = .probe
         }
         last = Step(y: y, insetTop: insetTop, wait: wait)
+        onTheirWay += 1
+        position = from
     }
 
     /// Whether `y`, asked while the scroll view is at `from`, can tell how `scrollTo(y:)`
@@ -196,22 +233,31 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
     }
 
     /// The scroll view reports the content offset `offset`. Where one of the two ways puts the
-    /// last step, it answered it, and a probe teaches that way; anything else (not moved yet,
-    /// moved by something else) waits for the next report.
+    /// last step, it answered it, and a probe teaches that way; a waiting step only by its own
+    /// report, with no step before it on its way (review Z1). Anything else (not moved yet, moved
+    /// by something else, an older step's report) waits for the next report.
     public mutating func reported(_ offset: Double) {
-        guard let step = last else { return }
-        let answer: Convention
-        if abs(offset - step.landing(.contentOffset)) < 1 {
-            answer = .contentOffset
-        } else if abs(offset - step.landing(.fromRestingTop)) < 1 {
-            answer = .fromRestingTop
-        } else {
-            return
+        guard offset != position else { return }
+        position = offset
+        let own = onTheirWay <= 1
+        onTheirWay = max(onTheirWay - 1, 0)
+        guard var step = last else { return }
+        if step.wait != nil {
+            step.heard = offset
+            last = step
         }
+        guard let way = step.way(to: offset), step.wait == nil || own else { return }
+        answer(step, way)
+    }
+
+    /// `step` was answered: it landed where `way` puts it.
+    private mutating func answer(_ step: Step, _ way: Convention) {
         if step.wait == .probe {
-            convention = answer
+            convention = way
             checked = true
         }
+        // A wait that ended with its answer: no step is on its way.
+        if step.wait != nil { onTheirWay = 0 }
         last = nil
     }
 
@@ -219,6 +265,8 @@ public struct PhotoGridScrollCalibration: Equatable, Sendable {
     /// run probes again.
     public mutating func reset() {
         last = nil
+        onTheirWay = 0
+        position = nil
         checked = false
         cleared = false
     }

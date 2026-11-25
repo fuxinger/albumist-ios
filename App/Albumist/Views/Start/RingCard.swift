@@ -240,11 +240,11 @@ struct FirstAnalysisMomentHeader: View {
     /// after its card went within the hold (V12), its bar joins again: this header's state lived
     /// on while its card was away (verification review X10).
     private func start() {
-        typealias T = FirstAnalysisMoment.Timing
+        typealias Timing = FirstAnalysisMoment.Timing
         guard run == nil, model.isOnScreen else { return }
         if again, !store.moment.cutShort { return }
         joined = false
-        let claimed = withAnimation(calm ? .easeInOut(duration: T.fade) : .smooth(duration: T.fade)) {
+        let claimed = withAnimation(calm ? .easeInOut(duration: Timing.fade) : .smooth(duration: Timing.fade)) {
             store.claim(onScreen: model.isOnScreen)
         }
         guard claimed else { return }
@@ -256,16 +256,16 @@ struct FirstAnalysisMomentHeader: View {
 
     /// The bar joins (not when calm), it stays a few seconds and folds away.
     private func play() async {
-        typealias T = FirstAnalysisMoment.Timing
+        typealias Timing = FirstAnalysisMoment.Timing
         if !calm {
-            try? await Task.sleep(for: .seconds(T.joinDelay))
+            try? await Task.sleep(for: .seconds(Timing.joinDelay))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: T.join)) { joined = true }
+            withAnimation(.easeInOut(duration: Timing.join)) { joined = true }
         }
-        let hold = UITestSupport.showsFirstFinishMoment ? T.heldForUITest : T.hold
-        try? await Task.sleep(for: .seconds(calm ? hold : hold - T.joinDelay))
+        let hold = UITestSupport.showsFirstFinishMoment ? Timing.heldForUITest : Timing.hold
+        try? await Task.sleep(for: .seconds(calm ? hold : hold - Timing.joinDelay))
         guard !Task.isCancelled else { return }
-        withAnimation(calm ? .easeInOut(duration: T.fade) : .smooth(duration: T.fold)) { store.ended() }
+        withAnimation(calm ? .easeInOut(duration: Timing.fade) : .smooth(duration: Timing.fold)) { store.ended() }
         run = nil
     }
 }

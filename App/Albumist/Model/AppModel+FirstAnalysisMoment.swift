@@ -6,9 +6,9 @@ import AlbumistCore
 /// The one moment when the first full analysis reaches 100 % on screen (DS-08, design wave 3;
 /// the rules are `FirstAnalysisMoment`): whether it is still owed on this installation, kept in
 /// `UserDefaults` next to where the analysis got to (`AnalysisMarker`), and whether the ring card
-/// shows it now (`FirstAnalysisMomentHeader`). Beside it the legs of the first analysis, which
-/// count together for its first completion, "Analyse fertig" and its 100 % (`FirstAnalysisLegs`,
-/// verification review X9). One per app, like the model.
+/// shows it now (`FirstAnalysisMomentHeader`). Beside it the legs of an analysis that may bring
+/// the moment, which count together for "Analyse fertig" and its 100 % (`FirstAnalysisLegs`,
+/// verification reviews X9 and Y). One per app, like the model.
 ///
 /// `UserDefaults`, not the database: a rebuilt database ("Analyse neu aufbauen", a start error)
 /// is a new one and is not in a device backup, and neither may bring the moment back; the
@@ -23,14 +23,15 @@ final class FirstAnalysisMomentStore {
     private static let firstCompletedKey = "analysis.firstFinishMoment.firstCompleted"
     /// That quick first analysis saw only the photos shared with Albumist (`FirstAnalysisMoment.sharedOnly`).
     private static let sharedOnlyKey = "analysis.firstFinishMoment.sharedOnly"
-    /// The legs of the first analysis so far (`FirstAnalysisLegs.kept`), kept with the resume
-    /// position: how long they ran and whether one showed the bar (verification review X9).
+    /// The legs so far of an analysis that may bring the moment (`FirstAnalysisLegs.kept`), kept
+    /// with the resume position: how long they ran and whether one showed the bar (verification
+    /// reviews X9 and Y).
     private static let legSecondsKey = "analysis.firstFinishMoment.legSeconds"
     private static let legBarKey = "analysis.firstFinishMoment.legBar"
 
     private(set) var moment: FirstAnalysisMoment
-    /// The legs of the first analysis (`FirstAnalysisLegs`): what "Analyse fertig" is decided on at
-    /// its first completion. Not observed: the ring card reads only the moment.
+    /// The legs of an analysis that may bring the moment (`FirstAnalysisLegs`): what "Analyse
+    /// fertig" is decided on as it finishes. Not observed: the ring card reads only the moment.
     @ObservationIgnored private var legs = FirstAnalysisLegs()
     @ObservationIgnored private var observers: [any NSObjectProtocol] = []
 
@@ -45,11 +46,12 @@ final class FirstAnalysisMomentStore {
                                      firstCompleted: since, sharedOnly: sharedOnly)
         // The week after a quick first analysis ended while Albumist was closed (verification review V6).
         moment.lapse(at: Date())
-        // The legs of a first analysis that went on in another launch (verification review X9).
+        // The legs of an analysis that went on in another launch, while the moment is owed
+        // (verification reviews X9 and Y).
         let legSeconds = fresh ? 0 : UserDefaults.standard.double(forKey: Self.legSecondsKey)
         let legBar = !fresh && UserDefaults.standard.bool(forKey: Self.legBarKey)
         legs = FirstAnalysisLegs(kept: FirstAnalysisLegs.Leg(seconds: legSeconds, showedBar: legBar),
-                                 firstCompletionAhead: moment.firstCompletionAhead)
+                                 owed: moment.kept == .owed)
         keep()
         // Coming to the front looks at nothing: what completed the analysis meanwhile told the
         // store itself (a run's end, the overnight refinement, `completedAway`), and a quick first
@@ -68,29 +70,31 @@ final class FirstAnalysisMomentStore {
     /// completed its analysis before this version kept the moment.
     func launched() {}
 
-    /// The end of a run in the app (`AppModel.firstAnalysisRunEnded`).
-    func runEnded(finished: Bool, celebrates: Bool, wholeLibrary: Bool, fullAccess: Bool, onScreen: Bool) {
+    /// The end of a run in the app (`AppModel.firstAnalysisRunEnded`): what it analysed (`run`).
+    func runEnded(_ run: FirstAnalysisMoment.Run, finished: Bool, celebrates: Bool, onScreen: Bool) {
         guard finished else { return }
-        moment.runEnded(finished: finished, celebrates: celebrates, wholeLibrary: wholeLibrary, fullAccess: fullAccess, onScreen: onScreen, at: Date())
+        moment.runEnded(run, finished: finished, celebrates: celebrates, onScreen: onScreen, at: Date())
         keep()
     }
 
     /// The analysis was completed where no run of the app ended (the overnight refinement):
     /// `first`, it had not been completed before (`AnalysisMarker.completedOnce`, read before the
-    /// refinement sets it).
-    func completedAway(first: Bool) {
-        guard first, moment.kept == .owed else { return }
-        moment.completedAway(first: first)
+    /// refinement sets it); `fullAccess`, every photo is allowed. No legs are left to count.
+    func completedAway(first: Bool, fullAccess: Bool) {
+        guard moment.kept == .owed else { return }
+        moment.completedAway(first: first, fullAccess: fullAccess)
         legs.drop()
         keep()
     }
 
-    /// A run in the app starts (`AppModel.firstAnalysisLegStarted`): a leg of the first analysis
-    /// when `firstAnalysis` (no analysis completed since `AnalysisMarker.reset`) and the first
-    /// completion on this installation is still ahead; `goesOn`: from the resume position.
-    func legStarted(firstAnalysis: Bool, goesOn: Bool) {
-        legs.started(firstCompletion: firstAnalysis && moment.firstCompletionAhead, goesOn: goesOn)
-        keepLegs(exactly: true)
+    /// A run in the app starts (`AppModel.firstAnalysisLegStarted`): what it analyses (`run`),
+    /// a leg that counts with the legs before it when it may bring the moment
+    /// (`FirstAnalysisMoment.mayBeBrought`; a wait that is over first spends it); `goesOn`: from
+    /// the resume position.
+    func legStarted(_ run: FirstAnalysisMoment.Run, goesOn: Bool) {
+        moment.lapse(at: Date())
+        legs.started(mayBringMoment: moment.mayBeBrought(by: run), goesOn: goesOn)
+        keep()
     }
 
     /// The run works, `leg` so far (with each report, as the resume position is written).
@@ -178,24 +182,35 @@ extension AppModel {
     /// background (second review, K7): Control Center, an alert or a call banner in front leave
     /// the scene inactive, and the card claims the moment once it is active again
     /// (`FirstAnalysisMomentHeader`); gone to the background before, it is not shown later.
-    /// Whether it analysed the library as a whole, from the marker before this run's end sets it:
-    /// no analysis completed since `AnalysisMarker.reset` (the first one, "Analyse neu aufbauen",
-    /// another part of the library), not a check for new photos (verification review V6); and
-    /// whether every photo is allowed as it ends: after a quick first analysis of only the shared
-    /// photos, the first such run analysed the rest of the library (K7's case).
+    /// What it analysed is `firstAnalysisRun`.
     func firstAnalysisRunEnded(finished: Bool, celebrates: Bool) {
-        FirstAnalysisMomentStore.shared.runEnded(finished: finished, celebrates: celebrates,
-                                                 wholeLibrary: !AnalysisMarker.completedOnce,
-                                                 fullAccess: access == .full,
+        FirstAnalysisMomentStore.shared.runEnded(firstAnalysisRun, finished: finished, celebrates: celebrates,
                                                  onScreen: UIApplication.shared.applicationState != .background)
     }
 
     /// A run in the app starts, with its clock (`beginCard`, after the resume position was read):
-    /// a leg of the first analysis while no analysis was completed (`FirstAnalysisLegs`,
-    /// verification review X9), which goes on with the legs before it when the run goes on from
-    /// the resume position (`analysis.resumeFrom`, read from `AnalysisMarker.unfinished`).
+    /// a leg that counts with the legs before it when the run may bring the moment
+    /// (`FirstAnalysisLegs`, verification review X9) and goes on from the resume position
+    /// (`analysis.resumeFrom`, read from `AnalysisMarker.unfinished`).
     func firstAnalysisLegStarted() {
-        FirstAnalysisMomentStore.shared.legStarted(firstAnalysis: !AnalysisMarker.completedOnce, goesOn: analysis.resumeFrom != nil)
+        FirstAnalysisMomentStore.shared.legStarted(firstAnalysisRun, goesOn: analysis.resumeFrom != nil)
+    }
+
+    /// The analysis was completed where no run of the app ended (the overnight refinement,
+    /// `refinePass`), told before the marker says so: whether it had been completed before, and
+    /// whether every photo is allowed (after only the shared photos, it analysed the rest).
+    func firstAnalysisCompletedAway() {
+        FirstAnalysisMomentStore.shared.completedAway(first: !AnalysisMarker.completedOnce, fullAccess: access == .full)
+    }
+
+    /// What the moment asks of a run as it starts and as it ends (`FirstAnalysisMoment.Run`).
+    /// Whether it analyses the library as a whole, from the marker before this run's end sets it:
+    /// no analysis completed since `AnalysisMarker.reset` (the first one, "Analyse neu aufbauen",
+    /// another part of the library), not a check for new photos (verification review V6); and
+    /// whether every photo is allowed: after a quick first analysis of only the shared photos,
+    /// the first such run analyses the rest of the library (K7's case).
+    private var firstAnalysisRun: FirstAnalysisMoment.Run {
+        FirstAnalysisMoment.Run(wholeLibrary: !AnalysisMarker.completedOnce, fullAccess: access == .full)
     }
 
     /// The run works, `since` its start; `showedBar`: the card showed it as a full analysis. Told
@@ -206,8 +221,8 @@ extension AppModel {
     }
 
     /// The end of a run, before "Analyse fertig" is decided (`AnalysisCardState.celebratesFinish`):
-    /// what it is decided on, the run alone, or for the first completion the legs of the first
-    /// analysis together, so one whose last leg was short is celebrated with its 100 %.
+    /// what it is decided on, the run alone, or, for a run that may bring the moment, its legs
+    /// together, so one whose last leg was short is celebrated with its 100 %.
     func firstAnalysisLeg(ended finished: Bool, since start: ContinuousClock.Instant, showedBar: Bool) -> FirstAnalysisLegs.Leg {
         FirstAnalysisMomentStore.shared.legEnded(Self.leg(since: start, showedBar: showedBar), finished: finished)
     }

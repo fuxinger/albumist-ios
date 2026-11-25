@@ -23,6 +23,22 @@ import AlbumistCore
 /// that follows it. In Low Power Mode the albums fill as before, with their tap, but no photo
 /// flies; the pile shows its photos in every mode.
 struct SortingShow: View {
+    struct Album: Identifiable, Equatable {
+        /// Index of the album's last "add photos" step in the plan.
+        let id: Int
+        let title: String
+        /// Every photo the plan adds: what the counter counts.
+        let assets: [AssetID]
+        /// What flies and lies on the pile: ordinary photos first, never a sensitive document,
+        /// never a personal suggestion's photo (`SortingShowAlbum.flying`). Can be shorter than
+        /// `assets`, or empty.
+        let shown: [AssetID]
+        /// What its cover tries, best first (`SortingShowAlbum.cover`); empty for a personal album.
+        let cover: [AssetID]
+        /// A personal album: "Vorschau ausgeblendet" on its cover, nothing of it flies.
+        let hidesPreview: Bool
+    }
+
     let albums: [Album]
     /// The padding the screen puts around the show (above and below it); kept free when the
     /// show fits itself to the screen (`sceneScale`).
@@ -79,6 +95,9 @@ struct SortingShow: View {
     /// The scene's own height, from its sizes: 431 pt on the 4.7" iPhone with room enough (360 pt
     /// before DS-17), 387 pt with its pile given way.
     private var sceneHeight: CGFloat { CGFloat(stage.height) }
+    /// The show's own padding above its counts.
+    private static let topPadding = Theme.Spacing.m
+    private var sideBySide: Bool { verticalSizeClass == .compact }
     /// What the screen leaves for the scene: its visible height without the padding, the counts
     /// and the button, which keep their text size, so "Animation überspringen" stays on screen at
     /// every size (review P3-18: at the largest text it lay below the tab bar on the small
@@ -97,6 +116,17 @@ struct SortingShow: View {
         guard let free = sceneRoom else { return 1 }
         return min(1, max(0.1, free / sceneHeight))
     }
+    /// The scene's width before scaling: scaled, it fills the width on screen.
+    private var width: CGFloat { available / sceneScale }
+    private var pileCenter: CGPoint { CGPoint(x: width / 2, y: CGFloat(stage.pileCenterY)) }
+    private var coverCenter: CGPoint { CGPoint(x: width / 2, y: CGFloat(stage.coverCenterY)) }
+    private var spacing: CGFloat { CGFloat(stage.spacing) }
+    /// A photo's size in pixels: what a photo on the pile or in flight must bring to be sharp.
+    private var photoPixels: CGSize {
+        let side = CGFloat(stage.photo) * displayScale
+        return CGSize(width: side, height: side)
+    }
+    private var counted: Int { sorted.count }
 
     var body: some View {
         // Turned sideways the screen is too low for counts, scene and button one below the
@@ -135,6 +165,12 @@ struct SortingShow: View {
         .task(id: PileLoad(side: stage.photo, generation: photos.generation)) {
             await photos.load(pilePhotos, side: CGFloat(stage.photo), scale: displayScale)
         }
+    }
+
+    /// When the pile's photos are loaded: for their size, and again after a memory warning.
+    private struct PileLoad: Equatable {
+        var side: Double
+        var generation: Int
     }
 
     /// Photos fly: not with Reduce Motion or VoiceOver (the albums are riffled through quietly),
@@ -215,9 +251,15 @@ struct SortingShow: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Fotos werden einsortiert"))
-        .accessibilityValue(Text("\(landed.count) von \(albums.count) Alben fertig, \(counted) \(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert"))
+        .accessibilityValue(spokenProgress)
         .accessibilityAddTraits(.updatesFrequently)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
+    }
+
+    /// What VoiceOver says of the header: the albums done and the photos sorted, the number
+    /// grouped as the screen's language writes it.
+    private var spokenProgress: Text {
+        Text("\(landed.count) von \(albums.count) Alben fertig, \(counted) \(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert")
     }
 
     /// The pile thins out as photos find their albums. Only photos that are sharp on the device
@@ -262,8 +304,37 @@ struct SortingShow: View {
         }
     }
 
-    // MARK: Choreography
+    /// Up to six photos from the first albums, so the pile shows the user's own pictures.
+    private var pilePhotos: [AssetID] {
+        var result: [AssetID] = []
+        var round = 0
+        while result.count < 6 && round < 6 {
+            for album in albums where round < album.shown.count && result.count < 6 {
+                let id = album.shown[round]
+                if !result.contains(id) { result.append(id) }
+            }
+            round += 1
+        }
+        return result
+    }
 
+    /// How many photos fly into one album.
+    private var flightCount: Int { albums.count == 1 ? 5 : 3 }
+
+    // MARK: Plan → albums
+
+    /// The albums of the show, in plan order (`SortingShowAlbum.cast`, `AppModel.sortingShowAlbums`).
+    static func albums(from cast: [SortingShowAlbum]) -> [Album] {
+        cast.map {
+            Album(id: $0.lastStep, title: $0.title ?? String(localized: "Album"), assets: $0.assets,
+                  shown: $0.flying, cover: $0.cover, hidesPreview: $0.hidesPreview)
+        }
+    }
+}
+
+// MARK: Choreography
+
+extension SortingShow {
     private func run() async {
         let started = Date()
         // When the strip may move again: a move never starts while the last one is still
@@ -272,7 +343,46 @@ struct SortingShow: View {
         // `.task` restarts when the tab comes back: continue there, never land an album twice.
         for index in albums.indices where !landed.contains(index) {
             if Task.isCancelled { return }
-            guard await turn(of: index, started: started, moveEnds: &moveEnds) else { break }
+            let essential = index < 3 || index == albums.count - 1
+            let calm = !reduceMotion && !voiceOver
+            if calm && (essential || albumsDone() - index <= 1) {
+                await prefetch(index)
+            }
+            await waitUntilDone(index, started: started)
+            let execution = model.execution
+            if Task.isCancelled || execution.failure != nil { break }
+            if !execution.isRunning && execution.finished == nil { break } // never started: no celebration
+            // A step that failed or was skipped gets no checkmark.
+            if model.executionProgress.unsuccessfulSteps.contains(albums[index].id) { continue }
+            // Photos fly while the show keeps up; a backlog of finished albums is riffled through.
+            let quick = !calm || (!essential && albumsDone() - index > 1)
+            let mustMove = current != index && (!quick || index == albums.count - 1)
+            if mustMove, moveEnds.timeIntervalSinceNow > 0 {
+                try? await Task.sleep(for: .seconds(moveEnds.timeIntervalSinceNow))
+            }
+            if current != index && (mustMove || moveEnds.timeIntervalSinceNow <= 0) {
+                let duration = reduceMotion || quick ? 0.3 : 0.5
+                withAnimation(reduceMotion ? .easeInOut(duration: duration) : .smooth(duration: duration)) {
+                    current = index
+                }
+                moveEnds = Date().addingTimeInterval(duration + 0.04)
+            }
+            if quick {
+                await land(index, quietly: true)
+                let step = reduceMotion ? max(0.08, min(0.5, 2.0 / Double(albums.count))) : 0.06
+                try? await Task.sleep(for: .seconds(step))
+            } else {
+                // In Low Power Mode nothing flies: the album fills after the same short wait.
+                let arrival = launch(index, duration: albums.count == 1 ? 0.7 : 0.58, lead: 0.15)
+                try? await Task.sleep(for: .seconds(arrival))
+                await land(index, quietly: false)
+                try? await Task.sleep(for: .seconds(0.15))
+                // The next album already moves to the centre and waits there while its step runs.
+                if index + 1 < albums.count && albumsDone() <= index + 1 {
+                    withAnimation(.smooth(duration: 0.5)) { current = index + 1 }
+                    moveEnds = Date().addingTimeInterval(0.54)
+                }
+            }
         }
         await waitForEnd(started: started)
         guard !Task.isCancelled else { return }
@@ -349,139 +459,6 @@ struct SortingShow: View {
         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { pop = false }
     }
 
-    /// Loads what the album shows next, not mid-flight: the photos about to fly (sharp only, not
-    /// when nothing flies) and its cover at the size it is drawn, which `CoverLoader` keeps for
-    /// the album's `CoverPhoto` (the same pixels: whole points times the screen's scale).
-    private func prefetch(_ index: Int) async {
-        let album = albums[index]
-        let stage = self.stage
-        if flies {
-            await photos.load(album.shown.prefix(flightCount), side: CGFloat(stage.photo), scale: displayScale)
-        }
-        guard !album.hidesPreview, !album.cover.isEmpty, !Task.isCancelled else { return }
-        let side = CGFloat(stage.cover) * displayScale
-        _ = await CoverLoader.load(CoverLoader.Request(ids: Array(album.cover.prefix(CoverLoader.attempts)),
-                                                       pixels: CGSize(width: side, height: side)))
-    }
-
-    // MARK: Plan → albums
-
-    /// The albums of the show, in plan order (`SortingShowAlbum.cast`, `AppModel.sortingShowAlbums`).
-    static func albums(from cast: [SortingShowAlbum]) -> [Album] {
-        cast.map {
-            Album(id: $0.lastStep, title: $0.title ?? String(localized: "Album"), assets: $0.assets,
-                  shown: $0.flying, cover: $0.cover, hidesPreview: $0.hidesPreview)
-        }
-    }
-}
-
-// The show's albums, its measures, the pile's photos and the waits for the real work: apart
-// from the struct's body, which keeps its parts (SwiftLint's type body length).
-extension SortingShow {
-    /// One album of the show, from the plan (`albums(from:)`).
-    struct Album: Identifiable, Equatable {
-        /// Index of the album's last "add photos" step in the plan.
-        let id: Int
-        let title: String
-        /// Every photo the plan adds: what the counter counts.
-        let assets: [AssetID]
-        /// What flies and lies on the pile: ordinary photos first, never a sensitive document,
-        /// never a personal suggestion's photo (`SortingShowAlbum.flying`). Can be shorter than
-        /// `assets`, or empty.
-        let shown: [AssetID]
-        /// What its cover tries, best first (`SortingShowAlbum.cover`); empty for a personal album.
-        let cover: [AssetID]
-        /// A personal album: "Vorschau ausgeblendet" on its cover, nothing of it flies.
-        let hidesPreview: Bool
-    }
-
-    /// The show's own padding above its counts.
-    private static let topPadding = Theme.Spacing.m
-    private var sideBySide: Bool { verticalSizeClass == .compact }
-    /// The scene's width before scaling: scaled, it fills the width on screen.
-    private var width: CGFloat { available / sceneScale }
-    private var pileCenter: CGPoint { CGPoint(x: width / 2, y: CGFloat(stage.pileCenterY)) }
-    private var coverCenter: CGPoint { CGPoint(x: width / 2, y: CGFloat(stage.coverCenterY)) }
-    private var spacing: CGFloat { CGFloat(stage.spacing) }
-    /// A photo's size in pixels: what a photo on the pile or in flight must bring to be sharp.
-    private var photoPixels: CGSize {
-        let side = CGFloat(stage.photo) * displayScale
-        return CGSize(width: side, height: side)
-    }
-    private var counted: Int { sorted.count }
-
-    /// When the pile's photos are loaded: for their size, and again after a memory warning.
-    private struct PileLoad: Equatable {
-        var side: Double
-        var generation: Int
-    }
-
-    /// Up to six photos from the first albums, so the pile shows the user's own pictures.
-    private var pilePhotos: [AssetID] {
-        var result: [AssetID] = []
-        var round = 0
-        while result.count < 6 && round < 6 {
-            for album in albums where round < album.shown.count && result.count < 6 {
-                let id = album.shown[round]
-                if !result.contains(id) { result.append(id) }
-            }
-            round += 1
-        }
-        return result
-    }
-
-    /// How many photos fly into one album.
-    private var flightCount: Int { albums.count == 1 ? 5 : 3 }
-
-    // MARK: Choreography
-
-    /// One album's turn in the show (`run`): its photos fly in, or it is riffled through when the
-    /// show falls behind the work. False when the show stops here (cancelled, failed, or the
-    /// plan never started).
-    private func turn(of index: Int, started: Date, moveEnds: inout Date) async -> Bool {
-        let essential = index < 3 || index == albums.count - 1
-        let calm = !reduceMotion && !voiceOver
-        if calm && (essential || albumsDone() - index <= 1) {
-            await prefetch(index)
-        }
-        await waitUntilDone(index, started: started)
-        let execution = model.execution
-        if Task.isCancelled || execution.failure != nil { return false }
-        if !execution.isRunning && execution.finished == nil { return false } // never started: no celebration
-        // A step that failed or was skipped gets no checkmark.
-        if model.executionProgress.unsuccessfulSteps.contains(albums[index].id) { return true }
-        // Photos fly while the show keeps up; a backlog of finished albums is riffled through.
-        let quick = !calm || (!essential && albumsDone() - index > 1)
-        let mustMove = current != index && (!quick || index == albums.count - 1)
-        if mustMove, moveEnds.timeIntervalSinceNow > 0 {
-            try? await Task.sleep(for: .seconds(moveEnds.timeIntervalSinceNow))
-        }
-        if current != index && (mustMove || moveEnds.timeIntervalSinceNow <= 0) {
-            let duration = reduceMotion || quick ? 0.3 : 0.5
-            withAnimation(reduceMotion ? .easeInOut(duration: duration) : .smooth(duration: duration)) {
-                current = index
-            }
-            moveEnds = Date().addingTimeInterval(duration + 0.04)
-        }
-        if quick {
-            await land(index, quietly: true)
-            let step = reduceMotion ? max(0.08, min(0.5, 2.0 / Double(albums.count))) : 0.06
-            try? await Task.sleep(for: .seconds(step))
-        } else {
-            // In Low Power Mode nothing flies: the album fills after the same short wait.
-            let arrival = launch(index, duration: albums.count == 1 ? 0.7 : 0.58, lead: 0.15)
-            try? await Task.sleep(for: .seconds(arrival))
-            await land(index, quietly: false)
-            try? await Task.sleep(for: .seconds(0.15))
-            // The next album already moves to the centre and waits there while its step runs.
-            if index + 1 < albums.count && albumsDone() <= index + 1 {
-                withAnimation(.smooth(duration: 0.5)) { current = index + 1 }
-                moveEnds = Date().addingTimeInterval(0.54)
-            }
-        }
-        return true
-    }
-
     /// Never ahead of the real work: wait until the album's step has finished.
     private func waitUntilDone(_ index: Int, started: Date) async {
         while !Task.isCancelled {
@@ -511,5 +488,20 @@ extension SortingShow {
         guard execution.isRunning else { return 0 }
         let completed = model.executionProgress.completedSteps
         return albums.filter { completed > $0.id }.count
+    }
+
+    /// Loads what the album shows next, not mid-flight: the photos about to fly (sharp only, not
+    /// when nothing flies) and its cover at the size it is drawn, which `CoverLoader` keeps for
+    /// the album's `CoverPhoto` (the same pixels: whole points times the screen's scale).
+    private func prefetch(_ index: Int) async {
+        let album = albums[index]
+        let stage = self.stage
+        if flies {
+            await photos.load(album.shown.prefix(flightCount), side: CGFloat(stage.photo), scale: displayScale)
+        }
+        guard !album.hidesPreview, !album.cover.isEmpty, !Task.isCancelled else { return }
+        let side = CGFloat(stage.cover) * displayScale
+        _ = await CoverLoader.load(CoverLoader.Request(ids: Array(album.cover.prefix(CoverLoader.attempts)),
+                                                       pixels: CGSize(width: side, height: side)))
     }
 }

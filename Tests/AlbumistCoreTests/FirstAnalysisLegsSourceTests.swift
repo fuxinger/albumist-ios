@@ -3,19 +3,21 @@ import Testing
 @testable import AlbumistCore
 import AlbumistTestSupport
 
-/// X9 as the App wires it (verification review X9, the lead's decision): a first analysis that ran
-/// in legs (paused, cut off by iOS, closed and gone on later) is one wait for "Analyse fertig" and
-/// its 100 %. The rule is `FirstAnalysisLegs` (tested in `FirstAnalysisLegsTests`); the model tells
-/// where a run starts, works and ends, and the moment's store keeps the legs beside the moment
-/// (`FirstAnalysisMomentStore`). The App does not build on Linux, so these tests read its code
-/// (`AppSource`, with the paths and helpers of `FirstAnalysisMomentSourceTests`). A first analysis
-/// in legs on the iPhone, closed and killed in between, is a device check.
+/// X9 as the App wires it (verification reviews X9 and Y, the lead's decisions): an analysis that
+/// may bring the first 100 % and ran in legs (paused, cut off by iOS, closed and gone on later) is
+/// one wait for "Analyse fertig" and its 100 %. The rule is `FirstAnalysisLegs` with
+/// `FirstAnalysisMoment.mayBeBrought` (tested in `FirstAnalysisLegsTests` and
+/// `FirstAnalysisLegsWhileOwedTests`); the model tells where a run starts, works and ends, and the
+/// moment's store keeps the legs beside the moment (`FirstAnalysisMomentStore`). The App does not
+/// build on Linux, so these tests read its code (`AppSource`, with the paths and helpers of
+/// `FirstAnalysisMomentSourceTests`). An analysis in legs on the iPhone, closed and killed in
+/// between, is a device check.
 @Suite("First analysis in legs in the App (X9)")
 struct FirstAnalysisLegsSourceTests {
     typealias Source = FirstAnalysisMomentSourceTests
 
-    /// The legs of the first analysis count together for its first completion (verification review
-    /// X9, `FirstAnalysisLegs`): the model tells where a run starts (with its clock, after the
+    /// The legs of an analysis that may bring the moment count together (verification reviews X9
+    /// and Y, `FirstAnalysisLegs`): the model tells where a run starts (with its clock, after the
     /// resume position was read), while it works (with each report the tick takes, right after
     /// `receive` wrote the resume position; not in `receive` itself, which SwiftLint's
     /// `function_body_length` holds at 50 lines) and as it ends, before "Analyse fertig" is
@@ -52,12 +54,21 @@ struct FirstAnalysisLegsSourceTests {
             let told = try #require(run.range(of: follower), "\(follower)")
             #expect(decided.upperBound < told.lowerBound, "\(follower)")
         }
-        // A leg of the first analysis while no analysis was completed, going on from the resume position.
+        // A leg that counts when the run may bring the moment (what it analyses, the same run as at
+        // its end), going on from the resume position.
         let store = try Source.code(Source.store)
         let begun = try Source.body(["extension AppModel", "func firstAnalysisLegStarted()"], in: store)
-        #expect(begun.contains("legStarted(firstAnalysis: !AnalysisMarker.completedOnce, goesOn: analysis.resumeFrom != nil)"), "\(begun)")
-        let start = try Source.body(["final class FirstAnalysisMomentStore", "func legStarted(firstAnalysis: Bool, goesOn: Bool)"], in: store)
-        #expect(start.contains("legs.started(firstCompletion: firstAnalysis && moment.firstCompletionAhead, goesOn: goesOn)"), "\(start)")
+        #expect(begun.contains("FirstAnalysisMomentStore.shared.legStarted(firstAnalysisRun, goesOn: analysis.resumeFrom != nil)"),
+                "\(begun)")
+        let start = try Source.body(["final class FirstAnalysisMomentStore", "func legStarted(_ run: FirstAnalysisMoment.Run, goesOn: Bool)"],
+                                    in: store)
+        // A wait that is over spends the moment first (verification review Y: the legs count for
+        // every run that may bring it while it is owed), and what changed is kept.
+        let lapse = try #require(start.range(of: "moment.lapse(at: Date())"), "\(start)")
+        let counts = try #require(start.range(of: "legs.started(mayBringMoment: moment.mayBeBrought(by: run), goesOn: goesOn)"),
+                                  "\(start)")
+        let kept = try #require(start.range(of: "keep()"), "\(start)")
+        #expect(lapse.upperBound < counts.lowerBound && counts.upperBound < kept.lowerBound, "\(start)")
     }
 
     /// The legs live in `UserDefaults` beside the moment, under keys of their own: read at launch
@@ -78,7 +89,7 @@ struct FirstAnalysisLegsSourceTests {
         let lapse = try #require(initializer.range(of: "moment.lapse(at: Date())"), "\(initializer)")
         let kept = try #require(initializer.range(of: "keep()"), "\(initializer)")
         #expect(lapse.upperBound < read.lowerBound && read.upperBound < kept.lowerBound, "\(initializer)")
-        #expect(initializer.contains("firstCompletionAhead: moment.firstCompletionAhead)"), "\(initializer)")
+        #expect(initializer.contains("owed: moment.kept == .owed)"), "\(initializer)")
         let works = try Source.body(["final class FirstAnalysisMomentStore", "func legRuns(_ leg: FirstAnalysisLegs.Leg)"], in: store)
         #expect(works.contains("guard legs.counting else { return }") && works.contains("keepLegs(exactly: false)"), "\(works)")
         let ended = try Source.body(["final class FirstAnalysisMomentStore", "func legEnded(_ leg: FirstAnalysisLegs.Leg, finished: Bool)"], in: store)
@@ -88,7 +99,7 @@ struct FirstAnalysisLegsSourceTests {
         #expect(written.contains("UserDefaults.standard.removeObject(forKey: Self.legSecondsKey)"), "\(written)")
         let keep = try Source.body(["final class FirstAnalysisMomentStore", "private func keep()"], in: store)
         #expect(keep.contains("keepLegs(exactly: true)"), "\(keep)")
-        let away = try Source.body(["final class FirstAnalysisMomentStore", "func completedAway(first: Bool)"], in: store)
+        let away = try Source.body(["final class FirstAnalysisMomentStore", "func completedAway(first: Bool, fullAccess: Bool)"], in: store)
         let dropped = try #require(away.range(of: "legs.drop()"), "the legs outlive an overnight completion: \(away)")
         let keptAway = try #require(away.range(of: "keep()"), "\(away)")
         #expect(dropped.upperBound < keptAway.lowerBound, "\(away)")

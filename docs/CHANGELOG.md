@@ -2,13 +2,18 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 25.11. Dritte Nachprüfung der ersten 100 % (Design-Welle 3, H13, noch in keinem Build): Auch nach einer schnellen
+  ersten Analyse zählen die Etappen des Laufs zusammen, der die 100 % noch bringen kann (alle Jahre nach
+  „Nur 2026“, der Rest nach wenigen freigegebenen Fotos): ein kurzer letzter Rest endet mit „Analyse fertig“ und
+  den 100 %. Der erste fertige Lauf mit allen Fotos verbraucht die Chance der freigegebenen Fotos, gefeiert oder
+  nicht; die Suche nach neuen Fotos bringt die 100 % nie. Verlauf und Beleg rechnen für ihre Titelbilder nichts
+  Großes mehr auf dem Hauptthread.
 - 25.11. Zweite Nachprüfung der ruhigen Farben und der ersten 100 % (Design-Welle 3, H13, noch in keinem Build):
-  Lief die erste Analyse in Etappen (pausiert, von iOS beendet, später weiter), zählen ihre Etappen zusammen: dauert
-  die letzte nur Sekunden, endet sie trotzdem mit „Analyse fertig“ und den 100 %. Nach wenigen freigegebenen Fotos
-  verbraucht ein Lauf mit allen Fotos, der zu kurz für „Analyse fertig“ ist, die 100 % nicht mehr. Spielen die
-  100 % ein zweites Mal, schließt sich ihr Balken wieder sichtbar. Eine wieder geöffnete Vorschlagsseite blendet
-  ihre Farbe mit dem Titelbild ein, auch wenn es nicht mehr im Speicher war, und vorher nur die Farbe des Fotos,
-  das sie gleich zeigt. Die Vorschau vor „Anlegen“ rechnet nichts Großes mehr auf dem Hauptthread.
+  Lief die erste Analyse in Etappen (pausiert, von iOS beendet, später weiter), zählen ihre Etappen zusammen:
+  dauert die letzte nur Sekunden, endet sie trotzdem mit „Analyse fertig“ und den 100 %. Spielen die 100 % ein
+  zweites Mal, schließt sich ihr Balken wieder sichtbar. Eine wieder geöffnete Vorschlagsseite blendet ihre Farbe
+  mit dem Titelbild ein, auch wenn es nicht mehr im Speicher war, und vorher nur die Farbe des Fotos, das sie
+  gleich zeigt. Die Vorschau vor „Anlegen“ rechnet nichts Großes mehr auf dem Hauptthread.
 - 25.11. Raster in „Unsortiert“ und in Vorschlägen nach der Prüfung der zweiten Runde (Design-Welle 3, noch in
   keinem Build): Ziehen zum Auswählen findet die Fotos auch gleich nach „Auswählen“ und „Fertig“ und hakt über einer
   angehefteten Tagesüberschrift weiter ab; VoiceOvers Doppeltippen nach Ziehen oder Zoom zählt wieder; das

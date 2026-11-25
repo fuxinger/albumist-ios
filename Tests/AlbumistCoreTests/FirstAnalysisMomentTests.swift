@@ -373,7 +373,8 @@ struct FirstAnalysisMomentTests {
     /// case): the first run to end once Albumist may read every photo analyses the rest of the
     /// library, the library as a whole, and brings it when celebrated (the lead's "first full
     /// analysis after more photos were allowed"). A check among the shared photos before it does
-    /// not; once that first run with every photo ended, the checks after it do not either.
+    /// not; one with every photo too quick for "Analyse fertig" leaves the chance to the next
+    /// (`theRunWithEveryPhotoKeepsItsChanceUntilCelebrated`).
     @Test func afterAQuickAnalysisOfSharedPhotosEveryPhotoBringsIt() {
         var moment = Self.fresh()
         Self.end(&moment, celebrates: false, fullAccess: false)
@@ -386,13 +387,6 @@ struct FirstAnalysisMomentTests {
         Self.end(&moment, wholeLibrary: false, fullAccess: true, after: 3600)
         #expect(moment.isDue(at: Self.at(3601)))
         #expect(moment.kept == .spent && moment.firstCompleted == nil && !moment.sharedOnly)
-        // That first run with every photo too quick for "Analyse fertig": a check after it never brings it.
-        var quick = Self.fresh()
-        Self.end(&quick, celebrates: false, fullAccess: false)
-        Self.end(&quick, celebrates: false, wholeLibrary: false, fullAccess: true, after: 600)
-        #expect(quick.kept == .owed && !quick.sharedOnly)
-        Self.end(&quick, wholeLibrary: false, fullAccess: true, after: 3600)
-        #expect(!quick.isDue(at: Self.at(3601)) && quick.kept == .owed)
         // A quick first analysis with every photo readable leaves nothing of the kind.
         var full = Self.fresh()
         Self.end(&full, celebrates: false)
@@ -410,6 +404,42 @@ struct FirstAnalysisMomentTests {
         var away = kept
         away.completedAway(first: true)
         #expect(away.kept == .spent && !away.sharedOnly)
+    }
+
+    /// After a quick first analysis of only the shared photos, the run with every photo allowed
+    /// uses up its chance only when it is celebrated (the lead's decision on the review's remark
+    /// on `runEnded`, the shape of X9): too quick for "Analyse fertig" (little of the library
+    /// left, or a short last leg), the moment stays owed under the seven days, and the next
+    /// celebrated run with every photo allowed brings it, once. Never twice, never after the
+    /// seven days, never from a run that still sees only the shared photos.
+    @Test func theRunWithEveryPhotoKeepsItsChanceUntilCelebrated() {
+        var moment = Self.fresh()
+        Self.end(&moment, celebrates: false, fullAccess: false)
+        Self.end(&moment, celebrates: false, wholeLibrary: false, fullAccess: true, after: 600)
+        #expect(moment.kept == .owed && moment.sharedOnly, "the uncelebrated run used up the chance")
+        #expect(moment.firstCompleted == Self.start, "the uncelebrated run moved the wait")
+        #expect(!moment.isDue(at: Self.at(601)))
+        // The next run with every photo allowed, celebrated on screen: now, once.
+        Self.end(&moment, wholeLibrary: false, fullAccess: true, after: 3600)
+        #expect(moment.isDue(at: Self.at(3601)))
+        #expect(moment.kept == .spent && !moment.sharedOnly && moment.firstCompleted == nil)
+        let plays = moment.claim(at: Self.at(3602), onScreen: true)
+        #expect(plays)
+        moment.ended()
+        Self.end(&moment, wholeLibrary: false, fullAccess: true, after: 7200)
+        let twice = moment.claim(at: Self.at(7201), onScreen: true)
+        #expect(!twice && !moment.isDue(at: Self.at(7201)))
+        // After the seven days: spent, whatever the run.
+        var late = Self.fresh()
+        Self.end(&late, celebrates: false, fullAccess: false)
+        Self.end(&late, celebrates: false, wholeLibrary: false, fullAccess: true, after: 600)
+        Self.end(&late, wholeLibrary: false, fullAccess: true, after: Self.week + 1)
+        #expect(!late.isDue(at: Self.at(Self.week + 2)) && late.kept == .spent)
+        // Still only the shared photos: a celebrated check among them saw no more of the library.
+        var limited = Self.fresh()
+        Self.end(&limited, celebrates: false, fullAccess: false)
+        Self.end(&limited, wholeLibrary: false, fullAccess: false, after: 600)
+        #expect(!limited.isDue(at: Self.at(601)) && limited.kept == .owed && limited.sharedOnly)
     }
 
     /// Seven days from that first completion: a run of the whole library just inside brings it,

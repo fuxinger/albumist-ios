@@ -19,10 +19,12 @@ import Foundation
 /// (`firstCompleted`), and only a run that analyses the library as a whole can bring it then:
 /// the first full analysis once another part of the library is taken in, or "Analyse neu
 /// aufbauen" (no analysis completed since `AnalysisMarker.reset`), and, after a first analysis
-/// of only the photos shared with Albumist ("Ausgewählte Fotos", `sharedOnly`), the first run to
-/// end once every photo is allowed, which analyses the rest of the library. Never a check for new
-/// photos or a catch-up of new imports, however long it runs. After those seven days it is spent
-/// (second review, K7; the lead's decision on verification review V6).
+/// of only the photos shared with Albumist ("Ausgewählte Fotos", `sharedOnly`), a run that ends
+/// with every photo allowed, which analyses the rest of the library: the first such run uses up
+/// that chance only when it is celebrated, so one too quick for "Analyse fertig" leaves it to the
+/// next. Never a check for new photos or a catch-up of new imports, however long it runs. After
+/// those seven days it is spent (second review, K7; the lead's decisions on verification reviews
+/// V6 and V, X9).
 ///
 /// Exactly once per installation: whether it is still owed is kept in `UserDefaults`
 /// (`FirstAnalysisMomentStore`), written as `spent` the moment it becomes due, so once it was due
@@ -45,8 +47,8 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// once spent.
     public private(set) var firstCompleted: Date?
     /// That quick first analysis saw only the photos shared with Albumist ("Ausgewählte Fotos"):
-    /// the first run to end once every photo is allowed analyses the library as a whole too. Kept
-    /// next to `firstCompleted`; false once such a run ended, and once spent.
+    /// a run that ends with every photo allowed analyses the library as a whole too, until one is
+    /// celebrated (which spends the moment). Kept next to `firstCompleted`; false once spent.
     public private(set) var sharedOnly = false
     /// The first full analysis finished on screen then; the card shows the moment from then until
     /// `window` has passed. In memory only.
@@ -111,8 +113,9 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
     /// whole (no analysis completed since `AnalysisMarker.reset`: the first analysis, one of
     /// another part of the library, "Analyse neu aufbauen"), not a check for new photos or a
     /// catch-up; `fullAccess`: every photo is allowed as it ends (not only "Ausgewählte Fotos"),
-    /// so after a quick first analysis of only the shared photos (`sharedOnly`) the first such
-    /// run analysed the rest of the library, the library as a whole too; `onScreen`: Albumist is
+    /// so after a quick first analysis of only the shared photos (`sharedOnly`) such a run
+    /// analysed the rest of the library, the library as a whole too, and only a celebrated one
+    /// uses up that chance (an uncelebrated one leaves it to the next); `onScreen`: Albumist is
     /// not in the background as it ends (in front of it Control Center or an alert only make the
     /// card wait, `claim`). The first celebrated finish of the whole library decides: due on
     /// screen, spent either way. Any other finish starts the wait after a quick first analysis
@@ -123,8 +126,8 @@ public struct FirstAnalysisMoment: Sendable, Equatable {
         lapse(at: now)
         guard kept == .owed else { return }
         let whole = wholeLibrary || (sharedOnly && fullAccess)
-        // Only the first run to end with every photo allowed takes in the rest of the library.
-        if fullAccess { sharedOnly = false }
+        // Not celebrated: a run with every photo allowed after a quick first analysis of the shared
+        // photos leaves its chance to the next one (`sharedOnly` stays), within the wait.
         guard celebrates, whole else {
             if firstCompleted == nil {
                 firstCompleted = now

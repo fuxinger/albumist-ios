@@ -102,7 +102,7 @@ struct SortingShowWordsSourceTests {
     /// test whose looks all missed the landing fails. The landing is there for half a second
     /// before the show hands over, and XCTest's reads took 5 to 7 s each in busy runs: the test
     /// lets the show hold its end (`-AlbumistUITestShowHold`, 15 s), a switch inert outside UI
-    /// runs (`flag`, see `FirstAnalysisMomentSourceTests`) that only the show reads.
+    /// runs (`flag`, see `FirstAnalysisMomentUIRunSourceTests`) that only the show reads.
     @Test func theUITestReadsTheShowsExactWords() throws {
         let test = AppSource.code(try AppSource.read("App/AlbumistUITests/ShowAndHandwritingUITests.swift"), keepStrings: true)
         let body = try Self.body(["final class ShowAndHandwritingUITests", "func test2_SortingShowCountsThePhotosItSorts()"], in: test)

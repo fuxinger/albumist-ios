@@ -10,7 +10,7 @@ import Testing
 /// ignored photo, an album, a place's name, the home, the part of the library, the day) or a new
 /// text search again as the tab is chosen again, and only a new text starts the hits from the
 /// first page.
-@Suite("Search: coming back to the tab does not search again")
+@Suite("Search: coming back to the tab searches again only after a change")
 struct SearchAnswerTests {
     /// The page's task starts for `text`: true when it searches.
     private static func starts(_ answer: inout SearchAnswer, _ text: String, revision: Int) -> Bool {

@@ -866,7 +866,10 @@ final class AlbumistFlowUITests: XCTestCase {
     /// Every swipe in the photo viewer goes to the next photo (iPhone, Build 41, 26.11.: "reagiert
     /// teilweise nicht auf Weiterwischen, erst beim 3.–4. Mal"). Four swipes, each must move the
     /// position ("viewer.position", "n von m") within 2 s; a swipe without effect is counted and
-    /// fails the test, never repeated. Back to the first photo afterwards.
+    /// fails the test, never repeated. Back to the first photo afterwards. Then the same with
+    /// swipes as a finger makes them (A12): slower, a little downwards; XCTest's own `swipeLeft`
+    /// is a quick flick, and those always went through in the simulator while the iPhone missed
+    /// every second or third swipe.
     private func swipesGoToTheNextPhoto() {
         let position = app.descendants(matching: .any)["viewer.position"]
         guard position.waitForExistence(timeout: 5) else {
@@ -882,21 +885,32 @@ final class AlbumistFlowUITests: XCTestCase {
         defer { print("UI_TIMING viewer swipes \(String(format: "%.1f", Date().timeIntervalSince(began))) s") }
         let swipes = min(4, max(total - (number() ?? 1), 0))
         XCTAssertGreaterThan(swipes, 0, "No photo to swipe to in the viewer ('\(label)')")
-        var missed: [Int] = []
-        for swipe in stride(from: 1, through: swipes, by: 1) {
-            let before = number() ?? 0
-            let swipedAt = Date()
-            app.swipeLeft()
-            let moved = UITestWait.holds(timeout: 2, interval: 0.1) { (number() ?? before) > before }
-            print("UI_FACT viewer swipe \(swipe): \(before) -> \(number() ?? -1) after \(Int(Date().timeIntervalSince(swipedAt) * 1000)) ms")
-            if !moved { missed.append(swipe) }
+        // A finger's swipe: from the right edge to the left third at a finger's pace, drifting
+        // down a little as a thumb does.
+        let fingerSwipe = {
+            let from = self.app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5))
+            let to = self.app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.53))
+            from.press(forDuration: 0.02, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0)
         }
-        print(missed.isEmpty ? "UI_STEP_OK every swipe goes to the next photo" : "UI_STEP_MISSING swipes without effect: \(missed)")
-        XCTAssertTrue(missed.isEmpty, "\(missed.count) of \(swipes) swipes in the photo viewer did not go to the next photo: \(missed)")
-        for _ in 0..<swipes {
-            let before = number() ?? 0
-            app.swipeRight()
-            _ = UITestWait.holds(timeout: 2, interval: 0.1) { (number() ?? before) < before }
+        for (kind, swipe) in [("flick", { self.app.swipeLeft() }), ("finger", fingerSwipe)] {
+            var missed: [Int] = []
+            for index in stride(from: 1, through: swipes, by: 1) {
+                let before = number() ?? 0
+                let swipedAt = Date()
+                swipe()
+                let moved = UITestWait.holds(timeout: 2, interval: 0.1) { (number() ?? before) > before }
+                print("UI_FACT viewer \(kind) swipe \(index): \(before) -> \(number() ?? -1) after \(Int(Date().timeIntervalSince(swipedAt) * 1000)) ms")
+                if !moved { missed.append(index) }
+            }
+            print(missed.isEmpty ? "UI_STEP_OK every \(kind) swipe goes to the next photo" : "UI_STEP_MISSING \(kind) swipes without effect: \(missed)")
+            XCTAssertTrue(missed.isEmpty, "\(missed.count) of \(swipes) \(kind) swipes in the photo viewer did not go to the next photo: \(missed)")
+            // Back to where the swipes began, so the second kind has photos to go to.
+            for _ in 0..<swipes {
+                let before = number() ?? 0
+                guard before > 1 else { break }
+                app.swipeRight()
+                _ = UITestWait.holds(timeout: 2, interval: 0.1) { (number() ?? before) < before }
+            }
         }
     }
 

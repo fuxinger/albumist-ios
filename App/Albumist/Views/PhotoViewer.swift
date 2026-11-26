@@ -200,25 +200,20 @@ private struct ZoomablePhoto: View {
                     .onEnded { _ in lastOffset = offset },
                 including: scale > 1 ? .all : .subviews
             )
-            // At normal size a mostly vertical pull down closes the viewer, as in Photos;
-            // sideways still goes to the next photo.
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 20)
-                    .onChanged { value in
-                        let t = value.translation
-                        guard t.height > 0, abs(t.height) > abs(t.width) else { return }
-                        pull = t.height
-                    }
-                    .onEnded { value in
-                        let t = value.translation
-                        if t.height > 120, abs(t.height) > abs(t.width) {
-                            onClose()
-                        } else {
-                            withAnimation(.snappy) { pull = 0 }
-                        }
-                    },
-                including: scale > 1 ? .subviews : .all
-            )
+            // At normal size a pull down closes the viewer, as in Photos. A UIKit pan that only
+            // begins when the finger moves mostly downwards: the SwiftUI drag it replaces took
+            // part in every touch, sideways ones too, and on the iPhone a finger's swipe to the
+            // next photo went through only every second or third time (Build 41, A12). A
+            // sideways swipe now never reaches it and belongs to the pages alone.
+            .gesture(PullDownToClose(enabled: scale <= 1) { distance in
+                pull = distance
+            } ended: { distance, speed in
+                if distance > 120 || (distance > 40 && speed > 800) {
+                    onClose()
+                } else {
+                    withAnimation(.snappy) { pull = 0 }
+                }
+            })
             .task(id: id) {
                 unavailable = false
                 let pixels = CGSize(width: geo.size.width * displayScale * 2, height: geo.size.height * displayScale * 2)
@@ -243,5 +238,52 @@ private struct ZoomablePhoto: View {
         lastScale = 1
         offset = .zero
         lastOffset = .zero
+    }
+}
+
+/// Pull down to close the viewer: a pan that begins only when it starts mostly downwards, so
+/// it never competes with the sideways swipe of the pages (A12).
+private struct PullDownToClose: UIGestureRecognizerRepresentable {
+    var enabled: Bool
+    /// How far the photo is pulled down, in points (never below 0).
+    var changed: (CGFloat) -> Void
+    /// The distance and the downward speed (points per second) when the finger lifts.
+    var ended: (CGFloat, CGFloat) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        pan.delegate = context.coordinator
+        pan.maximumNumberOfTouches = 1
+        return pan
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        recognizer.isEnabled = enabled
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        let distance = max(recognizer.translation(in: recognizer.view).y, 0)
+        switch recognizer.state {
+        case .began, .changed: changed(distance)
+        case .ended: ended(distance, recognizer.velocity(in: recognizer.view).y)
+        case .cancelled, .failed: ended(0, 0)
+        default: break
+        }
+    }
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        /// Mostly downwards at its start; anything sideways or upwards is the pages' swipe.
+        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = recognizer as? UIPanGestureRecognizer else { return false }
+            let velocity = pan.velocity(in: pan.view)
+            return velocity.y > 0 && velocity.y > abs(velocity.x) * 1.5
+        }
+
+        /// The pages' scroll view may follow the same touch (as the drag before did); it does
+        /// not move on a pull straight down.
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
 }

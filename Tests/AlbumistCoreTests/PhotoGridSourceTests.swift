@@ -45,8 +45,8 @@ struct PhotoGridSourceTests {
         // empty area): photos of its own in either are drawn beside the grid.
         let library = Self.squeezed(try Self.body(["struct LibraryView"], in: Self.library) + Self.body(["extension LibraryView"], in: Self.library))
         #expect(library.contains("PhotoGrid(sections:days,limit:limit,place:.unsorted,selecting:selecting,selection:$selection,"
-                                 + "pinsHeaders:true,zoom:zoom,identifier:\"library.photo\"){idinopen(id,in:days,limit:limit)}"
-                                 + "perform:{item,idinperform(item,on:id,in:days,limit:limit)}"), "\(library)")
+                                 + "pinsHeaders:true,zoom:zoom,identifier:\"library.photo\"){idinopen(id)}"
+                                 + "perform:{item,idinperform(item,on:id)}"), "\(library)")
         let suggestion = Self.squeezed(try Self.body(["struct ProposalPhotosView"], in: Self.suggestions))
         #expect(suggestion.contains("PhotoGrid(sections:sections[...],place:.suggestion,selecting:selecting,selection:$selected,"
                                     + "available:!disabled&&isCurrent,disabled:disabled,zoom:zoom,"
@@ -57,9 +57,10 @@ struct PhotoGridSourceTests {
                 #expect(!code.contains(own), "\(page) draws its photos itself: \(own)")
             }
         }
-        // The pages' photo view opens on the photos shown, in the grid's order (one page at most).
+        // The photo view opens on every photo of the area in the grid's order, not only the pages
+        // shown: it builds its pages in a window ("11 von 3.000", iPhone, Build 41, 26.11.2026).
         let open = Self.squeezed(try Self.body(["struct LibraryView", "private func open("], in: Self.library))
-        #expect(open.contains("viewing=PhotoViewer.Start(id:id,ids:PhotoGridSection.ids(of:days,below:limit))"), "\(open)")
+        #expect(open.contains("viewing=PhotoViewer.Start(id:id,ids:PhotoGridSection.ids(of:days.sections))"), "\(open)")
         // A suggestion's days with each photo's time on its own clock, made again only when they
         // change, or what the times are read from (its facts, the iPhone's clock; review L12).
         let sections = Self.squeezed(try Self.body(["struct ProposalPhotosView", "private var sections:"], in: Self.suggestions))

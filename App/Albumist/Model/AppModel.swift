@@ -2854,6 +2854,17 @@ final class AppModel {
 
     /// Runs a plan; the caller holds the execution claim. `resume`: an interrupted plan that
     /// was confirmed before (its free albums were checked then).
+    /// Why `plan` may not run on the free albums left (nil: it may): an undo and a continuation
+    /// always run. After a new install the count comes from the keychain, read off the main thread.
+    private func freeAlbumsRefusal(_ plan: ChangePlan, resume: Bool) async -> String? {
+        await Purchases.shared.keychainRead()
+        guard plan.reverts == nil, !resume else { return nil }
+        guard !Purchases.shared.allows(albums: plan.freeAlbumUse(applied: false)) else { return nil }
+        return String(localized: """
+            Die Gratis-Alben reichen für diese Änderungen nicht. Schalte Albumist frei, um weiterzumachen.
+            """)
+    }
+
     private func run(_ plan: ChangePlan, resume: Bool = false) async {
         guard let store else { return }
         // One plan at a time, also when one was cut off: that one is settled first (plugin
@@ -2863,13 +2874,8 @@ final class AppModel {
             return
         }
         // The free albums are checked here too, not only on the review screen.
-        let wanted = plan.freeAlbumUse(applied: false)
-        // After a new install the count comes from the keychain, read off the main thread.
-        await Purchases.shared.keychainRead()
-        if plan.reverts == nil, !resume, !Purchases.shared.allows(albums: wanted) {
-            execution = ExecutionState(planID: plan.id, failure: String(localized: """
-                Die Gratis-Alben reichen für diese Änderungen nicht. Schalte Albumist frei, um weiterzumachen.
-                """))
+        if let refusal = await freeAlbumsRefusal(plan, resume: resume) {
+            execution = ExecutionState(planID: plan.id, failure: refusal)
             return
         }
         // Every plan runs only once the results of finished plans are stored (after a full disk

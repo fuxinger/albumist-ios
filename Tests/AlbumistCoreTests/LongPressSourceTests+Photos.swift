@@ -204,7 +204,7 @@ extension LongPressSourceTests {
         }
         // The tap and "Ansehen" open the photo the same way; "Zu Album hinzufügen …" the sheet.
         let places = [
-            PageWithPhotos(path: Self.library, type: "struct LibraryView", perform: "private func perform(", tap: "open(id, in: days, limit: limit)"),
+            PageWithPhotos(path: Self.library, type: "struct LibraryView", perform: "private func perform(", tap: "open(id)"),
             PageWithPhotos(path: Self.search, type: "struct SearchView", perform: "private func perform(", tap: "open(id, from: key)"),
             PageWithPhotos(path: Self.albums, type: "struct AlbumScreen", perform: "private func perform(", tap: "open(photo, ids: ids)"),
         ]

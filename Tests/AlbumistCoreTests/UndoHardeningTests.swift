@@ -762,8 +762,8 @@ struct UndoHardeningTests {
         #expect(await library.assets == assets)
         // Generous bounds for a debug build on a slow machine: they catch work that grows
         // with the square of the plan, not ordinary speed.
-        #expect(runTime < .seconds(60), "run took \(runTime)")
-        #expect(undoTime < .seconds(60), "undo took \(undoTime)")
+        #expect(TimingLimit.holds(runTime, under: .seconds(60), "plan run"), "run took \(runTime)")
+        #expect(TimingLimit.holds(undoTime, under: .seconds(60), "undo"), "undo took \(undoTime)")
     }
 
     // MARK: Removing one of Albumist's albums, and taking that back (C9)

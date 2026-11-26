@@ -266,7 +266,7 @@ struct LabelsLaterTests {
         let start = clock.now
         let rest = try await s.pipeline.run(onProgress: second.onProgress)
         #expect(rest.isComplete)
-        #expect(clock.now - start < .seconds(10))
+        #expect(TimingLimit.holds(clock.now - start, under: .seconds(10), "labels later"))
         second.expectMonotonic()
         let resumed = try #require(second.content.withLock { $0.first })
         #expect(resumed.completed == reached.completed)

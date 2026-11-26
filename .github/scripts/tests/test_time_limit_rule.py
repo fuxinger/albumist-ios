@@ -77,6 +77,14 @@ class LoosenedTests(unittest.TestCase):
         # A window moved back from a moment, or computed from a variable, is no deadline.
         self.assertEqual(found(diff(ui, ["reacted.addingTimeInterval(-1)"], ["reacted.addingTimeInterval(-2)"])), [])
         self.assertEqual(found(diff(ui, ["Date().addingTimeInterval(timeout)"], ["Date().addingTimeInterval(timeout * 2)"])), [])
+        # TimingLimit (26.11.): the limit is the argument `under:`; converting one keeps its value.
+        self.assertEqual(found(diff(unit, ['#expect(TimingLimit.holds(t, under: .seconds(10), "x"))'],
+                                    ['#expect(TimingLimit.holds(t, under: .seconds(60), "x"))'])), [("B.swift", 10, 60)])
+        self.assertEqual(found(diff(unit, ["#expect(took < .seconds(1))"],
+                                    ['#expect(TimingLimit.holds(took, under: .seconds(1), "Pause"))'])), [])
+        self.assertEqual(found(diff(unit, ['#expect(took < .milliseconds(500), "Pause took \\(took)")'],
+                                    ['#expect(TimingLimit.holds(took, under: .seconds(1), "Pause"), "Pause took \\(took)")'])),
+                         [("B.swift", 0.5, 1)])
         # Time the test moves forward is no limit.
         self.assertEqual(found(diff(unit, ["clock.advance(by: .seconds(5))"], ["clock.advance(by: .seconds(50))"])), [])
         self.assertEqual(found(diff(flow, ["    timeout-minutes: 60"], ["    timeout-minutes: 85"])), [("ui.yml", 3600, 5100)])

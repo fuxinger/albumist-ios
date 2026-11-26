@@ -606,7 +606,7 @@ class HangLimitTests(unittest.TestCase):
         ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
         ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
         watched = 0
-        for text, job in ((ci, "core-linux"), (ci, "ios"), (ui, "core-linux")):
+        for text, job in ((ci, "core-linux"), (ci, "ios"), (ui, "core-linux"), (ui, "core-macos")):
             for name, _, run in job_steps(text, job):
                 if "swift test" not in run:
                     continue
@@ -619,7 +619,8 @@ class HangLimitTests(unittest.TestCase):
                     # The watchdog reports (and gives the backtrace a minute) before GitHub kills.
                     self.assertLessEqual(minutes + 2, int(limit.group(1)))
                     watched += 1
-        self.assertEqual(watched, 4)
+        # ci: core, load, macOS core; ui: core, load (merge gate), macOS core (merge gate).
+        self.assertEqual(watched, 6)
         # The Linux container installs python3 for it.
         for text in (ci, ui):
             self.assertIn("apt_install.sh libsqlite3-dev python3", text)

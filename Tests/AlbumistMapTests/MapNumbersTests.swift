@@ -279,7 +279,7 @@ struct MapNumbersTests {
             MapCountry(code: code, firstVisit: date, photoCount: 100, tripIDs: [], isState: true, continent: Continent.forCountryCode(code),
                        region: WorldRegion.of(countryCode: code))
         }
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var numbers = WorldNumbers()
         var years: [MapYear] = []
         var stats: [TripStats] = []

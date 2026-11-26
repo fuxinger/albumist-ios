@@ -247,7 +247,7 @@ struct MapPinsBuilderTests {
         // 5,000 trips with 20,000 places: one pass over the places and one sort.
         let (trips, countries) = MapHandmade.dayTrips(5_000)
         var pins: [MapPin] = []
-        let took = ContinuousClock().measure { pins = MapPins.build(trips: trips, countries: countries) }
+        let took = ThreadCPUClock().measure { pins = MapPins.build(trips: trips, countries: countries) }
         #expect(pins.filter { $0.level == .trip }.count == 5_000)
         #expect(pins.filter { $0.level == .place }.count == 20_000)
         #expect(pins.filter { $0.level == .country }.count == 12)

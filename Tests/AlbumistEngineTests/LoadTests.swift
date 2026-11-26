@@ -164,8 +164,9 @@ struct LoadTests {
         let peak = Self.peakMemoryMB()
         print("LOAD_MEMORY photos \(assets.count) peak \(peak.map { "\($0) MB" } ?? "unknown")")
         #expect(atlas.tripCount >= 25)
-        #expect(full < limits.first)
-        #expect(again < limits.second) // 20,000 photos: was 44 s before the grid DBSCAN
+        #expect(TimingLimit.holds(full, under: limits.first, "first run"), "first run took \(full)")
+        // 20,000 photos: was 44 s before the grid DBSCAN
+        #expect(TimingLimit.holds(again, under: limits.second, "second run"), "second run took \(again)")
         if let limit = limits.peakMB, let peak { #expect(peak < limit) }
     }
 
@@ -277,10 +278,12 @@ struct LoadTests {
         print("LOAD_IMAGE_STEP " + seen.map { "\(ms($0.at - start.at)) ms \($0.progress.completed)\($0.progress.earlyProposals ? " early" : "")" }.joined(separator: " | "))
         let firstCount = try #require(seen.first { $0.progress.completed > start.progress.completed })
         let early = try #require(seen.first { $0.progress.earlyProposals })
-        #expect(early.at - start.at < .seconds(5), "early suggestions \(ms(early.at - start.at)) ms after the step began")
-        #expect(firstCount.at - start.at < .seconds(2), "first count \(ms(firstCount.at - start.at)) ms after the step began")
+        #expect(TimingLimit.holds(early.at - start.at, under: .seconds(5), "early suggestions after the step began"),
+                "early suggestions \(ms(early.at - start.at)) ms after the step began")
+        #expect(TimingLimit.holds(firstCount.at - start.at, under: .seconds(2), "first count after the step began"),
+                "first count \(ms(firstCount.at - start.at)) ms after the step began")
         let gaps = zip(seen, seen.dropFirst()).map { $1.at - $0.at }
-        #expect(gaps.allSatisfy { $0 < .seconds(3) }, "longest gap \(ms(gaps.max() ?? .zero)) ms")
+        #expect(TimingLimit.holds(gaps.max() ?? .zero, under: .seconds(3), "longest gap between reports"), "longest gap \(ms(gaps.max() ?? .zero)) ms")
     }
 
     /// Review of 9ff0dfc: Pause while the early suggestions are made (2.8 s over these 50,000
@@ -315,7 +318,7 @@ struct LoadTests {
         let took = ended - paused.at
         print("LOAD_PAUSE_EARLY \(atFirstCount ? "first count" : "step start") at \(paused.completed): \(took), early \(report.earlyProposals)")
         #expect(report.pausedBecause == .userPaused)
-        #expect(took < .seconds(1), "Pause took \(took)")
+        #expect(TimingLimit.holds(took, under: .seconds(1), "Pause"), "Pause took \(took)")
         await pipeline.waitForEarlyLeftBehind()
         if !report.earlyProposals { #expect(try await pipeline.latestProposals() == nil) }
     }

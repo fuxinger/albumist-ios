@@ -523,7 +523,7 @@ struct StoreTests {
         let elapsed = Date().timeIntervalSince(start)
         #expect(try await s.assetCount() == 20_000)
         // Generous bound for CI machines; real measurements belong in TEST_PLAN.md.
-        #expect(elapsed < 30)
+        #expect(TimingLimit.holds(.seconds(elapsed), under: .seconds(30), "upsert 20k assets"))
         print("[measure] upsert 20k assets: \(String(format: "%.2f", elapsed)) s")
     }
 

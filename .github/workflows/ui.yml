@@ -101,6 +101,11 @@ permissions:
 env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
+  # Wall-clock time limits of the Swift tests (AlbumistTestSupport/TimingLimit): only reported
+  # (TIMING_OVER lines, counted by timing_report.py) in runs on a pull request; hard in every
+  # other run (merge gate by hand, main, TestFlight, nightly). Rule of 26.11. (coordinator for
+  # Fuchs): exceeded limits on the overloaded CI Macs are findings, not red runs, until merge.
+  ALBUMIST_TIMING: ${{ (!inputs.release && github.event_name == 'pull_request') && 'report' || 'hard' }}
   # Quick mode (top of this file): pull requests and runs started with quick, never a TestFlight
   # run. The same expression is in the name of the "UI verdict" job (no env there).
   UI_QUICK: ${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'true' || '' }}
@@ -251,6 +256,47 @@ jobs:
       - name: Build and test
         timeout-minutes: 12
         run: python3 .github/scripts/swift_test_watch.py --minutes 10 --log core-linux.log -- swift test --parallel
+      - name: Time limits reported
+        if: ${{ always() }}
+        run: python3 .github/scripts/timing_report.py core-linux.log >> "$GITHUB_STEP_SUMMARY"
+
+  core-macos:
+    # The macOS core tests with hard wall-clock limits, once in the full run before the merge
+    # (rule of 26.11., second review: CI's macOS job only reports them on a pull request, and
+    # CI is not part of the merge gate). Only what the full run lacks: the Linux tests, the
+    # app build and the UI groups are already in it. Not on a pull request (CI's macOS job runs
+    # there) and not in a TestFlight run (CI ran hard on main before it).
+    name: Core tests hard (macOS)
+    needs: plan
+    if: ${{ needs.plan.result == 'success' && github.event_name != 'pull_request' && !inputs.release && !inputs.quick }}
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode
+      - name: Core tests (macOS), hard limits
+        timeout-minutes: 15
+        run: |
+          mkdir -p build
+          python3 .github/scripts/swift_test_watch.py --minutes 13 --log build/core-macos.log -- swift test --parallel
+      - name: Load test, hard limits
+        # Here, not in core-linux: that job is skipped when every group's green is reused, and
+        # this job runs in every full run (second review 26.11.). Limits as in the nightly run,
+        # which runs the same load test on macOS.
+        timeout-minutes: 9
+        run: |
+          set +e
+          ALBUMIST_LOAD_TEST=1 python3 .github/scripts/swift_test_watch.py --minutes 7 --quiet --log build/load.log -- \
+            swift test --skip-build --filter LoadTests
+          status=$?
+          grep -E "LOAD_|TIMING_|passed|failed|error" build/load.log
+          exit $status
+      - name: Time limits reported
+        if: ${{ always() }}
+        run: python3 .github/scripts/timing_report.py build/core-macos.log build/load.log >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: UI build
@@ -487,7 +533,7 @@ jobs:
     # then reuses those greens by content and runs only groups without one. Not in a TestFlight run: there the
     # "UI gate" of testflight.yml does this.
     name: UI verdict (${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'quick' || 'full' }})
-    needs: [plan, ui]
+    needs: [plan, ui, core-macos]
     if: ${{ !cancelled() && needs.plan.result == 'success' && !inputs.release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -502,6 +548,14 @@ jobs:
           # The commits of earlier results, to recompute their fingerprints from git.
           fetch-depth: 0
           persist-credentials: false
+      - name: macOS core tests with hard time limits
+        # Rule of 26.11.: part of the merge gate in a full run (job core-macos).
+        if: ${{ github.event_name != 'pull_request' && !inputs.quick }}
+        env:
+          CORE_MACOS: ${{ needs.core-macos.result }}
+        run: |
+          echo "core-macos: $CORE_MACOS"
+          [ "$CORE_MACOS" = success ] || { echo "::error title=Merge gate::Core tests hard (macOS) is $CORE_MACOS, not green"; exit 1; }
       - name: Full UI pass before the merge
         # The owner's decision of 20.11.2026, 17:12: the full UI pass runs once before the merge
         # (not again in the TestFlight run, whose UI gate takes its greens by content). A pull

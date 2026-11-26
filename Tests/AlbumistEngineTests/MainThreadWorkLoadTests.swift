@@ -185,18 +185,31 @@ extension LoadTests {
         // with 4 cores, see docs/TEST_PLAN.md): about three times the measurement, so a pass that
         // grows by more than that is red. At 100,000 photos the double.
         let scale = photos / 50_000
-        #expect(candidatesTook < .milliseconds(3_500) * scale, "HomeCandidates.make took \(candidatesTook)") // measured 844-1,165 / 2,175-2,721 ms
-        #expect(stayTook < .milliseconds(600) * scale, "HomeCandidates.stayStart took \(stayTook)") // measured 126-193 / 388-396 ms
-        #expect(nameTook < .milliseconds(800) * scale, "DerivedLibrary.namedHome took \(nameTook)") // measured 243-274 / 475-554 ms
-        #expect(byIDTook < .milliseconds(200) * scale, "FactsByID took \(byIDTook)") // measured 40-54 / 89-96 ms
-        #expect(lookupTook < .milliseconds(5), "1,000 lookups took \(lookupTook)") // measured 0.5-0.8 ms
-        #expect(yearsTook < .milliseconds(1_000) * scale, "DerivedLibrary.yearAtlases took \(yearsTook)") // measured 277-349 / 482-716 ms
-        #expect(compareTook < .milliseconds(500) * scale, "comparing the facts took \(compareTook)") // measured 149 / 226 ms
-        #expect(statusesTook < .milliseconds(1_200) * scale, "LibraryStatus.searchStatuses took \(statusesTook)") // measured 320-377 / 722-1,011 ms
+        // measured 844-1,165 / 2,175-2,721 ms
+        #expect(TimingLimit.holds(candidatesTook, under: .milliseconds(3_500) * scale, "HomeCandidates.make"),
+                "HomeCandidates.make took \(candidatesTook)")
+        // measured 126-193 / 388-396 ms
+        #expect(TimingLimit.holds(stayTook, under: .milliseconds(600) * scale, "HomeCandidates.stayStart"),
+                "HomeCandidates.stayStart took \(stayTook)")
+        // measured 243-274 / 475-554 ms
+        #expect(TimingLimit.holds(nameTook, under: .milliseconds(800) * scale, "DerivedLibrary.namedHome"),
+                "DerivedLibrary.namedHome took \(nameTook)")
+        #expect(TimingLimit.holds(byIDTook, under: .milliseconds(200) * scale, "FactsByID"), "FactsByID took \(byIDTook)") // measured 40-54 / 89-96 ms
+        #expect(TimingLimit.holds(lookupTook, under: .milliseconds(5), "1,000 lookups"), "1,000 lookups took \(lookupTook)") // measured 0.5-0.8 ms
+        // measured 277-349 / 482-716 ms
+        #expect(TimingLimit.holds(yearsTook, under: .milliseconds(1_000) * scale, "DerivedLibrary.yearAtlases"),
+                "DerivedLibrary.yearAtlases took \(yearsTook)")
+        // measured 149 / 226 ms
+        #expect(TimingLimit.holds(compareTook, under: .milliseconds(500) * scale, "comparing the facts"),
+                "comparing the facts took \(compareTook)")
+        // measured 320-377 / 722-1,011 ms
+        #expect(TimingLimit.holds(statusesTook, under: .milliseconds(1_200) * scale, "LibraryStatus.searchStatuses"),
+                "LibraryStatus.searchStatuses took \(statusesTook)")
         // The main actor: never held for anything near a pass (Apple counts a hang from 250 ms;
         // under 100 ms one seldom notices). Measured 1.4 to 12 ms, the ticker's own rhythm.
         for (name, stall, took) in stalls {
-            #expect(stall < .milliseconds(50), "the main actor stood \(stall) while \(name) ran \(took)")
+            #expect(TimingLimit.holds(stall, under: .milliseconds(50), "main actor stall while \(name) ran"),
+                    "the main actor stood \(stall) while \(name) ran \(took)")
         }
     }
 }

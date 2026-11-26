@@ -440,7 +440,9 @@ class Verifier:
             if app:
                 try:
                     groups = ui_groups.Groups(ui_groups.GitTree(sha, self.cwd))
-                    value = (app, {**groups.fingerprints(), **stress_keys(groups)}, groups.fingerprints(quick=True))
+                    # The smoke test is a quick run of its own key (ui_groups.Groups.smoke_fingerprint).
+                    value = (app, {**groups.fingerprints(), **stress_keys(groups)},
+                             {**groups.fingerprints(quick=True), ui_groups.SMOKE_GROUP: groups.smoke_fingerprint()})
                     self.trees[sha] = groups
                 except (ValueError, KeyError):
                     value = (app, {}, {})
@@ -727,11 +729,13 @@ def known_red(decisions: list[dict]) -> tuple[list[str], str]:
 
 
 def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = False,
-         now: datetime | None = None, only: str = "", stress: str = "", stress_only: bool = False) -> int:
+         now: datetime | None = None, only: str = "", stress: str = "", stress_only: bool = False,
+         smoke_only: bool = False) -> int:
     """`stress` ("<photos>-<minutes>", e.g. 10000-15): the stress pass of that size must be green
     for this app and its stress test fingerprint too (the owner's decision of 20.11.2026, 17:20:
     TestFlight takes the pass before the merge by content); `stress_only`: no UI group checked
-    (the verdict of ui-stress.yml)."""
+    (the verdict of ui-stress.yml); `smoke_only`: only the smoke test, green for this app and its
+    smoke test code (the fast gate of testflight.yml, 26.11.2026: no group, no stress pass)."""
     tree, groups, app = current(tree)
     names = groups.names()
     chosen = only.split()
@@ -741,13 +745,15 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
         print(earlier_attempts.command("error", "UI gate", f"unknown group(s) {' '.join(unknown)} or stress size "
                                        f"{stress!r}; use some of: {' '.join(names)}; --stress <photos>-<minutes>"))
         return 1
-    checked = [] if stress_only else ([n for n in names if n in chosen] if chosen else names)
-    left_out = [] if stress_only else [n for n in names if n not in checked]
+    checked = [] if stress_only or smoke_only else ([n for n in names if n in chosen] if chosen else names)
+    left_out = [] if stress_only or smoke_only else [n for n in names if n not in checked]
     verifier = verifier or Verifier()
     mode = "quick" if quick else "full"
     scope = f"{mode}, only {' '.join(checked)}" if left_out else mode
     if stress:
         scope = f"stress pass {stress} only" if stress_only else f"{scope}, stress pass {stress}"
+    if smoke_only:
+        scope = "smoke test only (fast gate)"
     call = counted(call or api)
     try:
         info = {}
@@ -766,7 +772,9 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
         return 1
     print(f"UI_API_CALLS {call.count} (budget {MAX_CALLS})")
     decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in checked]
-    if not stress_only:
+    if smoke_only:
+        decisions.append(decide(ui_groups.SMOKE_GROUP, app, groups.smoke_fingerprint(), entries, verifier))
+    elif not stress_only:
         decisions += smoke_red(app, groups, entries, verifier)
     if size:
         decisions.append(decide(stress_group(*size.groups()), app, stress_fingerprint(groups, *size.groups()),
@@ -912,6 +920,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--groups", default="", help="check only these groups (the small gate of the daily build)")
     g.add_argument("--stress", default="", help="<photos>-<minutes>: the stress pass of that size must be green too")
     g.add_argument("--stress-only", action="store_true", help="check only the stress pass (ui-stress.yml's verdict)")
+    g.add_argument("--smoke-only", action="store_true", help="check only the smoke test (the fast gate of testflight.yml)")
     sp = sub.add_parser("stress-plan")
     sp.add_argument("--photos", required=True)
     sp.add_argument("--minutes", required=True)
@@ -926,7 +935,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "plan":
         return plan(args.groups.strip(), quick=args.quick, smoke=args.smoke)
     run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
-    return gate(run_id, quick=args.quick, only=args.groups, stress=args.stress.strip(), stress_only=args.stress_only)
+    if args.smoke_only and (args.stress or args.groups or args.stress_only):
+        print("::error title=UI gate::--smoke-only checks the smoke test alone")
+        return 1
+    return gate(run_id, quick=args.quick, only=args.groups, stress=args.stress.strip(), stress_only=args.stress_only,
+                smoke_only=args.smoke_only)
 
 
 if __name__ == "__main__":

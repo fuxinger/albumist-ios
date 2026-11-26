@@ -106,6 +106,10 @@ on:
         description: Quick run (see workflow_dispatch); never with release
         type: boolean
         default: false
+      smoke:
+        description: Only the smoke test (the fast gate of testflight.yml, 26.11.2026); with release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -122,8 +126,8 @@ env:
   # (a draft runs the smoke test, a ready pull request the full run) and never a TestFlight
   # run. The same expressions are in the name of the "UI verdict" job (no env there).
   UI_QUICK: ${{ (!inputs.release && github.event_name != 'pull_request' && inputs.quick) && 'true' || '' }}
-  # A draft pull request: only the smoke test (top of this file).
-  UI_SMOKE: ${{ (github.event_name == 'pull_request' && github.event.pull_request.draft) && 'true' || '' }}
+  # A draft pull request, or the fast gate of testflight.yml: only the smoke test (top of this file).
+  UI_SMOKE: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.draft) || inputs.smoke) && 'true' || '' }}
 
 # The Mac queue (Profi-Analyse 16.11., Top 3, decided 17.11.: only one Mac-heavy strand at a
 # time). Every UI run and every stress pass (ui-stress.yml) of every branch shares the group

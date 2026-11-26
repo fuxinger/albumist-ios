@@ -538,6 +538,36 @@ class CommandTests(unittest.TestCase):
         other = dict(red_job, name=red_job["name"].replace(key[:12], "f" * 12))
         self.assertEqual(self.gate([run(8, "b" * 40, [other], event="pull_request"), run(9, "b" * 40, green_here)])[0], 0)
 
+    def test_the_fast_gate_checks_only_the_smoke_test(self):
+        # testflight.yml gate fast (26.11.2026): the smoke test of this app and smoke test code
+        # green, from this run; no group and no stress pass needed; a red one blocks.
+        groups = ui_groups.Groups(TEST_ONLY)
+        key = groups.smoke_fingerprint()[:12]
+        smoke_job = job("device", tests=key, job_id=300)
+        smoke_job["name"] = f"UI flow / UI smoke test, full flow and undo (quick) [smoke app {APP[:12]} tests {key}]"
+
+        verifier = FakeVerifier(dict(VERIFIER.commits, **{"b" * 40: (APP, TEST_ONLY_FPS, {"smoke": key})}))
+
+        def smoke_gate(runs):
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                code = ui_evidence.gate(9, call=fake_api(runs), verifier=verifier, tree=TEST_ONLY, now=NOW,
+                                        smoke_only=True)
+            return code, log.getvalue()
+
+        self.assertEqual(smoke_gate([run(9, "b" * 40, [smoke_job], workflow="testflight.yml")])[0], 0)
+        self.assertIn("smoke test only (fast gate)", self.read(self.summary))
+        # Without a smoke result (the groups alone are no smoke test) it is not green.
+        groups_only = [run(9, "b" * 40, [job(g, tests=TEST_ONLY_FPS[g], job_id=310 + i) for i, g in enumerate(NAMES)],
+                           workflow="testflight.yml")]
+        self.assertEqual(smoke_gate(groups_only)[0], 1)
+        red = dict(smoke_job, id=301, conclusion="failure", completed_at="2026-11-19T13:00:00Z",
+                   steps=job("device", "failure", "failure")["steps"])
+        self.assertEqual(smoke_gate([run(8, "b" * 40, [red], event="pull_request"),
+                                     run(9, "b" * 40, [smoke_job], workflow="testflight.yml")])[0], 1)
+        # Never mixed with groups or a stress pass.
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ui_evidence.main(["gate", "--smoke-only", "--stress", "10000-15"]), 1)
+
     def test_a_smoke_test_that_was_renamed_stops_the_plan(self):
         with contextlib.redirect_stdout(io.StringIO()) as log:
             code = ui_evidence.plan("auto", tree=HEAD, smoke=True)

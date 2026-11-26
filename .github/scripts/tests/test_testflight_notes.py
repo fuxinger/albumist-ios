@@ -33,6 +33,12 @@ class RenderTests(unittest.TestCase):
         self.assertTrue(text.endswith("…\n\nBuild 42 · 902f101"))
         self.assertLessEqual(len(text), testflight_notes.LIMIT)
 
+    def test_a_fast_gate_build_says_it_is_internal_only(self):
+        # Fast gate (26.11.2026): only for the owner, never for external testers or the App Store.
+        text = testflight_notes.render(self.notes("Hallo"), 45, SHA, "fast")
+        self.assertEqual(text, "Hallo\n\nBuild 45 · 902f101\n" + testflight_notes.FAST_GATE)
+        self.assertIn("nur intern", text)
+
     def test_a_small_gate_build_says_it_is_only_for_the_owner(self):
         # The daily build (testflight.yml, gate small; decision 10 of 18.11.2026) is for the
         # owner's own iPhone; testers get builds of the big gate, whose text has no such line.

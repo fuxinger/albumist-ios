@@ -686,6 +686,28 @@ Jobs davor brauchen sie nicht.
 | Erkennbar an | Laufname „TestFlight daily build (small gate, only for the owner)“, Nachricht des Tags, letzte Zeile von „Was testen“ | Laufname „TestFlight“ |
 | Für wen | nur dich (interne Tests); nicht an externe Tester geben | Tester und App Store |
 
+### Drittes Tor: Schnell-Build nur für Fuchs (Entscheidung Fuchs 26.11.2026, Regeltext vom Koordinator freigegeben)
+
+Ein Build nur für Fuchs als internen Tester, in rund 30–40 statt 70 Minuten:
+TestFlight > Run workflow auf `main`, **gate** `fast`.
+
+- **Läuft**: CI mit allen schnellen Tests (auch Datensicherheit, Rückgängig, Käufe, harte
+  Zeitgrenzen auf macOS), der Release-Kurztest und der UI-Rauchtest (`test1` kompletter Ablauf und
+  `test1c` Rückgängig aus dem Verlauf, `ui_groups.SMOKE_TESTS`). Die zwei Mac-Jobs laufen neben CI
+  statt danach; der Release-Kurztest tut das seit 26.11. mit jedem Tor. Ein rotes CI sperrt den
+  Upload wie immer. Thread Sanitizer (Linux) und UI-Tor (`ui_evidence.py gate --smoke-only`) wie
+  bei den anderen Toren.
+- **Läuft nicht**: kein 10k-Härtetest, keine weiteren UI-Gruppen.
+- **Gesperrt** (Job „Upload setup“, `fast_gate.py`, schließt im Zweifel): Hat sich seit dem letzten
+  TestFlight-Build (`build-<Nummer>`) etwas außerhalb von Ansichten, Karte, Texten, Tests und
+  Dokumenten geändert (Analyse, Zählung, Alben anlegen/rückgängig, Käufe, Speicher, Modell und
+  Plattform-Code der App, StoreKit, Paket- und Projektdateien, die Bau-Strecke `.github/` und das
+  Datenschutz-Manifest), bricht der Lauf ab und nennt die Dateien. Dann gilt das kleine oder das
+  große Tor.
+- **Erkennbar an**: Laufname „TestFlight fast build (fast gate, internal only)“, Nachricht des
+  Tags, letzte Zeile von „Was testen“ („Schnell-Build, nur intern“). Geht nie an externe Tester
+  oder in den App Store; dafür bleibt das große Tor.
+
 - Beide Tore laufen in `testflight.yml` (Eingabe **gate**), damit Build-Nummern, Tags und „ein
   TestFlight-Lauf zur Zeit“ bleiben, wie sie sind. `daily-build.yml` (Linux, eine Minute, ohne
   Secrets) startet nur den Lauf; `.github/scripts/daily_build.py` entscheidet, ob.

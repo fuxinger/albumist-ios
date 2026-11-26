@@ -74,6 +74,43 @@ class OlderRunsTests(unittest.TestCase):
         self.assertEqual(self.ids([broken]), [])
 
 
+class ReadyForReviewTests(unittest.TestCase):
+    """Stage 1 (26.11.2026): when a draft is marked ready for review, the head stays the same and
+    the draft's smoke run of that commit gives way to the full run of the ready event."""
+
+    def ids(self, runs, ready=True):
+        return ui_supersede.older_runs(runs, REPO, BRANCH, NEW, JOB_CREATED, same_commit=ready)
+
+    def test_the_smoke_run_of_the_same_commit_is_cancelled_when_ready(self):
+        self.assertEqual(self.ids([run(1, sha=NEW, created="2026-11-19T09:40:00Z")]), [1])
+
+    def test_without_the_ready_event_the_same_commit_stays(self):
+        self.assertEqual(self.ids([run(1, sha=NEW, created="2026-11-19T09:40:00Z")], ready=False), [])
+
+    def test_the_full_run_of_the_ready_event_itself_is_never_cancelled(self):
+        # Created in the same second as this job's run, or one second before it.
+        runs = [run(1, sha=NEW, created=JOB_CREATED), run(2, sha=NEW, created="2026-11-19T09:59:59Z"),
+                run(3, sha=NEW, created="2026-11-19T09:59:01Z")]
+        self.assertEqual(self.ids(runs), [])
+
+    def test_the_gap_is_sixty_seconds(self):
+        self.assertEqual(self.ids([run(1, sha=NEW, created="2026-11-19T09:59:00Z")]), [1])
+        self.assertEqual(self.ids([run(1, sha=NEW, created="2026-11-19T09:59:01Z")]), [])
+
+    def test_older_commits_are_cancelled_as_before(self):
+        self.assertEqual(self.ids([run(1, created="2026-11-19T09:59:59Z")]), [1])
+
+    def test_main_reads_the_action(self):
+        env = {"GITHUB_REPOSITORY": REPO, "PR_NUMBER": "9", "HEAD_SHA": NEW, "HEAD_REF": BRANCH,
+               "GITHUB_RUN_ID": "77", "ACTION": "ready_for_review"}
+        api = FakeApi(runs=[run(5, sha=NEW, created="2026-11-19T09:30:00Z"), run(6, sha=NEW, created=JOB_CREATED)])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(ui_supersede.main(api, env), 0)
+        self.assertEqual(api.cancelled, [5])
+        self.assertIn("ready for review", out.getvalue())
+
+
 class FakeApi:
     def __init__(self, head=NEW, runs=(), refuse=(), heads=None):
         self.head, self.runs, self.refuse = head, list(runs), dict.fromkeys(refuse, 409)
@@ -181,8 +218,13 @@ class WorkflowTests(unittest.TestCase):
     def test_runs_on_the_pushes_that_start_a_ui_run(self):
         with open(os.path.join(ROOT, ".github", "workflows", "ui.yml"), encoding="utf-8") as f:
             ui = f.read()
-        self.assertIn("pull_request:\n    paths-ignore: ['**.md']", ui)
-        self.assertIn("pull_request:\n    paths-ignore: ['**.md']", self.code)
+        # The same events as ui.yml's pull request runs, ready_for_review too (stage 1, 26.11.).
+        def code(text):
+            return "\n".join(line for line in text.splitlines() if not line.strip().startswith("#"))
+        types = "pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n    paths-ignore: ['**.md']"
+        self.assertIn(types, code(ui))
+        self.assertIn(types, code(self.text))
+        self.assertIn("ACTION: ${{ github.event.action }}", self.code)
 
     def test_outside_the_mac_queue_and_one_per_pull_request(self):
         # In "mac-queue" it would wait behind the very run it has to cancel.

@@ -27,7 +27,9 @@ test code (the owner's rule of 17.11.).
       the branch left it, or the merge has conflicts) it names what differs: merge main into
       the branch and run the full pass again (the groups whose keys did not change are reused).
 
-Quick mode (--quick; pull requests): the tests get ALBUMIST_UI_QUICK=1, and
+Quick mode (--quick; runs by hand with quick, and the smoke test of a draft pull request since
+26.11.2026, whose result counts for no group but blocks when red: smoke_red): the tests get
+ALBUMIST_UI_QUICK=1, and
 DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips itself (XCTSkip). Every group
 has another test fingerprint in a quick run (ui_groups.py adds the mode for all, also where no
 file visibly reads the switch). A quick check may take a full green instead of a quick one; a
@@ -438,7 +440,9 @@ class Verifier:
             if app:
                 try:
                     groups = ui_groups.Groups(ui_groups.GitTree(sha, self.cwd))
-                    value = (app, {**groups.fingerprints(), **stress_keys(groups)}, groups.fingerprints(quick=True))
+                    # The smoke test is a quick run of its own key (ui_groups.Groups.smoke_fingerprint).
+                    value = (app, {**groups.fingerprints(), **stress_keys(groups)},
+                             {**groups.fingerprints(quick=True), ui_groups.SMOKE_GROUP: groups.smoke_fingerprint()})
                     self.trees[sha] = groups
                 except (ValueError, KeyError):
                     value = (app, {}, {})
@@ -602,6 +606,7 @@ def keys(groups, stress: tuple[str, str] | None = None) -> set[str]:
     pass's (STRESS_PASSES, and `stress` (photos, minutes) when given)."""
     found = {fp[:ui_groups.SHORT] for quick in (False, True) for fp in groups.fingerprints(quick).values()}
     found |= {fp[:ui_groups.SHORT] for fp in stress_keys(groups).values()}
+    found.add(groups.smoke_fingerprint()[:ui_groups.SHORT])
     if stress:
         found.add(stress_fingerprint(groups, *stress)[:ui_groups.SHORT])
     return found
@@ -613,8 +618,11 @@ def current(tree=None):
     return tree, groups, ui_groups.app_fingerprint(tree)
 
 
-def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, now: datetime | None = None) -> int:
+def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, now: datetime | None = None,
+         smoke: bool = False) -> int:
     tree, groups, app = current(tree)
+    if smoke:
+        return plan_smoke(groups, app)
     names = groups.names()
     fps = groups.fingerprints(quick)
     words = choice.split()
@@ -636,6 +644,7 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
                       "(call budget); their reds are not listed")
             decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in names]
             run = [d["group"] for d in decisions if d["state"] != "green"]
+            decisions += smoke_red(app, groups, entries, verifier)
         except (ApiError, KeyError) as error:
             run = names
             note = f"Earlier results not readable completely ({error}): every group runs."
@@ -659,7 +668,7 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
     if decisions:
         md.append(table(decisions, set(run)))
         for d in decisions:
-            if d["group"] not in run:
+            if d["group"] not in run and d["state"] == "green":
                 print(f"UI_PLAN reuse {d['group']}: green in {where(d['evidence'])}")
         for text in cleared_notes(decisions, groups, verifier):
             print(earlier_attempts.command("warning", "UI red cleared by a shared change", text))
@@ -679,6 +688,36 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
     return 0
 
 
+def plan_smoke(groups, app: str) -> int:
+    """The plan of a draft pull request (rebuild stage 1, 26.11.2026): only the smoke test
+    (ui_groups.SMOKE_TESTS, quick, one Mac). No earlier result is read: the smoke test is no
+    evidence for a group and always runs; its red blocks later verdicts (smoke_red)."""
+    missing = [t for t in ui_groups.SMOKE_TESTS if t not in groups.tests]
+    if missing:
+        print(f"::error title=UI smoke test::{' '.join(missing)} not found among the UI tests "
+              "(renamed or moved? see ui_groups.SMOKE_TESTS)")
+        return 1
+    entry = ui_groups.smoke_entry(app, groups.smoke_fingerprint())
+    print(f"UI_PLAN app {app} smoke: {entry['only']}")
+    append("GITHUB_STEP_SUMMARY", "\n".join([
+        f"### UI smoke test for app {app[:ui_groups.SHORT]} (draft pull request)", "",
+        f"Runs: {', '.join(ui_groups.SMOKE_TESTS)} (quick, one Mac).", "",
+        "The full UI run (every group, full) starts once the pull request is marked ready for review.",
+    ]) + "\n")
+    append("GITHUB_OUTPUT", f"matrix={json.dumps({'include': [entry]}, separators=(',', ':'))}\ncount=1\n"
+                            "known_red=\nknown_red_text=\n")
+    return 0
+
+
+def smoke_red(app: str, groups, entries: list[dict], verifier) -> list[dict]:
+    """[the smoke test's decision] when the smoke test of a draft was red for this app and smoke
+    test code, else []: then the verdict of every later run of this content is red too (a red
+    test is never re-run to green, also not by marking the draft ready; second review 26.11.).
+    A green or missing smoke test changes nothing: it is no evidence for a group."""
+    found = decide(ui_groups.SMOKE_GROUP, app, groups.smoke_fingerprint(), entries, verifier)
+    return [found] if found["state"] == "red" else []
+
+
 def known_red(decisions: list[dict]) -> tuple[list[str], str]:
     """The groups already red for this app and their test code (tempo plan 20.11.): the verdict of
     this run will be red whatever they show now (a red test is never re-run to green), so ui.yml's
@@ -690,11 +729,13 @@ def known_red(decisions: list[dict]) -> tuple[list[str], str]:
 
 
 def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = False,
-         now: datetime | None = None, only: str = "", stress: str = "", stress_only: bool = False) -> int:
+         now: datetime | None = None, only: str = "", stress: str = "", stress_only: bool = False,
+         smoke_only: bool = False) -> int:
     """`stress` ("<photos>-<minutes>", e.g. 10000-15): the stress pass of that size must be green
     for this app and its stress test fingerprint too (the owner's decision of 20.11.2026, 17:20:
     TestFlight takes the pass before the merge by content); `stress_only`: no UI group checked
-    (the verdict of ui-stress.yml)."""
+    (the verdict of ui-stress.yml); `smoke_only`: only the smoke test, green for this app and its
+    smoke test code (the fast gate of testflight.yml, 26.11.2026: no group, no stress pass)."""
     tree, groups, app = current(tree)
     names = groups.names()
     chosen = only.split()
@@ -704,13 +745,15 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
         print(earlier_attempts.command("error", "UI gate", f"unknown group(s) {' '.join(unknown)} or stress size "
                                        f"{stress!r}; use some of: {' '.join(names)}; --stress <photos>-<minutes>"))
         return 1
-    checked = [] if stress_only else ([n for n in names if n in chosen] if chosen else names)
-    left_out = [] if stress_only else [n for n in names if n not in checked]
+    checked = [] if stress_only or smoke_only else ([n for n in names if n in chosen] if chosen else names)
+    left_out = [] if stress_only or smoke_only else [n for n in names if n not in checked]
     verifier = verifier or Verifier()
     mode = "quick" if quick else "full"
     scope = f"{mode}, only {' '.join(checked)}" if left_out else mode
     if stress:
         scope = f"stress pass {stress} only" if stress_only else f"{scope}, stress pass {stress}"
+    if smoke_only:
+        scope = "smoke test only (fast gate)"
     call = counted(call or api)
     try:
         info = {}
@@ -729,6 +772,10 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
         return 1
     print(f"UI_API_CALLS {call.count} (budget {MAX_CALLS})")
     decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in checked]
+    if smoke_only:
+        decisions.append(decide(ui_groups.SMOKE_GROUP, app, groups.smoke_fingerprint(), entries, verifier))
+    elif not stress_only:
+        decisions += smoke_red(app, groups, entries, verifier)
     if size:
         decisions.append(decide(stress_group(*size.groups()), app, stress_fingerprint(groups, *size.groups()),
                                 entries, verifier))
@@ -867,11 +914,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("plan")
     p.add_argument("--groups", default="auto")
     p.add_argument("--quick", action="store_true", help="a quick run (ALBUMIST_UI_QUICK=1)")
+    p.add_argument("--smoke", action="store_true", help="a draft pull request: only the smoke test (ui_groups.SMOKE_TESTS)")
     g = sub.add_parser("gate")
     g.add_argument("--quick", action="store_true", help="the verdict of a quick run; never for an upload")
     g.add_argument("--groups", default="", help="check only these groups (the small gate of the daily build)")
     g.add_argument("--stress", default="", help="<photos>-<minutes>: the stress pass of that size must be green too")
     g.add_argument("--stress-only", action="store_true", help="check only the stress pass (ui-stress.yml's verdict)")
+    g.add_argument("--smoke-only", action="store_true", help="check only the smoke test (the fast gate of testflight.yml)")
     sp = sub.add_parser("stress-plan")
     sp.add_argument("--photos", required=True)
     sp.add_argument("--minutes", required=True)
@@ -884,9 +933,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "stress-plan":
         return stress_plan(args.photos.strip(), args.minutes.strip(), args.reuse)
     if args.command == "plan":
-        return plan(args.groups.strip(), quick=args.quick)
+        return plan(args.groups.strip(), quick=args.quick, smoke=args.smoke)
     run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
-    return gate(run_id, quick=args.quick, only=args.groups, stress=args.stress.strip(), stress_only=args.stress_only)
+    if args.smoke_only and (args.stress or args.groups or args.stress_only):
+        print("::error title=UI gate::--smoke-only checks the smoke test alone")
+        return 1
+    return gate(run_id, quick=args.quick, only=args.groups, stress=args.stress.strip(), stress_only=args.stress_only,
+                smoke_only=args.smoke_only)
 
 
 if __name__ == "__main__":

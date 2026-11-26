@@ -12,15 +12,21 @@ Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergesse
 
 ## Zahlen
 
+Nachgezählt 26.11. 10:55 Uhr: 99 / 3 / 3 / 2 / 10 / 3 (P1-10 und P2-09 erledigt, PR #25 in main 9fc91cb9).
+
+Nachgezählt 26.11. 03:00 Uhr: 97 / 3 / 3 / 2 / 12 / 3 (P6-03 und P6-08 erledigt: Entscheidungen 11 und 13 im Repo; P6-11 bleibt 👤, weil nur Fuchs Tester einladen kann).
+
+Nachgezählt 26.11. 02:05 Uhr: unverändert 95 / 3 / 3 / 2 / 14 / 3 (G6-05, P5-12 und P5-07 haben Fortschritt, ihr Status bleibt, weil der Rest bei Fuchs bzw. im Umbau liegt).
+
 Nachgezählt 20.11. 21:50 Uhr nach Build 40. Davor 03:45 Uhr: Die Spalte „Prüfung von außen“ zählte Z3 (braucht dein OK) seit dem 19.11. als erledigt; richtig sind 30 erledigt und 2 für dich, zusammen 71 statt 72.
 
 | Status | Große Analyse | Prüfung von außen | Zusammen |
 |---|---:|---:|---:|
-| ✅ erledigt | 60 | 35 | 95 |
+| ✅ erledigt | 64 | 35 | 99 |
 | 🔧 in Arbeit | 3 | 0 | 3 |
 | 📋 geplant (offen, noch nicht begonnen) | 3 | 0 | 3 |
 | ⏸ bewusst verschoben | 0 | 2 | 2 |
-| 👤 braucht Fuchs | 13 | 1 | 14 |
+| 👤 braucht Fuchs | 9 | 1 | 10 |
 | 📱 nur am iPhone prüfbar | 2 | 1 | 3 |
 | **Summe** | **81** | **39** | **120** |
 
@@ -59,7 +65,7 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 | P1-07 | Wechsel auf „Ausgewählte Fotos“ und zurück wirft die ganze Analyse weg | ✅ | fertig 20.11., drei Prüfungen, zuletzt ohne Befund; Reisen, Orte und ihre Namen bleiben über mehrere Auswahlen; Rückgängig braucht vollen Zugriff; in main seit PR #12 (fdf9c30), in Build 40 |
 | P1-08 | Dreimal unlesbares Foto wird nie wieder versucht, Text verspricht „später noch einmal“ | ✅ | `main` 5f9ad8a: 6ed182e, e5c8635, afee52b (nach einer Woche neu versucht, der Text stimmt jetzt); Tests `NeverDoneTests.aPhotoGivenUpAsUnreadableIsTriedAgainAWeekLater` u. a. Wortlaut „N nicht lesbar“ kommt als Entwurf |
 | P1-09 | Fotos auf See oder an der Grenze ohne Online-Ortssuche bleiben für immer „offen“ | ✅ | `main` 5f9ad8a: 8f8a5f4, d62de37; Tests `NeverDoneTests.photosThatCannotGetACountryAreNotCountedAsWaiting` u. a. |
-| P1-10 | Das eigene Zuhause wird als „Häufiger Ort in München“ vorgeschlagen | 👤 | Entscheidung 7 (Album fürs Zuhause?) offen; Zuhause-Erkennung ist repariert (G1-02) |
+| P1-10 | Das eigene Zuhause wird als „Häufiger Ort in München“ vorgeschlagen | ✅ | Entschieden 26.11. (kein Album fürs Zuhause, nur auf Wunsch: Schalter „Album fürs Zuhause vorschlagen“); PR #25 in main 9fc91cb9, HomeAlbumTests (14), HomePipelineTests |
 | P1-11 | Krim, Westsahara usw. bekommen ein Land und gelten als „sicher“ | ✅ | d52cb53, a905af6, b376999, e627d49; `DisputedAreaTests`; Entscheidung 8 |
 | P1-12 | Nach Sprachwechsel bleiben Ländernamen in der alten Sprache (⊂ G1-03) | ✅ | 6933ba5, 638ff85, daff055; `AlbumNameLanguageTests`. Rest Städte: G1-03 |
 | P1-13 | Suche liest „seit/vor/nach 2024“ als genau 2024 (⊂ G1-06) | ✅ | e17d5e3, 60c8974, fcccf28; `SearchDateRangeTests`. Rest „Winter 2024“: G1-06 |
@@ -78,7 +84,7 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 | P2-06 | Toter Weg „Quell-Alben entfernen“ hätte Alben ohne Lösch-Schutz gelöscht | ✅ | 6ccdf74; `PlanningExecutionTests` (`noPlanDeletesAnAlbumWithoutADeleteGuard`) |
 | P2-07 | Journal einen Eintrag hinter Fotos: „Fortsetzen“ legt Alben doppelt an | ✅ | 6f699e0; `UndoHardeningTests`. Rest (`fullfsync`) nur am Gerät messbar, KNOWN_LIMITATIONS |
 | P2-08 | Foto kommt kurz vor dem Löschen ins Album und verliert seine Zuordnung (= G2-01) | ✅ | 87e1094; `UndoHardeningTests.aPhotoThatComesInBeforeTheDeletionGoesOutKeepsTheAlbum` |
-| P2-09 | Zwei Pläne ergänzen dasselbe Album, Rückgängig des älteren nimmt Fotos des neueren mit | 👤 | KNOWN_LIMITATIONS: zwei Wege möglich, „offen für eine Entscheidung“ |
+| P2-09 | Zwei Pläne ergänzen dasselbe Album, Rückgängig des älteren nimmt Fotos des neueren mit | ✅ | Entschieden 26.11.: Rückgängig nimmt nur Fotos, die kein anderer Plan braucht; PR #25 in main 9fc91cb9 (Fable-Zweitprüfung), TwoPlansOneAlbumTests (10, vorher rot), KeptForOthersStoreTests |
 
 ### Prüfer 3: Bedienung und Design
 
@@ -87,7 +93,7 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 | P3-01 | Knopf „aus Vorschlag entfernen“ liegt hinter der Tab-Leiste (= G3-04) | ✅ | fertig 20.11., zweite Prüfung ohne Muss-Punkt: Tab-Leiste im Auswahlmodus aus, Aktionen unten wie in Apple Fotos; neue CI-Regel; Bildschirmfotos für dich vor dem Zusammenführen; in main seit PR #12 (fdf9c30), in Build 40 |
 | P3-02 | „Nichts wird hochgeladen“ passt nicht zum Ortsnamen-Schalter (= P2-03) | ✅ | wie P2-03 |
 | P3-03 | Zu viele und widersprüchliche Zahlen zu „sortiert“ („0 von 0 sortiert“) | ✅ | fertig 20.11. (Zweig `fix/overviewnumbers`), zwei gründliche Prüfungen ohne Muss-Punkt: jedes Foto in genau einer Gruppe, Summe = Zahl der Analyse-Karte; nie mehr „0 von 0“; Bildschirmfotos für dich vor dem Zusammenführen In Build 40 (main fdf9c30, PR #12), Mac-Durchgang und Bildschirmfotos grün. |
-| P3-04 | Erster Start zu lang: 4 Bildschirme, bis zu 7 Schalter, 150 Wörter | 📋 | löst das beschlossene Bedienungs-Paket A, noch nicht gebaut |
+| P3-04 | Erster Start zu lang: 4 Bildschirme, bis zu 7 Schalter, 150 Wörter | 🔧 | gebaut im Design-Paket (DS-09, Welle 1, Zweig `claude/project-thread-ndibup`): nur noch Willkommen und Zugriff, mit dem Zugriff startet die Analyse; Bereiche, Städte und „nur ein Jahr“ nur in den Einstellungen; iOS fragt nach Mitteilungen erst bei „Bescheid sagen“ (`OnboardingView.swift`, `enum Step { case access }`); UI-Tests `onboarding.start`/`access.continue`. Abhaken, wenn der Design-PR in main und in einem Build ist |
 | P3-05 | „Alben jetzt anlegen“ erst nach Scrollen sichtbar (= G3-05) | ✅ | fertig 20.11. (Zweig `fix/plancta`), zweite Prüfung ohne Muss-Punkt: Knopf in einer Leiste unten, immer erreichbar; Bildschirmfotos für dich vor dem Zusammenführen In Build 40 (main fdf9c30, PR #12), Mac-Durchgang und Bildschirmfotos grün. |
 | P3-06 | Ein Vorschlag hat bis zu sechs Aktionen | ✅ | fertig 20.11. (Zweig `fix/suggestactions`), zweite Prüfung ohne Muss-Punkt: zwei Knöpfe, der Rest oben rechts unter „…“; neue CI-Regel; Bildschirmfotos für dich vor dem Zusammenführen In Build 40 (main fdf9c30, PR #12), Mac-Durchgang und Bildschirmfotos grün. |
 | P3-07 | Rückgängig später schwer zu finden, iOS-Löschfrage kommt unangekündigt (= G3-09) | ✅ | fertig 20.11., drei Prüfungen, zuletzt ohne Muss-Punkt: jede Rückfrage kündigt die Frage von iOS an (Alben frisch gelesen, höchstens 3 s, sonst sicher angekündigt); in main seit PR #12 (fdf9c30), in Build 40 |
@@ -131,12 +137,12 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 | P5-04 | Kein Zeitplan läuft (Nachtlauf, Härtetest, Abholen der Abstürze) | ✅ | Zeitpläne laufen auf `main`, alle grün am 20.11.: Nachtlauf (Lauf 44698348676), CodeQL (44705078341), Tages-Build (44732451070), TestFlight-Rückmeldungen seit 19.11. GitHub startet sie aber Stunden später als geplant (Nachtlauf 8:53 statt 2:00 Uhr); von Hand gestartet 5:16 Uhr ebenfalls grün |
 | P5-05 | Bedienungs-Durchgang wartet vor allem, Demo-Mediathek wird in jeder Gruppe neu analysiert | 🔧 | Stufe 2 (feste Pausen durch echtes Warten ersetzt, alle UI-Test-Dateien) in `main` seit PR #13 (c2a6f2b), in Build 41, drei volle UI-Läufe grün. Stufe 1 (Demo-Mediathek nur einmal) am 21.11. neu gemessen (Lauf 44828248004): je Gruppe 48–55 s Anlegen und 3–4 Min. erste Analyse. Die Gruppen laufen gleichzeitig auf eigenen Macs, eine geteilte Mediathek spart also Mac-Minuten (etwa 20 je Lauf), aber kaum Wartezeit; deshalb hinten angestellt. Dazu Gruppen neu verteilt (längste etwa 47 → 36 Min., nächster Pull Request) |
 | P5-06 | 8 von 15 roten Durchgängen waren kein App-Fehler | ✅ | `main` 5f9ad8a: bedingte Wartezeiten (90c79c1), Home-Druck mit drei Wegen, jede Wiederholung gezählt; UI-Lauf 44529147724 auf PR #10 im ersten Versuch grün |
-| P5-07 | Geplanter Umbau bringt nur 60 statt 84 Min. und macht die Bau-Strecke größer | 📋 | Stufe 4 (Tor vereinfachen, rund 1.400 Zeilen weg) offen |
+| P5-07 | Geplanter Umbau bringt nur 60 statt 84 Min. und macht die Bau-Strecke größer | 📋 | Stufe 4 (Tor vereinfachen, rund 1.400 Zeilen weg) offen; steht im Umbau-Plan 26.11. als Schritt 8 (bau-strecke/umbau-plan-2026-11-26.md, 1–2 Tage). Vorher die Tempo-Schritte vom 26.11. (bau-strecke/messung-2026-11-26.md) |
 | P5-08 | Das neue Tor hat eigene Lücken (a bis f) | ✅ | (a) „force“ weg, (b) = G5-04, (c) nur die Dateien der UI-Workflows zählen (IMPROVEMENTS), (d) keine Antwort der Log-Schnittstelle = kein Urteil (PR #11), (e) = P5-02, (f) = P5-03 (Release-Probelauf in jedem TestFlight-Lauf) |
 | P5-09 | Tests laufen fast nie von selbst, Hauptzweig nicht geschützt (≈ G6-05) | 👤 | GitHub meldet am 19.11. „Branch not protected“: Schutz für `main` einschalten |
 | P5-10 | Läufe für Build 36 prüften einen zusammengeführten Stand, nicht den ausgelieferten | ✅ | 3bad601 (TestFlight-Lauf testet seinen eigenen Commit), `archive_check.py` |
 | P5-11 | 3 von 11 eingebauten Fehlern blieben in den schnellen Tests unentdeckt | ✅ | PR #11 (31ec24c): 7f1df09, `SeededFaultTests` |
-| P5-12 | Schlüssel und fremde Pull Requests: drei offene Punkte | 👤 | CodeQL läuft wieder grün; offen: Dependabot (jetzt PR #8) und Freigabe für fremde Mitwirkende in den Einstellungen |
+| P5-12 | Schlüssel und fremde Pull Requests: drei offene Punkte | 👤 | CodeQL läuft wieder grün; Dependabot-PR #8 hat Dependabot am 25.11. selbst geschlossen (Regel: nicht von Hand auflösen, Nachfolger kommen von Dependabot). Offen nur noch: Freigabe für Läufe aus Forks in den Einstellungen (Settings › Actions › „Require approval for all outside collaborators“, Klick von dir) |
 | P5-13 | Regel „nie still wiederholen“ gebrochen, Test vor dem Build gelockert | ✅ | PR #11 (31ec24c): Lint-Schritt „Zeitgrenze nur mit Eintrag lockern“ |
 | P5-14 | Kleinere Punkte in den schnellen Tests (Dateinamen, Zeitmessungen, Zufall) | ✅ | fester Zufall und Zählung statt Zeit in PR #11 (31ec24c); Dateinamen nach Thema in main seit PR #12 (fdf9c30), in Build 40 |
 | P5-15 | Alter Upload-Ablauf auf `main` lädt ungetestete Stände hoch (= P6-01, G5-01) | ✅ | 8b5afbd (PR #5, 6cdefb3); `test_workflows.py` |
@@ -147,15 +153,15 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 |---|---|---|---|
 | P6-01 | Warnung „nichts auf main zusammenführen“ verschwunden (= P5-15) | ✅ | wie P5-15 |
 | P6-02 | 53 Stunden kein Build: großes Tor vor jedem Build | ✅ | täglicher Build auf `main` seit PR #10, Umgebung eingerichtet; erster Lauf 20.11. 04:30 Uhr; erster Zeitplan-Lauf grün (20.11. 13:02 Uhr, Lauf 44732451070). |
-| P6-03 | „Jedes Limit-Fenster voll nutzen“ und „Vollgas“ erzeugen Baustellen | 👤 | Entscheidung 11 (Vorgaben ändern nur du) |
+| P6-03 | „Jedes Limit-Fenster voll nutzen“ und „Vollgas“ erzeugen Baustellen | ✅ | Entscheidung 11 vom 26.11. in docs/DECISIONS.md (5c84aac3): „Vollgas“ bleibt, Limit „sinnvoll nutzen“; Regeltext macht der Koordinator |
 | P6-04 | Zweitprüfung ohne Stopp-Regel (28 Prüfdurchgänge) | 👤 | Regeltext für die Vorgaben (Vorschlag von Prüfer 6) |
 | P6-05 | Ziel und Ist stehen in den Vorgaben ununterscheidbar nebeneinander | 👤 | Regeltext; `main` ist seit PR #7 wieder aktuell |
 | P6-06 | Kein Ort, an dem du den Stand siehst; Schätzungen lagen alle zu früh | 📋 | diese Liste ist ein erster Schritt, eine Stand-Seite fehlt |
 | P6-07 | Einzelheiten der Bau-Strecke in den Vorgaben, nachts geändert | 👤 | Regeltext |
-| P6-08 | Technik-Rückfragen an dich, App-Verhalten nachts ohne dich entschieden | 👤 | Entscheidung 13 |
+| P6-08 | Technik-Rückfragen an dich, App-Verhalten nachts ohne dich entschieden | ✅ | Entscheidung 13 vom 26.11. in docs/DECISIONS.md (5c84aac3): Technik entscheidet der Koordinator, Fragen täglich gebündelt |
 | P6-09 | Regeln erreichen Unter-Agenten nur von Hand | 👤 | Regel-Datei im Repo (Entwurf von Prüfer 6) braucht dein OK |
 | P6-10 | „Für jeden Fall einen Test“ nennt keine Ebene | 👤 | Regeltext; TEST_PLAN hat jetzt zwei Tore (96cef21) |
-| P6-11 | Für 1.0 fehlen Umfangs-Stopp, Freigabe-Zahlen, echte Tester | 👤 | Entscheidung 12; Tester einladen kannst nur du |
+| P6-11 | Für 1.0 fehlen Umfangs-Stopp, Freigabe-Zahlen, echte Tester | 👤 | Entscheidung 12 vom 26.11. in docs/DECISIONS.md (5c84aac3): Umfang eingefroren, Freigabe-Zahlen, 3–5 Tester; offen bleibt nur: Tester einladen kannst nur du |
 
 ## Prüfung von außen (ChatGPT-Rückgabe, 39 Befunde)
 
@@ -196,7 +202,7 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 | G5-09 | Kauf-Test merkt nicht, wenn die Freischalt-Karte fehlt | ✅ | 3219bb3, 1a99f2c |
 | G5-10 | Rundgang prüft Zeilen nur in einer Liste streng | ✅ | 40d76f0; Beleg durch einen UI-Lauf steht noch aus |
 | G6-04 | Hauptzweig ist 3 Tage alt | ✅ | PR #7 auf `main` (da79816, 19.11.); PR #9 wartet als Nächstes |
-| G6-05 | Zweitprüfung nirgends nachweisbar (≈ P5-09) | 👤 | `main` nicht geschützt (Klick von dir); PR-Vorlage hat noch kein Feld für die Zweitprüfung |
+| G6-05 | Zweitprüfung nirgends nachweisbar (≈ P5-09) | 👤 | PR-Vorlage hat jetzt den Abschnitt „Zweitprüfung“ (wer, wann, Commit, Befunde; Branch claude/project-thread-h6mv71, kommt mit dem nächsten Bau-Strecken-PR in `main`, 26.11.). Offen nur noch: `main` schützen (Klick von dir) |
 | G6-06 | Testplan widerspricht sich (77 offene Fälle) | ✅ | 96cef21; TEST_PLAN „Tore“; DECISIONS „Zwei Tore“ |
 | G7-01 | Store-Text verspricht Städte-Alben | ✅ | 752ba07; `PromiseWordingTests`; Entscheidung 14 |
 | G7-02 | Featuring-Check nennt iPad, die App ist nur fürs iPhone | ✅ | PR #11 (31ec24c): 53bbac1 |
@@ -214,7 +220,7 @@ Die Zusatzfunde Z1 bis Z3 sind alle erledigt.
 1. ~~**Freigabe vor dem Hochladen einrichten**~~: erledigt (19.11., Umgebung `testflight-upload`). Build 38 ging am 19.11. um 16:40 Uhr ohne Klick zu TestFlight (P5-02 ✅; P6-02 wartet auf den ersten Tages-Build am 20.11.).
 2. **Hauptzweig `main` schützen** (Klick bei GitHub): P5-09, G6-05.
 3. **Einstellungen bei GitHub:** Freigabe für Läufe aus fremden Kopien; Dependabot-PR #8 annehmen oder schließen: P5-12.
-4. **Entscheidungen, die im Repo noch nicht festgehalten sind:** 6 Grafikeinheit (nach Messung, P4-13), 7 Album fürs Zuhause (P1-10), 9 „Merken“ oder „Auswählen“ (Paket 4A), 11 „Vollgas“/Limit (P6-03), 13 Technik beim Koordinator (P6-08), dazu P2-09 (zwei Pläne, ein Album).
+4. **Entscheidungen, die im Repo noch nicht festgehalten sind:** 6 Grafikeinheit (nach Messung, P4-13), ~~7 Album fürs Zuhause (P1-10)~~ (26.11. in docs/DECISIONS.md, gebaut), ~~9 „Auswählen“, 11 „Vollgas“/Limit (P6-03), 12 Umfang/Tester (P6-11), 13 Technik beim Koordinator (P6-08)~~ (am 26.11. in docs/DECISIONS.md festgehalten), dazu P2-09 (entschieden 26.11.: Rückgängig nimmt nur Fotos heraus, die kein anderer Plan braucht; gebaut, PR #25 in main 9fc91cb9).
 5. **Am iPhone:** 5-Minuten-Messung Hintergrund (P4-13); lässt sich „… aus Vorschlag entfernen“ antippen (G3-04)?
 6. **Vorgaben (Regeltext):** P6-04, P6-05, P6-07, P6-09, P6-10.
 7. **Für 1.0:** Tester einladen, Freigabe-Zahlen (P6-11).

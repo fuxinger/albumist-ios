@@ -25,6 +25,8 @@ vorzuschlagen. Seit 16.11. erklärt die Übersicht das und bietet Beispielfotos 
 - [ ] Absatz „[MAP] Map“: nur mit Karte im Build; dann „[MAP] “ löschen und „[label from the
       build]“ durch den Namen der Einstellung ersetzen. Ohne Karte den ganzen Absatz streichen.
 - [ ] Texte unten mit dem eingereichten Build abgleichen (Knopfnamen, Karte, Einstellungen).
+      „Full Version“ (großes V) ist der Abschnittsname ab dem Design-Paket; im Build davor
+      heißt er „Full version“.
 - [ ] Kontaktdaten für Rückfragen (Name, Telefon, E-Mail) im Feld „Contact Information“.
 
 ## English (paste this block)
@@ -39,13 +41,13 @@ See everything in about one minute:
 4. “Undo” on the result card reverts everything. Settings › “History and Undo” lists exactly what was done.
 5. Settings › “Remove Sample Photos” deletes all of the app’s sample photos, including ones that were edited or added to other albums, plus the albums made only from them. The app finds these photos by their stored identifiers; iOS asks for confirmation before deleting, and the photos then stay in Recently Deleted for 30 days. All other photos and albums are never touched. Removing requires full photo access and isn’t possible while the app is applying changes; the app explains this if needed.
 
-Purchase: The first 10 albums are free. A one-time, non-consumable in-app purchase (“Unlock Albumist”) removes the limit; it is submitted together with this version. “Restore Purchase” and “Redeem Code” are in Settings › Full version.
+Purchase: The first 10 albums are free. A one-time, non-consumable in-app purchase (“Unlock Albumist”) removes the limit; it is submitted together with this version. “Restore Purchase” and “Redeem Code” are in Settings › “Full Version”.
 
 Privacy: Photos are never uploaded, and all analysis happens on the device. If “Refine places online” is on (the default), coordinates and the language for place names are sent to Apple’s geocoder (CLGeocoder) to name places; nothing is sent to the developer. Original photos are never modified. After the user confirms, the app creates albums and adds photos to matching existing albums; “Undo” removes the albums it created and the photos it added. The only photos it ever deletes are its own sample photos, after the user taps “Remove Sample Photos” and confirms in the iOS dialog (they stay in Recently Deleted for 30 days).
 
 Background work and notifications: A long first analysis runs as a continued processing task (BGContinuedProcessingTask), so it can keep going after the user leaves the app; the system shows its progress on the Lock Screen and can stop it at any time. A local “Analysis complete” notification is sent only if the user has allowed notifications for the app. Nothing runs on a server.
 
-[MAP] Map (“Your World”): The globe and trip replay use the photos’ own locations. Map images come from Apple (MapKit), only for the visible area; Settings › “[label from the build]” turns this off.
+[MAP] Map (“Your World”): The globe and trip replay use the photos’ own locations. Map images are loaded from Apple’s map service, only for the visible area; Settings › “[label from the build]” turns this off.
 
 Siri and Shortcuts: “Sort new photos with Albumist” starts an analysis of new photos; Spotlight lists countries and pending suggestions.
 
@@ -100,7 +102,7 @@ dabei den Fortschritt auf dem Sperrbildschirm und kann die Aufgabe jederzeit bee
 Mitteilung „Analyse fertig“ kommt nur, wenn Mitteilungen für die App erlaubt sind.
 
 **[KARTE] Karte („Deine Welt“):** Globus und „Reise abspielen“ nutzen die Aufnahmeorte der Fotos.
-Kartenbilder kommen von Apple (MapKit), nur für den sichtbaren Ausschnitt; abschaltbar unter
+Kartenbilder kommen von Apples Kartendienst, nur für den sichtbaren Ausschnitt; abschaltbar unter
 Einstellungen › „[Name aus dem Build]“.
 
 **Siri und Kurzbefehle:** „Neue Fotos sortieren mit Albumist“ startet die Analyse neuer Fotos;
@@ -114,6 +116,11 @@ die hinzugefügten Fotos wieder heraus (wie Produktseite und Presse sagen). „A
 photos“ → der echte Knopf von iOS „Allow Full Access“. „Review devices usually have …“ unterstellte
 den Prüfern, was auf ihren Geräten ist. „the change receipt“ gibt es in der App nicht; der Ort
 heißt Einstellungen › „History and Undo“. Schritt 5 entwirrt.
+
+Nach dem Abgleich mit der Wortlaut-Prüfung im Code (26.11.): Kartenbilder kommen jetzt von
+„Apple’s map service“ / „Apples Kartendienst“, ohne den Namen von Apples Karten-Framework
+(`PromiseWordingTests` lässt ihn hier nicht zu, weil die Ortsnamen über `CLGeocoder` kommen).
+„Full version“ → „Full Version“ wie in der App ab dem Design-Paket.
 
 ## Drehbuch für die Bildschirmaufnahme (ca. 60 Sekunden, echte Mediathek)
 

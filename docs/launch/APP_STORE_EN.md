@@ -8,10 +8,20 @@ Lines marked **[MAP]** only once the "Your World" map is in the submitted build;
 app, never against it; no absolute claims; "your photos" instead of "never a photo"; the developer
 speaks as "I"; button names exactly as in the app.
 
-Privacy wording (same as the German page): "Albumist never uploads your photos" and "all
-analysis happens on your iPhone", never "everything stays on your iPhone" or "no photo ever leaves
-your iPhone". Place-name lookups send coordinates to Apple by default (can be turned off), the map
-loads map images from Apple, and with iCloud Photos the photos are in iCloud anyway.
+Privacy wording (same as the German page): "Albumist never uploads your photos" or "No photo is
+ever uploaded" (the app's words) and "all analysis happens on your iPhone", never "everything
+stays on your iPhone" or "no photo ever leaves your iPhone". Place-name lookups send coordinates
+and the language for place names to Apple by default (can be turned off), the map loads map
+images from Apple, and with iCloud Photos the photos are in iCloud anyway.
+
+Wording check in the code: `Tests/AlbumistCoreTests/PromiseWordingTests.swift` compares the
+place-name sentence, "No photo is ever uploaded", and the heading "CITIES IF YOU LIKE" word for
+word with the app, and rejects a few wrong words (listed in the test). Change these only together
+with the test: `.md`-only changes start no tests, so a mismatch would only show up in the next app
+run. With the design package the app says "a sample of photo locations, roughly one per area" (both
+reviewers: "single photo locations" reads as every photo's location). This page, the website, and
+`docs/PRIVACY.md` switch to that sentence in one step with the test, together with the website
+corrections (before submission).
 
 Style: US English (organize, favorite, color), serial comma, curly quotes (“ ” ’), Apple's
 spellings and capitalization (iPhone, iPad, Mac, iCloud Photos, Photos app, Lock Screen, Dark
@@ -44,7 +54,7 @@ sort,vacation,holiday,travel,map,countries,places,screenshots,pictures,gallery,m
 (100) No "clean"/"cleanup" (draws storage-cleaner searches the app does not serve), no "journal"
 (misleading). U.K.: same list.
 
-**Description** (max 4,000; this version 2,502 characters with the map, 2,407 without):
+**Description** (max 4,000; this version 2,684 characters with the map, 2,589 without):
 
 ```
 Thousands of photos and not a single album? Albumist finds your trips and turns them into real albums in your Photos app. You preview everything first, and Albumist never uploads your photos.
@@ -66,20 +76,19 @@ A world map of every country you’ve taken photos in, with a flag and photo cou
 SEARCHES BECOME ALBUMS
 Type “dogs Italy 2023” and Albumist shows you the matching photos. On iPhone models with Apple Intelligence, you can also search in natural language, like “barbecue at Grandma’s last summer.” Turn any search into an album.
 
+COUNTRIES, AND CITIES IF YOU LIKE
+Albumist also creates albums for countries, and for cities if you like. It suggests places you visit often, too, and you choose their names.
+
 MORE THAN TRIPS
-Albumist also creates albums for:
-• Countries, and cities if you like
-• Places you visit often, with names you choose
+You also get albums for:
 • Screenshots, sorted by content: orders, tickets, recipes
 • Documents like invoices and receipts
 • Topics like dogs, beaches, or food
 • Months and years, if you want them
 
 PRIVATE BY DESIGN
-• All analysis happens on your iPhone
-• No account, no tracking, no ads
-• For place names, iOS sends Apple’s map service only coordinates, never photos; you can turn this off
-[MAP] • Map images come from Apple, only for the area you’re viewing; you can turn this off too
+All analysis happens on your iPhone. No photo is ever uploaded, and there’s no account, no tracking, and no ads. For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service; you can turn this off in Settings.
+[MAP] Map images come from Apple, only for the area you’re viewing. You can turn that off, too.
 
 KEEPS WORKING IN THE BACKGROUND
 Big libraries take time. You can leave Albumist while it works: as long as iOS allows, it keeps analyzing and shows its progress on your Lock Screen. Later, sort new photos with a single tap or with Siri.
@@ -106,7 +115,7 @@ What changed since 21 Nov (copyedit):
   analyzes in the background → "keeps analyzing". "add new photos" sounded like importing →
   "sort new photos" (matches the Siri phrase).
 - Privacy: "no photo ever leaves your iPhone" → "Albumist never uploads your photos"; "iOS sends
-  Apple only the location" → "only coordinates, never photos" (same as the privacy policy).
+  Apple only the location" → the app's own sentence, word for word (see below).
   "PRIVATE ON YOUR IPHONE" → "PRIVATE BY DESIGN"; "iPhones" → "iPhone models".
 - Accessibility moved out of the privacy list into its own line.
 - "Reach us … We read every message" → "Get in touch … I read every message", with a line before
@@ -115,6 +124,18 @@ What changed since 21 Nov (copyedit):
   iPhone". Keywords use the last 5 bytes (",city").
 - Straight quotes → curly quotes; serial comma throughout; Apple's capitalization of Larger Text,
   Dark Mode, and Reduce Motion.
+
+After matching the wording check in the code (26 Nov):
+- The 21 Nov version had reworded three things that `PromiseWordingTests` compares word for word
+  with the app; the test would have failed in the next app run. Word for word again: "No photo is
+  ever uploaded", the place-name sentence (it also names the language for place names; "only
+  coordinates" alone was not true), and the heading "CITIES IF YOU LIKE" (city albums only on
+  request, `PlaceSettings`).
+- So countries and cities get their own section before "MORE THAN TRIPS", and privacy is a short
+  paragraph instead of a list, because the app's sentence is a full sentence (the lists have no
+  periods).
+- Until the switch described above, the place-name sentence still says "single photo locations",
+  as the app does today.
 
 Same checks as the German page (Voice Control test, Family Sharing is off today, search examples
 "dogs Italy 2023" and "barbecue at Grandma’s last summer" tried with the English demo library, the

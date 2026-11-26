@@ -23,11 +23,20 @@ Regeln für jeden Satz:
   und mindestens 10 Fotos, `TripSettings.minPhotos`); in Untertitel und Bildzeilen ist es als
   Versprechen erlaubt.
 - „Deine Fotos“ statt „nie ein Foto“ (die App löscht auf Wunsch ihre eigenen Beispielfotos).
-- **Datenschutz überall gleich und genau:** „Albumist lädt keine Fotos hoch“ und „die Analyse
-  läuft auf deinem iPhone“, aber nie „alles bleibt auf dem iPhone“ oder „kein Foto verlässt dein
-  iPhone“. Ab Werk gehen für Ortsnamen Koordinaten an Apples Kartendienst (abschaltbar), mit der
-  Karte auch Anfragen für Kartenbilder, und mit iCloud-Fotos liegen Fotos ohnehin in iCloud.
-  Redaktionen legen Produktseite, Pressetexte und Datenschutzerklärung nebeneinander.
+- **Datenschutz überall gleich und genau:** „Albumist lädt keine Fotos hoch“ oder „Kein Foto
+  wird hochgeladen“ (so sagt es die App) und „die Analyse läuft auf deinem iPhone“, aber nie
+  „alles bleibt auf dem iPhone“ oder „kein Foto verlässt dein iPhone“. Ab Werk gehen für Ortsnamen
+  Koordinaten und die Sprache der Ortsnamen an Apples Kartendienst (abschaltbar), mit der Karte
+  auch Anfragen für Kartenbilder, und mit iCloud-Fotos liegen Fotos ohnehin in iCloud. Redaktionen
+  legen Produktseite, Pressetexte und Datenschutzerklärung nebeneinander.
+- **Wortlaut-Prüfung im Code:** `Tests/AlbumistCoreTests/PromiseWordingTests.swift` vergleicht den
+  Satz zu Ortsnamen, „Kein Foto wird hochgeladen“ und die Überschrift „LÄNDER, AUF WUNSCH AUCH
+  STÄDTE“ Wort für Wort mit der App und verbietet einige falsche Wörter (Liste im Test). Diese
+  Stellen nur zusammen mit dem Test ändern. Reine `.md`-Änderungen starten keine Tests, ein Fehler
+  fiele erst beim nächsten App-Lauf auf.
+- **Geplanter Wechsel:** Mit dem Design-Paket sagt die App genauer „einzelne Aufnahmeorte, etwa
+  einen pro Gegend“. Produktseite, Webseite und `docs/PRIVACY.md` übernehmen den Satz dann in
+  einem Schritt mit dem Test, zusammen mit den Webseiten-Korrekturen (vor dem Einreichen).
 - Keine Fachwörter. Knopfnamen genau wie in der App, in „…“.
 - Albumist spricht als **ich** (eine Person, kein Team), wie Webseite, Pressemails und
   Featuring-Bewerbung. Die Leser werden geduzt, wie in der App.
@@ -75,7 +84,7 @@ zusammengesetzte Wörter nicht und erkennt Ein- und Mehrzahl nicht sicher, darum
 „app“, Namen anderer Apps, „speicher“ oder „löschen“ (locken Leute, die Speicher frei räumen
 wollen; das macht Albumist nicht).
 
-**Beschreibung** (max. 4.000; diese Fassung 2.736 Zeichen mit Karte, 2.596 ohne):
+**Beschreibung** (max. 4.000; diese Fassung 2.934 Zeichen mit Karte, 2.786 ohne):
 
 ```
 Tausende Fotos und kein einziges Album? Albumist findet deine Reisen und legt sie als echte Alben in deiner Fotos-App an. Du siehst alles vorher, und Albumist lädt keine Fotos hoch.
@@ -97,20 +106,19 @@ Eine Weltkarte mit allen Ländern, in denen du fotografiert hast, mit Flagge und
 AUS SUCHTREFFERN WERDEN ALBEN
 Gib „Hunde Italien 2023“ ein, und Albumist zeigt dir die passenden Fotos. Auf iPhone-Modellen mit Apple Intelligence versteht die Suche auch Beschreibungen in eigenen Worten wie „Grillen bei Oma letzten Sommer“. Aus den Treffern legst du auf Wunsch gleich ein Album an.
 
+LÄNDER, AUF WUNSCH AUCH STÄDTE
+Albumist legt außerdem Alben für Länder an, auf Wunsch auch für Städte, und schlägt Orte vor, an denen du oft bist. Die Namen vergibst du selbst.
+
 MEHR ALS REISEN
-Albumist legt auch Alben an für:
-• Länder, auf Wunsch auch Städte
-• Orte, an denen du oft bist, mit Namen, die du selbst vergibst
+Dazu kommen Alben für:
 • Screenshots nach Inhalt: Bestellungen, Tickets, Rezepte
 • Dokumente wie Rechnungen und Kassenbons
 • Themen wie Hunde, Strand oder Essen
 • Monate und Jahre, wenn du magst
 
 PRIVAT VON ANFANG AN
-• Die ganze Analyse läuft auf deinem iPhone
-• Kein Konto, kein Tracking, keine Werbung
-• Für Ortsnamen schickt iOS nur Koordinaten an Apples Kartendienst, nie Fotos; abschaltbar
-[KARTE] • Kartenbilder kommen von Apple, nur für den Ausschnitt, den du gerade ansiehst; ebenfalls abschaltbar
+Die ganze Analyse läuft auf deinem iPhone. Kein Foto wird hochgeladen, und es gibt kein Konto, kein Tracking und keine Werbung. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten.
+[KARTE] Kartenbilder kommen von Apple, nur für den Ausschnitt, den du gerade ansiehst. Auch das kannst du ausschalten.
 
 LÄUFT IM HINTERGRUND WEITER
 Große Mediatheken brauchen Zeit. Du kannst Albumist dabei verlassen: Solange iOS es erlaubt, analysiert die App weiter und zeigt den Fortschritt auf dem Sperrbildschirm. Neue Fotos sortierst du später mit einem Fingertipp oder per Siri ein.
@@ -139,8 +147,8 @@ Was sich gegenüber dem 21.11. geändert hat (Lektorat):
 
 Nach der unabhängigen Zweitprüfung (26.11.):
 - **Datenschutz genau wie in der Datenschutzerklärung:** „kein Foto verlässt dein iPhone“ →
-  „Albumist lädt keine Fotos hoch“; „schickt iOS nur den Aufnahmeort an Apple“ → „nur Koordinaten
-  an Apples Kartendienst, nie Fotos“.
+  „Albumist lädt keine Fotos hoch“; „schickt iOS nur den Aufnahmeort an Apple“ → der Satz der App,
+  Wort für Wort (siehe unten).
 - „PRIVAT AUF DEINEM IPHONE“ → „PRIVAT VON ANFANG AN“ (wie die Webseite; Apple erlaubt „iPhone“
   nicht in Versalien). „Auf iPhones“ → „Auf iPhone-Modellen“.
 - „FOTOS SCHNELL FINDEN“ → „AUS SUCHTREFFERN WERDEN ALBEN“: Suchen kann die Fotos-App selbst; was
@@ -152,9 +160,17 @@ Nach der unabhängigen Zweitprüfung (26.11.):
   „Unbegrenzte Alben“ (aus dem Englischen übersetzt).
 - Kleinigkeiten: „analysiert die App weiter“ (vorher zwei „es“ mit verschiedenem Bezug), „Neue
   Fotos sortierst du … ein“ (den Fingertipp macht der Mensch), „statt sie doppelt anzulegen“,
-  Einleitung „Albumist legt auch Alben an für:“, „ALLES LÄSST SICH RÜCKGÄNGIG MACHEN“ wie der
-  Knopf, „Flagge und Fotozahl für jedes Land“, „Albumist entwickle ich allein“ als Bezug für das
-  „ich“ am Schluss.
+  „ALLES LÄSST SICH RÜCKGÄNGIG MACHEN“ wie der Knopf, „Flagge und Fotozahl für jedes Land“,
+  „Albumist entwickle ich allein“ als Bezug für das „ich“ am Schluss.
+
+Nach dem Abgleich mit der Wortlaut-Prüfung im Code (26.11.):
+- Die Fassung vom 21.11. hatte drei Stellen umformuliert, die `PromiseWordingTests` Wort für Wort
+  mit der App vergleicht; der Test wäre beim nächsten App-Lauf rot geworden. Wieder wortgleich:
+  „Kein Foto wird hochgeladen“, der Satz zu Ortsnamen (er nennt auch die Sprache der Ortsnamen,
+  „nur Koordinaten“ allein stimmte nicht) und die Überschrift „LÄNDER, AUF WUNSCH AUCH STÄDTE“
+  (Städte-Alben gibt es nur auf Wunsch, `PlaceSettings`).
+- Länder und Städte darum als eigener Abschnitt vor „MEHR ALS REISEN“; Datenschutz als kurzer
+  Absatz statt Liste, weil der Satz der App ein ganzer Satz ist (die Listen haben keine Punkte).
 
 Prüfvermerke (vor dem Einreichen abhaken):
 - [ ] Erster Absatz (sichtbar vor „mehr“) mit dem eingereichten Build gegenlesen.

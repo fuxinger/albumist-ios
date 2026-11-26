@@ -49,7 +49,7 @@ Inhalt
 | App | Albumist | Albumist |
 | In einem Satz | Findet Reisen in der Fotomediathek und legt sie als echte Alben in Apples Fotos-App an. | Finds the trips in a photo library and turns them into real albums in Apple’s Photos app. |
 | Echte Alben | Gewöhnliche Alben in der Fotos-App, wie von Hand angelegt; mit iCloud-Fotos auch auf Mac und iPad; sie bleiben, auch wenn man Albumist löscht. | Ordinary albums in the Photos app, just like ones made by hand; on Mac and iPad too with iCloud Photos; they stay even if Albumist is deleted. |
-| Datenschutz | Analyse vollständig auf dem iPhone, kein Foto-Upload. Für Ortsnamen gehen nur Koordinaten an Apples Kartendienst (abschaltbar). [KARTE] Kartenbilder kommen ebenfalls von Apple (abschaltbar). Kein Konto, kein Tracking, keine Werbung. | All analysis on the iPhone; no photo is ever uploaded. For place names, only coordinates go to Apple’s map service (can be turned off). [MAP] Map images also come from Apple (can be turned off). No account, no tracking, no ads. |
+| Datenschutz | Analyse vollständig auf dem iPhone, kein Foto-Upload. Für Ortsnamen schickt iOS einzelne Aufnahmeorte an Apples Kartendienst, etwa einen pro Gegend: nur Koordinaten und die Sprache der Ortsnamen (abschaltbar). [KARTE] Kartenbilder kommen ebenfalls von Apple (abschaltbar). Kein Konto, kein Tracking, keine Werbung. | All analysis on the iPhone; no photo is ever uploaded. For place names, iOS sends a sample of photo locations to Apple’s map service, roughly one per area: only coordinates and the language for the names (can be turned off). [MAP] Map images also come from Apple (can be turned off). No account, no tracking, no ads. |
 | Vertrauen | Jede Änderung vorher sichtbar und rückgängig zu machen; vorhandene Alben werden ergänzt statt doppelt angelegt; Originalfotos werden nie verändert. | Every change is previewed and can be undone; existing albums are added to, not duplicated; original photos are never modified. |
 | Außerdem | Alben auch für Länder, Städte, häufige Orte, Screenshots, Dokumente, Themen, Monate und Jahre. Suche mit Stichwörtern, mit Apple Intelligence auch in eigenen Worten. | Albums for countries, cities, frequent places, screenshots, documents, topics, and months or years. Keyword search, plus natural-language search with Apple Intelligence. |
 | Besonderheit | [KARTE] „Deine Welt“: Globus mit allen Aufnahmeorten, Reisen Station für Station abspielen. [OHNE KARTE] Reise-Atlas: alle Länder mit Fotos auf einer Weltkarte, als Bild zum Teilen. | [MAP] “Your World”: a globe of every place in the library, with trip replays. [NO MAP] Travel Atlas: every country with photos on one world map, ready to share as an image. |
@@ -70,7 +70,7 @@ Inhalt
 
 *Die unabhängig entwickelte App findet Reisen in der Fotomediathek und legt sie als Alben in Apples Fotos-App an. Die Analyse läuft vollständig auf dem iPhone.*
 
-[ORT], [DATUM] – Viele iPhone-Mediatheken enthalten Tausende Fotos, aber kaum ein Album. Die neue App Albumist ändert das: Sie erkennt Reisen und Ausflüge, auch solche, die Jahre zurückliegen, und legt dafür echte Alben in Apples Fotos-App an, etwa „Gardasee, August 2026“. Die gesamte Analyse läuft auf dem iPhone, kein Foto wird hochgeladen. Nur für Ortsnamen schickt iOS Koordinaten an Apples Kartendienst; das lässt sich abschalten.
+[ORT], [DATUM] – Viele iPhone-Mediatheken enthalten Tausende Fotos, aber kaum ein Album. Die neue App Albumist ändert das: Sie erkennt Reisen und Ausflüge, auch solche, die Jahre zurückliegen, und legt dafür echte Alben in Apples Fotos-App an, etwa „Gardasee, August 2026“. Die gesamte Analyse läuft auf dem iPhone, kein Foto wird hochgeladen. Nur für Ortsnamen schickt iOS einzelne Aufnahmeorte an Apples Kartendienst; das lässt sich abschalten.
 
 Es sind gewöhnliche Alben, wie man sie auch von Hand anlegt. Mit iCloud-Fotos erscheinen sie auch auf Mac und iPad, und sie bleiben erhalten, selbst wenn man Albumist wieder löscht.
 
@@ -115,7 +115,7 @@ Albumist ist ab [DATUM] im App Store erhältlich, für iPhone ab iOS 26, auf Deu
 
 *Built by an independent developer, Albumist finds the trips in a photo library and creates albums for them in the Photos app. All analysis happens on the iPhone, and no photo is ever uploaded.*
 
-[CITY], Germany, [DATE] — Many iPhone libraries hold thousands of photos and hardly any albums. Albumist changes that. The new app recognizes trips and day trips, even ones from years ago, and creates real albums for them in Apple’s Photos app, with names like “Lake Garda, August 2026.” All analysis happens on the iPhone, and no photo is ever uploaded. To look up place names, iOS sends only coordinates to Apple’s map service, and users can turn this off.
+[CITY], Germany, [DATE] — Many iPhone libraries hold thousands of photos and hardly any albums. Albumist changes that. The new app recognizes trips and day trips, even ones from years ago, and creates real albums for them in Apple’s Photos app, with names like “Lake Garda, August 2026.” All analysis happens on the iPhone, and no photo is ever uploaded. To look up place names, iOS sends a sample of photo locations to Apple’s map service, and users can turn this off.
 
 These are ordinary albums, just like ones made by hand. With iCloud Photos, they appear on Mac and iPad too, and they stay even if Albumist is deleted.
 
@@ -176,7 +176,7 @@ Hallo [Vorname Nachname],
 Ich heiße [DEIN NAME], komme aus [ORT] und habe die iPhone-App Albumist allein entwickelt. Die App findet Reisen in der Fotomediathek und legt sie als echte Alben in Apples Fotos-App an, etwa „Gardasee, August 2026“. Auf Wunsch kommen Länder, Städte, Screenshots und Dokumente dazu.
 
 Was Albumist besonders macht:
-- Die Analyse läuft auf dem iPhone, kein Foto wird hochgeladen; nur für Ortsnamen gehen Koordinaten an Apples Kartendienst (abschaltbar). Es gibt kein Konto und kein Tracking.
+- Die Analyse läuft auf dem iPhone, kein Foto wird hochgeladen; nur für Ortsnamen schickt iOS einzelne Aufnahmeorte an Apples Kartendienst (abschaltbar). Es gibt kein Konto und kein Tracking.
 - Nichts passiert ohne Zustimmung: Jedes Album ist vorher zu sehen, vorhandene Alben werden ergänzt statt doppelt angelegt, und alles lässt sich rückgängig machen.
 - [KARTE] „Deine Welt“: ein Globus mit allen Orten, an denen man fotografiert hat; jede Reise lässt sich Station für Station noch einmal abspielen.
 - [OHNE KARTE] Der Reise-Atlas: alle Länder, in denen man fotografiert hat, als Bild zum Teilen.
@@ -226,7 +226,7 @@ Hi [First name],
 I’m [YOUR NAME], an independent developer from [CITY], Germany. I built Albumist, an iPhone app that finds the trips in a photo library and turns them into real albums in Apple’s Photos app, with names like “Lake Garda, August 2026.” Countries, cities, screenshots, and documents can get albums too.
 
 A few highlights:
-- All analysis happens on the iPhone, and no photo is ever uploaded. For place names, only coordinates go to Apple’s map service, and you can turn that off. No account, no tracking.
+- All analysis happens on the iPhone, and no photo is ever uploaded. To look up place names, iOS sends a sample of photo locations to Apple’s map service, and you can turn that off. No account, no tracking.
 - Nothing changes without your approval: you preview every album, existing albums are added to instead of duplicated, and everything can be undone.
 - [MAP] “Your World”: a globe of everywhere you’ve taken photos, with trips you can replay stop by stop.
 - [NO MAP] The Travel Atlas: every country you’ve photographed in, ready to share.

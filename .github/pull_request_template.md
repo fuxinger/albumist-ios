@@ -1,3 +1,7 @@
+<!-- Als Entwurf öffnen: dann läuft je Push nur der Rauchtest. Erst wenn der letzte Commit drin ist,
+"Ready for review": das startet den vollen UI-Lauf, dessen "UI verdict (full)" das Merge-Tor ist
+(Umbau Stufe 1, 26.11.2026, docs/TESTFLIGHT.md). -->
+
 ## Was und warum
 
 <!-- Was ändert sich für die Nutzer, und warum? Kurz, auf Deutsch oder Englisch. -->

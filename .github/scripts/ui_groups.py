@@ -944,6 +944,27 @@ def definition(group: dict) -> dict:
     return {k: v for k, v in group.items() if not k.startswith("_") and k not in REPORT_ONLY}
 
 
+# The smoke test of a draft pull request (rebuild stage 1, the owner's decision of 26.11.2026,
+# "alles wie empfohlen"): while a pull request is a draft, ui.yml runs only these two tests,
+# quick, on one Mac (the full flow from onboarding to plan, and undo from the history; each
+# onboards by itself), instead of all six groups. The full UI run comes once, when the pull
+# request is marked ready for review. Not a group: its result is no evidence for any group
+# (its job name carries the test key SMOKE_TESTS_KEY, which no group's fingerprint can be), so
+# the verdict of a ready pull request, the TestFlight gate and every plan run the groups
+# themselves.
+SMOKE_TESTS = ("AlbumistFlowUITests/test1_FullFlow", "AlbumistFlowUITests/test1c_UndoFromHistory")
+SMOKE_TESTS_KEY = "0" * 12
+SMOKE_BUDGET_MIN = 25
+
+
+def smoke_entry(app: str) -> dict:
+    """ui.yml's job matrix entry for the smoke test of a draft pull request."""
+    return {"group": "smoke", "title": "smoke test, full flow and undo (quick)", "device": "pro",
+            "only": " ".join(SMOKE_TESTS), "skip": "", "video": False, "reduce_motion": False,
+            "increase_contrast": False, "budget_min": SMOKE_BUDGET_MIN, "quick": True,
+            "app": app[:SHORT], "tests": SMOKE_TESTS_KEY}
+
+
 class Groups:
     """The groups of one tree, their tests, files and fingerprints."""
 

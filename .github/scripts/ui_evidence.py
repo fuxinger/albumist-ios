@@ -613,8 +613,11 @@ def current(tree=None):
     return tree, groups, ui_groups.app_fingerprint(tree)
 
 
-def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, now: datetime | None = None) -> int:
+def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, now: datetime | None = None,
+         smoke: bool = False) -> int:
     tree, groups, app = current(tree)
+    if smoke:
+        return plan_smoke(groups, app)
     names = groups.names()
     fps = groups.fingerprints(quick)
     words = choice.split()
@@ -676,6 +679,27 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
     red, red_text = known_red(decisions or [])
     append("GITHUB_OUTPUT", f"matrix={json.dumps(matrix, separators=(',', ':'))}\ncount={len(run)}\n"
                             f"known_red={' '.join(red)}\nknown_red_text={red_text}\n")
+    return 0
+
+
+def plan_smoke(groups, app: str) -> int:
+    """The plan of a draft pull request (rebuild stage 1, 26.11.2026): only the smoke test
+    (ui_groups.SMOKE_TESTS, quick, one Mac). No earlier result is read: the smoke test is no
+    evidence, and no group runs, so none is reused or known red."""
+    missing = [t for t in ui_groups.SMOKE_TESTS if t not in groups.tests]
+    if missing:
+        print(f"::error title=UI smoke test::{' '.join(missing)} not found among the UI tests "
+              "(renamed or moved? see ui_groups.SMOKE_TESTS)")
+        return 1
+    entry = ui_groups.smoke_entry(app)
+    print(f"UI_PLAN app {app} smoke: {entry['only']}")
+    append("GITHUB_STEP_SUMMARY", "\n".join([
+        f"### UI smoke test for app {app[:ui_groups.SHORT]} (draft pull request)", "",
+        f"Runs: {', '.join(ui_groups.SMOKE_TESTS)} (quick, one Mac).", "",
+        "The full UI run (every group, full) starts once the pull request is marked ready for review.",
+    ]) + "\n")
+    append("GITHUB_OUTPUT", f"matrix={json.dumps({'include': [entry]}, separators=(',', ':'))}\ncount=1\n"
+                            "known_red=\nknown_red_text=\n")
     return 0
 
 
@@ -867,6 +891,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("plan")
     p.add_argument("--groups", default="auto")
     p.add_argument("--quick", action="store_true", help="a quick run (ALBUMIST_UI_QUICK=1)")
+    p.add_argument("--smoke", action="store_true", help="a draft pull request: only the smoke test (ui_groups.SMOKE_TESTS)")
     g = sub.add_parser("gate")
     g.add_argument("--quick", action="store_true", help="the verdict of a quick run; never for an upload")
     g.add_argument("--groups", default="", help="check only these groups (the small gate of the daily build)")
@@ -884,7 +909,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "stress-plan":
         return stress_plan(args.photos.strip(), args.minutes.strip(), args.reuse)
     if args.command == "plan":
-        return plan(args.groups.strip(), quick=args.quick)
+        return plan(args.groups.strip(), quick=args.quick, smoke=args.smoke)
     run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
     return gate(run_id, quick=args.quick, only=args.groups, stress=args.stress.strip(), stress_only=args.stress_only)
 

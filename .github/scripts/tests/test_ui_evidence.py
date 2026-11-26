@@ -487,6 +487,41 @@ class CommandTests(unittest.TestCase):
             with self.subTest(choice=wrong):
                 self.assertEqual(self.plan(wrong, [])[0], 1)
 
+    def test_a_draft_runs_only_the_smoke_test(self):
+        # Stage 1 (26.11.2026): a draft pull request runs the two smoke tests, quick, one Mac,
+        # and reads no earlier result.
+        smoke = repo(**{"App__AlbumistUITests__AlbumistFlowUITests.swift":
+                        "import XCTest\nfinal class AlbumistFlowUITests: XCTestCase {\n"
+                        "    func test1_FullFlow() throws {}\n    func test1c_UndoFromHistory() throws {}\n}\n"})
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = ui_evidence.plan("auto", call=fake_api([], fail=True), verifier=VERIFIER, tree=smoke, smoke=True)
+        self.assertEqual(code, 0, log.getvalue())
+        matrix = json.loads(self.outputs()["matrix"])
+        self.assertEqual(len(matrix["include"]), 1)
+        entry = matrix["include"][0]
+        self.assertEqual((entry["group"], entry["quick"], entry["device"]), ("smoke", True, "pro"))
+        self.assertEqual(entry["only"], "AlbumistFlowUITests/test1_FullFlow AlbumistFlowUITests/test1c_UndoFromHistory")
+        self.assertEqual(entry["app"], ui_groups.app_fingerprint(smoke)[:12])
+        # Its job name can never be evidence for a group: no group has this test key.
+        self.assertEqual(entry["tests"], "0" * 12)
+        self.assertNotIn("0" * 12, [fp[:12] for fp in ui_groups.Groups(smoke).fingerprints().values()])
+        self.assertEqual((self.outputs()["count"], self.outputs()["known_red"]), ("1", ""))
+        self.assertIn("ready for review", self.read(self.summary))
+        # A smoke job in the history is ignored by the groups' decisions.
+        smoke_job = job("device", tests="0" * 12)
+        smoke_job["name"] = f"UI smoke test, full flow and undo (quick) [smoke app {APP[:12]} tests {'0' * 12}]"
+        entries = ui_evidence.results([run(5, "a" * 40, [smoke_job])])
+        self.assertEqual([e["group"] for e in entries], ["smoke"])
+        for quick in (True, False):
+            found = ui_evidence.decide_mode("device", APP, ui_groups.Groups(HEAD), entries, VERIFIER, quick)
+            self.assertEqual(found["state"], "missing")
+
+    def test_a_smoke_test_that_was_renamed_stops_the_plan(self):
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = ui_evidence.plan("auto", tree=HEAD, smoke=True)
+        self.assertEqual(code, 1)
+        self.assertIn("AlbumistFlowUITests/test1_FullFlow", log.getvalue())
+
     def test_plan_runs_everything_when_the_api_does_not_answer(self):
         code, log = self.plan("auto", self.NIGHT, fail=True)
         self.assertEqual(code, 0)

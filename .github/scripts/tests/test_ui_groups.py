@@ -673,6 +673,13 @@ class RepositoryTests(unittest.TestCase):
                 with self.subTest(path=path):
                     self.assertTrue(names, f"{path} is in no group")
 
+    def test_the_smoke_tests_of_a_draft_exist(self):
+        # Stage 1 (26.11.2026): a draft pull request runs only these; a rename must not leave
+        # drafts without a smoke test (ui_evidence.py plan --smoke fails then, too).
+        for test in ui_groups.SMOKE_TESTS:
+            with self.subTest(test=test):
+                self.assertIn(test, self.groups.tests)
+
     def test_every_swift_file_of_the_target_is_read_as_code(self):
         # Otherwise a comment edit in it would change its groups' fingerprints again and let a red
         # result go (Prüfer B G5-04). Write a division as "a / b" (a bare regex /.../ can not be read).

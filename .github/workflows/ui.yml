@@ -43,13 +43,23 @@ run-name: >-
 #   where later runs and the TestFlight gate find the result again. A group whose result for
 #   this app and test code was red runs again when asked, but its green never counts (a red test
 #   is fixed, not re-run to green).
-#   Quick mode (pull requests, or "quick" by hand; never in a TestFlight run): the tests get
+#   Pull requests (rebuild stage 1, the owner's decision of 26.11.2026, "alles wie empfohlen"):
+#   while a pull request is a draft, every push runs only the smoke test (ui_groups.SMOKE_TESTS:
+#   the full flow and undo from the history, quick, one Mac; no evidence for any group). When
+#   it is marked ready for review (and on every push after that) the run is the full UI run:
+#   every group without a green result for this app and test code, full, as by hand before.
+#   That run's "UI verdict (full)" is the merge check; nothing has to be started by hand. So a
+#   strand opens its pull request as a draft and marks it ready once its last commit is in.
+#   The 10,000-photo stress pass is no longer a merge check (same decision): it runs before
+#   every TestFlight upload (testflight.yml) and every night on main (ui-stress.yml).
+#   Quick mode ("quick" by hand, and the smoke test; never in a TestFlight run): the tests get
 #   ALBUMIST_UI_QUICK=1 and DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips
 #   itself. Every group has another test fingerprint then, so a quick green never stands for a
 #   full one; a red in either mode blocks both.
-#   The last job, "UI verdict (full|quick)", checks every group for this app and its test code
-#   (the same check as the TestFlight gate), also when no group had to run; the release gate
-#   (ci_gate.py) needs "UI verdict (full)" green.
+#   The last job, "UI verdict (full|quick|smoke)", checks every group for this app and its test
+#   code (the same check as the TestFlight gate), also when no group had to run; the smoke
+#   verdict of a draft only checks the smoke test. The release gate (ci_gate.py) and the merge
+#   need "UI verdict (full)" green.
 #   A group whose every pass failed on the simulator or XCTest alone (lost before the first
 #   test, testmanagerd crashed, also in the repeat) has no result (neither green nor red): its job
 #   fails in "No test result (...)", not in "Run UI tests".
@@ -68,6 +78,8 @@ run-name: >-
 # TestFlight run, testflight.yml does that instead, together with the stress pass's record.
 on:
   pull_request:
+    # ready_for_review: the draft's smoke test is followed by the full UI run (stage 1).
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore: ['**.md']
   workflow_dispatch:
     inputs:
@@ -106,9 +118,12 @@ env:
   # other run (merge gate by hand, main, TestFlight, nightly). Rule of 26.11. (coordinator for
   # Fuchs): exceeded limits on the overloaded CI Macs are findings, not red runs, until merge.
   ALBUMIST_TIMING: ${{ (!inputs.release && github.event_name == 'pull_request') && 'report' || 'hard' }}
-  # Quick mode (top of this file): pull requests and runs started with quick, never a TestFlight
-  # run. The same expression is in the name of the "UI verdict" job (no env there).
-  UI_QUICK: ${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'true' || '' }}
+  # Quick mode (top of this file): runs started with quick by hand, never a pull request run
+  # (a draft runs the smoke test, a ready pull request the full run) and never a TestFlight
+  # run. The same expressions are in the name of the "UI verdict" job (no env there).
+  UI_QUICK: ${{ (!inputs.release && github.event_name != 'pull_request' && inputs.quick) && 'true' || '' }}
+  # A draft pull request: only the smoke test (top of this file).
+  UI_SMOKE: ${{ (github.event_name == 'pull_request' && github.event.pull_request.draft) && 'true' || '' }}
 
 # The Mac queue (Profi-Analyse 16.11., Top 3, decided 17.11.: only one Mac-heavy strand at a
 # time). Every UI run and every stress pass (ui-stress.yml) of every branch shares the group
@@ -127,7 +142,7 @@ env:
 #     Start TestFlight when the queue is idle; then it is the one Mac-heavy strand. Not yet
 #     seen in a real run: check on the first TestFlight run that its UI flow and stress pass
 #     do not wait for "mac-queue".
-#   - the weekly full stress pass (ui-stress.yml, group "stress-weekly").
+#   - the stress passes at night (ui-stress.yml, group "stress-night").
 #   - pull requests from forks: one group of their own ("ui-fork"), so that a run from outside
 #     the repository can neither replace nor hold up the runs in the queue.
 #   - CI's macOS job (ci.yml), the quick verdict of every push (one Mac, ~20 min): in this
@@ -184,7 +199,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           UI_GROUPS: ${{ inputs.groups || 'auto' }}
-        run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS" ${UI_QUICK:+--quick}
+        run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS" ${UI_QUICK:+--quick} ${UI_SMOKE:+--smoke}
 
   known-red:
     # Tempo plan 20.11.: a group that is red for exactly this app and its test code makes the
@@ -264,12 +279,15 @@ jobs:
     # The macOS core tests with hard wall-clock limits, once in the full run before the merge
     # (rule of 26.11., second review: CI's macOS job only reports them on a pull request, and
     # CI is not part of the merge gate). Only what the full run lacks: the Linux tests, the
-    # app build and the UI groups are already in it. Not on a pull request (CI's macOS job runs
-    # there) and not in a TestFlight run (CI ran hard on main before it).
+    # app build and the UI groups are already in it. Not in a draft's smoke run or a quick run,
+    # and not in a TestFlight run (CI ran hard on main before it). In the full run of a ready
+    # pull request (the merge check since stage 1) hard as well: its own ALBUMIST_TIMING.
     name: Core tests hard (macOS)
     needs: plan
-    if: ${{ needs.plan.result == 'success' && github.event_name != 'pull_request' && !inputs.release && !inputs.quick }}
+    if: ${{ needs.plan.result == 'success' && !inputs.release && !inputs.quick && !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
     runs-on: xcode-27
+    env:
+      ALBUMIST_TIMING: hard
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -532,7 +550,7 @@ jobs:
     # unchanged (step "Merge content same as this commit"); the TestFlight run after the merge
     # then reuses those greens by content and runs only groups without one. Not in a TestFlight run: there the
     # "UI gate" of testflight.yml does this.
-    name: UI verdict (${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'quick' || 'full' }})
+    name: UI verdict (${{ (github.event_name == 'pull_request' && github.event.pull_request.draft) && 'smoke' || ((!inputs.release && github.event_name != 'pull_request' && inputs.quick) && 'quick' || 'full') }})
     needs: [plan, ui, core-macos]
     if: ${{ !cancelled() && needs.plan.result == 'success' && !inputs.release }}
     runs-on: ubuntu-24.04
@@ -550,22 +568,24 @@ jobs:
           persist-credentials: false
       - name: macOS core tests with hard time limits
         # Rule of 26.11.: part of the merge gate in a full run (job core-macos).
-        if: ${{ github.event_name != 'pull_request' && !inputs.quick }}
+        if: ${{ !inputs.quick && !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
         env:
           CORE_MACOS: ${{ needs.core-macos.result }}
         run: |
           echo "core-macos: $CORE_MACOS"
           [ "$CORE_MACOS" = success ] || { echo "::error title=Merge gate::Core tests hard (macOS) is $CORE_MACOS, not green"; exit 1; }
-      - name: Full UI pass before the merge
-        # The owner's decision of 20.11.2026, 17:12: the full UI pass runs once before the merge
-        # (not again in the TestFlight run, whose UI gate takes its greens by content). A pull
-        # request's own runs are quick; this says how to start the full one on its branch.
-        if: ${{ github.event_name == 'pull_request' }}
+      - name: Smoke test green (draft)
+        # Stage 1 (26.11.2026): a draft runs only the smoke test; the merge check is the full run
+        # that starts when the pull request is marked ready for review.
+        if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.draft) }}
         env:
-          HEAD_REF: ${{ github.head_ref }}
+          SMOKE: ${{ needs.ui.result }}
         run: |
-          echo "::notice title=Full UI pass before the merge::Once the last commit is pushed: Actions > UI stress > Run workflow on branch $HEAD_REF (first, the longest Mac job), then Actions > UI flow > Run workflow on it with quick off. 'UI stress verdict' and 'UI verdict (full)' must be green on the branch's last commit before the merge (docs/TESTFLIGHT.md)."
+          echo "smoke test: $SMOKE"
+          echo "::notice title=Draft::Only the smoke test ran. Mark the pull request ready for review for the full UI run; its 'UI verdict (full)' is the merge check."
+          [ "$SMOKE" = success ] || { echo "::error title=UI smoke test::the smoke test is $SMOKE, not green"; exit 1; }
       - name: UI groups green for this app and test code
+        if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}

@@ -483,10 +483,18 @@ Regeländerung: Der volle UI-Lauf läuft einmal vor dem Merge, nicht noch einmal
 TestFlight-Lauf. Der volle Lauf vor jedem Upload bleibt Pflicht; das UI-Tor von TestFlight
 weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
 
-- **Vor dem Merge (Stufe 1)**: nach dem letzten Push des Pull Requests Actions > UI flow > Run
-  workflow auf seinem Zweig, „quick“ aus (`gh workflow run ui.yml --ref <zweig> -f quick=false`).
-  Der Lauf führt nur die Gruppen aus, die für diesen Inhalt noch kein volles Grün haben. Die
-  Pull-Request-Läufe selbst bleiben schnell (quick) und sagen das im Urteil-Job als Hinweis.
+- **Vor dem Merge, seit 26.11. (Umbau Stufe 1, Entscheidung Fuchs „alles wie empfohlen“)**:
+  Ein Pull Request wird als **Entwurf** geöffnet. Solange er Entwurf ist, läuft bei jedem Push
+  nur der **Rauchtest** (`ui_groups.SMOKE_TESTS`: kompletter Ablauf `test1` und Rückgängig aus
+  dem Verlauf `test1c`, schnell, ein Mac, rund 25 Minuten mit Bau; Urteil „UI verdict
+  (smoke)“; zählt für keine Gruppe). Ist der letzte Commit drin, stellt der Strang den PR auf
+  **„Ready for review“**: dann startet von selbst der volle UI-Lauf (alle Gruppen ohne volles
+  Grün für diesen Inhalt, voll, mit „Core tests hard (macOS)“), und sein „UI verdict (full)“ ist
+  das Merge-Tor. Nichts mehr von Hand starten. Danach läuft bei einem Fix-Push wieder der volle
+  Lauf, übernimmt aber jede Gruppe, deren App- und Testschlüssel gleich blieb (nur ein reiner
+  Testfix lässt also nur die betroffene Gruppe laufen). „UI supersede“ bricht beim Wechsel auf
+  „Ready“ den noch laufenden Rauchtest desselben Commits ab. Ein Lauf von Hand (`gh workflow run
+  ui.yml --ref <zweig> -f quick=false`) geht weiter, ist aber nicht mehr nötig.
 - **Merge-Tor**: „UI verdict (full)“ dieses Laufs grün auf dem letzten Commit des Zweigs. Es
   verlangt für jede Gruppe ein volles Grün (nie ein schnelles) für genau den App- und
   Test-Fingerabdruck, kein Rot für diesen Schlüssel, und im Schritt „Merge content same as this
@@ -499,7 +507,7 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   volle Lauf prüft sie hart: Job „Core tests hard (macOS)“ (macOS-Core-Tests und Lasttest). „UI verdict (full)“ ist nur grün, wenn „Core tests hard (macOS)“
   grün ist. Nur diese fehlenden Teile, keine zweite App-Build oder UI-Gruppe.
 - **Damit GitHub es erzwingt** (nur Fuchs, Einstellung, P5-09): Schutzregel für `main` mit
-  Pflicht-Prüfungen „UI verdict (full)“ und „UI stress verdict“ (seit 17:20, unten) und „Require
+  Pflicht-Prüfung „UI verdict (full)“ (seit 26.11. ohne „UI stress verdict“, unten) und „Require
   branches to be up to date before merging“.
   Bis dahin gilt es als Regel für Agenten und Fuchs.
 - **TestFlight (großes Tor)**: unverändert `ui_groups: auto`; es laufen nur Gruppen ohne volles
@@ -509,11 +517,20 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   neben dem Release-Kurztest, Hochladen rund 10); letzter Push bis Upload rund 2,5 statt 3,5–4
   Stunden. Unterscheidet sich der Inhalt doch (etwas kam nach dem vollen Lauf auf `main`),
   laufen die betroffenen Gruppen im TestFlight-Lauf wie bisher: langsamer, nie ungeprüft.
-- Achtung Mac-Warteschlange: der Lauf von Hand wartet in `mac-queue`; ein neuer Push auf
-  irgendeinen Pull Request kann ihn dort ersetzen (GitHub hält je Gruppe einen wartenden Lauf).
-  Darum erst starten, wenn der schnelle Lauf des letzten Pushs fertig ist.
+- Achtung Mac-Warteschlange: der volle Lauf wartet in `mac-queue`; ein neuer Push auf
+  irgendeinen Pull Request kann ihn dort ersetzen (GitHub hält je Gruppe einen wartenden Lauf;
+  „Re-run all jobs“ startet ihn neu). Darum einen PR erst auf „Ready“ stellen, wenn kein anderer
+  Lauf wartet.
 
 ### Härtetest einmal vor dem Merge (Entscheidung Fuchs 20.11. 17:20 Uhr)
+
+**Ersetzt am 26.11.2026 (Umbau Stufe 1, Entscheidung Fuchs „alles wie empfohlen“):** Der kleine
+Härtetest ist **kein Merge-Tor mehr**. Er läuft vor jedem TestFlight-Upload (beide Tore,
+unverändert) und jede Nacht auf `main` (`ui-stress.yml`, Montag bis Samstag 00:40 UTC der kleine
+Durchgang, übernommen, wenn `main` für diesen Inhalt schon ein Grün hat; Sonntag der volle mit
+50.000 Fotos). Ein roter nächtlicher Durchgang ist ein Befund wie jeder rote Lauf: sofort beheben.
+Von Hand auf einem Zweig geht er weiter (z. B. bei Änderungen an Analyse oder Speicher). Der Rest
+dieses Abschnitts beschreibt den Stand vom 20.11.
 
 Regeländerung: Der kleine Härtetest (10.000 Fotos, 15 Minuten) läuft einmal vor dem Merge,
 neben dem vollen UI-Lauf, und TestFlight übernimmt sein Grün, wenn der Inhalt nachweislich gleich

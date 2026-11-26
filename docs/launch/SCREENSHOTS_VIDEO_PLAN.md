@@ -40,11 +40,11 @@ Bilder, die verkaufen). Spalte „ohne Karte“ gilt, falls die Karte nicht rech
 |---|---|---|---|---|
 | 1 | Jede Reise wird ein Album. | Every trip becomes an album. | Vorschläge-Liste im neuen Foto-Look: 4–5 Reisen mit großen Titelfotos, Ort und Monat | gleich |
 | 2 | Echte Alben in deiner Fotos-App. | Real albums in your Photos app. | Ergebnis nach dem Anlegen als Raster der neuen Alben mit Titelfoto und Namen, Knopf „Fotos-App öffnen“ | gleich |
-| 3 | Deine Welt. | Your world. | Globus mit Bögen und Orten, Länderzahl (dunkel) | Reise-Atlas: „Alle Länder auf einen Blick.“ / „Every country at a glance.“ |
-| 4 | Erst ansehen. Dann anlegen. | Look first. Then create. | Vorschau mit Albenliste und „Alben jetzt anlegen“ | gleich |
-| 5 | Nichts ist endgültig. | Nothing is final. | Liste der angelegten Alben mit „Rückgängig machen“ | gleich |
-| 6 | Erlebe jede Reise noch einmal. | Relive every trip. | Bild aus „Reise abspielen“: Route über Gelände, bestes Foto groß (dunkel) | Suche: „Such einfach: Hunde Italien 2023.“ / „Just search: dogs Italy 2023.“ |
-| 7 | Bleibt auf deinem iPhone. | Stays on your iPhone. | Gestaltete Aussage: großes Schild-Symbol über einer Übersicht mit Mosaik, darunter „Keine Fotos hochgeladen · Kein Konto · Kein Abo“ | gleich |
+| 3 | Deine Welt. | Your World. | Globus mit Bögen und Orten, Länderzahl (dunkel) | Reise-Atlas: „Alle Länder auf einen Blick.“ / “Every country at a glance.” |
+| 4 | Erst ansehen. Dann anlegen. | Preview first. Then create. | Vorschau mit Albenliste und „Alben jetzt anlegen“ | gleich |
+| 5 | Nichts ist endgültig. | Nothing is set in stone. | Liste der angelegten Alben mit „Rückgängig machen“ | gleich |
+| 6 | Erlebe jede Reise noch einmal. | Relive every trip. | Bild aus „Reise abspielen“: Route über Gelände, bestes Foto groß (dunkel) | Suche: „Such einfach: Hunde Italien 2023“ / “Just search: dogs Italy 2023” |
+| 7 | Alles bleibt auf deinem iPhone. | It all stays on your iPhone. | Gestaltete Aussage: großes Schild-Symbol über einer Übersicht mit Mosaik, darunter „Kein Upload · Kein Konto · Kein Abo“ / “No uploads · No account · No subscription” | gleich |
 
 Bild 1–3 sind, was die Suche zeigt: **was passiert, dass es echt ist, das Wow.**
 Bilder 3 und 6 dunkel (Globus und Fotos leuchten), sonst hell. **Kein Preis, keine Webadresse,

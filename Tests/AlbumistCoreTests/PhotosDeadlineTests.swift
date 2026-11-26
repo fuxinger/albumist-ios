@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import AlbumistCore
+import AlbumistTestSupport
 
 /// App-speed (18.11.2026): calls into Photos that never answer must not freeze the analysis or
 /// a plan for good (`PhotosDeadline`). Short limits here; the app waits seconds.
@@ -215,7 +216,7 @@ struct PhotosDeadlineTests {
         await #expect(throws: PhotosNotResponding(lane: .write, what: "createAlbum", notSent: true)) {
             try await deadline.run("createAlbum", lane: .write, limit: .seconds(30)) { _ in await second.wait() }
         }
-        #expect(clock.now - began < .seconds(10))
+        #expect(TimingLimit.holds(clock.now - began, under: .seconds(10), "photos deadline"))
         #expect(second.started == 0)
         #expect(try await deadline.run("photo", lane: .image, limit: .seconds(30)) { _ in 5 } == 5)
         // The deletion's question to the user is said as such.

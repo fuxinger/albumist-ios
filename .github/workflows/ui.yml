@@ -101,6 +101,11 @@ permissions:
 env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
+  # Wall-clock time limits of the Swift tests (AlbumistTestSupport/TimingLimit): only reported
+  # (TIMING_OVER lines, counted by timing_report.py) in runs on a pull request; hard in every
+  # other run (merge gate by hand, main, TestFlight, nightly). Rule of 26.11. (coordinator for
+  # Fuchs): exceeded limits on the overloaded CI Macs are findings, not red runs, until merge.
+  ALBUMIST_TIMING: ${{ (!inputs.release && github.event_name == 'pull_request') && 'report' || 'hard' }}
   # Quick mode (top of this file): pull requests and runs started with quick, never a TestFlight
   # run. The same expression is in the name of the "UI verdict" job (no env there).
   UI_QUICK: ${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'true' || '' }}
@@ -251,6 +256,9 @@ jobs:
       - name: Build and test
         timeout-minutes: 12
         run: python3 .github/scripts/swift_test_watch.py --minutes 10 --log core-linux.log -- swift test --parallel
+      - name: Time limits reported (pull requests only)
+        if: ${{ always() }}
+        run: python3 .github/scripts/timing_report.py core-linux.log >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: UI build

@@ -43,7 +43,7 @@ struct JournalLoadTests {
         print("JOURNAL steps \(plan.steps.count), elapsed \(elapsed), db \(size / 1_000_000) MB, peak \(LoadTests.peakMemoryMB() ?? -1) MB")
         #expect(result.status == .completed)
         #expect(saved.appliedAssets.count == photos)
-        #expect(elapsed < .seconds(20))
+        #expect(TimingLimit.holds(elapsed, under: .seconds(20), "journal load"))
         // Reading the history must stay quick too (the overview reads it after every change).
         let read = clock.now
         for _ in 0..<10 { _ = try await store.undoneTargets(); _ = try await store.planHistory(limit: 20) }
@@ -95,6 +95,6 @@ struct JournalLoadTests {
         let saved = try #require(try await store.plan(plan.id))
         #expect(saved.record?.maybeCreated.count == albums)
         #expect(saved.steps.allSatisfy { $0.state.isFinished })
-        #expect(elapsed < .seconds(60))
+        #expect(TimingLimit.holds(elapsed, under: .seconds(60), "journal load (large)"))
     }
 }

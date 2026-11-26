@@ -658,6 +658,14 @@ final class AccessibilityUITests: XCTestCase {
     /// twice in a row (UI run 45651824235, Mac load 549) while the same group was green on the
     /// commit before. Two snapshots in a row under 2 s count as caught up, at most 90 s; the
     /// second attempt runs anyway after that, and a second timeout still fails the screen.
+    ///
+    /// Then waits for the Mac itself (coordinator's rule of 26.11.2026): the app can answer
+    /// quickly while XCTest's own audit has no room (UI run 45759464360: "en plan lower" timed
+    /// out twice although the app answered after 1.5 s; load 370-452 the whole pass, testmanagerd
+    /// at 80-200 % CPU; the green pass on main, run 45743255283, had a median load of 247). Until
+    /// the 1-minute load is under `calmLoad`, at most 120 s, the load is logged every 10 s (the
+    /// pass's PASS_TOP lines say what kept the Mac busy at that clock). The wait is a counted
+    /// retry (`UI_FLAKY_RETRY`), never silent; a second timeout stays red as a real finding.
     private func waitForResponsiveApp(before screen: String) {
         let start = Date()
         var calm = 0
@@ -669,6 +677,35 @@ final class AccessibilityUITests: XCTestCase {
         }
         let waited = String(format: "%.1f", Date().timeIntervalSince(start))
         print("A11Y_AUDIT_RETRY \(screen) app \(caughtUp ? "answered quickly again" : "still slow") after \(waited) s")
+        waitForCalmMac(before: screen)
+    }
+
+    /// Between the green pass's median (247) and the lowest load of the red one (370).
+    static let calmLoad = 300.0
+
+    /// The Mac's 1-minute load as the simulator sees it (the host's kernel), nil when unknown.
+    static func macLoad() -> Double? {
+        var loads = [Double](repeating: 0, count: 1)
+        return getloadavg(&loads, 1) == 1 ? loads[0] : nil
+    }
+
+    private func waitForCalmMac(before screen: String) {
+        let start = Date()
+        let first = Self.macLoad()
+        var lastLog = Date.distantPast
+        let calmed = UITestWait.holds(timeout: 120, interval: 2) {
+            guard let load = Self.macLoad() else { return true }
+            if Date().timeIntervalSince(lastLog) >= 10 {
+                lastLog = Date()
+                print("A11Y_AUDIT_LOAD \(screen) load(1m) \(String(format: "%.0f", load)) after \(Int(Date().timeIntervalSince(start))) s")
+            }
+            return load < Self.calmLoad
+        }
+        let end = Self.macLoad().map { String(format: "%.0f", $0) } ?? "unknown"
+        let began = first.map { String(format: "%.0f", $0) } ?? "unknown"
+        print("UI_FLAKY_RETRY \(UITestWait.testID(self)) audit of \(screen) did not complete, second attempt after "
+              + "\(Int(Date().timeIntervalSince(start))) s for the Mac (load(1m) \(began) to \(end), \(calmed ? "under" : "still over") "
+              + "\(Int(Self.calmLoad)))")
     }
 
     /// "Contrast failed" must repeat in a second contrast audit two seconds later to count.

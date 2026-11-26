@@ -11,7 +11,7 @@ extension AirborneFilterTests {
 
     @Test func fiftyThousandPhotosAreJudgedQuickly() {
         let photos = MapLibrary(count: 50_000).facts.map(\.asset)
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var result = FlightJudgement()
         // As the summary judges them: with the photos maybe taken in flight.
         let elapsed = clock.measure { result = AirborneFilter.judge(photos) }
@@ -75,7 +75,7 @@ extension AirborneFilterTests {
 
     @Test func aDenseLibraryIsJudgedQuickly() {
         let photos = Self.denseLibrary(count: 50_000)
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var result = FlightJudgement()
         let elapsed = clock.measure { result = AirborneFilter.judge(photos) }
         let ms = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1e15

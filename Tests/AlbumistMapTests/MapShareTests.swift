@@ -281,7 +281,7 @@ struct MapShareTests {
         let summary = MapHandmade.summary(trips: trips, countries: countries, years: years)
         var world: ShareWorld?
         var year: ShareYear?
-        let took = ContinuousClock().measure {
+        let took = ThreadCPUClock().measure {
             world = MapShare.world(summary, geometry: geometry)
             year = MapShare.year(2015, of: summary)
             _ = MapShare.passport(summary)

@@ -242,7 +242,7 @@ struct PinGroupingTests {
             Self.pin("place:\($0)", Self.at(46 + random.unit() * 6, 9.3 + random.unit() * 4.4), count: 1 + random.int(0..<100), level: .place)
         }
         let view = Self.view(Self.at(49, 11.5), widthMeters: 300_000)
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var groups: [MapPinGroup] = []
         var fastest = Duration.seconds(60)
         for _ in 0..<3 { fastest = min(fastest, clock.measure { groups = MapPins.visible(pins, in: view) }) }

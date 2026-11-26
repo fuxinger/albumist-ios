@@ -75,14 +75,15 @@ public struct TripFilm: Hashable, Sendable {
     /// leaves out joins on its first day, after the route's visits of that day), grouped into
     /// stations.
     static func stations(of geometry: TripGeometry) -> [TripFilmStation] {
-        var visits: [(day: LocalDay, order: Int, place: Int)] = []
+        struct Visit { var day: LocalDay, order: Int, place: Int }
+        var visits: [Visit] = []
         for (order, point) in geometry.route.enumerated() where geometry.places.indices.contains(point.placeIndex) {
-            visits.append((point.day, order, point.placeIndex))
+            visits.append(Visit(day: point.day, order: order, place: point.placeIndex))
         }
         let routed = Set(visits.map(\.place))
         for index in geometry.places.indices where !routed.contains(index) {
             let day = geometry.places[index].days.min() ?? geometry.lastDay
-            visits.append((day, geometry.route.count + index, index))
+            visits.append(Visit(day: day, order: geometry.route.count + index, place: index))
         }
         visits.sort { ($0.day, $0.order) < ($1.day, $1.order) }
         var order: [Int] = []

@@ -1502,6 +1502,19 @@ final class DeviceConditionUITests: XCTestCase {
             guard let label = try? anything("Fotos und Videos").snapshot().label else { return false }
             return (Int(label.replacingOccurrences(of: ".", with: "").prefix { $0.isNumber }) ?? 0) >= 3200
         })
+        // The viewer counts every photo of the list, not the 3,000 thumbnails of the grid's first
+        // page (iPhone, Build 41, 26.11.: "11 von 3.000" in a larger library).
+        let libraryCount = (try? anything("Fotos und Videos").snapshot().label)
+            .flatMap { Int($0.replacingOccurrences(of: ".", with: "").prefix { $0.isNumber }) } ?? 0
+        if tap(libraryPhotos.firstMatch, "first photo of the large library") {
+            let position = app.staticTexts["viewer.position"]
+            let label = position.waitForExistence(timeout: 10) ? ((try? position.snapshot().label) ?? "") : ""
+            let total = Int(label.components(separatedBy: " von ").last?.replacingOccurrences(of: ".", with: "") ?? "") ?? 0
+            print("UI_FACT large library viewer \(label), library \(libraryCount)")
+            XCTAssertEqual(total, libraryCount, "The photo viewer counts \(total) photos, the library \(libraryCount)")
+            tap(app.buttons["viewer.close"], "close the photo of the large library")
+            _ = UITestWait.holds(timeout: 10) { !app.buttons["viewer.close"].exists }
+        }
         timed("scroll library", limit: 20, { for _ in 0..<6 { app.swipeUp() } }, until: { libraryPhotos.firstMatch.exists })
         shot("24-large-library")
         timed("overview tab", limit: 10, { tabButton("Übersicht").tap() }, until: { anything("Fotos analysiert").exists })

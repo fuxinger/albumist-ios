@@ -59,6 +59,15 @@ struct PhotoViewer: View {
             // Light controls and title on the black photo background.
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
+                // The title as its own element with a fixed name, so the UI tests read which
+                // photo shows without searching visible text ("11 von 3.000", 26.11.).
+                ToolbarItem(placement: .principal) {
+                    Text("\(index + 1) von \(ids.count)")
+                        .font(.headline)
+                        .monospacedDigit()
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("viewer.position")
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
                         .accessibilityIdentifier("viewer.close")

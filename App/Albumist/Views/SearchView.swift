@@ -260,7 +260,8 @@ struct SearchView: View {
             zoomSource = key
             // The best hits sit above the grid and may lie beyond the pages shown: the
             // viewer always contains the photo that was tapped.
-            var ids = Array(result.ids.prefix(shown))
+            // Every hit, not only the pages of the grid shown (see LibraryView, 26.11.).
+            var ids = result.ids
             if !ids.contains(id) { ids.insert(id, at: 0) }
             viewing = PhotoViewer.Start(id: id, ids: ids)
         } label: {

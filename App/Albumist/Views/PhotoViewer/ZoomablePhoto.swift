@@ -99,12 +99,15 @@ struct ZoomablePhoto: View {
             .gesture(LivePress(isEnabled: live != nil) { began in press(began) })
             .gesture(taps)
             .gesture(magnify)
-            // Moving the zoomed photo wins over swiping to the next one; at normal size the
-            // swipe goes to the next photo.
-            .highPriorityGesture(pan, including: scale > 1 ? .all : .subviews)
-            // At normal size a mostly vertical pull down closes the viewer, as in Photos;
-            // sideways still goes to the next photo.
-            .simultaneousGesture(pullDown, including: scale > 1 ? .subviews : .all)
+            // Moving the zoomed photo wins over swiping to the next one; at normal size it is not
+            // there at all, so no SwiftUI drag sits in front of the pages' swipe (A12).
+            .highPriorityGesture(pan, isEnabled: scale > 1)
+            // At normal size a pull down closes the viewer, as in Photos. A UIKit pan that only
+            // begins when the finger moves mostly downwards (`PullDownToClose`): the SwiftUI drag
+            // it replaces took part in every touch, sideways ones too, and on the iPhone a
+            // finger's swipe to the next photo went through only every third or fourth time
+            // (Build 41, A12). A sideways swipe now never reaches it and belongs to the pages.
+            .gesture(PullDownToClose(isEnabled: scale <= 1, changed: pulled, ended: pullEnded))
     }
 
     /// What the page shows (`ViewerPage`): the picture once its still is sharp, or its video plays
@@ -291,21 +294,19 @@ extension ZoomablePhoto {
     }
 
     /// A finger that drifts while a long press plays the Live Photo pulls nothing.
-    private var pullDown: some Gesture {
-        DragGesture(minimumDistance: 20)
-            .onChanged { value in
-                let t = value.translation
-                guard !pressedLately, t.height > 0, abs(t.height) > abs(t.width) else { return }
-                pull = t.height
-            }
-            .onEnded { value in
-                let t = value.translation
-                if !pressedLately, t.height > 120, abs(t.height) > abs(t.width) {
-                    onClose()
-                } else {
-                    withAnimation(.snappy) { pull = 0 }
-                }
-            }
+    private func pulled(_ distance: CGFloat) {
+        guard !pressedLately else { return }
+        pull = distance
+    }
+
+    /// Far enough, or a quick flick down, closes; anything else springs back. A pull that ended
+    /// up more sideways than down was a swipe to the next photo and never closes.
+    private func pullEnded(_ distance: CGFloat, sideways: CGFloat, speed: CGFloat) {
+        if !pressedLately, distance > sideways, distance > 120 || (distance > 40 && speed > 800) {
+            onClose()
+        } else {
+            withAnimation(.snappy) { pull = 0 }
+        }
     }
 
     // MARK: Zoom

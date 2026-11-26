@@ -29,6 +29,7 @@ struct WorldMapView: View {
         let id = UUID()
         let trip: MapTrip
         let film: TripFilm
+        let clock = FilmClock()
     }
 
     var body: some View {
@@ -37,12 +38,8 @@ struct WorldMapView: View {
                 map
                     .overlay {
                         if let playing {
-                            TripFilmOverlay(playing: playing, photos: data.photos(playing.trip), reader: reader) {
-                                stopFilm()
-                            } onAgain: {
-                                play(playing.trip)
-                            }
-                            .id(playing.id)
+                            TripFilmOverlay(layer: .route, playing: playing, photos: data.photos(playing.trip), reader: reader)
+                                .id(playing.id)
                         }
                     }
             }
@@ -50,6 +47,16 @@ struct WorldMapView: View {
             .onChange(of: proxy.size) { size = proxy.size }
         }
         .ignoresSafeArea()
+        .overlay {
+            if let playing {
+                TripFilmOverlay(layer: .controls, playing: playing, photos: data.photos(playing.trip)) {
+                    stopFilm()
+                } onAgain: {
+                    play(playing.trip)
+                }
+                .id(playing.id)
+            }
+        }
         .overlay(alignment: .top) { if playing == nil { topBar } }
         .overlay { if !data.loaded { ProgressView().accessibilityLabel(Text("Karte wird geladen")) } }
         .sheet(isPresented: sheetShown) {
@@ -77,12 +84,14 @@ struct WorldMapView: View {
     // MARK: The map
 
     private var map: some View {
-        Map(position: $position) {
+        // During the film the camera stays still: the route is drawn on the screen over it.
+        Map(position: $position, interactionModes: playing == nil ? .all : []) {
             if playing == nil {
                 ForEach(groups) { group in
                     Annotation(GlobePinLabel.name(of: group.pin), coordinate: group.pin.coordinate.clCoordinate, anchor: .center) {
                         WorldMapPin(group: group, data: data) { perform(MapTapAction.action(for: group, pins: data.pinsByID)) }
                     }
+                    .annotationTitles(.hidden)
                 }
                 if let home = data.summary?.home {
                     Annotation("Zuhause", coordinate: home.coordinate.clCoordinate, anchor: .center) {
@@ -93,11 +102,11 @@ struct WorldMapView: View {
                             .background(.regularMaterial, in: Circle())
                             .accessibilityLabel(Text("Zuhause"))
                     }
+                    .annotationTitles(.hidden)
                 }
             }
         }
         .mapStyle(.standard(elevation: .flat, emphasis: .muted, pointsOfInterest: .excludingAll))
-        .annotationTitles(.hidden)
         .mapControlVisibility(.hidden)
         .onMapCameraChange(frequency: .onEnd) { context in
             regroup(context.region)

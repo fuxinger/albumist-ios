@@ -71,15 +71,22 @@ public struct TripFilm: Hashable, Sendable {
 
     // MARK: Stations
 
-    /// The trip's places in the order they were visited (`TripGeometry.route`; places the route
-    /// leaves out follow in their order), grouped into stations.
+    /// The trip's places in the order they were visited (`TripGeometry.route`; a place the route
+    /// leaves out joins on its first day, after the route's visits of that day), grouped into
+    /// stations.
     static func stations(of geometry: TripGeometry) -> [TripFilmStation] {
-        var order: [Int] = []
-        for point in geometry.route where order.last != point.placeIndex && geometry.places.indices.contains(point.placeIndex) {
-            order.append(point.placeIndex)
+        var visits: [(day: LocalDay, order: Int, place: Int)] = []
+        for (order, point) in geometry.route.enumerated() where geometry.places.indices.contains(point.placeIndex) {
+            visits.append((point.day, order, point.placeIndex))
         }
-        let routed = Set(order)
-        order += geometry.places.indices.filter { !routed.contains($0) }
+        let routed = Set(visits.map(\.place))
+        for index in geometry.places.indices where !routed.contains(index) {
+            let day = geometry.places[index].days.min() ?? geometry.lastDay
+            visits.append((day, geometry.route.count + index, index))
+        }
+        visits.sort { ($0.day, $0.order) < ($1.day, $1.order) }
+        var order: [Int] = []
+        for visit in visits where order.last != visit.place { order.append(visit.place) }
 
         var groups: [[Int]] = []
         for index in order {

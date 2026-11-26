@@ -10,7 +10,7 @@ struct WorldMapSheet: View {
     @Binding var selection: WorldMapSelection
     let onTap: (MapTapAction) -> Void
     let onPlay: (MapTrip) -> Void
-    @State private var story: PhotoStory?
+    @State private var story: WorldPhotoStory?
     /// Round buttons grow with the text size (their size at the default text size).
     @ScaledMetric(relativeTo: .body) private var buttonSide: CGFloat = 44
     @State private var viewing: PhotoViewer.Start?
@@ -186,7 +186,7 @@ struct WorldMapSheet: View {
             .padding(.vertical, Theme.Spacing.xs)
         case .flyTo, .photoStory:
             mainButton("Fotos ansehen", systemImage: "photo.on.rectangle", identifier: "worldmap.story") {
-                story = PhotoStory(trip: trip, photos: photos, places: Array(trip.geometry.places.indices))
+                story = WorldPhotoStory(trip: trip, photos: photos, places: Array(trip.geometry.places.indices))
             }
             Text(verbatim: hint(trip, film)).font(.subheadline).foregroundStyle(.noteText)
         }
@@ -223,7 +223,7 @@ struct WorldMapSheet: View {
         let subtitle = [WorldMapText.when(trip.geometry), String(localized: "\(count) Fotos")].joined(separator: " · ")
         header(WorldMapText.placeName(trip, index), subtitle, closable: true)
         mainButton("Fotos ansehen", systemImage: "photo.on.rectangle", identifier: "worldmap.story") {
-            story = PhotoStory(trip: trip, photos: photos, places: [index])
+            story = WorldPhotoStory(trip: trip, photos: photos, places: [index])
         }
         if trip.geometry.places.count > 1 {
             Button {

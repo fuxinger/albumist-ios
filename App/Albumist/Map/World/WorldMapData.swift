@@ -105,12 +105,13 @@ enum WorldMapCamera {
     /// shows is moved up by half of it.
     static let coveredShare = 0.4
 
-    /// A region `widthMeters` wide around `center` for a view of `size`, moved so that `center`
-    /// sits in the middle of the part above the sheet.
+    /// A region `widthMeters` wide around `center` for a view of `size` (as tall as the screen,
+    /// so the map keeps the width), moved so that `center` sits in the middle of the part above
+    /// the sheet.
     static func region(center: GeoCoordinate, widthMeters: Double, size: CGSize, covered: Double = coveredShare) -> MKCoordinateRegion {
         let aspect = size.width > 0 ? max(size.height / size.width, 0.5) : 2
         let width = min(max(widthMeters, 1_000), 20_000_000)
-        let height = width * aspect / max(1 - covered, 0.3)
+        let height = width * aspect
         let shiftDegrees = height * covered / 2 / GeoMath.metersPerDegreeLatitude
         let latitude = min(max(center.latitude - shiftDegrees, -80), 80)
         return MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: latitude, longitude: center.longitude),

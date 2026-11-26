@@ -4,7 +4,7 @@ import AlbumistMap
 
 /// The photos of a short trip or of one place, shown one after another (a trip in one town, or
 /// with two stations, has no film: Fuchs, 26.11.2026).
-struct PhotoStory: Identifiable {
+struct WorldPhotoStory: Identifiable {
     let id = UUID()
     let pages: [Page]
 
@@ -36,7 +36,7 @@ struct PhotoStory: Identifiable {
 /// last. With Reduce Motion the photos do not move on by themselves.
 struct PhotoStoryView: View {
     static let secondsPerPhoto = 3.5
-    let story: PhotoStory
+    let story: WorldPhotoStory
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var index = 0
@@ -89,7 +89,7 @@ struct PhotoStoryView: View {
         .statusBarHidden()
         .task(id: index) {
             shownSince = .now
-            guard !reduceMotion else { return }
+            guard !reduceMotion, !story.pages.isEmpty else { return }
             try? await Task.sleep(for: .seconds(Self.secondsPerPhoto))
             guard !Task.isCancelled else { return }
             next()

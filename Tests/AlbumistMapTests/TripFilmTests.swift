@@ -103,6 +103,14 @@ struct TripFilmTests {
         #expect(film.stations.map(\.placeIndices) == [[0], [1], [2]])
     }
 
+    @Test("A place the route leaves out joins on its own day, not at the end")
+    func offRouteInTime() {
+        var geometry = Fixture.geometry([(Self.florenz, 0), (Self.siena, 2), (Self.pisa, 4)])
+        geometry.route.remove(at: 1)
+        let film = TripFilm(geometry: geometry)
+        #expect(film.stations.map(\.placeIndices) == [[0], [1], [2]])
+    }
+
     @Test("The film runs in order: fly in, then each station reached, then the end")
     func timeline() {
         let film = Self.film([Self.florenz, Self.sanGimignano, Self.siena, Self.pisa])
@@ -181,6 +189,13 @@ struct MapTapActionTests {
             Issue.record("expected zoom"); return
         }
         for p in [a, b] { #expect(GeoMath.distance(focus.center, p.coordinate) < focus.radiusMeters) }
+        // Pins on one spot: a tap opens them instead of zooming in for ever.
+        let a2 = Self.pin("a2", .place, 43.77, 11.26, trip: Self.trip, place: 4)
+        #expect(MapTapAction.action(for: MapPinGroup(pin: a, memberIDs: ["a", "a2"]), pins: ["a": a, "a2": a2]) == .showTrip(Self.trip))
+        var other = Self.pin("o", .trip, 43.77, 11.26, trip: AlbumistID("t2"))
+        other.count = 50
+        let first = Self.pin("f", .trip, 43.77, 11.26, trip: Self.trip)
+        #expect(MapTapAction.action(for: MapPinGroup(pin: first, memberIDs: ["f", "o"]), pins: ["f": first, "o": other]) == .showTrip(AlbumistID("t2")))
         // A group of one opens its pin.
         #expect(MapTapAction.action(for: MapPinGroup(pin: a, memberIDs: ["a"]), pins: ["a": a]) == .showPlace(trip: Self.trip, placeIndex: 0))
     }

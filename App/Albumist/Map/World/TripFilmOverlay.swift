@@ -9,59 +9,62 @@ import AlbumistMap
 ///
 /// The map does not move during the film, so the stations are placed on the screen with the
 /// map's own projection (`MapProxy.convert`) at each frame and drawn in a `Canvas`.
+///
+/// Two layers share the film's clock: the route over the map (edge to edge, like the map) and
+/// the title, card and buttons inside the safe area.
 struct TripFilmOverlay: View {
+    enum Layer { case route, controls }
+
     /// The share of the screen the card and the buttons cover at the bottom.
     static let coveredShare = 0.36
 
+    let layer: Layer
     let playing: WorldMapView.PlayingFilm
     let photos: TripPhotos
-    let reader: MapProxy
-    let onClose: () -> Void
-    let onAgain: () -> Void
-    @State private var played = 0.0
+    var reader: MapProxy?
+    var onClose: () -> Void = {}
+    var onAgain: () -> Void = {}
     /// Round buttons grow with the text size (their size at the default text size).
     @ScaledMetric(relativeTo: .body) private var buttonSide: CGFloat = 56
-    @State private var runningSince: Date? = .now
     @Environment(\.scenePhase) private var scenePhase
 
     private var film: TripFilm { playing.film }
     private var trip: MapTrip { playing.trip }
 
+    private var clock: FilmClock { playing.clock }
+
     var body: some View {
-        TimelineView(.animation(paused: runningSince == nil)) { context in
-            let frame = film.frame(at: time(at: context.date))
-            ZStack(alignment: .bottom) {
+        TimelineView(.animation(paused: !clock.isRunning)) { context in
+            let frame = film.frame(at: clock.time(at: context.date))
+            switch layer {
+            case .route:
                 route(frame)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
+            case .controls:
                 VStack(spacing: Theme.Spacing.m) {
+                    titleBar(frame)
+                    Spacer(minLength: 0)
                     card(frame)
                     controls(frame)
                 }
-                .padding(.horizontal, Theme.Spacing.l)
                 .padding(.bottom, Theme.Spacing.l)
             }
-            .overlay(alignment: .top) { titleBar(frame) }
         }
         .onChange(of: scenePhase) {
-            if scenePhase != .active { pause() }
+            if layer == .controls && scenePhase != .active { clock.pause() }
         }
-    }
-
-    // MARK: Time
-
-    private func time(at date: Date) -> Double {
-        played + (runningSince.map { date.timeIntervalSince($0) } ?? 0)
-    }
-
-    private func pause() {
-        guard let since = runningSince else { return }
-        played += Date.now.timeIntervalSince(since)
-        runningSince = nil
-    }
-
-    private func resume() {
-        if runningSince == nil { runningSince = .now }
+        .task(id: playing.id) {
+            // At the end the clock stops, so nothing is drawn again and again for nothing.
+            guard layer == .controls else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                if clock.time(at: .now) >= film.duration {
+                    clock.pause()
+                    return
+                }
+            }
+        }
     }
 
     // MARK: Drawing
@@ -70,6 +73,7 @@ struct TripFilmOverlay: View {
         Canvas { context, _ in
             if case .flyingIn = frame.phase { return }
             let reached = frame.reachedStations
+            guard let reader else { return }
             let points = film.stations.map { reader.convert($0.coordinate.clCoordinate, to: .local) }
             guard points.allSatisfy({ $0 != nil }) else { return }
             let screen = points.compactMap { $0 }
@@ -133,9 +137,9 @@ struct TripFilmOverlay: View {
             .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Spacing.m)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .padding(.horizontal, Theme.Spacing.l)
-        .padding(.vertical, Theme.Spacing.s)
-        .background(.regularMaterial)
         .accessibilityElement(children: .combine)
     }
 
@@ -172,6 +176,7 @@ struct TripFilmOverlay: View {
         .padding(Theme.Spacing.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .padding(.horizontal, Theme.Spacing.l)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("worldmap.film.station")
     }
@@ -191,19 +196,20 @@ struct TripFilmOverlay: View {
         .padding(Theme.Spacing.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .padding(.horizontal, Theme.Spacing.l)
     }
 
     private func controls(_ frame: TripFilmFrame) -> some View {
         HStack(spacing: Theme.Spacing.l) {
             if frame.phase != .finished {
                 Button {
-                    if runningSince == nil { resume() } else { pause() }
+                    if clock.isRunning { clock.pause() } else { clock.resume() }
                 } label: {
-                    Image(systemName: runningSince == nil ? "play.fill" : "pause.fill").font(.title3).frame(width: buttonSide, height: buttonSide)
+                    Image(systemName: clock.isRunning ? "pause.fill" : "play.fill").font(.title3).frame(width: buttonSide, height: buttonSide)
                 }
                 .buttonStyle(.plain)
                 .background(.regularMaterial, in: Circle())
-                .accessibilityLabel(runningSince == nil ? Text("Weiter") : Text("Anhalten"))
+                .accessibilityLabel(clock.isRunning ? Text("Anhalten") : Text("Weiter"))
                 .accessibilityIdentifier("worldmap.film.pause")
             }
             Button(action: onClose) {
@@ -226,5 +232,29 @@ struct TripFilmOverlay: View {
         }
         guard !names.isEmpty else { return nil }
         return String(localized: "mit \(names.formatted(.list(type: .and)))")
+    }
+}
+
+/// The film's time: runs from the start, stops while paused or in the background. Used on the
+/// main thread only (by the film's views).
+@Observable
+final class FilmClock {
+    private var played = 0.0
+    private var runningSince: Date? = .now
+
+    var isRunning: Bool { runningSince != nil }
+
+    func time(at date: Date) -> Double {
+        played + (runningSince.map { date.timeIntervalSince($0) } ?? 0)
+    }
+
+    func pause() {
+        guard let since = runningSince else { return }
+        played += Date.now.timeIntervalSince(since)
+        runningSince = nil
+    }
+
+    func resume() {
+        if runningSince == nil { runningSince = .now }
     }
 }

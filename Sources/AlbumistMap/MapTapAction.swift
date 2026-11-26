@@ -25,9 +25,23 @@ public enum MapTapAction: Hashable, Sendable {
     /// country) zooms in on itself instead of doing nothing.
     public static func action(for group: MapPinGroup, pins: [String: MapPin]) -> MapTapAction {
         let members = group.memberIDs.compactMap { pins[$0] }
-        if members.count > 1 { return zoom(on: members.map(\.coordinate)) }
-        return action(for: members.first ?? group.pin)
+        guard members.count > 1 else { return action(for: members.first ?? group.pin) }
+        let coordinates = members.map(\.coordinate).filter(\.isPlausible)
+        let center = GeoMath.centroid(coordinates) ?? group.pin.coordinate
+        let spread = coordinates.reduce(0) { max($0, GeoMath.distance(center, $1)) }
+        // Pins on one spot stay one group however far the map zooms in: a tap opens them
+        // instead (their trip, or the pin with the most photos) and never does nothing.
+        if spread < sameSpotMeters {
+            let trips = Set(members.compactMap(\.tripID))
+            if trips.count == 1, let trip = trips.first, members.allSatisfy({ $0.tripID != nil }) { return .showTrip(trip) }
+            let best = members.max { a, b in a.count != b.count ? a.count < b.count : a.id > b.id }
+            return action(for: best ?? group.pin)
+        }
+        return zoom(on: coordinates)
     }
+
+    /// Group members closer together than this count as one spot.
+    public static let sameSpotMeters = 2_500.0
 
     public static func action(for pin: MapPin) -> MapTapAction {
         switch pin.level {

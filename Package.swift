@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "AlbumistStore", targets: ["AlbumistStore"]),
         .library(name: "AlbumistWorldMap", targets: ["AlbumistWorldMap"]),
         .library(name: "AlbumistEngine", targets: ["AlbumistEngine"]),
+        .library(name: "AlbumistMap", targets: ["AlbumistMap"]),
         .library(name: "AlbumistTestSupport", targets: ["AlbumistTestSupport"]),
     ],
     targets: [
@@ -48,6 +49,13 @@ let package = Package(
             dependencies: ["AlbumistCore", "AlbumistStore"],
             swiftSettings: strictSettings
         ),
+        // "Deine Welt" (map concept 2.0, approved 20.11.2026): the map summary, its numbers and
+        // the data of the share images. Its own module, so the map builds and tests on its own.
+        .target(
+            name: "AlbumistMap",
+            dependencies: ["AlbumistCore"],
+            swiftSettings: strictSettings
+        ),
         .target(
             name: "AlbumistTestSupport",
             dependencies: ["AlbumistCore"],
@@ -71,6 +79,11 @@ let package = Package(
         .testTarget(
             name: "AlbumistCoreTests",
             dependencies: ["AlbumistCore", "AlbumistWorldMap", "AlbumistTestSupport"],
+            swiftSettings: strictSettings
+        ),
+        .testTarget(
+            name: "AlbumistMapTests",
+            dependencies: ["AlbumistMap", "AlbumistCore", "AlbumistWorldMap", "AlbumistTestSupport"],
             swiftSettings: strictSettings
         ),
         .testTarget(

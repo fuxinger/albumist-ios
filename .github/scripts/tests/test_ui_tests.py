@@ -1742,7 +1742,7 @@ class SleepRuleTests(unittest.TestCase):
     # Calls of sleep()/usleep() per file (code only). The count may only go down; lower it here
     # when a sleep becomes a condition wait.
     CEILING = {
-        "AccessibilityUITests.swift": 6,
+        "AccessibilityUITests.swift": 5,
         "DeviceConditionUITests.swift": 14,
         "SearchUITests.swift": 1,
         "AlbumistFlowUITests.swift": 45,

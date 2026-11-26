@@ -67,7 +67,8 @@ struct UITestTabsSourceTests {
             classes.append(URL(fileURLWithPath: path).lastPathComponent)
         }
         #expect(classes.sorted() == ["AccessibilityUITests.swift", "AlbumistFlowUITests.swift", "DeviceConditionUITests.swift",
-                                     "FrameUITests.swift", "PerformanceUITests.swift", "SearchUITests.swift"], "\(classes.sorted())")
+                                     "FrameUITests.swift", "MapPrototypeUITests.swift", "PerformanceUITests.swift",
+                                     "SearchUITests.swift"], "\(classes.sorted())")
     }
 
     /// The one `tabButton` leaves the search when its tab is missing or cannot be tapped while a

@@ -247,6 +247,7 @@ struct AtlasView: View {
                     .disabled(order.isEmpty)
             }
         }
+        .mapPrototypeEntry()
         .onChange(of: year) {
             // Switching the year shows the result at once (no fill animation), also a year whose
             // atlas is still being made.

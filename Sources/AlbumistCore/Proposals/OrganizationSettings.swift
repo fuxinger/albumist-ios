@@ -164,6 +164,11 @@ public struct PrivacySettings: Hashable, Sendable, Codable {
     public var allowCellularDownloads = false
     /// Reverse geocoding uses Apple's service; can be turned off (then only offline data).
     public var allowOnlineGeocoding = true
+    /// "Apples Karte verwenden" (map concept 2.0, decision Fuchs 20.11.2026: on by default): a
+    /// trip and its playback show Apple's map, which loads map images of the area on screen from
+    /// Apple's map service (Apple sees which area and the IP address, never a photo). Off: the
+    /// trip shows Albumist's own map and plays as a slideshow; the globe never needs the network.
+    public var useAppleMaps = true
     public var excludedAlbumIDs: Set<CollectionID> = []
     public init() {}
 }

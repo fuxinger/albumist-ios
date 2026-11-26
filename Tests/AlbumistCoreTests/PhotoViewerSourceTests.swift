@@ -226,7 +226,7 @@ struct PhotoViewerSourceTests {
         #expect(call.contains("isVideoAutoplayEnabled"))
         try Self.theLongPressIsUIKits(viewer)
         // The touch that was a press is neither a tap nor a pull down to close.
-        for gesture in ["private var taps", "private var pullDown"] {
+        for gesture in ["private var taps", "private func pulled(", "private func pullEnded("] {
             let body = try #require(AppSource.body(of: gesture, in: viewer))
             #expect(body.contains("pressedLately"), "\(gesture) acts on a long press")
         }
@@ -295,7 +295,8 @@ struct PhotoViewerSourceTests {
         let content = try #require(AppSource.body(of: "private func content(in size: CGSize)", in: source))
         var last = content.startIndex
         for step in [".contentShape(Rectangle())", ".gesture(LivePress(isEnabled: live != nil) { began in press(began) })",
-                     ".gesture(taps)", ".gesture(magnify)", ".highPriorityGesture(pan,", ".simultaneousGesture(pullDown,"] {
+                     ".gesture(taps)", ".gesture(magnify)", ".highPriorityGesture(pan, isEnabled: scale > 1)",
+                     ".gesture(PullDownToClose(isEnabled: scale <= 1,"] {
             let found = try #require(content.range(of: step, range: last..<content.endIndex), "\(step) is not in its place")
             last = found.upperBound
         }

@@ -134,7 +134,7 @@ extension PhotoViewerSourceTests {
                      "\"viewer.close\"", "\"viewer.info\"", "IgnoreUndoBar()", ".accessibilityAction(.escape)",
                      "AssetDetailView(facts:", "AddToAlbumSheet(assets:", "init(ids: [AssetID], current: AssetID, showsInfo: Bool = false)",
                      "Text(\"Foto wird geladen\")", "\"viewer.unavailable\"", "ThumbnailCache.shared.largeImage(for:",
-                     "DragGesture(minimumDistance: 20)", "onClose()", ".tabViewStyle(.page(indexDisplayMode: .never))"] {
+                     "PullDownToClose(isEnabled:", "onClose()", ".tabViewStyle(.page(indexDisplayMode: .never))"] {
             #expect(viewer.contains(kept), "\(kept) is gone")
         }
         let thumbnails = AppSource.code(try ThumbnailSource.read())

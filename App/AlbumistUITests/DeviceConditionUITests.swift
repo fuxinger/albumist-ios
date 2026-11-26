@@ -1757,8 +1757,10 @@ final class DeviceConditionUITests: XCTestCase {
         let began = Date()
         defer { print("UI_TIMING \(context) viewer counts of the lists \(String(format: "%.1f", Date().timeIntervalSince(began))) s") }
         var checked: [String] = []
-        for list in ["Nicht sortiert", "Unsicher", "Sortiert", "Ignoriert", "Alle"] {
-            let chip = app.buttons[list]
+        // The tab's filters by their fixed names (`UITestScreens.Unsorted.filters`; since design
+        // wave 1 "Unsortiert", "Unsicher" and "Ignoriert", no "Sortiert" or "Alle").
+        for list in UITestScreens.Unsorted.filters {
+            let chip = UITestScreens.Unsorted.filter(app, list)
             guard chip.waitForExistence(timeout: 5) else {
                 print("UI_FACT \(context) list \(list) not offered")
                 continue
@@ -1783,8 +1785,9 @@ final class DeviceConditionUITests: XCTestCase {
                           "\(context): the photo viewer of \(list) counts \(total ?? -1) photos, the list \(listed)")
             checked.append(list)
         }
-        // Never a pass without a check: "Alle" always has photos here.
-        XCTAssertTrue(checked.contains("Alle"), "\(context): no viewer count was compared (lists checked: \(checked))")
+        // Never a pass without a check: "Unsortiert" has photos here (the large library and the
+        // stress run are analysed only in part, or sort far fewer photos than they hold).
+        XCTAssertTrue(checked.contains("unorganized"), "\(context): no viewer count was compared (lists checked: \(checked))")
     }
 
     /// The card's progress line as the app recorded it (`-AlbumistUITestProgressLog`): every change

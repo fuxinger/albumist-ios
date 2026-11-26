@@ -6,6 +6,7 @@ import XCTest
 /// cycling between duplicate values" (87 times in the English pass's app, never on main): a view
 /// that keeps changing gives the audit no still screen. The probe names what changes and which
 /// audit type does not complete, so the cause is read from the log, not guessed.
+@MainActor
 enum UITestScreenProbe {
     /// Snapshots in a row (each takes a moment on a busy Mac, so no pause between them): each
     /// element whose frame, label or value is not the same in all of them (`A11Y_PROBE_MOVING`),

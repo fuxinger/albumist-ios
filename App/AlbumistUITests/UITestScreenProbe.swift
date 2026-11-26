@@ -37,8 +37,21 @@ enum UITestScreenProbe {
         }
     }
 
-    /// Each audit type alone, timed: which one does not complete (`A11Y_PROBE_AUDIT`).
+    /// Screens whose audit types were already tried alone in this test process.
+    private static var probed: Set<String> = []
+
+    /// Each audit type alone, timed: which one does not complete (`A11Y_PROBE_AUDIT`). Once per
+    /// test process, for the first screen whose audit failed twice: each type can take up to the
+    /// audit's own time limit, so a pass with several such screens would add four audits each to
+    /// an already slow pass (UI run 45884483812: the accessibility group's tests took 73 min in
+    /// first pass and repeat, against 25-35 min green; its log was lost, so this is a bound, not
+    /// a proven cause). Later screens print `A11Y_PROBE_AUDIT … skipped`.
     static func auditTypesAlone(_ app: XCUIApplication, screen: String) {
+        guard probed.isEmpty else {
+            print("A11Y_PROBE_AUDIT \(screen) skipped (types already tried alone on \(probed.sorted().joined(separator: ", ")))")
+            return
+        }
+        probed.insert(screen)
         let types: [(String, XCUIAccessibilityAuditType)] = [
             ("contrast", .contrast), ("textClipped", .textClipped), ("hitRegion", .hitRegion),
             ("sufficientElementDescription", .sufficientElementDescription)

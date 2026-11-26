@@ -75,8 +75,9 @@ enum UITestAppEnd {
         defer { try? FileManager.default.removeItem(atPath: answer) }
         let start = Date()
         print("UI_HOST_SETTLE \(answer)")
-        // 60 s of the Mac's wait, its probes (up to 30 s each) and the 2 s it reads the log.
-        _ = UITestWait.holds(timeout: 100, interval: 1) { FileManager.default.fileExists(atPath: answer) }
+        // 60 s of the Mac's wait plus its last probe and process list (up to 30 s each) and the
+        // 2 s it reads the log: up to about 125 s.
+        _ = UITestWait.holds(timeout: 150, interval: 1) { FileManager.default.fileExists(atPath: answer) }
         let reply = (try? String(contentsOfFile: answer, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
         print("UI_TIMING simulator settle after an end of \(Int(took)) s: \(Int(Date().timeIntervalSince(start))) s, "
               + "the Mac answered '\(reply ?? "nothing")'")

@@ -500,7 +500,7 @@ class SelectionTests(unittest.TestCase):
         # Z4 (27.11.): one repeat on a fresh simulator, counted; the same again is red.
         code, marker, log = self.run_with_passes([LOST_UP, LOST_UP])
         self.assertEqual((code, marker), (1, False), log)
-        self.assertIn("the repeat after a late launch was not green either", log)
+        self.assertIn("the repeat after an app XCTest lost although it came up was not green either", log)
         self.assertIn("UI_RESULT device fail", log)
         code, marker, log = self.run_with_passes([LOST_UP, "** TEST SUCCEEDED **\n" + PASSED_ONE])
         self.assertEqual((code, marker), (0, False), log)
@@ -1997,6 +1997,9 @@ UI_FACT app lifecycle foreground at 23:11:24.9 UTC
 UI_FACT app lifecycle active at 23:11:25.1 UTC
 {extra}Test Case '-[AlbumistUITests.DeviceConditionUITests test02_LowBatteryAndLowPowerModeWording]' failed (233.198 seconds).
 Test Case '-[AlbumistUITests.DeviceConditionUITests test03_BackgroundExpiryAndRelaunchContinue]' started.
+UI_FACT clock 23:14:39.8 end the app before the next launch
+UI_HOST_TERMINATE_APP 1795734879 21345
+UI_TIMING app ended before the next launch 3 s (by the Mac, ended)
 UI_FACT clock 23:14:43.7 launch
 UI_FACT app process 22569 started 23:14:45.9 UTC, its code ran from 23:14:55.3 UTC
 UI_FACT app lifecycle active at 23:14:57.2 UTC
@@ -2049,6 +2052,31 @@ class LostWhileUpTests(unittest.TestCase):
         # Short stalls (2.1-2.2 s in all three cases) do not.
         self.assertEqual(ui_tests.decide(65, self.log("UI_FACT main stall 2.1 s from 23:11:26.0 UTC\n"),
                                          bundle=LOST_UP_BUNDLE)[0], "retry")
+
+    def test_a_hang_that_never_ended_stays_red(self):
+        # The app writes "main stall" only when a stall ends; a hang for good leaves stack lines.
+        hang = "".join(f"UI_FACT main stack after {n}.0 s of the stall from 23:11:26.0 UTC: x\n" for n in (2, 5, 10))
+        self.assertEqual(ui_tests.decide(65, self.log(hang), bundle=LOST_UP_BUNDLE)[0], "fail")
+
+    def test_a_loss_after_test_steps_is_no_launch_loss_and_stays_red(self):
+        later = self.log().replace("UI_FACT clock 23:11:10.2 launch\n",
+                                   "UI_FACT clock 23:11:10.2 launch\nUI_STEP_OK prepared\n")
+        self.assertEqual(ui_tests.decide(65, later, bundle=LOST_UP_BUNDLE)[0], "fail")
+
+    def test_an_app_that_left_the_screen_or_was_not_ended_later_stays_red(self):
+        left = self.log("UI_FACT app lifecycle resign-active at 23:11:30.0 UTC\n")
+        self.assertEqual(ui_tests.decide(65, left, bundle=LOST_UP_BUNDLE)[0], "fail")
+        gone = self.log("UI_FACT app lifecycle background at 23:11:30.0 UTC\n")
+        self.assertEqual(ui_tests.decide(65, gone, bundle=LOST_UP_BUNDLE)[0], "fail")
+        # The next test ended another process (or none): not shown that the app stayed.
+        other = self.log().replace("UI_HOST_TERMINATE_APP 1795734879 21345", "UI_HOST_TERMINATE_APP 1795734879 21399")
+        self.assertEqual(ui_tests.decide(65, other, bundle=LOST_UP_BUNDLE)[0], "fail")
+
+    def test_over_midnight_it_still_counts(self):
+        night = (self.log().replace("23:11:10.2 launch", "23:59:58.0 launch")
+                 .replace("started 23:11:15.5", "started 00:00:03.0").replace("foreground at 23:11:24.9", "foreground at 00:00:12.0")
+                 .replace("active at 23:11:25.1", "active at 00:00:13.0"))
+        self.assertIn("its screen 14 s", ui_tests.decide(65, night, bundle=LOST_UP_BUNDLE)[1][0])
 
     def test_any_other_failure_keeps_it_red(self):
         other = self.log("/x/DeviceConditionUITests.swift:120: error: -[AlbumistUITests.DeviceConditionUITests "

@@ -94,8 +94,9 @@ a crash report means the app crashed; a process that started 30 s or more after 
 a process that started at once means the app itself did not come up in time (app side);
 without a record of a new process the cause stays open. The exception (Z4, 27.11.,
 `lost_while_up`): when that loss is the pass's only failure, no crash report was written and the
-app's own record shows it on screen within 60 s of the launch request without a long stall,
-XCTest lost an app that had come up; the pass is repeated once on a fresh simulator, counted,
+app's own record shows it in the foreground within 60 s of the launch request, without a long
+stall, staying there until the next test's end of the app ended that same process, XCTest lost
+an app that had come up; the pass is repeated once on a fresh simulator, counted,
 and a red repeat is red. After an end of the app that took 8 s or more, the test also asks the
 Mac to wait for the simulator before the launch (UI_HOST_SETTLE). A pass that ran no test at all
 fails (a renamed test would otherwise make an empty, green selection), and so does a group in
@@ -298,6 +299,11 @@ LATE_START = 30.0
 # The app's own record of reaching the screen (UITestLifecycle, read from the file the app writes).
 APP_UP = re.compile(r"UI_FACT app lifecycle (?:foreground|active) at (\d\d):(\d\d):(\d\d(?:\.\d)?) UTC")
 MAIN_STALL = re.compile(r"UI_FACT main stall (\d+(?:\.\d+)?) s from")
+# A stall that never ended leaves only these (the app writes "main stall" when one ends).
+MAIN_STACK = re.compile(r"UI_FACT main stack after (\d+(?:\.\d+)?) s of the stall")
+APP_LEFT = re.compile(r"UI_FACT app lifecycle (?:resign-active|background)\b")
+# A step of the test between the launch and the loss: then it was not lost at the launch.
+TEST_STEP = re.compile(r"UI_STEP|UI_FACT clock \S+ wait (?:start|end)")
 # Z4 (27.11.): the app came up this soon after the launch request, its main thread never stalled
 # this long, and XCTest still lost it minutes later. Seen: up after 15-30 s, stalls of 2.1-2.2 s.
 UP_WITHIN = 60.0
@@ -311,24 +317,36 @@ def clock_seconds(match: re.Match, first: int) -> float:
 def app_came_up(lines: list[str], index: int) -> tuple[float, float] | None:
     """For the lost app of lines[index]: (s from the launch request to the new process, s to the
     app's first foreground/active) when the app's own record shows that it came up within
-    UP_WITHIN s and its main thread never stalled UP_STALL_LIMIT s or more; else None.
+    UP_WITHIN s and its main thread never stalled UP_STALL_LIMIT s or more (also a stall that
+    never ended, seen only as "main stack after N s"), it never left the screen afterwards, and
+    the next test's end of the app (UI_HOST_TERMINATE_APP ... <pid>) ended that same process;
+    else None.
 
-    The record is printed after the failure, up to the next test's start; the launch request is
-    the last "UI_FACT clock ... launch" before it in the same test."""
+    The record is printed after the failure, up to the next test's start; the launch request
+    must come right before the failure in the same test, with no test step between them."""
     launch = process = up = None
     for earlier in reversed(lines[:index]):
-        if STARTED.search(earlier):
+        if STARTED.search(earlier) or TEST_STEP.search(earlier):
             break
-        launch = launch or LAUNCH_CLOCK.search(earlier)
-    for later in lines[index + 1:]:
+        if launch := LAUNCH_CLOCK.search(earlier):
+            break
+    ended = False
+    for number, later in enumerate(lines[index + 1:]):
         if STARTED.search(later):
+            # The same process stayed until the next test's end of the app ended it.
+            ended = bool(process) and any(
+                (term := HOST_TERMINATE.search(line)) and term.group(2) == process.group(1)
+                for line in lines[index + 1 + number:index + 1 + number + 40])
             break
-        if (stall := MAIN_STALL.search(later)) and float(stall.group(1)) >= UP_STALL_LIMIT:
+        stall = MAIN_STALL.search(later) or MAIN_STACK.search(later)
+        if stall and float(stall.group(1)) >= UP_STALL_LIMIT:
             return None
         process = process or APP_PROCESS.search(later)
         if process and not up:
             up = APP_UP.search(later)
-    if not (launch and process and up):
+        elif up and APP_LEFT.search(later):
+            return None
+    if not (launch and process and up and ended):
         return None
     start = (clock_seconds(process, 2) - clock_seconds(launch, 1)) % 86_400
     shown = (clock_seconds(up, 1) - clock_seconds(launch, 1)) % 86_400
@@ -1751,7 +1769,9 @@ def run_group(args) -> int:
                     # although it came up); a repeat that is not green is a real finding (second
                     # review: "no result" would hide it).
                     final = "fail"
-                    reasons = ["the repeat after a late launch was not green either (counted as red)"] + reasons
+                    cause = "a late launch" if any(r.startswith(LATE_LAUNCH_REASON) for r in retry_reasons) \
+                        else "an app XCTest lost although it came up"
+                    reasons = [f"the repeat after {cause} was not green either (counted as red)"] + reasons
                 again = daemon_crash_tests(first_log) & daemon_crash_tests(text)
                 if final == "infra" and again:
                     # The daemon crashed again in the same test: likely caused by what the test

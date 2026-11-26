@@ -331,7 +331,7 @@ struct DataSafetyTests {
         let size = (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
         print("[measure] open with integrity check, \(size / 1_000_000) MB: \(elapsed)")
         #expect(try await reopened?.assetCount() == 20_000)
-        #expect(elapsed < .seconds(5))
+        #expect(TimingLimit.holds(elapsed, under: .seconds(5), "reopening the store"))
     }
 
     /// An empty file (a copy that never got its content) starts as a new database.

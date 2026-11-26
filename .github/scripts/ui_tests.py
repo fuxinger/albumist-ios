@@ -331,6 +331,54 @@ def lost_app_at_launch(log: str, crash_reports: list[str] | None = None) -> list
     return reasons
 
 
+LAUNCH_FAIL = re.compile(r"Failed to launch <XCUIApplication|Timed out while launching application")
+LATE_LAUNCH_REASON = "launch timed out:"
+
+
+def late_launch(log: str, crash_reports: list[str] | None = None) -> list[str]:
+    """A launch that XCTest gave up on because the simulator started the app process late
+    (rule of 26.11., coordinator for Fuchs): every failure of the pass is a launch failure, no
+    crash report was written, and for each the app process started LATE_START s or more after
+    the launch request (UI_FACT clock ... launch, UI_FACT app process ... started). The delay
+    then lies before any code of the app ran. Stress run 45722861565: 110 s to the process, 44 s
+    more to the app's first code, at load 700-804; in green runs 4-8 s. Such a pass is repeated
+    once on a fresh simulator, counted like every repeat; a red repeat is a real finding.
+    [] when the picture is not this one."""
+    if crash_reports:
+        return []
+    lines = [line for line in log.splitlines() if not DATA_LINE.search(line)]
+    errors = [index for index, line in enumerate(lines) if strong_real(line)]
+    if not errors or not all(LAUNCH_FAIL.search(lines[index]) or AGGREGATE.search(lines[index])
+                             or FAILED_CASE.search(lines[index]) for index in errors):
+        return []
+    launches = [index for index in errors if LAUNCH_FAIL.search(lines[index])]
+    if not launches:
+        return []
+
+    def seconds(match: re.Match, first: int) -> float:
+        return int(match.group(first)) * 3600 + int(match.group(first + 1)) * 60 + float(match.group(first + 2))
+
+    reasons = []
+    for index in launches:
+        launch = process = None
+        for earlier in reversed(lines[:index]):
+            if STARTED.search(earlier):
+                break
+            launch = LAUNCH_CLOCK.search(earlier) if launch is None else launch
+        for later in lines[index + 1:]:
+            if STARTED.search(later):
+                break
+            process = process or APP_PROCESS.search(later)
+        if not (launch and process):
+            return []
+        late = (seconds(process, 2) - seconds(launch, 1)) % 86_400
+        if late < LATE_START:
+            return []
+        reasons.append(f"{LATE_LAUNCH_REASON} the simulator started the app process {late:.0f} s after the launch "
+                       f"request, no crash report (simulator side, repeated once)")
+    return reasons[:1]
+
+
 def daemon_crash_tests(log: str) -> set[tuple[str, str]]:
     """(class, test) of each test in which testmanagerd crashed."""
     hit = set()
@@ -396,6 +444,16 @@ def decide(status: int, log: str, crash_reports: list[str] | None = None, probe:
     real += [reason for reason in lost_app_at_launch(log, crash_reports) if reason not in real]
     if crash_reports:
         real.append("crash report " + ", ".join(os.path.basename(p) for p in crash_reports))
+    late = late_launch(log, crash_reports)
+    if late and all(LAUNCH_FAIL.search(finding) for finding in bundle or []):
+        # Every reason the log gives must come from the launch failure and the lines XCTest
+        # writes around any failure; anything else (an accessibility finding, a hang, a Fatal
+        # error, a recorded issue) keeps it red (second review 26.11.).
+        launch_lines = [line for line in log.splitlines() if LAUNCH_FAIL.search(line) or FAILED_CASE.search(line)
+                        or AGGREGATE.search(line) or "TEST EXECUTE FAILED" in line or "Executed " in line]
+        explained = scan("\n".join(launch_lines))[0]
+        if all(reason in explained for reason in real):
+            return "retry", late
     real += list(bundle or [])
     if real:
         return "fail", real
@@ -1335,6 +1393,28 @@ MTC_PROBE_ON = False
 CONSOLES: list[str] = []
 
 
+def swiftui_stream_command(udid: str) -> list[str]:
+    """The live system log of a pass (`<name>-swiftui.txt`): SwiftUI's runtime warnings, the
+    app's faults (UI_MAIN_HANG, UI_MAIN_STALL and the main thread checker line are faults,
+    UITestSupport `note`) and navigation warnings.
+
+    At the default level, not `--level debug` (until 25.11.): streaming at debug level makes
+    every process of the simulator hand its debug and info messages to diagnosticd, which
+    then filters them by the predicate. In the full UI run 45662948348 the simulator's
+    diagnosticd was the second largest process after the app (PASS_TOP, about a quarter of
+    a core on average in the device group), and every line the gates read from this file was
+    a fault (UI_RUNTIME_WARNING type `F`). The default level keeps default, error and fault
+    messages, so no line the gates use is lost.
+
+    Not proven by a run: that SwiftUI's navigation warning ("no matching navigationDestination")
+    and "Publishing changes from within view updates" arrive as faults too. They are Xcode
+    runtime issues, which SwiftUI logs as faults, but run 45662948348 was green and had none
+    (second review 25.11.). The first run that shows one settles it."""
+    return ["xcrun", "simctl", "spawn", udid, "log", "stream", "--style", "compact",
+            "--predicate", 'process == "Albumist" AND (subsystem == "com.apple.SwiftUI" OR messageType == fault '
+                           'OR eventMessage CONTAINS[c] "navigationDestination")']
+
+
 def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str, str, float, bool]:
     """One xcodebuild run; returns (status, log text, result bundle path, start time, whether
     the watchdog stopped it)."""
@@ -1354,11 +1434,7 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     # SwiftUI reports broken navigation (link without destination) and similar runtime problems
     # only in the system log, so it is recorded during the whole pass.
     with open(os.path.join(args.out, f"{args.name}-swiftui.txt"), "a") as swiftui:
-        stream = subprocess.Popen(
-            ["xcrun", "simctl", "spawn", args.udid, "log", "stream", "--style", "compact", "--level", "debug",
-             "--predicate", 'process == "Albumist" AND (subsystem == "com.apple.SwiftUI" OR messageType == fault '
-                            'OR eventMessage CONTAINS[c] "navigationDestination")'],
-            stdout=swiftui, stderr=subprocess.STDOUT)
+        stream = subprocess.Popen(swiftui_stream_command(args.udid), stdout=swiftui, stderr=subprocess.STDOUT)
     recorder = None
     if args.video and not os.path.exists(args.video):
         recorder = Recorder(args.udid, log_path, args.video)
@@ -1568,6 +1644,11 @@ def run_group(args) -> int:
                                           earlier=first_log)
                 # "infra": the repeat failed on the simulator or XCTest alone again.
                 final = {"pass": "pass", "retry": "infra"}.get(verdict, "fail")
+                if final == "infra" and any(r.startswith(LATE_LAUNCH_REASON) for r in retry_reasons):
+                    # Rule of 26.11.: one repeat for a late launch; a repeat that is not green
+                    # is a real finding (second review: "no result" would hide it).
+                    final = "fail"
+                    reasons = ["the repeat after a late launch was not green either (counted as red)"] + reasons
                 again = daemon_crash_tests(first_log) & daemon_crash_tests(text)
                 if final == "infra" and again:
                     # The daemon crashed again in the same test: likely caused by what the test

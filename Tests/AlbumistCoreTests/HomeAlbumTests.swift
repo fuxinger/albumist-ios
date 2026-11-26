@@ -181,6 +181,33 @@ struct HomeAlbumTests {
         #expect(frequent(analysis).map(\.id) == [AlbumistID("fp-park")])
     }
 
+    /// Fourth review: places next door with evenings of their own (a café, a partner's flat
+    /// 250 m away) are no part of the home; nor does a place with one evening make a café
+    /// easier to take for the home.
+    @Test func neighboursWithEveningsOfTheirOwnStay() {
+        let nextDoor = GeoCoordinate(latitude: 48.1394, longitude: 11.5754)
+        let home = Self.facts("flat", at: Self.flat, days: 180, every: 2)
+        let cafe = Self.facts("cafe", at: nextDoor, days: 30, every: 7, from: "2025-01-02")
+        let partner = Self.facts("partner", at: nextDoor, days: 80, every: 3, from: "2025-01-02")
+        for (name, other) in [("fp-cafe", cafe), ("fp-partner", partner)] {
+            let analysis = AnalysisSnapshot(facts: home + other, frequentPlaces: [Self.place("fp-flat", at: Self.flat, home), Self.place(name, at: nextDoor, other)])
+            #expect(frequent(analysis).map(\.id) == [AlbumistID(name)])
+        }
+        // A café with a third of the evenings at home, the flat no frequent place: shown, also
+        // with a place far off in town that has one evening in its time.
+        let alone = Self.facts("cafe", at: Self.park, days: 40, every: 9)
+        let town = (0..<80).map { i -> AssetFacts in
+            let spot = GeoCoordinate(latitude: 48.10 + Double(i % 40) * 0.002, longitude: 11.50 + Double(i / 40) * 0.01)
+            let asset = AssetSnapshot(id: AssetID("town-\(i)"), creationDate: Fixture.date("2025-01-01").addingTimeInterval(Double(i) * 4 * 86_400 + 20 * 3_600), location: spot)
+            return AssetFacts(asset: asset, place: Self.munich, placeSource: .gpsReverseGeocoded, atHome: true)
+        }
+        let far = GeoCoordinate(latitude: 48.30, longitude: 11.70)
+        let weak = Self.facts("weak", at: far, days: 5, every: 1, from: "2024-03-01") + Self.facts("weak-b", at: far, days: 1, every: 1, from: "2025-06-01")
+        let analysis = AnalysisSnapshot(facts: alone + town + weak,
+                                        frequentPlaces: [Self.place("fp-cafe", at: Self.park, alone), Self.place("fp-weak", at: far, weak)])
+        #expect(frequent(analysis).contains { $0.id == AlbumistID("fp-cafe") })
+    }
+
     /// "Kein Zuhause" (no photo is at home) or a place away from home: nothing is left out.
     @Test func withoutAHomeNothingIsLeftOut() {
         let home = Self.facts("flat", at: Self.flat, days: 180, every: 2, atHome: false)

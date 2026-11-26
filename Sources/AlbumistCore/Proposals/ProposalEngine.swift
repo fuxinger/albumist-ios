@@ -597,11 +597,13 @@ public struct ProposalEngine: Sendable {
     ///   flat on more than half as many evenings: nothing is left out rather than the wrong
     ///   one), and
     /// - at least `homeShareOfEvenings` of the evenings with photos at home in its span, or
-    ///   `loneHomeShareOfEvenings` without any competitor (a café visited in the evening among
+    ///   `loneHomeShareOfEvenings` without a competitor of at least `minimumHomeEvenings` there
+    ///   (a café visited in the evening among
     ///   evening photos all over town is not the home).
     /// Judged pairwise, a park or the parents' place visited for years never ties two homes of
-    /// a move together: each flat is judged in its own years. A home split in two clusters: the
-    /// candidates within `sameHomeMeters` of a home with evenings in its span go with it.
+    /// a move together: each flat is judged in its own years. A home split in two clusters: a
+    /// candidate within `sameHomeMeters` of a home whose evenings are mostly the home's goes
+    /// with it.
     /// "Kein Zuhause" marks no photo at home: then no place is home.
     static func homePlaces(_ places: [FrequentPlace], facts: [AssetFacts], calendar: Calendar, radius: Double) -> Set<AlbumistID> {
         guard !places.isEmpty else { return [] }
@@ -657,19 +659,23 @@ public struct ProposalEngine: Sendable {
                 && GeoMath.distance(places[other.index].centroid, center) <= 2 * radius {
                 let theirs = between(other.evenings, first, last)
                 guard theirs > 0 else { continue }
-                lone = false
+                // Only a real competitor lowers the share needed (fourth review: a place with
+                // one evening there made a café easier to take for the home).
+                if theirs >= minimumHomeEvenings { lone = false }
                 if Double(mine) < homeLead * Double(theirs) { leads = false; break }
             }
             let share = lone ? loneHomeShareOfEvenings : homeShareOfEvenings
             if leads, Double(mine) >= share * Double(between(sortedEvenings, first, last)) { homes.append(c.index) }
         }
         var result = Set(homes.map { places[$0].id })
-        // A home split in two clusters: the other part goes with it.
+        // A home split in two clusters (GPS drift): a place close by whose evenings are mostly
+        // the home's own evenings goes with it. A café, a bar or a partner's flat next door has
+        // evenings of its own and stays (fourth review).
         for c in candidates where !result.contains(places[c.index].id) {
-            let (first, last) = span(c)
             for h in homes where GeoMath.distance(places[h].centroid, places[c.index].centroid) <= sameHomeMeters {
-                let home = candidates.first { $0.index == h }!
-                if between(home.evenings, first, last) > 0 { result.insert(places[c.index].id); break }
+                let home = Set(candidates.first { $0.index == h }?.evenings ?? [])
+                let shared = c.evenings.lazy.filter(home.contains).count
+                if Double(shared) >= sameHomeSharedEvenings * Double(c.evenings.count) { result.insert(places[c.index].id); break }
             }
         }
         return result
@@ -685,8 +691,10 @@ public struct ProposalEngine: Sendable {
     static let homeShareOfEvenings = 0.25
     /// The same without any competitor: a lone place must hold half of them.
     static let loneHomeShareOfEvenings = 0.5
-    /// Another place this close to the home, in its time, is part of it (a home split in two clusters).
-    static let sameHomeMeters = 300.0
+    /// Another place this close to the home whose evenings are mostly the home's (this share)
+    /// is part of it (a home split in two clusters).
+    static let sameHomeMeters = 200.0
+    static let sameHomeSharedEvenings = 0.8
 
     /// The name the user gave a frequent place in the settings (nil: none yet).
     func frequentPlaceName(_ place: FrequentPlace) -> String? {

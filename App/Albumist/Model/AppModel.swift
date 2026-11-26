@@ -1090,9 +1090,14 @@ final class AppModel {
                 // "Album fürs Zuhause vorschlagen" needs no run, only the suggestions again
                 // (review P1-10): the home comes or goes at once. The choices as they are now
                 // are stored first, as before a home change.
-                if previous.frequentPlaces.suggestHome != settings.frequentPlaces.suggestHome, let pipeline {
-                    try? await store?.setValue(storedDecisions(decisions), forKey: Key.decisions)
-                    _ = try? await pipeline.resuggest(always: true)
+                // A run in progress makes them with the new settings anyway.
+                if previous.frequentPlaces.suggestHome != settings.frequentPlaces.suggestHome, !analysis.isRunning, let pipeline {
+                    do {
+                        try await store?.setValue(storedDecisions(decisions), forKey: Key.decisions)
+                        _ = try await pipeline.resuggest(always: true)
+                    } catch {
+                        message = .failure(error.localizedDescription)
+                    }
                 }
             }
             await refreshDerived()

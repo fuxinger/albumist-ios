@@ -734,14 +734,17 @@ final class AppModel {
         FirstAnalysisMomentStore.shared.launched() // Design W3 H13: the first 100 % (DS-08), read before the marker may be reset below
         _ = FinishAnnouncementStore.shared // Design W3 H14: made at launch, iOS says long before a run ends if notifications are allowed (Q2)
         do {
-            if UITestSupport.rebuildsDatabase, let url = try? Self.databaseURL() {
-                AlbumistStore.quarantineDatabase(at: url)
+            // The folder is made and marked off the main thread: in UI run 45589509156 its file
+            // calls (setResourceValues) held the main thread at launch.
+            let real = try await Task.detached(priority: .userInitiated) { try Self.databaseURL() }.value
+            if UITestSupport.rebuildsDatabase {
+                AlbumistStore.quarantineDatabase(at: real)
                 // Where the analysis got to belongs to the database set aside (review of d612bc0:
                 // the stale "64 %" was the stress run's drop to 38 %).
                 AnalysisMarker.reset()
             }
             // Opened off the main thread: the integrity check and migrations read the file.
-            let url = UITestSupport.databaseURL(try Self.databaseURL())
+            let url = UITestSupport.databaseURL(real)
             let store = try await Task.detached(priority: .userInitiated) { try AlbumistStore(url: url) }.value
             self.store = store
             // Where the analysis got to (UserDefaults, restored by a device backup) belongs to
@@ -1021,7 +1024,8 @@ final class AppModel {
         saveSafetyBackup()
     }
 
-    static func databaseURL() throws -> URL {
+    /// Off the main thread (it creates and marks the folder; `load`).
+    nonisolated static func databaseURL() throws -> URL {
         let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent(AppInfo.supportFolderName, isDirectory: true)
         // The database holds recognized text of screenshots and documents: encrypted at rest
@@ -1119,6 +1123,18 @@ final class AppModel {
             // lookups or hidden photos need a run.
             if let previous = await pipeline?.update(settings: settings) {
                 runAfterSettingsChange(from: previous, to: settings)
+                // "Album fürs Zuhause vorschlagen" needs no run, only the suggestions again
+                // (review P1-10): the home comes or goes at once. The choices as they are now
+                // are stored first, as before a home change.
+                // A run in progress makes them with the new settings anyway.
+                if previous.frequentPlaces.suggestHome != settings.frequentPlaces.suggestHome, !analysis.isRunning, let pipeline {
+                    do {
+                        try await store?.setValue(storedDecisions(decisions), forKey: Key.decisions)
+                        _ = try await pipeline.resuggest(always: true)
+                    } catch {
+                        message = .failure(error.localizedDescription)
+                    }
+                }
             }
             await refreshDerived()
         }
@@ -2848,6 +2864,8 @@ final class AppModel {
         }
         // The free albums are checked here too, not only on the review screen.
         let wanted = plan.freeAlbumUse(applied: false)
+        // After a new install the count comes from the keychain, read off the main thread.
+        await Purchases.shared.keychainRead()
         if plan.reverts == nil, !resume, !Purchases.shared.allows(albums: wanted) {
             execution = ExecutionState(planID: plan.id, failure: String(localized: """
                 Die Gratis-Alben reichen für diese Änderungen nicht. Schalte Albumist frei, um weiterzumachen.
@@ -3433,9 +3451,14 @@ final class AppModel {
         // Undos of this plan that did not get everything back (plugin review W1): an album one
         // of them brought back gets the photos still missing, never a second album.
         let earlier: [ChangePlan]
-        do { earlier = try await store.reverts(of: executed.id) } catch { message = .failure(error.localizedDescription); return }
+        // Photos other changes the user still has want in the same albums stay (review P2-09).
+        let keep: [CollectionID: Set<AssetID>]
+        do {
+            earlier = try await store.reverts(of: executed.id)
+            keep = try await store.keptForOthers(undoing: executed)
+        } catch { message = .failure(error.localizedDescription); return }
         // The same planning as the question before it (`DeleteQuestion.undo`).
-        let undoPlan = UndoPlanner().undoPlan(for: executed, albums: albums, current: current, earlierUndos: earlier)
+        let undoPlan = UndoPlanner().undoPlan(for: executed, albums: albums, current: current, keptForOthers: keep, earlierUndos: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
             message = AppMessage(title: interruptedPlan?.reverts != nil
@@ -3449,10 +3472,33 @@ final class AppModel {
         // What the undo left because Albumist cannot prove it was its own (an album found by its
         // name after an interruption, photos in the user's own album) is said, not left to be
         // found in Photos (review P2-01).
-        if let finished = execution.finished, finished.id == undoPlan.id, finished.status == .completed,
-           let said = Self.remainderMessage(UndoRemainder(plan: executed, current: inventory), inHistory: false) {
-            message = said
+        if let finished = execution.finished, finished.id == undoPlan.id, finished.status == .completed {
+            let remainder = Self.remainderMessage(UndoRemainder(plan: executed, current: inventory), inHistory: false)
+            if let said = Self.joined(remainder, Self.keptMessage(undoPlan.notes, inventory: inventory)) { message = said }
         }
+    }
+
+    /// Both messages of an undo in one, the remainder's title first. Nil when neither applies.
+    static func joined(_ remainder: AppMessage?, _ kept: AppMessage?) -> AppMessage? {
+        guard let remainder else { return kept }
+        guard let kept else { return remainder }
+        return AppMessage(title: remainder.title, text: remainder.text + "\n\n" + kept.text)
+    }
+
+    /// Photos the undo left because another change of the user's still wants them there
+    /// (review P2-09), in words. Nil when it left none.
+    static func keptMessage(_ notes: [PlanNote], inventory: CollectionInventory) -> AppMessage? {
+        var lines: [String] = []
+        for note in notes {
+            guard case .keptForOtherPlans(let album, let count) = note, count > 0 else { continue }
+            let title = inventory[album]?.title ?? String(localized: "Album ohne Namen")
+            lines.append(count == 1
+                         ? String(localized: "1 Foto bleibt im Album „\(title)“.")
+                         : String(localized: "\(count) Fotos bleiben im Album „\(title)“."))
+        }
+        guard !lines.isEmpty else { return nil }
+        lines.append(String(localized: "Ein anderer Vorschlag, den du angenommen hast, hat sie auch dort hingelegt. Nimmst du ihn zurück, gehen sie mit."))
+        return AppMessage(title: String(localized: "Einige Fotos bleiben"), text: lines.joined(separator: "\n"))
     }
 
     // MARK: Announcing the iOS question (review 18.11., P3-07)
@@ -3471,7 +3517,9 @@ final class AppModel {
         let albums = managedAlbums
         let waiting = (try? await store?.plansAwaitingFinalization()) ?? []
         let earlier = (try? await store?.reverts(of: executed.id)) ?? []
-        return await DeleteQuestion(library: library).undo(executed, albums: albums, waiting: waiting, earlierUndos: earlier, cached: inventory)
+        let keep = (try? await store?.keptForOthers(undoing: executed)) ?? [:]
+        return await DeleteQuestion(library: library).undo(executed, albums: albums, waiting: waiting, earlierUndos: earlier,
+                                                           keptForOthers: keep, cached: inventory)
     }
 
     /// Whether "Alles rückgängig machen" for the interrupted plan deletes an album or folder.

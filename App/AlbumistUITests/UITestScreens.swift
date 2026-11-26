@@ -55,6 +55,13 @@ enum UITestScreens {
         query.allElementsBoundByIndex.first(where: \.isHittable) ?? query.firstMatch
     }
 
+    /// The photo viewer's position ("3 von 176") of the photo on screen ("viewer.position"): the
+    /// photo's value, its label being where and when it was taken. Nil when it cannot be read.
+    static func viewerPosition(_ element: XCUIElement) -> String? {
+        guard let snapshot = try? element.snapshot() else { return nil }
+        return snapshot.value as? String
+    }
+
     // MARK: Tabs
 
     /// A tab bar button by its name ("Vorschläge", "Unsortiert", "Alben"; the search tab is

@@ -1071,6 +1071,36 @@
         }
       }
     },
+    "1 Foto bleibt im Album „%@“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 photo stays in the album “%@”."
+          }
+        }
+      }
+    },
+    "Album fürs Zuhause vorschlagen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggest an album for your home"
+          }
+        }
+      }
+    },
+    "Album ohne Namen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Untitled album"
+          }
+        }
+      }
+    },
     "Dafür braucht Albumist Zugriff auf alle Fotos. Gerade sind nur ausgewählte Fotos freigegeben, und Albumist sieht nicht, was sonst in deinen Alben liegt. Ändern kannst du das unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff." : {
       "localizations" : {
         "en" : {
@@ -1757,6 +1787,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suggesting a date"
+          }
+        }
+      }
+    },
+    "Ein anderer Vorschlag, den du angenommen hast, hat sie auch dort hingelegt. Nimmst du ihn zurück, gehen sie mit." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Another suggestion you accepted put them there too. If you undo it, they go with it."
+          }
+        }
+      }
+    },
+    "Einige Fotos bleiben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Some photos stay"
+          }
+        }
+      }
+    },
+    "Fotos, die bei dir zu Hause entstehen, bekommen sonst kein eigenes Album. Orte in deiner Nähe, an denen du oft bist, werden weiter vorgeschlagen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otherwise photos taken at your home don't get an album of their own. Places nearby that you often visit are still suggested."
           }
         }
       }

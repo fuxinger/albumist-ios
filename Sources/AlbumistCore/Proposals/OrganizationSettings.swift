@@ -98,6 +98,10 @@ public struct FrequentPlaceSettings: Hashable, Sendable, Codable {
     public var advanced = FrequentPlaceDetector.Configuration()
     /// User-given names keyed by frequent place id.
     public var names: [AlbumistID: String] = [:]
+    /// "Album fürs Zuhause": the user's own home is suggested like any frequent place. Off by
+    /// default (review P1-10, decision 7): the home is no place one makes an album of
+    /// (`ProposalEngine.withoutHome`).
+    public var suggestHome = false
     public init() {}
 }
 

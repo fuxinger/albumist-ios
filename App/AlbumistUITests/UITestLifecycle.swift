@@ -50,6 +50,25 @@ enum UITestLifecycle {
         return entered
     }
 
+    /// When the app last became active at or after `since` (seconds since 1970), from the watch
+    /// file's `text`; nil when it has not, or went to the background again since. In UI run
+    /// 45552393361 (device test03) the app was back at 05:53:49.5 UTC, a second after the test
+    /// brought it to the front, while XCTest read state 3 (running in the background) for 15 s
+    /// more and the test brought it to the front a second time (`UITestWait.toForeground`).
+    static func inForeground(_ text: String, since: Double) -> Double? {
+        var active: Double?
+        for line in text.split(separator: "\n") {
+            let parts = line.split(separator: " ")
+            guard parts.count == 3, parts[0] == "^", let seconds = Double(parts[1]), seconds >= since - 0.05 else { continue }
+            switch parts[2] {
+            case "active": active = seconds
+            case "resign-active", "background": active = nil
+            default: break
+            }
+        }
+        return active
+    }
+
     /// "HH:MM:SS.s" (UTC) of seconds since 1970, the clock of `UITestOnboarding.clock`.
     static func clock(_ seconds: Double) -> String {
         let day = seconds.truncatingRemainder(dividingBy: 86_400)

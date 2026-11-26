@@ -630,7 +630,7 @@ final class MainThreadWatch: @unchecked Sendable {
             return "\(image) +0x\(String(address - UInt(bitPattern: info.dli_fbase), radix: 16))"
         }
         let symbol = demangle(String(cString: name))
-        let short = symbol.count > 140 ? String(symbol.prefix(140)) + "…" : symbol
+        let short = HangKind.shortSymbol(symbol)
         return "\(image) \(short) + \(address - UInt(bitPattern: start))"
     }
 

@@ -19,6 +19,7 @@ SQLite, Version über `PRAGMA user_version`, Migrationen in `Sources/AlbumistSto
 | `plans` | `id` | Kopf der Änderungspläne: Status, Zeiten, Bezug auf rückgängig gemachten Plan (ab v4 ohne Schritte und Journal) |
 | `plan_steps` | (`plan_id`, `idx`) | Schritte eines Plans mit Zustand (v4) |
 | `plan_media` | (`plan_id`, `step_id`) | Ausführungsjournal je Schritt: wirklich geänderte Fotos (v4) |
+| `plan_wanted` | `plan_id` | Fotos, die die Vorschläge eines Plans je Album wollen (`ChangePlan.wanted`, v7) |
 | `settings` | `key` | Einstellungen, Entscheidungen, Vorschlags-Schnappschuss |
 
 ## Beziehungen und Indizes
@@ -63,4 +64,8 @@ Idempotenzschlüssel (Plan-ID + Index + Inhalts-Hash).
   oder ein Ort die Kennung mit nur einem Teil der Fotos, behält die Kennung auch die
   beiseitegelegten (Reise: in der Identität; Ort: als Eintrag mit derselben Kennung in
   `analysis.frequentPlacesOutOfView`).
+- v7: `plan_wanted`: was die Vorschläge eines Plans je Album wollen (Prüfung P2-09), eine Zeile je
+  Plan, geschrieben nur wenn es sich ändert. Im Plankopf wurde es mit jedem Schritt neu geschrieben
+  (100.000 Fotos in 200 Alben: 165 s statt unter 20 s). Ältere Pläne behalten es im Kopf, bis sie
+  wieder gespeichert werden.
 Migrationen laufen nur vorwärts, jede in einer Transaktion.

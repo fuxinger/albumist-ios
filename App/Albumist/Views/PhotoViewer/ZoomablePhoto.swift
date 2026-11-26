@@ -197,6 +197,9 @@ struct ZoomablePhoto: View {
         .accessibilityLabel(Text(verbatim: label))
         .accessibilityValue(position)
         .accessibilityAddTraits(.isImage)
+        // The photo on screen carries its position ("3 von 176") as its value under a fixed name:
+        // the UI tests read which photo shows from it (viewer count and swipes, 26.11.2026).
+        .accessibilityIdentifier(isCurrent ? "viewer.position" : "viewer.photo")
         // VoiceOver's own zoom gesture instead of "Zweimal tippen zum Vergrößern",
         // which clashed with VoiceOver's double tap (design review W11).
         .accessibilityZoomAction { action in zoom(action) }

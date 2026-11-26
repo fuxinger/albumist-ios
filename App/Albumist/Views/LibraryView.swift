@@ -155,9 +155,9 @@ struct LibraryView: View {
     private func grid(_ days: ArraySlice<PhotoGridSection>, limit: Int) -> some View {
         PhotoGrid(sections: days, limit: limit, place: .unsorted, selecting: selecting, selection: $selection,
                   pinsHeaders: true, zoom: zoom, identifier: "library.photo") { id in
-            open(id, in: days, limit: limit)
+            open(id)
         } perform: { item, id in
-            perform(item, on: id, in: days, limit: limit)
+            perform(item, on: id)
         }
     }
 
@@ -188,17 +188,19 @@ struct LibraryView: View {
             .accessibilityIdentifier("library.loadingMore")
     }
 
-    /// The photo large, the photos the grid shows, in its order, to swipe through (a cut day's
-    /// shown ones: never all 40,000 photos of one day at once).
-    private func open(_ id: AssetID, in days: ArraySlice<PhotoGridSection>, limit: Int) {
-        viewing = PhotoViewer.Start(id: id, ids: PhotoGridSection.ids(of: days, below: limit))
+    /// The photo large, every photo of the area in the grid's order to swipe through, not only
+    /// the pages shown so far: the viewer builds its pages in a window (`PageWindow`). With the
+    /// grid's first page it said "11 von 3.000" in a larger library and stopped there (iPhone,
+    /// Build 41, 26.11.2026).
+    private func open(_ id: AssetID) {
+        viewing = PhotoViewer.Start(id: id, ids: PhotoGridSection.ids(of: days.sections))
     }
 
     /// An item of the photo's long press, the way "Unsortiert" goes it: "Ansehen" as a tap,
     /// "Zu Album hinzufügen …" the sheet the selection opens (then the preview).
-    private func perform(_ action: PhotoMenu.Item, on id: AssetID, in days: ArraySlice<PhotoGridSection>, limit: Int) {
+    private func perform(_ action: PhotoMenu.Item, on id: AssetID) {
         switch action {
-        case .view: open(id, in: days, limit: limit)
+        case .view: open(id)
         case .addToAlbum: addingToAlbum = [id]
         // Ignoring is the model's, the same everywhere (`PhotoMenuItems`); a suggestion's own.
         case .ignore, .stopIgnoring, .removeFromSuggestion: break

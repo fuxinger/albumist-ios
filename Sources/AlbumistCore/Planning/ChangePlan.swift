@@ -88,6 +88,9 @@ public enum PlanConflict: Hashable, Sendable, Codable {
 /// Non-blocking information shown with the plan.
 public enum PlanNote: Hashable, Sendable, Codable {
     case respectedManualRemovals(count: Int)
+    /// An undo left these photos in the album: another change the user still has wants them
+    /// there (review P2-09). Its own undo takes them.
+    case keptForOtherPlans(album: CollectionID, count: Int)
     case skippedDeletedByUser(AlbumistID)
     case skippedRejected(AlbumistID)
     case optionalItemsNotIncluded(count: Int)
@@ -95,6 +98,21 @@ public enum PlanNote: Hashable, Sendable, Codable {
 
 public enum PlanStatus: String, Sendable, Codable {
     case draft, confirmed, running, completed, completedWithErrors, cancelled
+}
+
+/// The photos a plan wants in one album (`ChangePlan.wanted`).
+public struct AlbumWish: Hashable, Sendable, Codable {
+    public var album: AlbumRef
+    public var assets: [AssetID]
+    /// The suggestion that wants them: a wish counts only once its adds there were carried
+    /// out (`ChangePlan.wantedMembers`).
+    public var sourceID: AlbumistID?
+
+    public init(album: AlbumRef, assets: [AssetID], sourceID: AlbumistID? = nil) {
+        self.album = album
+        self.assets = assets
+        self.sourceID = sourceID
+    }
 }
 
 /// A concrete, persisted change plan. Only confirmed plans are executed (prompt §16).
@@ -128,6 +146,12 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
     public var retries: AlbumistID? = nil
     /// Albums the retried plan created. Adding to them now does not use another free album.
     public var albumsFromRetriedPlan: Set<CollectionID>? = nil
+    /// Per album, every photo the plan's suggestions want in it, also those that were there
+    /// already and so got no step (review P2-09). Two plans can fill the same album: the undo
+    /// of one leaves the photos another plan still wants (`UndoPlanner`, `keptForOthers`), and
+    /// the later undo of that one takes them. Nil in plans of older versions and in undo,
+    /// removal and retry plans: what they added stands for what they want (`wantedMembers`).
+    public var wanted: [AlbumWish]?
 
     public var summary: PlanSummary { PlanSummary(self) }
 
@@ -480,5 +504,71 @@ public struct PlanSummary: Hashable, Sendable {
         }
         extendedAlbums = extended.count
         distinctAssets = distinct.count
+    }
+}
+
+extension ChangePlan {
+    /// Per album, the photos this plan wants there (`wanted`, resolved through `resolvedKeys`).
+    /// Plans without `wanted` (older versions, undo, removal and retry plans): what their adds
+    /// put in, as the record says (planned media of a step that succeeded, for plans without
+    /// a record).
+    public func wantedMembers() -> [CollectionID: Set<AssetID>] {
+        if let wanted { return wishedMembers(wanted) }
+        var result: [CollectionID: Set<AssetID>] = [:]
+        for step in steps {
+            guard case .addAssets(let ref, let assets) = step.operation, let album = resolved(ref) else { continue }
+            let added: [AssetID]
+            if let media = record?.media[step.id] {
+                added = media
+            } else if case .succeeded = step.state {
+                added = assets
+            } else {
+                added = []
+            }
+            if !added.isEmpty { result[album, default: []].formUnion(added) }
+        }
+        return result
+    }
+
+    /// The album a reference names: an existing one, or the one created for a planned key.
+    private func resolved(_ ref: AlbumRef) -> CollectionID? {
+        switch ref {
+        case .existing(let id): id
+        case .planned(let key): resolvedKeys[key]
+        }
+    }
+
+    /// `wantedMembers` of a plan with `wanted`. Per suggestion and album: whether it had adds
+    /// there, and whether one was carried out. A wish whose adds all failed or were skipped
+    /// wants nothing (second review of P2-09: its plan finished because of another
+    /// suggestion); one that needed no add (everything was there already) holds.
+    private func wishedMembers(_ wanted: [AlbumWish]) -> [CollectionID: Set<AssetID>] {
+        func key(_ source: AlbumistID?, _ album: CollectionID) -> String { "\(source?.rawValue ?? "")|\(album.rawValue)" }
+        var hadAdds = Set<String>(), carriedOut = Set<String>()
+        for step in steps {
+            guard case .addAssets(let ref, _) = step.operation, let album = resolved(ref) else { continue }
+            hadAdds.insert(key(step.sourceID, album))
+            let done: Bool = if case .succeeded = step.state { true } else { !(record?.media[step.id] ?? []).isEmpty }
+            if done { carriedOut.insert(key(step.sourceID, album)) }
+        }
+        var result: [CollectionID: Set<AssetID>] = [:]
+        for wish in wanted {
+            guard let album = resolved(wish.album) else { continue }
+            guard !hadAdds.contains(key(wish.sourceID, album)) || carriedOut.contains(key(wish.sourceID, album)) else { continue }
+            result[album, default: []].formUnion(wish.assets)
+        }
+        return result
+    }
+
+    /// Whether `other` belongs to the same change as this plan: one is the retry of the other
+    /// ("Erneut versuchen"), also over several retries (`retriedFrom`: plan → the plan it
+    /// retries, of the journal). Such plans never keep photos for each other in an undo.
+    public func isSameChange(as other: ChangePlan, retriedFrom: [AlbumistID: AlbumistID] = [:]) -> Bool {
+        func root(_ plan: ChangePlan) -> AlbumistID {
+            var id = plan.id, next = plan.retries, steps = 0
+            while let n = next, steps < 100 { id = n; next = retriedFrom[n]; steps += 1 }
+            return id
+        }
+        return root(self) == root(other)
     }
 }

@@ -244,8 +244,9 @@ struct SearchView: View {
     private func open(_ id: AssetID, from key: String) {
         zoomSource = key
         // The best hits sit above the grid and may lie beyond the pages shown: the
-        // viewer always contains the photo that was tapped.
-        var ids = Array(result.ids.prefix(shown))
+        // viewer always contains the photo that was tapped. Every hit, not only the pages of the
+        // grid shown (see `LibraryView.open`, 26.11.2026).
+        var ids = result.ids
         if !ids.contains(id) { ids.insert(id, at: 0) }
         viewing = PhotoViewer.Start(id: id, ids: ids)
     }

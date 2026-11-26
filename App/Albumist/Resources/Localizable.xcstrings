@@ -7661,12 +7661,12 @@
         }
       }
     },
-    "Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst, nie ein Foto. Aus iCloud lädt Albumist nur Screenshots und Dokumente, nie Videos, und nur, wenn du es einschaltest (dann standardmäßig nur im WLAN)." : {
+    "Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen), an Apples Kartendienst, nie ein Foto. Aus iCloud lädt Albumist nur Screenshots und Dokumente, nie Videos, und nur, wenn du es einschaltest (dann standardmäßig nur im WLAN)." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The analysis always runs on your device. For place names, iOS sends a sample of photo locations, roughly one per area (only coordinates and the language for place names) to Apple’s map service, never a photo. Albumist downloads only screenshots and documents from iCloud, never videos, and only if you turn this on (then over Wi‑Fi by default)."
+            "value" : "The analysis always runs on your device. For place names, iOS sends a sample of photo locations, roughly one per area (only coordinates and the language for place names), to Apple’s map service, never a photo. Albumist downloads only screenshots and documents from iCloud, never videos, and only if you turn this on (then over Wi‑Fi by default)."
           }
         }
       }
@@ -7751,12 +7751,12 @@
         }
       }
     },
-    "Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Albumist lädt keine Fotos hoch." : {
+    "Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen), an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Albumist lädt keine Fotos hoch." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "For place names, iOS sends a sample of photo locations, roughly one per area (only coordinates and the language for place names) to Apple’s map service. This is on by default and can be turned off under “Refine places online”. Albumist never uploads your photos."
+            "value" : "For place names, iOS sends a sample of photo locations, roughly one per area (only coordinates and the language for place names), to Apple’s map service. This is on by default and can be turned off under “Refine places online”. Albumist never uploads your photos."
           }
         }
       }
@@ -7871,12 +7871,12 @@
         }
       }
     },
-    "Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten." : {
+    "Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen), an Apples Kartendienst – das kannst du in den Einstellungen ausschalten." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist needs full access to analyze your library and create albums. The analysis happens only on this device. For place names, iOS sends a sample of photo locations, roughly one per area (only coordinates and the language for place names) to Apple’s map service; you can turn this off in Settings."
+            "value" : "Albumist needs full access to analyze your library and create albums. The analysis happens only on this device. For place names, iOS sends a sample of photo locations, roughly one per area (only coordinates and the language for place names), to Apple’s map service; you can turn this off in Settings."
           }
         }
       }

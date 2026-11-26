@@ -48,11 +48,11 @@ struct PromiseWordingTests {
     static let placeNamesEN = "For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service"
     /// The app says how many go, as the privacy pages do ("etwa einen pro Gegend", "roughly one
     /// per area"; editing of the texts, 26.11.: "single photo locations" read as every photo's
-    /// place). The store texts and the other pages follow with the texts' own pull request.
+    /// place). The store texts, the website and PRIVACY.md follow with the website corrections (A25).
     static let placeNamesAppDE = "Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend"
-        + " (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst"
+        + " (nur Koordinaten und die Sprache der Ortsnamen), an Apples Kartendienst"
     static let placeNamesAppEN = "For place names, iOS sends a sample of photo locations, roughly one per area"
-        + " (only coordinates and the language for place names) to Apple’s map service"
+        + " (only coordinates and the language for place names), to Apple’s map service"
 
     /// Whitespace folded, so a sentence wrapped across lines in Markdown is still found.
     static func flat(_ path: String) throws -> String {

@@ -37,7 +37,12 @@ public enum TimingLimit {
                              report: (String) -> Void) -> Bool {
         let within = orEqual ? measured <= limit : measured < limit
         if within { return true }
-        guard reporting else { return false }
+        guard reporting else {
+            // The measured value with the failure (second review 26.11.: an `#expect` without
+            // a message showed only the call).
+            report("TIMING_LIMIT_FAILED \(what): \(measured) over \(limit) at \(file):\(line)")
+            return false
+        }
         report("TIMING_OVER \(what): \(measured) over \(limit) at \(file):\(line)")
         return true
     }

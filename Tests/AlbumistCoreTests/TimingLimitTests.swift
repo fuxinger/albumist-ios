@@ -13,8 +13,8 @@ struct TimingLimitTests {
 
     @Test func overTheLimitFailsWhenHard() {
         var lines: [String] = []
-        #expect(!TimingLimit.holds(.seconds(2), under: .seconds(1), "Pause", reporting: false) { lines.append($0) })
-        #expect(lines.isEmpty)
+        #expect(!TimingLimit.holds(.seconds(2), under: .seconds(1), "Pause", reporting: false, file: "M/F.swift", line: 7) { lines.append($0) })
+        #expect(lines == ["TIMING_LIMIT_FAILED Pause: 2.0 seconds over 1.0 seconds at M/F.swift:7"])
     }
 
     @Test func overTheLimitIsReportedOnceWhenReportOnly() {

@@ -164,8 +164,9 @@ struct LoadTests {
         let peak = Self.peakMemoryMB()
         print("LOAD_MEMORY photos \(assets.count) peak \(peak.map { "\($0) MB" } ?? "unknown")")
         #expect(atlas.tripCount >= 25)
-        #expect(full < limits.first)
-        #expect(again < limits.second) // 20,000 photos: was 44 s before the grid DBSCAN
+        #expect(TimingLimit.holds(full, under: limits.first, "first run"), "first run took \(full)")
+        // 20,000 photos: was 44 s before the grid DBSCAN
+        #expect(TimingLimit.holds(again, under: limits.second, "second run"), "second run took \(again)")
         if let limit = limits.peakMB, let peak { #expect(peak < limit) }
     }
 

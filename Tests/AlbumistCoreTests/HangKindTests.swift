@@ -77,6 +77,43 @@ struct HangKindTests {
         #expect(HangKind.shortStack(["?? 0x1234"]) == "?? 0x1234")
     }
 
+    /// UI run 45589509156 (flow-other): seven hangs of up to 2.3 s in a witness of
+    /// `_makeViewList`, cut at 140 characters before the view's name.
+    @Test func aCutSymbolStillNamesTheViewItConformsFor() {
+        let witness = "protocol witness for static SwiftUI.View._makeViewList(view: SwiftUI._GraphValue<A>, inputs: "
+            + "SwiftUI._ViewListInputs) -> SwiftUI._ViewListOutputs in conformance Albumist.OverviewView : SwiftUI.View in Albumist"
+        let short = HangKind.shortSymbol(witness)
+        #expect(short.count <= 141)
+        #expect(short.hasSuffix(" in conformance Albumist.OverviewView : SwiftUI.View in Albumist"))
+        #expect(short.hasPrefix("protocol witness for static SwiftUI.View._makeViewList"))
+        // The cut of before this fix lost it.
+        #expect(!(String(witness.prefix(140)) + "…").contains("OverviewView"))
+    }
+
+    @Test func aCutClosureStillNamesItsFunction() {
+        let closure = "closure #1 () -> SwiftUI.TupleView<(<<opaque return type of (extension in SwiftUI):SwiftUI.View.fixedSize("
+            + "horizontal: Swift.Bool, vertical: Swift.Bool) -> some>>.0, SwiftUI.Text)> in Albumist.AnalysisProgressCard.header.getter : some"
+        let short = HangKind.shortSymbol(closure)
+        #expect(short.count <= 141)
+        #expect(short.hasSuffix(" in Albumist.AnalysisProgressCard.header.getter : some"))
+    }
+
+    /// Second review: a long tail kept the cut longer than the limit, and " in " inside
+    /// "(extension in SwiftUI)" was taken for the function a closure is in.
+    @Test func aLongTailIsCutToo() {
+        let symbol = "closure #1 () -> Swift.Int " + String(repeating: "a", count: 60)
+            + " in Albumist.SomeView." + String(repeating: "b", count: 160)
+        #expect(HangKind.shortSymbol(symbol).count <= 141)
+        let extensionOnly = "(extension in SwiftUI):SwiftUI.View." + String(repeating: "c", count: 160)
+        #expect(HangKind.shortSymbol(extensionOnly) == String(extensionOnly.prefix(140)) + "…")
+    }
+
+    @Test func aShortSymbolStaysAsItIs() {
+        #expect(HangKind.shortSymbol("AppModel.tick(run:)") == "AppModel.tick(run:)")
+        let long = String(repeating: "x", count: 200)
+        #expect(HangKind.shortSymbol(long) == String(repeating: "x", count: 140) + "…")
+    }
+
     @Test func atMostSixOfOurFrames() {
         let deep = (0..<10).map { "Albumist.debug.dylib f\($0)() + 1" }
         #expect(HangKind.shortStack(deep).split(separator: "|").count == 6)

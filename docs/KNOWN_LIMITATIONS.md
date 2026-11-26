@@ -329,13 +329,18 @@ mit eingeschränkten Rechten: nur lesend.
   Der Änderungsbeleg zeigt den Schritt als nicht bestätigt; nach dem Rückgängig (auch nach
   „Alles zurücknehmen“) sagt Albumist, wie viele Fotos in welchem Album bleiben, und der Plan
   bleibt im Verlauf statt zu verschwinden (P2-01).
-- Zwei Pläne ergänzen dasselbe Album (Prüfer 2, P2-09): Ein Plan zeichnet nur auf, was er selbst
-  hinzugefügt hat. Wird der ältere zurückgenommen, nimmt er seine Fotos aus dem Album, auch die,
-  die der neuere Vorschlag ebenfalls dort haben wollte; der Beleg des neueren sagt weiter
-  „erledigt“. Fotos des Nutzers sind nie betroffen. Nicht geändert, weil zwei Wege möglich sind
-  und beide etwas versprechen, das der andere nicht hält: die Fotos beim Rückgängig des älteren
-  lassen (dann nimmt „Rückgängig“ des älteren nicht alles zurück, und ein späteres Rückgängig des
-  neueren kennt sie nicht als seine) oder es in der Rückfrage sagen. Offen für eine Entscheidung.
+- Zwei Pläne füllen dasselbe Album (Prüfer 2, P2-09, entschieden 26.11.2026): Rückgängig nimmt
+  nur Fotos heraus, die kein anderer angenommener Vorschlag dort haben will (`ChangePlan.wanted`,
+  `UndoPlanner.keptForOthers`); Albumist sagt danach, wie viele Fotos in welchem Album bleiben.
+  Das spätere Rückgängig des anderen Vorschlags nimmt sie mit. Grenze: Pläne aus Versionen vor
+  dieser Änderung haben ihre Wünsche nicht aufgeschrieben; für sie zählt, was sie selbst
+  hinzugefügt haben, und ihr Rückgängig verhält sich wie vorher. Ein unterbrochener Plan, der
+  mit „Alles zurücknehmen“ zurückgeht, prüft andere Pläne nicht (er legt nur Fehlendes dazu).
+  Behält ein Rückgängig ein von Albumist angelegtes Album für einen anderen Vorschlag, gibt es
+  das Gratis-Album trotzdem zurück; hat der andere Vorschlag dort nichts hinzugefügt, zählt das
+  Album danach nicht mehr (zugunsten des Nutzers). Das Rückgängig eines Plans nimmt auch Fotos
+  aus seinen Alben, die er dort haben wollte und die von Albumist sind, wenn kein anderer Plan
+  sie mehr will (so gehen die Fotos mit, die ein früheres Rückgängig für ihn ließ).
 - Beispielfotos entfernen (Prüfer 2, P2-05): Gelöscht wird nur ein Foto, dessen Dateiname und
   Aufnahmedatum im Löschblock selbst noch zu einem Beispielfoto passen
   (`SampleLibrary.isSample`), egal was in der gespeicherten Liste steht; ein Album nur, solange

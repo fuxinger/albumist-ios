@@ -294,6 +294,7 @@ extension AlbumistStore {
                            [.text(r.key), .text(r.secondary ?? "completed"), r.number.map { .real($0) } ?? .null, .blob(r.payload)])
             try db.execute("DELETE FROM plan_steps WHERE plan_id = ?", [.text(r.key)])
             try db.execute("DELETE FROM plan_media WHERE plan_id = ?", [.text(r.key)])
+            try db.execute("DELETE FROM plan_wanted WHERE plan_id = ?", [.text(r.key)])
             journalCache[AlbumistID(r.key)] = nil
             headerCache[AlbumistID(r.key)] = nil
         }

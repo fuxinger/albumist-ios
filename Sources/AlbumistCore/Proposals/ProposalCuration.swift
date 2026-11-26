@@ -45,11 +45,15 @@ public struct Suggestions: Sendable {
     public var open: [AlbumProposal]
     public var dismissed: [AlbumProposal]
     public var standIns: [StandIn]
+    /// Frequent places left out as the user's home (review P1-10, `ProposalEngine.withoutHome`):
+    /// their photos are not counted as unsorted for "Häufige Orte".
+    public var homePlaces: Set<AlbumistID> = []
 
-    public init(open: [AlbumProposal], dismissed: [AlbumProposal] = [], standIns: [StandIn] = []) {
+    public init(open: [AlbumProposal], dismissed: [AlbumProposal] = [], standIns: [StandIn] = [], homePlaces: Set<AlbumistID> = []) {
         self.open = open
         self.dismissed = dismissed
         self.standIns = standIns
+        self.homePlaces = homePlaces
     }
 }
 

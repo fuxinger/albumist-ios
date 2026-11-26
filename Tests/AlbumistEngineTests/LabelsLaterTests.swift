@@ -780,8 +780,9 @@ struct LabelsLaterTests {
             ], kind: "content", version: AnalysisPipeline.contentVersion, markingAnalyzed: [withLabels, without, noResult, givenUp])
         }
         do {
-            // Back to schema 4 (without version 6's column too).
+            // Back to schema 4 (without version 6's column and version 7's table too).
             let old = try SQLiteDatabase(path: url.path)
+            try old.execute("DROP TABLE plan_wanted")
             try old.execute("DROP INDEX idx_assets_out_of_view")
             try old.execute("ALTER TABLE assets DROP COLUMN out_of_view")
             try old.execute("DROP INDEX idx_assets_labels")
@@ -789,7 +790,7 @@ struct LabelsLaterTests {
             try old.setUserVersion(4)
         }
         let store = try AlbumistStore(url: url)
-        #expect(await store.schemaVersion == 6)
+        #expect(await store.schemaVersion == 7)
         let versions = try await store.labelsVersions()
         #expect(versions == [withLabels: 1, without: 0, noResult: 0, givenUp: 0, fresh: 0])
         #expect(try await store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 1)

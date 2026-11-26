@@ -1502,6 +1502,7 @@ final class DeviceConditionUITests: XCTestCase {
             guard let label = try? anything("Fotos und Videos").snapshot().label else { return false }
             return (Int(label.replacingOccurrences(of: ".", with: "").prefix { $0.isNumber }) ?? 0) >= 3200
         })
+        viewerCountsMatchTheLibrary("large library")
         timed("scroll library", limit: 20, { for _ in 0..<6 { app.swipeUp() } }, until: { libraryPhotos.firstMatch.exists })
         shot("24-large-library")
         timed("overview tab", limit: 10, { tabButton("Übersicht").tap() }, until: { anything("Fotos analysiert").exists })
@@ -1705,9 +1706,53 @@ final class DeviceConditionUITests: XCTestCase {
             print("UI_TIMING stress library tab: main-thread stalls over 0.5 s \(stalls.map { "\($0.ms) ms" })")
         }
         shot("27-stress-library")
+        viewerCountsMatchTheLibrary("stress")
         // The measured launch's stalls of 2 s or more, with stacks (its own file, not the one
         // `UITestStalls.report()` prints at every launch).
         UITestStalls.report(mainStalls)
+    }
+
+    /// For every list of the library tab: the photo viewer opened from it counts as many photos
+    /// as the list says ("n Fotos und Videos"), so every photo of it can be reached (iPhone, Build
+    /// 41, 26.11.: "Nicht sortiert" had 3.348 photos, the viewer said "1 von 3.000" and stopped
+    /// there; the grid builds 3,000 thumbnails at a time and handed only those over). Runs in
+    /// the large library (3,200+ photos) and the stress run (10,000), so the lists lie above the
+    /// grid's page of 3,000 and the search's of 2,000. Lists without photos are skipped.
+    private func viewerCountsMatchTheLibrary(_ context: String) {
+        func number(_ text: String?) -> Int? {
+            text.flatMap { Int($0.replacingOccurrences(of: ".", with: "").prefix { $0.isNumber }) }
+        }
+        let began = Date()
+        defer { print("UI_TIMING \(context) viewer counts of the lists \(String(format: "%.1f", Date().timeIntervalSince(began))) s") }
+        var checked: [String] = []
+        for list in ["Nicht sortiert", "Unsicher", "Sortiert", "Ignoriert", "Alle"] {
+            let chip = app.buttons[list]
+            guard chip.waitForExistence(timeout: 5) else {
+                print("UI_FACT \(context) list \(list) not offered")
+                continue
+            }
+            chip.tap()
+            let header = anything("Fotos und Videos")
+            guard header.waitForExistence(timeout: 15), let listed = number(try? header.snapshot().label), listed > 0 else {
+                print("UI_FACT \(context) list \(list) without photos")
+                continue
+            }
+            guard tap(libraryPhotos.firstMatch, "\(context) first photo of \(list)") else { continue }
+            let position = app.descendants(matching: .any)["viewer.position"]
+            let label = position.waitForExistence(timeout: 10) ? ((try? position.snapshot().label) ?? "") : ""
+            let total = number(label.components(separatedBy: " von ").last)
+            tap(app.buttons["viewer.close"], "\(context) close the photo of \(list)")
+            _ = UITestWait.holds(timeout: 10) { !app.buttons["viewer.close"].exists }
+            // A photo can change lists while the analysis still runs: the count before or after
+            // the viewer counts (second review).
+            let after = header.waitForExistence(timeout: 5) ? number(try? header.snapshot().label) : nil
+            print("UI_FACT \(context) list \(list): \(listed) photos (after \(after ?? -1)), viewer \(label)")
+            XCTAssertTrue(total == listed || (total != nil && total == after),
+                          "\(context): the photo viewer of \(list) counts \(total ?? -1) photos, the list \(listed)")
+            checked.append(list)
+        }
+        // Never a pass without a check: "Alle" always has photos here.
+        XCTAssertTrue(checked.contains("Alle"), "\(context): no viewer count was compared (lists checked: \(checked))")
     }
 
     /// The card's progress line as the app recorded it (`-AlbumistUITestProgressLog`): every change

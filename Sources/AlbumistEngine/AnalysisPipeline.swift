@@ -106,6 +106,8 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
     /// (a camera with its clock set wrong, "2031"). They count like every photo the suggestions
     /// saw, not as taken afterwards (`LibraryStatus`, review P1-03). Usually none.
     public var datedAfterwards: Set<AssetID> = []
+    /// Frequent places left out as the user's home (`Suggestions.homePlaces`, review P1-10).
+    public var homePlaces: Set<AlbumistID> = []
 
     public init(generatedAt: Date, scope: OrganizationScope, proposals: [AlbumProposal], matches: [AlbumistID: MatchResult],
                 dismissed: [AlbumProposal] = [], standIns: [StandIn] = [], isEarly: Bool = false,
@@ -120,7 +122,9 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
         self.matcherVersion = matcherVersion
     }
 
-    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly, matcherVersion, datedAfterwards }
+    enum CodingKeys: String, CodingKey {
+        case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly, matcherVersion, datedAfterwards, homePlaces
+    }
 
     /// Snapshots stored before dismissed suggestions and stand-ins were kept still load.
     public init(from decoder: any Decoder) throws {
@@ -134,6 +138,7 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
         isEarly = try c.decodeIfPresent(Bool.self, forKey: .isEarly) ?? false
         matcherVersion = try c.decodeIfPresent(Int.self, forKey: .matcherVersion) ?? 0
         datedAfterwards = try c.decodeIfPresent(Set<AssetID>.self, forKey: .datedAfterwards) ?? []
+        homePlaces = try c.decodeIfPresent(Set<AlbumistID>.self, forKey: .homePlaces) ?? []
     }
 }
 
@@ -2400,6 +2405,7 @@ public actor AnalysisPipeline {
         for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
         var snapshot = ProposalSnapshot(generatedAt: now(), scope: scope, proposals: suggestions.open, matches: matches,
                                         dismissed: suggestions.dismissed, standIns: suggestions.standIns, isEarly: early)
+        snapshot.homePlaces = suggestions.homePlaces
         snapshot.datedAfterwards = Set(facts.filter { ($0.asset.creationDate ?? .distantPast) > snapshot.generatedAt }.map(\.id))
         var values: [String: any Encodable & Sendable] = [Key.proposals: snapshot, Key.heldSuggestions: held]
         var removing: Set<String> = []
@@ -2570,11 +2576,14 @@ public actor AnalysisPipeline {
     /// Returns what the overview says (nil: nothing); nothing is made when there are no
     /// suggestions yet (the next analysis applies the settings) or a run already applied the
     /// change. Waits for a run in progress, like a run does.
-    public func resuggest() async throws -> HomeChangeNotice? {
+    /// `always`: also without a pending home change, for a setting that only changes which
+    /// suggestions are made ("Album fürs Zuhause vorschlagen", review P1-10).
+    public func resuggest(always: Bool = false) async throws -> HomeChangeNotice? {
         await beginRun()
         defer { endRun() }
         guard let previous = try await latestProposals() else { return nil }
-        guard try await pendingHomeChange() != nil else { return try await homeChangeNotice() }
+        let pending = always ? nil : try await pendingHomeChange()
+        guard always || pending != nil else { return try await homeChangeNotice() }
         // Before the trips are detected: a change stored while they are stays pending.
         let homeChange = homeGeneration
         let all = try await store.allAssets()

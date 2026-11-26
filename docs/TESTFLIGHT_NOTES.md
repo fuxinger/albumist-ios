@@ -22,6 +22,8 @@ Danke fürs Testen! Dieser Build bringt eine Testseite für die kommende Karte �
 - Kamera-Probe: Öffne die Testseite der Karte, dann „Reise abspielen“ und „Kamera-Probe“. Sieh dir zuerst den Flug an, dann tippe „Nochmal fliegen“, einmal im WLAN und einmal im Mobilfunk. Geh danach mit „Weiter“ durch die 16 Kamera-Blicke und mach Bildschirmfotos von den tiefen Blicken und von Rom.
 - Werte: Tippe am Ende auf „Werte kopieren“ und schick den Text mit. Er enthält das Gerät und Messwerte, keine Fotos und keine Koordinaten.
 - Ruckelt der Flug, bleiben Kartenteile leer oder wird das iPhone warm? Schreib kurz, was du gesehen hast.
+- Foto-Ansicht: Öffne in „Nicht sortiert“ ein Foto. Oben steht jetzt „1 von …“ mit derselben Zahl wie in der Liste, nicht mehr 3.000. Wisch ein paar Fotos weiter: Reagiert es beim ersten Wischen?
+- Zuhause: Deine Wohnung sollte nicht mehr als „Häufiger Ort in …“ vorgeschlagen werden. Unter Einstellungen › Dein Zuhause gibt es „Album fürs Zuhause vorschlagen“, falls du es doch willst.
 - Alles andere sollte genau wie im letzten Build funktionieren.
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.

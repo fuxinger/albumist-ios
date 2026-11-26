@@ -127,6 +127,7 @@ public enum LibraryStatus {
         suggestionReads: inout Int
     ) -> (states: [AssetID: AssetOrganizationState], reasons: Reasons, ifNotIgnored: [AssetID: AssetOrganizationState]) {
         var ifNotIgnored: [AssetID: AssetOrganizationState] = [:]
+        let homePlaces = snapshot?.homePlaces ?? []
         var proposedIn: [OrganizationArea: Set<AssetID>] = [:]
         var uncertainIn: [OrganizationArea: Set<AssetID>] = [:]
         /// Photos with an album in the area: a suggestion of their own, dismissed or standing in.
@@ -210,7 +211,14 @@ public enum LibraryStatus {
                         a.applicable = false
                         notCounted = \.noAlbum
                     }
-                case .frequentPlaces: a.applicable = f.frequentPlaceID != nil
+                case .frequentPlaces:
+                    a.applicable = f.frequentPlaceID != nil
+                    // The user's home gets no album unless asked (review P1-10): its photos are
+                    // not left unsorted for good, like photos at home for "Länder und Orte".
+                    if a.applicable, !hasAlbum, let place = f.frequentPlaceID, homePlaces.contains(place) {
+                        a.applicable = false
+                        notCounted = \.home
+                    }
                 case .chronology: a.applicable = f.asset.creationDate != nil
                 case .mediaTypes: a.applicable = !mediaTypes.categories(for: f.asset).isDisjoint(with: settings.mediaTypes.categories)
                 case .screenshots:

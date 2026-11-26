@@ -10,7 +10,7 @@ struct StoreTests {
 
     @Test func migrationsRun() async throws {
         let s = try store()
-        #expect(await s.schemaVersion == 6)
+        #expect(await s.schemaVersion == 7)
     }
 
     @Test func fileBackedStoreSurvivesReopen() async throws {
@@ -22,7 +22,7 @@ struct StoreTests {
         }
         let reopened = try AlbumistStore(url: url)
         #expect(try await reopened.assetCount() == 1)
-        #expect(await reopened.schemaVersion == 6)
+        #expect(await reopened.schemaVersion == 7)
     }
 
     @Test func upsertReportsOnlyChangedAssetsAndRoundTrips() async throws {
@@ -290,7 +290,7 @@ struct StoreTests {
             try old.execute("INSERT INTO text_fts (asset_id, content) VALUES ('gone', 'Kontoauszug alt')")
         }
         let s = try AlbumistStore(url: URL(fileURLWithPath: path))
-        #expect(await s.schemaVersion == 6)
+        #expect(await s.schemaVersion == 7)
         #expect(await s.hasFullTextSearch)
         #expect(try await s.searchText("Hotel") == ["a"])
         #expect(try await s.searchText("Kontoauszug").isEmpty) // orphan from the old index is gone

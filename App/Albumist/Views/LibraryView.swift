@@ -158,7 +158,10 @@ struct LibraryView: View {
                 // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
                 Button {
                     guard selecting else {
-                        viewing = PhotoViewer.Start(id: id, ids: members.prefix(shown).map(\.id))
+                        // Every photo of the list, not only the thumbnails built so far: the viewer
+                        // builds its pages in a window (PageWindow). With the grid's 3,000 it said
+                        // "11 von 3.000" in a larger library and stopped there (iPhone, Build 41, 26.11.).
+                        viewing = PhotoViewer.Start(id: id, ids: members.map(\.id))
                         return
                     }
                     if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }

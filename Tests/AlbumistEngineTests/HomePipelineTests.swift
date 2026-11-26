@@ -244,6 +244,36 @@ struct HomePipelineTests {
         #expect(trip.title.hasPrefix("München"))
     }
 
+    // MARK: No album for the home (review P1-10)
+
+    /// End to end: the trip detection marks the flat's photos at home, the flat is left out
+    /// as a frequent place, a park in town in the afternoons is suggested, and the flat's
+    /// photos do not count as unsorted for "Häufige Orte" (second review of P1-10).
+    @Test func theFlatIsNoSuggestionAndItsPhotosAreNotUnsorted() async throws {
+        let park = GeoCoordinate(latitude: 48.1550, longitude: 11.5900)
+        let s = try setup { lib in
+            lib.daily(from: "2025-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 2, everyNthDay: 2, hour: 19)
+            lib.daily(from: "2025-01-03", to: "2026-06-30", at: park, perDay: 2, everyNthDay: 9, hour: 14)
+        }
+        _ = try await s.pipeline.run()
+        let snapshot = try #require(try await s.pipeline.latestProposals())
+        let frequent = snapshot.proposals.filter { $0.kind == .frequentPlace }
+        let facts = try await s.pipeline.currentFacts()
+        let flatPhotos = Set(facts.filter { GeoMath.distance($0.asset.usableLocation!, Fixture.Places.munichHome) < 50 }.map(\.id))
+        #expect(!flatPhotos.isEmpty)
+        #expect(facts.filter { flatPhotos.contains($0.id) }.allSatisfy { $0.atHome })
+        #expect(!frequent.contains { !$0.assetIDs.isDisjoint(with: flatPhotos) }, "\(frequent.map(\.title))")
+        let parkPhotos = Set(facts.filter { GeoMath.distance($0.asset.usableLocation!, park) < 50 }.map(\.id))
+        #expect(frequent.contains { !$0.assetIDs.isDisjoint(with: parkPhotos) })
+        #expect(snapshot.homePlaces.count == 1)
+        var settings = s.settings
+        settings.primaryAreas = [.frequentPlaces]
+        let (states, reasons) = LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings,
+                                                                 contentAnalyzed: Set(facts.map(\.id)))
+        #expect(reasons.home >= flatPhotos.count)
+        #expect(flatPhotos.allSatisfy { states[$0]?.areas[.frequentPlaces] == .notApplicable })
+    }
+
     // MARK: The ring
 
     /// The ring counts the photos at home of the home the user chose; with "Kein Zuhause" none.

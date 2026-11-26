@@ -7,6 +7,9 @@ on for about an hour after 945446e had the fix, and the run of 945446e waited be
 concurrency setting cannot cancel per branch there (one group for all branches), so this
 script does it: it cancels the runs of ui.yml that belong to this pull request (same branch,
 same repository, event pull_request), are still waiting or running, and test another commit.
+Since 26.11.2026 every pull request has a group of its own ("ui-pr-<number>"); GitHub then
+replaces a waiting older run by itself, but still never cancels a running one, so this script
+stays: it stops the running run of an outdated commit.
 
 Never cancelled: runs of other branches, a run started by hand (workflow_dispatch), and the
 UI flow of a TestFlight run (it runs inside testflight.yml, not as a run of ui.yml).

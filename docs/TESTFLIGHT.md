@@ -200,6 +200,15 @@ Actions > **TestFlight feedback** > Run workflow.
   Lauf 44116350940 (17.11.), ist **fehlgeschlagen**: zu Beginn von Schritt 4 stand die
   Fortschrittszeile 13,7 s still (Grenze 10 s). Die Korrektur (9ff0dfc) ist in diesem Stand; ein
   neuer voller Durchgang damit steht aus.
+- **Seit 26.11.2026 keine gemeinsame Schlange `mac-queue` mehr** (Befund des Koordinators: GitHub
+  hält je Gruppe nur einen wartenden Lauf und bricht ihn still ab, sobald ein weiterer kommt; so
+  verdrängte ein Härtetest den wartenden UI-Lauf eines anderen Strangs). Jetzt hat jeder Pull
+  Request eine eigene Gruppe (`ui-pr-<Nummer>`, Rauchtest eines Entwurfs `ui-smoke-<Nummer>`),
+  jeder Zweig-Lauf von Hand `ui-branch-<ref>`, jeder Zweig-Härtetest `stress-branch-<ref>`, `main`
+  `mac-queue-main` und `stress-main`. Einen wartenden Lauf ersetzt nur ein neuerer desselben PRs
+  oder Zweigs (er prüft den neueren Stand). Läufe verschiedener Stränge warten auf einen freien
+  Mac in der Warteschlange des Kontos (fünf Macs), die nie etwas abbricht. Der folgende Punkt
+  beschreibt den Stand davor.
 - Mac-Warteschlange (Profi-Analyse, 17.11.2026): UI-Läufe und Härtetests aller Zweige laufen
   nacheinander, nie zwei zugleich. Es wartet höchstens einer; startet ein weiterer, ersetzt er den
   wartenden, der dann als „abgebrochen“ erscheint und später neu gestartet werden muss. Ein
@@ -520,7 +529,8 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   neben dem Release-Kurztest, Hochladen rund 10); letzter Push bis Upload rund 2,5 statt 3,5–4
   Stunden. Unterscheidet sich der Inhalt doch (etwas kam nach dem vollen Lauf auf `main`),
   laufen die betroffenen Gruppen im TestFlight-Lauf wie bisher: langsamer, nie ungeprüft.
-- Achtung Mac-Warteschlange: der volle Lauf wartet in `mac-queue`; ein neuer Push auf
+- (Stand vor dem 26.11.2026; seitdem hat jeder PR eine eigene Gruppe, siehe oben, und ein anderer
+  PR verdrängt keinen wartenden vollen Lauf mehr.) Achtung Mac-Warteschlange: der volle Lauf wartet in `mac-queue`; ein neuer Push auf
   einen anderen Pull Request auf „Ready“ kann ihn dort ersetzen (GitHub hält je Gruppe einen
   wartenden Lauf; Rauchtests von Entwürfen haben je PR eine eigene Gruppe und ersetzen ihn nie).
   Neu starten durch „Convert to draft“ und wieder „Ready for review“, nicht mit „Re-run all

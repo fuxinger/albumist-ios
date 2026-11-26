@@ -103,6 +103,9 @@ env:
   STRESS_PHOTOS: ${{ inputs.photos || (github.event.schedule == '40 0 * * 0' && '50000' || '10000') }}
   STRESS_MINUTES: ${{ inputs.minutes || (github.event.schedule == '40 0 * * 0' && '45' || '15') }}
 
+# Since 26.11.2026 a group per branch ("stress-branch-<ref>"), and "stress-main" on main: a
+# waiting pass is replaced only by a newer pass of the same branch, never by a UI run or another
+# strand's pass (ui.yml, "concurrency", same date). What follows describes the groups before.
 # In the Mac queue with the UI runs (see ui.yml, "concurrency"): one UI run or stress pass at a
 # time across all branches. A running pass is never cancelled; at most one run waits, and a
 # run that joins later takes its place (the waiting one is cancelled and has to be started
@@ -136,9 +139,8 @@ concurrency:
   group: >-
     ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-stress-{0}', github.run_id)
     || (github.event_name == 'schedule' && 'stress-night')
-    || (github.ref == 'refs/heads/main' && 'mac-queue-main')
-    || (github.event_name == 'workflow_dispatch' && 'stress-branch')
-    || 'mac-queue' }}
+    || (github.ref == 'refs/heads/main' && 'stress-main')
+    || format('stress-branch-{0}', github.ref) }}
   cancel-in-progress: false
 
 jobs:

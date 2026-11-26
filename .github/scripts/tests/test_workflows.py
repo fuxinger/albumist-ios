@@ -991,15 +991,17 @@ class MacQueueTests(unittest.TestCase):
         for name, text in (("ui", self.ui), ("ui-stress", self.stress)):
             group = concurrency_group(text)
             with self.subTest(workflow=name):
-                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main")), "mac-queue-main")
-                # The stress pass before the merge runs beside the branch's full UI pass (the
-                # owner's decision of 20.11.2026, 17:20): a group per branch, not the Mac queue.
+                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main")),
+                                 "stress-main" if name == "ui-stress" else "mac-queue-main")
+                # 26.11.2026: a group per branch and kind; no run of another strand or kind can
+                # replace a waiting one (GitHub keeps one waiting run per group).
                 self.assertEqual(gh_expr(group, dispatch_context("refs/heads/feature")),
-                                 "stress-branch" if name == "ui-stress" else "mac-queue")
+                                 "stress-branch-refs/heads/feature" if name == "ui-stress" else "ui-branch-refs/heads/feature")
 
     def test_no_pull_request_joins_the_queue_of_main(self):
         group = concurrency_group(self.ui)
-        self.assertEqual(gh_expr(group, pr_context()), "mac-queue")
+        # Each pull request its own group (26.11.2026): another strand's run never replaces it.
+        self.assertEqual(gh_expr(group, pr_context()), "ui-pr-8")
         # A draft's smoke test never waits in (and never replaces a run of) the Mac queue.
         self.assertEqual(gh_expr(group, pr_context(draft=True)), "ui-smoke-8")
         self.assertEqual(gh_expr(group, pr_context(draft=True, fork=True)), "ui-fork")

@@ -2,6 +2,11 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- „Album fürs Zuhause vorschlagen“ in „Dein Zuhause“: die eigene Wohnung kommt nur noch auf
+  Wunsch als „Häufiger Ort“ (P1-10). Rückgängig nimmt nur Fotos heraus, die kein anderer
+  angenommener Vorschlag im selben Album braucht, und sagt, was bleibt (P2-09). Die Foto-Ansicht
+  zeigt alle Fotos einer Liste, nicht nur die ersten 3.000 (Suche: 2.000). Start ohne
+  Schlüsselbund- und Datenbank-Hänger.
 - Neue Fortschrittsanzeige der Analyse (Entwurf v3 mit den 5 Punkten vom 15.11.): ein Balken in
   6 Abschnitten nach Zeitanteil, „Fertig gegen 23:40“ für die ganze Analyse, gleitender Balken,
   „Schon fertig: 51 Reisen, 38 Orte · Ansehen“, Fertig-Moment mit Häkchen, Details-Blatt,

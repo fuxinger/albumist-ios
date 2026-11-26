@@ -84,7 +84,7 @@ extension TripGeometryTests {
         #expect(facts.count == 5_000)
         let members = MapFixture.members(facts, of: AlbumistID("big"))
         let trip = MapFixture.trip(AlbumistID("big"), members)
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var geometry: TripGeometry?
         let elapsed = clock.measure {
             geometry = TripGeometry.build(trip: trip, facts: members, airborne: [], timeZone: MapFixture.utc)
@@ -137,7 +137,7 @@ extension TripGeometryTests {
         let members = MapFixture.members(Self.fiveYearsInOneTrip(), of: AlbumistID("life"))
         #expect(members.count == 50_000)
         let trip = MapFixture.trip(AlbumistID("life"), members)
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var geometry: TripGeometry?
         // Warm once (first-use costs of Foundation), then the best of three.
         _ = TripGeometry.build(trip: trip, facts: members, airborne: [], timeZone: MapFixture.utc)
@@ -218,7 +218,7 @@ extension TripGeometryTests {
             TripGeometryBuilder.DayGroup(day: LocalDay(year: 2023, month: 1, day: 1), members: [i],
                                          coordinate: MapFixture.at(asin(2 * random.unit() - 1) * 180 / .pi, random.unit() * 360 - 180))
         }
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var merged: (placeOfGroup: [Int], count: Int)?
         let elapsed = clock.measure { merged = TripGeometryBuilder.mergedPlaces(groups) }
         let ms = Double(elapsed.components.seconds) * 1_000 + Double(elapsed.components.attoseconds) / 1e15

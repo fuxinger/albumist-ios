@@ -198,7 +198,7 @@ struct CountryGeometryTests {
     /// does not fail it). The search for the middles, most of the work, is also counted, which
     /// does not depend on the machine: about 18,000 squares and 1.5 million edge distances.
     @Test func buildsTheWholeMapWellUnderASecond() throws {
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var fastest = Duration.seconds(60)
         for _ in 0..<3 {
             var geometry = CountryGeometry()

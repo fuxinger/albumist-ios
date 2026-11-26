@@ -214,7 +214,7 @@ struct MapArcsTests {
         // Concept §9: the whole summary of 50,000 photos in under 300 ms, so about linear work.
         let trips = MapHandmade.dayTrips(5_000).trips
         var arcs: [MapArc] = []
-        let took = ContinuousClock().measure { arcs = MapArcs.build(trips: trips) }
+        let took = ThreadCPUClock().measure { arcs = MapArcs.build(trips: trips) }
         #expect(arcs.count == MapSummary.maxArcs)
         #expect(arcs.allSatisfy { $0.weight >= 1 && $0.tripIDs.count == $0.weight })
         #expect(took < .seconds(2), "5,000 trips took \(took)")

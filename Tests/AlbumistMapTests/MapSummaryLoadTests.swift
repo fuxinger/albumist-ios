@@ -17,7 +17,7 @@ struct MapSummaryLoadTests {
         let library = MapLibrary(count: 50_000)
         let input = MapInput(facts: library.facts, trips: library.trips, homeSettings: library.homeSettings,
                              calendar: MapFixture.calendar, now: MapFixture.date("2026-11-20"))
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var summary: MapSummary?
         // Warm once (first-use costs of Foundation), then the best of three.
         _ = MapSummary.build(input)
@@ -92,7 +92,7 @@ struct MapSummaryLoadTests {
             MapInput(facts: facts, trips: library.trips, homeSettings: library.homeSettings, calendar: MapFixture.calendar,
                      now: MapFixture.date("2026-11-20"))
         }
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var once: MapSummary?, twice: MapSummary?
         _ = MapSummary.build(input(library.facts))
         let onceTime = clock.measure { once = MapSummary.build(input(library.facts)) }

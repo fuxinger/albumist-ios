@@ -332,6 +332,7 @@ def lost_app_at_launch(log: str, crash_reports: list[str] | None = None) -> list
 
 
 LAUNCH_FAIL = re.compile(r"Failed to launch <XCUIApplication|Timed out while launching application")
+LATE_LAUNCH_REASON = "launch timed out:"
 
 
 def late_launch(log: str, crash_reports: list[str] | None = None) -> list[str]:
@@ -373,7 +374,7 @@ def late_launch(log: str, crash_reports: list[str] | None = None) -> list[str]:
         late = (seconds(process, 2) - seconds(launch, 1)) % 86_400
         if late < LATE_START:
             return []
-        reasons.append(f"launch timed out: the simulator started the app process {late:.0f} s after the launch "
+        reasons.append(f"{LATE_LAUNCH_REASON} the simulator started the app process {late:.0f} s after the launch "
                        f"request, no crash report (simulator side, repeated once)")
     return reasons[:1]
 
@@ -445,7 +446,14 @@ def decide(status: int, log: str, crash_reports: list[str] | None = None, probe:
         real.append("crash report " + ", ".join(os.path.basename(p) for p in crash_reports))
     late = late_launch(log, crash_reports)
     if late and all(LAUNCH_FAIL.search(finding) for finding in bundle or []):
-        return "retry", late
+        # Every reason the log gives must come from the launch failure and the lines XCTest
+        # writes around any failure; anything else (an accessibility finding, a hang, a Fatal
+        # error, a recorded issue) keeps it red (second review 26.11.).
+        launch_lines = [line for line in log.splitlines() if LAUNCH_FAIL.search(line) or FAILED_CASE.search(line)
+                        or AGGREGATE.search(line) or "TEST EXECUTE FAILED" in line or "Executed " in line]
+        explained = scan("\n".join(launch_lines))[0]
+        if all(reason in explained for reason in real):
+            return "retry", late
     real += list(bundle or [])
     if real:
         return "fail", real
@@ -1636,6 +1644,11 @@ def run_group(args) -> int:
                                           earlier=first_log)
                 # "infra": the repeat failed on the simulator or XCTest alone again.
                 final = {"pass": "pass", "retry": "infra"}.get(verdict, "fail")
+                if final == "infra" and any(r.startswith(LATE_LAUNCH_REASON) for r in retry_reasons):
+                    # Rule of 26.11.: one repeat for a late launch; a repeat that is not green
+                    # is a real finding (second review: "no result" would hide it).
+                    final = "fail"
+                    reasons = ["the repeat after a late launch was not green either (counted as red)"] + reasons
                 again = daemon_crash_tests(first_log) & daemon_crash_tests(text)
                 if final == "infra" and again:
                     # The daemon crashed again in the same test: likely caused by what the test

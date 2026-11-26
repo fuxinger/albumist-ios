@@ -496,8 +496,7 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   gleichem Schlüssel werden übernommen, kosten also keinen Mac).
 - **Zeitgrenzen hart vor dem Merge** (Regel 26.11., Koordinator für Fuchs): Auf einem Pull
   Request melden Zeitgrenzen auf der Wanduhr nur (`TimingLimit`, `TIMING_OVER`, gezählt). Der
-  volle Lauf prüft sie hart: Job „Core tests hard (macOS)“ (macOS-Core-Tests) und der Lasttest
-  im Job „Core tests (Linux)“. „UI verdict (full)“ ist nur grün, wenn „Core tests hard (macOS)“
+  volle Lauf prüft sie hart: Job „Core tests hard (macOS)“ (macOS-Core-Tests und Lasttest). „UI verdict (full)“ ist nur grün, wenn „Core tests hard (macOS)“
   grün ist. Nur diese fehlenden Teile, keine zweite App-Build oder UI-Gruppe.
 - **Damit GitHub es erzwingt** (nur Fuchs, Einstellung, P5-09): Schutzregel für `main` mit
   Pflicht-Prüfungen „UI verdict (full)“ und „UI stress verdict“ (seit 17:20, unten) und „Require

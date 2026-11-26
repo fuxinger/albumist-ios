@@ -256,21 +256,9 @@ jobs:
       - name: Build and test
         timeout-minutes: 12
         run: python3 .github/scripts/swift_test_watch.py --minutes 10 --log core-linux.log -- swift test --parallel
-      - name: Load test, hard limits (merge gate)
-        # The full run before the merge holds the wall-clock limits hard (rule of 26.11.): the
-        # same load test as CI's Linux job, which on a pull request only reports them.
-        if: ${{ github.event_name != 'pull_request' }}
-        timeout-minutes: 9
-        run: |
-          set +e
-          ALBUMIST_LOAD_TEST=1 python3 .github/scripts/swift_test_watch.py --minutes 7 --quiet --log load.log -- \
-            swift test --skip-build --filter LoadTests
-          status=$?
-          grep -E "LOAD_|TIMING_|passed|failed|error" load.log
-          exit $status
-      - name: Time limits reported (pull requests only)
+      - name: Time limits reported
         if: ${{ always() }}
-        run: python3 .github/scripts/timing_report.py core-linux.log load.log >> "$GITHUB_STEP_SUMMARY"
+        run: python3 .github/scripts/timing_report.py core-linux.log >> "$GITHUB_STEP_SUMMARY"
 
   core-macos:
     # The macOS core tests with hard wall-clock limits, once in the full run before the merge
@@ -294,9 +282,21 @@ jobs:
         run: |
           mkdir -p build
           python3 .github/scripts/swift_test_watch.py --minutes 13 --log build/core-macos.log -- swift test --parallel
-      - name: Time limits reported (pull requests only)
+      - name: Load test, hard limits
+        # Here, not in core-linux: that job is skipped when every group's green is reused, and
+        # this job runs in every full run (second review 26.11.). Limits as in the nightly run,
+        # which runs the same load test on macOS.
+        timeout-minutes: 9
+        run: |
+          set +e
+          ALBUMIST_LOAD_TEST=1 python3 .github/scripts/swift_test_watch.py --minutes 7 --quiet --log build/load.log -- \
+            swift test --skip-build --filter LoadTests
+          status=$?
+          grep -E "LOAD_|TIMING_|passed|failed|error" build/load.log
+          exit $status
+      - name: Time limits reported
         if: ${{ always() }}
-        run: python3 .github/scripts/timing_report.py build/core-macos.log >> "$GITHUB_STEP_SUMMARY"
+        run: python3 .github/scripts/timing_report.py build/core-macos.log build/load.log >> "$GITHUB_STEP_SUMMARY"
 
   build:
     name: UI build

@@ -486,6 +486,16 @@ class SelectionTests(unittest.TestCase):
         self.assertIn("UI_RESULT device fail", log)
         self.assertIn("UI_RESULT device pass", self.run_with_passes(["** TEST SUCCEEDED **\n" + PASSED_ONE])[2])
 
+    def test_a_late_launch_is_repeated_once_and_a_late_repeat_is_red(self):
+        # Rule of 26.11.: one repeat; late again is a real finding, never "no result".
+        code, marker, log = self.run_with_passes([LATE_LAUNCH, LATE_LAUNCH])
+        self.assertEqual((code, marker), (1, False), log)
+        self.assertIn("the repeat after a late launch was not green either", log)
+        self.assertIn("UI_RESULT device fail", log)
+        # The repeat passed: green, with the repeat counted.
+        code, marker, log = self.run_with_passes([LATE_LAUNCH, "** TEST SUCCEEDED **\n" + PASSED_ONE])
+        self.assertEqual((code, marker), (0, False), log)
+
     def test_a_group_whose_every_test_skipped_itself_is_red(self):
         # G5-08: never green, also not as "no result": the selection tested nothing.
         code, marker, log = self.run_with_passes([SKIPPED_ONLY])
@@ -1982,6 +1992,12 @@ class LateLaunchTests(unittest.TestCase):
     def test_another_failure_in_the_pass_keeps_it_red(self):
         other = LATE_LAUNCH + "/x/A.swift:9: error: -[AlbumistUITests.AlbumistFlowUITests test3_TapThroughSweep] : XCTAssertTrue failed - no plan\n"
         self.assertEqual(ui_tests.decide(65, other)[0], "fail")
+
+    def test_any_other_reason_in_the_log_keeps_it_red(self):
+        for extra in ("A11Y_FAIL contrast light overview: 2 findings", "UI_HANG pass first: X/y still running",
+                      "Fatal error: Unexpectedly found nil", "/x/A.swift:3: Test x() recorded an issue at A.swift:3"):
+            with self.subTest(extra=extra):
+                self.assertEqual(ui_tests.decide(65, LATE_LAUNCH + extra + "\n")[0], "fail")
 
     def test_another_finding_in_the_result_bundle_keeps_it_red(self):
         verdict, _ = ui_tests.decide(65, LATE_LAUNCH, bundle=["result bundle: XCTAssertTrue failed - no plan"])

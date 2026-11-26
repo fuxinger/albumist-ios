@@ -53,7 +53,7 @@ class TimingReportTests(unittest.TestCase):
         # The merge gate holds the limits hard: macOS core tests and the load test in a full run.
         self.assertIn("core-macos:", ui)
         self.assertIn("needs: [plan, ui, core-macos]", ui)
-        self.assertIn("Load test, hard limits (merge gate)", ui)
+        self.assertIn("Load test, hard limits", ui.split("core-macos:", 1)[1].split("\n  build:", 1)[0])
         for name in ("nightly.yml", "testflight.yml", "ui-stress.yml"):
             with open(os.path.join(root, ".github", "workflows", name)) as f:
                 self.assertNotIn("ALBUMIST_TIMING", f.read(), name)

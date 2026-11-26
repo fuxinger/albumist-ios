@@ -36,7 +36,7 @@
       "group": "flow-other",
       "budget_min": 40,
       "title": "other flows, purchase and search",
-      "_why": "Every other UI test except the accessibility tests (flow tests 1b-7, locked purchase, search). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
+      "_why": "Every other UI test except the accessibility tests (flow tests 1d-7 and the remove-photo test, locked purchase, search; 1c runs in device). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
       "device": "pro",
       "only": "",
       "skip": "AlbumistFlowUITests/test1c_UndoFromHistory AlbumistFlowUITests/test1_FullFlow AlbumistFlowUITests/test1b_AtlasLibrarySearch PerformanceUITests AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo"

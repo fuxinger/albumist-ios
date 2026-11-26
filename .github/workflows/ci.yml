@@ -183,7 +183,7 @@ jobs:
           status=$?
           grep -E "LOAD_|passed|failed|error" load.log
           exit $status
-      - name: Time limits reported (pull requests only)
+      - name: Time limits reported
         if: ${{ always() }}
         run: python3 .github/scripts/timing_report.py core-linux.log load.log >> "$GITHUB_STEP_SUMMARY"
       - name: Job summary
@@ -287,7 +287,7 @@ jobs:
         run: |
           mkdir -p build
           python3 .github/scripts/swift_test_watch.py --minutes 13 --log build/core-macos.log -- swift test --parallel
-      - name: Time limits reported (pull requests only)
+      - name: Time limits reported
         if: ${{ always() && steps.core.outcome != 'skipped' }}
         run: python3 .github/scripts/timing_report.py build/core-macos.log >> "$GITHUB_STEP_SUMMARY"
       - name: Fresh simulator (erased and booted)

@@ -225,7 +225,7 @@ final class MapPrototypeUITests: XCTestCase {
         guard UITestWait.appears(page("worldmap.all"), "map for laypeople", timeout: 30) else { return }
         worldMap()
         guard tap(page("worldmap.more"), "map menu") else { return }
-        guard tap(button("Messwerte"), "open measuring page") else { return }
+        guard tap(page("worldmap.measure"), "open measuring page") else { return }
         guard UITestWait.appears(page("proto.hud"), "map prototype page with its HUD", timeout: 20) else { return }
 
         ownGlobe()

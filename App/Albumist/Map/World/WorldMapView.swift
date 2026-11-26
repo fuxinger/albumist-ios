@@ -137,6 +137,7 @@ struct WorldMapView: View {
             .accessibilityIdentifier("worldmap.all")
             Menu {
                 Button("Messwerte", systemImage: "gauge.with.dots.needle.50percent") { measuring = true }
+                    .accessibilityIdentifier("worldmap.measure")
             } label: {
                 Image(systemName: "ellipsis").font(.body.weight(.semibold)).frame(width: buttonSide, height: buttonSide)
             }

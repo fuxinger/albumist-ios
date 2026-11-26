@@ -45,9 +45,9 @@ struct PurchaseStoreKitTests {
         var url = try Self.configurationURL()
         if let price {
             let text = try String(contentsOf: url, encoding: .utf8)
-            #expect(text.contains(#""displayPrice" : "4.99""#))
+            #expect(text.contains(#""displayPrice" : "6.99""#))
             url = FileManager.default.temporaryDirectory.appendingPathComponent("Albumist-\(UUID().uuidString).storekit")
-            try text.replacingOccurrences(of: #""displayPrice" : "4.99""#, with: #""displayPrice" : "\#(price)""#)
+            try text.replacingOccurrences(of: #""displayPrice" : "6.99""#, with: #""displayPrice" : "\#(price)""#)
                 .write(to: url, atomically: true, encoding: .utf8)
         }
         let file = url
@@ -312,24 +312,25 @@ struct PurchaseStoreKitTests {
         print("STOREKIT_PRICE regular \(product.displayPrice)")
         #expect(product.id == "app.albumist.ios.unlock")
         #expect(product.type == .nonConsumable)
-        #expect(product.price == Decimal(string: "4.99"))
-        #expect(normalized(product.displayPrice).contains("4,99") || product.displayPrice.contains("4.99"), "shown: \(product.displayPrice)")
+        #expect(product.price == Decimal(string: "6.99"))
+        #expect(normalized(product.displayPrice).contains("6,99") || product.displayPrice.contains("6.99"), "shown: \(product.displayPrice)")
         #expect(product.displayPrice.contains("€"), "shown: \(product.displayPrice)")
     }
 
-    /// Launch week: App Store Connect sets 2,99 €, and that is what the app shows. Nothing in
-    /// the app holds a price (checked on Linux, `noPriceIsWrittenIntoTheApp`).
+    /// Launch week: App Store Connect sets 4,99 € (owner's decision 25.11.; 6,99 € after), and that
+    /// is what the app shows. Nothing in the app holds a price (checked on Linux,
+    /// `noPriceIsWrittenIntoTheApp`).
     @Test func launchWeekPriceIsWhatStoreKitSays() async throws {
-        let store = try await session(price: "2.99")
+        let store = try await session(price: "4.99")
         defer { clearAfterwards(store) }
         try await requireTestEnvironment()
         let (purchases, _) = freshInstall()
         try await within("load the product into Purchases") { await purchases.loadProduct() }
         let product = try #require(purchases.product)
         print("STOREKIT_PRICE launch week \(product.displayPrice)")
-        #expect(product.price == Decimal(string: "2.99"))
-        #expect(normalized(product.displayPrice).contains("2,99") || product.displayPrice.contains("2.99"), "shown: \(product.displayPrice)")
-        #expect(!product.displayPrice.contains("4"), "shown: \(product.displayPrice)")
+        #expect(product.price == Decimal(string: "4.99"))
+        #expect(normalized(product.displayPrice).contains("4,99") || product.displayPrice.contains("4.99"), "shown: \(product.displayPrice)")
+        #expect(!product.displayPrice.contains("6"), "shown: \(product.displayPrice)")
     }
 
     // MARK: Buying

@@ -17,6 +17,20 @@ Buildnummer und der Commit werden automatisch angehängt.
   (Beschluss 17.11.).
 
 <!-- testflight:start -->
+Danke fürs Testen! Dieser Build bringt eine Testseite für die kommende Karte „Deine Welt“. Sie gibt es nur in TestFlight, nicht in der App-Store-Version. Bitte achte besonders auf:
+
+- Kamera-Probe: Öffne die Testseite der Karte, dann „Reise abspielen“ und „Kamera-Probe“. Sieh dir zuerst den Flug an, dann tippe „Nochmal fliegen“, einmal im WLAN und einmal im Mobilfunk. Geh danach mit „Weiter“ durch die 16 Kamera-Blicke und mach Bildschirmfotos von den tiefen Blicken und von Rom.
+- Werte: Tippe am Ende auf „Werte kopieren“ und schick den Text mit. Er enthält das Gerät und Messwerte, keine Fotos und keine Koordinaten.
+- Ruckelt der Flug, bleiben Kartenteile leer oder wird das iPhone warm? Schreib kurz, was du gesehen hast.
+- Alles andere sollte genau wie im letzten Build funktionieren.
+
+Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
+<!-- testflight:end -->
+
+## Frühere Builds
+
+### Build 41 (21.11.2026)
+
 Danke fürs Testen! Dieser Build macht die App bei großen Mediatheken ruhiger. Bitte achte besonders auf:
 
 - Update ohne Verlust: Die Daten der App ziehen beim ersten Start in eine Datei mit dem neuen Namen um. Danach sollten deine Analyse, deine Vorschläge, deine Alben von Albumist und „Rückgängig“ genau wie vorher da sein. Fängt die App von vorn an zu analysieren oder fehlt etwas, melde das bitte sofort.
@@ -25,9 +39,6 @@ Danke fürs Testen! Dieser Build macht die App bei großen Mediatheken ruhiger. 
 - „Seit wann wohnst du dort?“: Der gewählte Ort zeigt einen Kreisel, solange das Datum vorgeschlagen wird.
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
-<!-- testflight:end -->
-
-## Frühere Builds
 
 ### Build 40 (20.11.2026)
 

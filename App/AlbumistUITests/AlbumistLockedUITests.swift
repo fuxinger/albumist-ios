@@ -104,9 +104,9 @@ final class AlbumistLockedUITests: XCTestCase {
             // it is, the return below says.
             _ = button("ausgewählte Alben anlegen").waitForExistence(timeout: 5)
         } else {
-            let row = app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", "Neues Album")).firstMatch
-            print("UI_FACT locked: no recommended ones, a row for a new album \(row.exists)")
-            if row.exists {
+            let row = UITestSuggestions.openRow(in: app)
+            print("UI_FACT locked: no recommended ones, an open suggestion \(row?.label ?? "none in sight")")
+            if let row {
                 row.tap()
                 UITestWait.appears(detail, "one suggestion opened (locked)", timeout: 10)
                 // By identifier, or by the start of the name where the menu does not pass the

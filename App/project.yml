@@ -32,6 +32,8 @@ targets:
         product: AlbumistEngine
       - package: AlbumistKit
         product: AlbumistWorldMap
+      - package: AlbumistKit
+        product: AlbumistMap
     info:
       path: Albumist/Resources/Info.plist
       properties:

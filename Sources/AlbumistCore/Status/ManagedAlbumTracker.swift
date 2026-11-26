@@ -245,10 +245,8 @@ extension UserOverride {
 public struct OverrideSet: Sendable {
     private var neverAddInAlbum: Set<String> = []
     private var neverAddInSource: Set<String> = []
-    private var alwaysAddInAlbum: Set<String> = []
     private var ignoredAssets: Set<AssetID> = []
     private var excludedAssets: Set<AssetID> = []
-    private var excludedAlbums: Set<CollectionID> = []
     private var rejectedSources: Set<AlbumistID> = []
     private var deletedSources: Set<AlbumistID> = []
     private var rejectedMatches: Set<String> = []
@@ -260,14 +258,15 @@ public struct OverrideSet: Sendable {
     public mutating func insert(_ o: UserOverride) {
         switch (o.scope, o.decision) {
         case let (.assetInAlbum(a, c), .neverAdd): neverAddInAlbum.insert(a.rawValue + "|" + c.rawValue)
-        case let (.assetInAlbum(a, c), .alwaysAdd): alwaysAddInAlbum.insert(a.rawValue + "|" + c.rawValue)
         case let (.assetInSource(a, s), .neverAdd): neverAddInSource.insert(a.rawValue + "|" + s.rawValue)
         case let (.asset(a), .ignoreAsset): ignoredAssets.insert(a)
         case let (.asset(a), .excludeFromAnalysis): excludedAssets.insert(a)
-        case let (.album(c), .excludeFromAnalysis): excludedAlbums.insert(c)
         case let (.source(s), .rejectProposal): rejectedSources.insert(s)
         case let (.source(s), .doNotRecreateAlbum): deletedSources.insert(s)
         case let (.albumForSource(c, s), .notMatchingAlbum): rejectedMatches.insert(c.rawValue + "|" + s.rawValue)
+        // No screen records "always add" or an album left out of the analysis (Periphery,
+        // 21.11.2026: nothing read them); the cases stay in `Decision` and `Scope` so stored
+        // overrides still decode.
         default: break
         }
     }
@@ -282,14 +281,10 @@ public struct OverrideSet: Sendable {
     public func tookOut(_ asset: AssetID, of album: CollectionID) -> Bool {
         neverAddInAlbum.contains(asset.rawValue + "|" + album.rawValue)
     }
-    public func isForcedIn(_ asset: AssetID, album: CollectionID) -> Bool {
-        alwaysAddInAlbum.contains(asset.rawValue + "|" + album.rawValue)
-    }
     public func isIgnored(_ asset: AssetID) -> Bool { ignoredAssets.contains(asset) }
     /// Every photo the user ignored.
     public var ignored: Set<AssetID> { ignoredAssets }
     public func isExcluded(_ asset: AssetID) -> Bool { excludedAssets.contains(asset) }
-    public func isExcludedAlbum(_ album: CollectionID) -> Bool { excludedAlbums.contains(album) }
     public func isRejected(_ source: AlbumistID) -> Bool { rejectedSources.contains(source) }
     public func mustNotRecreate(_ source: AlbumistID) -> Bool { deletedSources.contains(source) }
     /// The user said this album does not fit this suggestion.

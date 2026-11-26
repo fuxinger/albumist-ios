@@ -1,6 +1,5 @@
 import SwiftUI
 import AlbumistCore
-import AlbumistEngine
 
 /// List of proposals, optionally for one area.
 struct ProposalListView: View {

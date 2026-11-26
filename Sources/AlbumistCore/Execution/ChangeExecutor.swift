@@ -1131,8 +1131,14 @@ public struct UndoPlanner: Sendable {
     ///   records). Such an album that this plan only extended goes away when nothing but this
     ///   plan's photos is left in it (plugin review N5: P creates A, Q adds to A; taking back
     ///   P and then Q left A behind empty).
+    /// - Parameter keptForOthers: per album, the photos other changes the user still has want
+    ///   there (`ChangePlan.wantedMembers` of every finished plan not taken back, except this
+    ///   one and its retries; review P2-09, decision Fuchs 26.11.2026): they stay, and an album
+    ///   holding any of them is not deleted. With `owned`, the photos this plan wants that are
+    ///   still Albumist's count as this plan's too, so the photos an earlier undo of another
+    ///   plan left for this one go with this undo.
     public func undoPlan(for executed: ChangePlan, current: CollectionInventory, owned: [CollectionID: Set<AssetID>]? = nil,
-                         createdByAlbumist: Set<CollectionID> = [],
+                         createdByAlbumist: Set<CollectionID> = [], keptForOthers: [CollectionID: Set<AssetID>] = [:],
                          earlierUndos: [ChangePlan] = [], id: AlbumistID = AlbumistID(), now: Date = Date()) -> ChangePlan {
         var steps: [PlanStep] = []
         var notes: [PlanNote] = []
@@ -1193,6 +1199,19 @@ public struct UndoPlanner: Sendable {
         }
         if let owned {
             for (albumID, ours) in addedByUs { addedByUs[albumID] = ours.intersection(owned[albumID] ?? []) }
+            // What this plan wants that is Albumist's: photos it found there already, which an
+            // earlier undo of the plan that put them there left for this one (P2-09).
+            if executed.wanted != nil {
+                for (albumID, wish) in executed.wantedMembers() {
+                    let left = wish.intersection(owned[albumID] ?? [])
+                    if !left.isEmpty { addedByUs[albumID, default: []].formUnion(left) }
+                }
+            }
+        }
+        /// Of this plan's photos in an album, those another change still wants there (P2-09).
+        func kept(_ albumID: CollectionID, _ ours: Set<AssetID>, in album: CollectionSnapshot) -> Set<AssetID> {
+            guard let others = keptForOthers[albumID] else { return [] }
+            return ours.intersection(others).intersection(album.assetIDs)
         }
 
         // 1. Revert renames and moves if nobody changed them again.
@@ -1235,19 +1254,25 @@ public struct UndoPlanner: Sendable {
         for albumID in createdAlbums {
             guard let album = current[albumID] else { continue }
             let ours = addedByUs[albumID] ?? []
-            if album.assetIDs.isSubset(of: ours) {
+            let stay = kept(albumID, ours, in: album)
+            if album.assetIDs.isSubset(of: ours), stay.isEmpty {
                 albumDeletions.append(.deleteCollection(albumID, title: album.title))
                 guards[albumID] = ours
             } else {
-                let removable = album.assetIDs.intersection(ours).sorted()
+                let removable = album.assetIDs.intersection(ours).subtracting(stay).sorted()
                 if !removable.isEmpty { append(.removeAssets(album: albumID, assets: removable)) }
-                notes.append(.respectedManualRemovals(count: album.assetIDs.subtracting(ours).count))
+                if !album.assetIDs.isSubset(of: ours) {
+                    notes.append(.respectedManualRemovals(count: album.assetIDs.subtracting(ours).count))
+                }
+                if !stay.isEmpty { notes.append(.keptForOtherPlans(album: albumID, count: stay.count)) }
             }
         }
         // 3. Extended existing albums (and adopted ones): remove only our additions that are still there.
         for (albumID, ours) in addedByUs.sorted(by: { $0.key < $1.key }) where !createdSet.contains(albumID) {
             guard let album = current[albumID] else { continue }
-            if createdByAlbumist.contains(albumID), !album.assetIDs.isEmpty, album.assetIDs.isSubset(of: ours) {
+            let stay = kept(albumID, ours, in: album)
+            if !stay.isEmpty { notes.append(.keptForOtherPlans(album: albumID, count: stay.count)) }
+            if createdByAlbumist.contains(albumID), !album.assetIDs.isEmpty, album.assetIDs.isSubset(of: ours), stay.isEmpty {
                 // Albumist's own album, made by another plan that was taken back already: once
                 // these photos are out it would stay empty. It goes, guarded like the albums
                 // above (a photo the user puts in before the deletion runs keeps it).
@@ -1255,7 +1280,7 @@ public struct UndoPlanner: Sendable {
                 guards[albumID] = ours
                 continue
             }
-            let removable = album.assetIDs.intersection(ours).sorted()
+            let removable = album.assetIDs.intersection(ours).subtracting(stay).sorted()
             if !removable.isEmpty { append(.removeAssets(album: albumID, assets: removable)) }
         }
         // 4. A plan that took Albumist's photos back out of albums (or deleted its album) is

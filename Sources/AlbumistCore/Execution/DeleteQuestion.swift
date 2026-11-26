@@ -30,12 +30,14 @@ public struct DeleteQuestion: Sendable {
     /// album records `albums`, with the results of plans still waiting to be stored (`waiting`,
     /// oldest first) folded in, as the undo stores them before it plans (third review,
     /// SHOULD-1), from the album list read now.
+    /// `keptForOthers`: the photos other changes still want (P2-09): an album holding any stays.
     public func undo(_ executed: ChangePlan, albums: [ManagedAlbumState], waiting: [ChangePlan],
-                     earlierUndos: [ChangePlan], cached: CollectionInventory) async -> Bool {
+                     earlierUndos: [ChangePlan], keptForOthers: [CollectionID: Set<AssetID>] = [:], cached: CollectionInventory) async -> Bool {
         let made = executed.collectionsMade
         func deletes(_ current: CollectionInventory) -> Bool {
             let records = waiting.reduce(albums) { ManagedAlbumTracker().record($1, into: $0, inventory: current) }
-            return UndoPlanner().undoPlan(for: executed, albums: records, current: current, earlierUndos: earlierUndos).deletesCollections
+            return UndoPlanner().undoPlan(for: executed, albums: records, current: current, keptForOthers: keptForOthers,
+                                          earlierUndos: earlierUndos).deletesCollections
         }
         // Every album Albumist keeps a record of is looked up when the list lacks it, as the
         // undo's own check completes the list (fourth review, NIT-2: an album an earlier plan
@@ -128,12 +130,33 @@ extension UndoPlanner {
     /// The undo of `executed` from Albumist's album records `albums` (`owned`, `createdByAlbumist`):
     /// the user's own photos and albums stay. `AppModel.undo` and the question before it plan
     /// it the same way.
+    /// `keptForOthers`: what the other changes the user still has want (`keptForOthers(undoing:plans:undone:)`).
     public func undoPlan(for executed: ChangePlan, albums: [ManagedAlbumState], current: CollectionInventory,
+                         keptForOthers: [CollectionID: Set<AssetID>] = [:],
                          earlierUndos: [ChangePlan], id: AlbumistID = AlbumistID(), now: Date = Date()) -> ChangePlan {
         var owned: [CollectionID: Set<AssetID>] = [:]
         for state in albums { owned[state.albumID, default: []].formUnion(state.addedByAlbumist) }
         // An album another plan made, left with only this plan's photos, goes too (plugin review N5).
         let created = Set(albums.filter(\.createdByAlbumist).map(\.albumID))
-        return undoPlan(for: executed, current: current, owned: owned, createdByAlbumist: created, earlierUndos: earlierUndos, id: id, now: now)
+        return undoPlan(for: executed, current: current, owned: owned, createdByAlbumist: created, keptForOthers: keptForOthers,
+                        earlierUndos: earlierUndos, id: id, now: now)
+    }
+
+    /// Per album the undo of `executed` touches, the photos other changes the user still has
+    /// want there (review P2-09): every finished plan in `plans` that is no undo, was not taken
+    /// back (`undone`: the targets of completed undos) and is not the same change as
+    /// `executed` (a retry of it, or the plan it retries). A plan whose undo was only partial
+    /// still counts: its photos may still be there.
+    public static func keptForOthers(undoing executed: ChangePlan, plans: [ChangePlan], undone: Set<AlbumistID>) -> [CollectionID: Set<AssetID>] {
+        let albums = Set(executed.wantedMembers().keys).union(executed.touchedCollections)
+        guard !albums.isEmpty else { return [:] }
+        var result: [CollectionID: Set<AssetID>] = [:]
+        for plan in plans where plan.reverts == nil && !undone.contains(plan.id) && !executed.isSameChange(as: plan)
+            && (plan.status == .completed || plan.status == .completedWithErrors) {
+            for (album, assets) in plan.wantedMembers() where albums.contains(album) {
+                result[album, default: []].formUnion(assets)
+            }
+        }
+        return result
     }
 }

@@ -1061,6 +1061,15 @@ public actor AlbumistStore: PlanJournal {
             }
     }
 
+    /// Per album the undo of `executed` touches, the photos the other changes the user still
+    /// has want there (review P2-09, `UndoPlanner.keptForOthers`): from every finished plan of
+    /// the journal, not one page of it.
+    public func keptForOthers(undoing executed: ChangePlan) throws -> [CollectionID: Set<AssetID>] {
+        let plans = try db.query("SELECT payload FROM plans WHERE status IN ('completed', 'completedWithErrors') ORDER BY created_at")
+            .compactMap { try loadPlan($0["payload"]) }
+        return UndoPlanner.keptForOthers(undoing: executed, plans: plans, undone: try undoneTargets())
+    }
+
     /// Plans that a completed undo took back, over the whole journal (not one page of it).
     public func undoneTargets() throws -> Set<AlbumistID> {
         struct Header: Decodable { var reverts: AlbumistID? }

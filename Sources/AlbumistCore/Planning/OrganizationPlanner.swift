@@ -66,6 +66,11 @@ public struct OrganizationPlanner: Sendable {
         var notes: [PlanNote] = []
         var respectedRemovals = 0
         var optionalNotIncluded = 0
+        /// Every photo each suggestion wants in its album, also those there already (P2-09).
+        var wanted: [AlbumWish] = []
+        func wish(_ assets: [AssetID], in album: AlbumRef) {
+            if !assets.isEmpty { wanted.append(AlbumWish(album: album, assets: assets)) }
+        }
 
         // Detect duplicate titles among new albums before building.
         var newTitles: [String: [AlbumistID]] = [:]
@@ -118,11 +123,15 @@ public struct OrganizationPlanner: Sendable {
                     conflicts.append(.titleExistsInFolder(title: albumTitle, existing: existing))
                 }
                 let key = builder.createAlbum(title: albumTitle, parent: parent, source: sourceID)
-                builder.add(filtered(for: nil), to: .planned(key), source: sourceID)
+                let assets = filtered(for: nil)
+                wish(assets, in: .planned(key))
+                builder.add(assets, to: .planned(key), source: sourceID)
 
             case .extendExisting(let albumID):
                 guard requireEditable(albumID) else { continue }
-                let missing = filtered(for: albumID).filter { !(inventory[albumID]?.assetIDs.contains($0) ?? false) }
+                let assets = filtered(for: albumID)
+                wish(assets, in: .existing(albumID))
+                let missing = assets.filter { !(inventory[albumID]?.assetIDs.contains($0) ?? false) }
                 builder.add(missing, to: .existing(albumID), source: sourceID)
 
             case .renameExisting(let albumID, let newTitle, let extend):
@@ -132,7 +141,9 @@ public struct OrganizationPlanner: Sendable {
                     builder.append(.renameCollection(albumID, from: album.title, to: clean), source: sourceID)
                 }
                 if extend {
-                    builder.add(filtered(for: albumID).filter { !album.assetIDs.contains($0) }, to: .existing(albumID), source: sourceID)
+                    let assets = filtered(for: albumID)
+                    wish(assets, in: .existing(albumID))
+                    builder.add(assets.filter { !album.assetIDs.contains($0) }, to: .existing(albumID), source: sourceID)
                 }
 
             case .moveExisting(let albumID, let path, let extend):
@@ -142,7 +153,9 @@ public struct OrganizationPlanner: Sendable {
                     builder.append(.moveCollection(albumID, from: album.parentID, to: target), source: sourceID)
                 }
                 if extend {
-                    builder.add(filtered(for: albumID).filter { !album.assetIDs.contains($0) }, to: .existing(albumID), source: sourceID)
+                    let assets = filtered(for: albumID)
+                    wish(assets, in: .existing(albumID))
+                    builder.add(assets.filter { !album.assetIDs.contains($0) }, to: .existing(albumID), source: sourceID)
                 }
 
             case .merge(let target, let sources, let title, let path):
@@ -167,6 +180,7 @@ public struct OrganizationPlanner: Sendable {
                     ref = .planned(builder.createAlbum(title: AlbumTitle.sanitize(title ?? item.proposal.title), parent: parent, source: sourceID))
                     targetMembers = []
                 }
+                wish(union.sorted(), in: ref)
                 builder.add(union.subtracting(targetMembers).sorted(), to: ref, source: sourceID)
             }
         }
@@ -184,7 +198,8 @@ public struct OrganizationPlanner: Sendable {
             steps: builder.steps,
             conflicts: conflicts,
             notes: notes,
-            resolvedKeys: [:]
+            resolvedKeys: [:],
+            wanted: wanted
         )
     }
 

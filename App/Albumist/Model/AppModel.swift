@@ -3414,9 +3414,14 @@ final class AppModel {
         // Undos of this plan that did not get everything back (plugin review W1): an album one
         // of them brought back gets the photos still missing, never a second album.
         let earlier: [ChangePlan]
-        do { earlier = try await store.reverts(of: executed.id) } catch { message = .failure(error.localizedDescription); return }
+        // Photos other changes the user still has want in the same albums stay (review P2-09).
+        let keep: [CollectionID: Set<AssetID>]
+        do {
+            earlier = try await store.reverts(of: executed.id)
+            keep = try await store.keptForOthers(undoing: executed)
+        } catch { message = .failure(error.localizedDescription); return }
         // The same planning as the question before it (`DeleteQuestion.undo`).
-        let undoPlan = UndoPlanner().undoPlan(for: executed, albums: albums, current: current, earlierUndos: earlier)
+        let undoPlan = UndoPlanner().undoPlan(for: executed, albums: albums, current: current, keptForOthers: keep, earlierUndos: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
             message = AppMessage(title: interruptedPlan?.reverts != nil
@@ -3433,7 +3438,26 @@ final class AppModel {
         if let finished = execution.finished, finished.id == undoPlan.id, finished.status == .completed,
            let said = Self.remainderMessage(UndoRemainder(plan: executed, current: inventory), inHistory: false) {
             message = said
+        } else if let finished = execution.finished, finished.id == undoPlan.id, finished.status == .completed,
+                  let said = Self.keptMessage(undoPlan.notes, inventory: inventory) {
+            message = said
         }
+    }
+
+    /// Photos the undo left because another change of the user's still wants them there
+    /// (review P2-09), in words. Nil when it left none.
+    static func keptMessage(_ notes: [PlanNote], inventory: CollectionInventory) -> AppMessage? {
+        var lines: [String] = []
+        for note in notes {
+            guard case .keptForOtherPlans(let album, let count) = note, count > 0 else { continue }
+            let title = inventory[album]?.title ?? String(localized: "Album ohne Namen")
+            lines.append(count == 1
+                         ? String(localized: "1 Foto bleibt im Album „\(title)“.")
+                         : String(localized: "\(count) Fotos bleiben im Album „\(title)“."))
+        }
+        guard !lines.isEmpty else { return nil }
+        lines.append(String(localized: "Ein anderer Vorschlag, den du angenommen hast, hat sie auch dort hingelegt. Nimmst du ihn zurück, gehen sie mit."))
+        return AppMessage(title: String(localized: "Einige Fotos bleiben"), text: lines.joined(separator: "\n"))
     }
 
     // MARK: Announcing the iOS question (review 18.11., P3-07)
@@ -3452,7 +3476,9 @@ final class AppModel {
         let albums = managedAlbums
         let waiting = (try? await store?.plansAwaitingFinalization()) ?? []
         let earlier = (try? await store?.reverts(of: executed.id)) ?? []
-        return await DeleteQuestion(library: library).undo(executed, albums: albums, waiting: waiting, earlierUndos: earlier, cached: inventory)
+        let keep = (try? await store?.keptForOthers(undoing: executed)) ?? [:]
+        return await DeleteQuestion(library: library).undo(executed, albums: albums, waiting: waiting, earlierUndos: earlier,
+                                                           keptForOthers: keep, cached: inventory)
     }
 
     /// Whether "Alles zurücknehmen" for the interrupted plan deletes an album or folder.

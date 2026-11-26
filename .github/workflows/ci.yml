@@ -158,12 +158,12 @@ jobs:
     # Hang limits (20.11.2026: the core tests hung 30 min, until this job's limit of 30), from the
     # green jobs since 16.11. (fourth review: at least the longest seen + 50 % and twice the 95th
     # percentile): this job (97 in CI) p95 9.7, longest 18.9 min (11.6 of it apt during the mirror
-    # outage), so 30 for the container, apt's retries and both test steps (40 since 26.11., with the build as a step of its own); "Build and test" (158
+    # outage), so 30 for the container, apt's retries and both test steps (45 since 26.11.: apt 11.6 + build step 20 + watchdog 10 + summary, so the watchdog still reports before the job limit); "Build and test" (158
     # jobs) p95 4.7, longest 5.8: watchdog 10, step 12; load test p95 3.2, longest 3.3: watchdog
     # 7, step 9. swift_test_watch.py stops a step's tests before its timeout-minutes and names the
     # tests still running (TEST_HANG), so the log says which test hung; a hang is red like any
     # failing test, never re-run.
-    timeout-minutes: 40
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash

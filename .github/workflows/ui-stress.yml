@@ -49,7 +49,8 @@ name: UI stress
 on:
   schedule:
     # Sunday 00:40 UTC = 01:40 in Berlin in winter, 02:40 in summer (cron has no time zones):
-    # the full pass (a scheduled run has no inputs, see STRESS_PHOTOS below). Usually done by
+    # the full pass (a scheduled run has no inputs; STRESS_PHOTOS below tells the two schedules
+    # apart by github.event.schedule). Usually done by
     # about 03:20 Berlin time in winter (04:20 in summer; stress run 44116350940, which FAILED
     # (see above), took 1 h 40 min: build 9, creating 23, measuring 45, diagnostics 14); the job
     # ends 170 min after its start at the latest.
@@ -97,7 +98,8 @@ env:
   HOMEBREW_NO_INSTALL_CLEANUP: 1
   # The size of this pass. A run by hand takes its inputs (defaults: the small pass before each
   # TestFlight build), and so does a TestFlight run (it passes 10000 and 15); a scheduled run
-  # has no inputs (they are empty then) and is the full pass. The job name repeats this fallback.
+  # has no inputs (they are empty then): Sunday's is the full pass, the other nights' the small
+  # one (stage 1, 26.11.2026). The job name repeats this fallback.
   STRESS_PHOTOS: ${{ inputs.photos || (github.event.schedule == '40 0 * * 0' && '50000' || '10000') }}
   STRESS_MINUTES: ${{ inputs.minutes || (github.event.schedule == '40 0 * * 0' && '45' || '15') }}
 

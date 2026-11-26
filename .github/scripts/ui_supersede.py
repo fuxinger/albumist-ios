@@ -12,8 +12,9 @@ Never cancelled: runs of other branches, a run started by hand (workflow_dispatc
 UI flow of a TestFlight run (it runs inside testflight.yml, not as a run of ui.yml).
 
 When a draft is marked ready for review (ACTION ready_for_review; rebuild stage 1, 26.11.2026)
-the head commit stays the same, and the draft's smoke run of that commit is cancelled too: the
-full UI run of the same commit replaces it (it would otherwise hold the Mac queue first; PR #23
+the head commit stays the same, and the earlier runs of that commit are cancelled too: the
+draft's smoke run, or the full run of an earlier ready mark (its finished groups are reused by
+content). The full UI run of the same commit replaces it (it would otherwise hold the Mac queue first; PR #23
 on 26.11.: the full run waited 45 min behind the pull request's own quicker run).
 
 A newer push must never lose its run to the job of an older push (second review, 19.11.): only

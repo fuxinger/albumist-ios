@@ -135,6 +135,16 @@ class FullGateTests(unittest.TestCase):
                                 more=[(10, "completed", "success", ("full", "success"))])
         self.assertEqual(ci_gate.check()[:2], (True, True))
 
+    def test_a_draft_smoke_run_never_counts(self):
+        # Stage 1 (26.11.2026): a draft's smoke run is skipped like a quick one; an older full
+        # run of the same commit decides.
+        ci_gate.api = self.fake(ui=("completed", "success"), verdict=("smoke", "success"),
+                                more=[(10, "completed", "success", ("full", "success"))])
+        self.assertEqual(ci_gate.check()[:2], (True, True))
+        ci_gate.api = self.fake(ui=("in_progress", None), verdict=("smoke", None),
+                                more=[(10, "completed", "success", ("full", "success"))])
+        self.assertEqual(ci_gate.check()[:2], (True, True))
+
     def test_a_ui_run_without_a_green_full_verdict_is_not_green(self):
         # A skipped or cancelled verdict job checked nothing (G5-08): never green either.
         for verdict in (("full", "failure"), ("full", "skipped"), ("full", "cancelled"), None):

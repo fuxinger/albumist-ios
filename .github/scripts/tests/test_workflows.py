@@ -638,6 +638,45 @@ class HangLimitTests(unittest.TestCase):
             self.assertIn("apt_install.sh libsqlite3-dev python3", text)
 
 
+class DraftAndReadyTests(unittest.TestCase):
+    """Stage 1 (26.11.2026), evaluated: which verdict, mode and hard core tests each kind of run
+    gets (draft, ready pull request, by hand, by hand quick, from TestFlight)."""
+
+    def setUp(self):
+        self.text = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+
+    def expr(self, pattern):
+        return re.search(pattern, self.text, re.M).group(1)
+
+    def contexts(self):
+        ready, draft = pr_context(), pr_context(draft=True)
+        hand = dispatch_context("refs/heads/claude/x")
+        hand_quick = dispatch_context("refs/heads/claude/x")
+        hand_quick["inputs"] = {"quick": True}
+        release = dispatch_context("refs/heads/main", "TestFlight", True, "workflow_call")
+        return {"draft": draft, "ready": ready, "hand": hand, "hand quick": hand_quick, "release": release}
+
+    def test_each_kind_of_run(self):
+        verdict = self.expr(r"^    name: UI verdict \(\$\{\{ (.*) \}\}\)$")
+        quick = self.expr(r"^  UI_QUICK: \$\{\{ (.*) \}\}$")
+        smoke = self.expr(r"^  UI_SMOKE: \$\{\{ (.*) \}\}$")
+        core = self.text.split("\n  core-macos:\n", 1)[1]
+        core_if = re.search(r"^    if: \$\{\{ (.*) \}\}$", core, re.M).group(1)
+        expected = {  # verdict name, UI_QUICK, UI_SMOKE, core-macos runs (plan green)
+            "draft": ("smoke", "", "true", False),
+            "ready": ("full", "", "", True),
+            "hand": ("full", "", "", True),
+            "hand quick": ("quick", "true", "", False),
+            "release": ("full", "", "", False),
+        }
+        for kind, ctx in self.contexts().items():
+            with self.subTest(kind=kind):
+                ctx = dict(ctx, needs={"plan": {"result": "success"}})
+                got = (gh_expr(verdict, ctx), gh_expr(quick, ctx) or "", gh_expr(smoke, ctx) or "",
+                       bool(gh_expr(core_if, ctx)))
+                self.assertEqual(got, expected[kind])
+
+
 class StressEveryNightTests(unittest.TestCase):
     """Rebuild stage 1 (the owner's decision of 26.11.2026): the 10,000-photo pass is no merge
     check any more; it runs before each TestFlight build and every night on main (Monday to
@@ -896,10 +935,11 @@ def concurrency_group(text):
     return " ".join(strip_comment(line) for line in found.group(1).split("\n")).replace("${{", "").replace("}}", "")
 
 
-def pr_context(user="someone", fork=False):
+def pr_context(user="someone", fork=False, draft=False):
     return {"github": {"event_name": "pull_request", "workflow": "UI flow", "run_id": 7,
                        "ref": "refs/pull/8/merge",
-                       "event": {"pull_request": {"user": {"login": user}, "head": {"repo": {"fork": fork}}}}},
+                       "event": {"pull_request": {"user": {"login": user}, "head": {"repo": {"fork": fork}},
+                                                  "draft": draft, "number": 8}}},
             "inputs": {}}
 
 
@@ -932,6 +972,9 @@ class MacQueueTests(unittest.TestCase):
     def test_no_pull_request_joins_the_queue_of_main(self):
         group = concurrency_group(self.ui)
         self.assertEqual(gh_expr(group, pr_context()), "mac-queue")
+        # A draft's smoke test never waits in (and never replaces a run of) the Mac queue.
+        self.assertEqual(gh_expr(group, pr_context(draft=True)), "ui-smoke-8")
+        self.assertEqual(gh_expr(group, pr_context(draft=True, fork=True)), "ui-fork")
         self.assertEqual(gh_expr(group, pr_context(fork=True)), "ui-fork")
         self.assertEqual(gh_expr(group, pr_context(user="dependabot[bot]")), "ui-dependabot")
 

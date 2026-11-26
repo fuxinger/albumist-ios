@@ -93,6 +93,10 @@ class ReadyForReviewTests(unittest.TestCase):
                 run(3, sha=NEW, created="2026-11-19T09:59:01Z")]
         self.assertEqual(self.ids(runs), [])
 
+    def test_the_gap_is_sixty_seconds(self):
+        self.assertEqual(self.ids([run(1, sha=NEW, created="2026-11-19T09:59:00Z")]), [1])
+        self.assertEqual(self.ids([run(1, sha=NEW, created="2026-11-19T09:59:01Z")]), [])
+
     def test_older_commits_are_cancelled_as_before(self):
         self.assertEqual(self.ids([run(1, created="2026-11-19T09:59:59Z")]), [1])
 

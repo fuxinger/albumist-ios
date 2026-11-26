@@ -380,7 +380,8 @@ Testcode gibt.
   macht dieselbe Prüfung wie das Gate von TestFlight, auch wenn keine Gruppe laufen musste.
   Das Freigabe-Gate (`ci_gate.py`, Workflow „Release“) verlangt einen grünen Job
   „UI verdict (full)“.
-- **Schnellmodus** (`quick`): Pull Requests laufen schnell. Die Tests bekommen
+- **Schnellmodus** (`quick`): Läufe von Hand mit `quick` und der Rauchtest eines Entwurfs (seit
+  26.11.; ein PR auf „Ready“ läuft voll). Die Tests bekommen
   `ALBUMIST_UI_QUICK=1` (im Workflow als `TEST_RUNNER_ALBUMIST_UI_QUICK`), und
   `DeviceConditionUITests.test11_LargeLibrary` (große Mediathek, rund 25 Minuten) überspringt
   sich. Im Schnellmodus hat jede Gruppe einen anderen Test-Fingerabdruck (sicherheitshalber
@@ -497,8 +498,10 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   ui.yml --ref <zweig> -f quick=false`) geht weiter, ist aber nicht mehr nötig.
 - **Merge-Tor**: „UI verdict (full)“ dieses Laufs grün auf dem letzten Commit des Zweigs. Es
   verlangt für jede Gruppe ein volles Grün (nie ein schnelles) für genau den App- und
-  Test-Fingerabdruck, kein Rot für diesen Schlüssel, und im Schritt „Merge content same as this
-  commit“, dass der Merge in `main` dieselben Fingerabdrücke hat (`ui_evidence.py
+  Test-Fingerabdruck, kein Rot für diesen Schlüssel (auch kein rotes Rauchtest-Ergebnis für
+  diesen App- und Rauchtest-Schlüssel: ein Rot wird nie durch „Ready“ grün gelaufen), und bei
+  einem Lauf von Hand im Schritt „Merge content same as this commit“ (der PR-Lauf testet ohnehin
+  den Merge-Commit), dass der Merge in `main` dieselben Fingerabdrücke hat (`ui_evidence.py
   merge-content`, `git merge-tree`). Hat `main` seitdem App oder Testcode geändert oder gibt es
   Konflikte, ist er rot: `main` in den Zweig holen und den vollen Lauf neu starten (Gruppen mit
   gleichem Schlüssel werden übernommen, kosten also keinen Mac).
@@ -518,9 +521,11 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   Stunden. Unterscheidet sich der Inhalt doch (etwas kam nach dem vollen Lauf auf `main`),
   laufen die betroffenen Gruppen im TestFlight-Lauf wie bisher: langsamer, nie ungeprüft.
 - Achtung Mac-Warteschlange: der volle Lauf wartet in `mac-queue`; ein neuer Push auf
-  irgendeinen Pull Request kann ihn dort ersetzen (GitHub hält je Gruppe einen wartenden Lauf;
-  „Re-run all jobs“ startet ihn neu). Darum einen PR erst auf „Ready“ stellen, wenn kein anderer
-  Lauf wartet.
+  einen anderen Pull Request auf „Ready“ kann ihn dort ersetzen (GitHub hält je Gruppe einen
+  wartenden Lauf; Rauchtests von Entwürfen haben je PR eine eigene Gruppe und ersetzen ihn nie).
+  Neu starten durch „Convert to draft“ und wieder „Ready for review“, nicht mit „Re-run all
+  jobs“ (ein zweiter Versuch zählt für die Freigabe nie). Darum einen PR erst auf „Ready“
+  stellen, wenn kein anderer voller Lauf wartet.
 
 ### Härtetest einmal vor dem Merge (Entscheidung Fuchs 20.11. 17:20 Uhr)
 

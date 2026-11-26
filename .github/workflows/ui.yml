@@ -155,6 +155,10 @@ env:
 #     request can replace a run on main now; a run on main may run beside a pull request's run
 #     (its jobs then wait for a free Mac, nothing is cancelled). Inside "mac-queue-main" a newer
 #     run on main replaces a waiting older one, as before.
+#   - the smoke test of a draft pull request (stage 1, 26.11.2026; second review): one group per
+#     pull request, "ui-smoke-<number>", so that a draft's frequent pushes never replace a full
+#     run waiting in "mac-queue" (the merge check), and one draft holds at most one Mac. Its
+#     older commits' smoke runs are cancelled by ui-supersede.yml as before.
 #   - Dependabot pull requests: group "ui-dependabot", and no job runs for them (plan below), so
 #     a version bump uses no Mac and can never replace a waiting run. Before merging one, start
 #     "UI flow" by hand on its branch (Run workflow); that run is in "mac-queue" like any other.
@@ -167,6 +171,7 @@ concurrency:
     ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-ui-{0}', github.run_id)
     || (github.event.pull_request.head.repo.fork && 'ui-fork')
     || (github.event.pull_request.user.login == 'dependabot[bot]' && 'ui-dependabot')
+    || (github.event.pull_request.draft && format('ui-smoke-{0}', github.event.pull_request.number))
     || (github.ref == 'refs/heads/main' && 'mac-queue-main' || 'mac-queue') }}
   cancel-in-progress: false
 
@@ -590,6 +595,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}
       - name: Merge content same as this commit
+        # Only in a run by hand on a branch. The full run of a ready pull request (stage 1,
+        # 26.11.2026) tests the merge commit itself (refs/pull/N/merge), so its content is the
+        # merge's at run time; "Require branches to be up to date" covers a later change of main.
         # The full pass before the merge (decision 20.11.2026): its greens stand for the merge
         # only when merging this commit into main gives the same app fingerprint and the same
         # full test fingerprint of every group (ui_evidence.py merge-content, git merge-tree).

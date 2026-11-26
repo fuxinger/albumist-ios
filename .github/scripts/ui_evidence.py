@@ -27,7 +27,9 @@ test code (the owner's rule of 17.11.).
       the branch left it, or the merge has conflicts) it names what differs: merge main into
       the branch and run the full pass again (the groups whose keys did not change are reused).
 
-Quick mode (--quick; pull requests): the tests get ALBUMIST_UI_QUICK=1, and
+Quick mode (--quick; runs by hand with quick, and the smoke test of a draft pull request since
+26.11.2026, whose result counts for no group but blocks when red: smoke_red): the tests get
+ALBUMIST_UI_QUICK=1, and
 DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips itself (XCTSkip). Every group
 has another test fingerprint in a quick run (ui_groups.py adds the mode for all, also where no
 file visibly reads the switch). A quick check may take a full green instead of a quick one; a
@@ -602,6 +604,7 @@ def keys(groups, stress: tuple[str, str] | None = None) -> set[str]:
     pass's (STRESS_PASSES, and `stress` (photos, minutes) when given)."""
     found = {fp[:ui_groups.SHORT] for quick in (False, True) for fp in groups.fingerprints(quick).values()}
     found |= {fp[:ui_groups.SHORT] for fp in stress_keys(groups).values()}
+    found.add(groups.smoke_fingerprint()[:ui_groups.SHORT])
     if stress:
         found.add(stress_fingerprint(groups, *stress)[:ui_groups.SHORT])
     return found
@@ -639,6 +642,7 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
                       "(call budget); their reds are not listed")
             decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in names]
             run = [d["group"] for d in decisions if d["state"] != "green"]
+            decisions += smoke_red(app, groups, entries, verifier)
         except (ApiError, KeyError) as error:
             run = names
             note = f"Earlier results not readable completely ({error}): every group runs."
@@ -662,7 +666,7 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
     if decisions:
         md.append(table(decisions, set(run)))
         for d in decisions:
-            if d["group"] not in run:
+            if d["group"] not in run and d["state"] == "green":
                 print(f"UI_PLAN reuse {d['group']}: green in {where(d['evidence'])}")
         for text in cleared_notes(decisions, groups, verifier):
             print(earlier_attempts.command("warning", "UI red cleared by a shared change", text))
@@ -685,13 +689,13 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
 def plan_smoke(groups, app: str) -> int:
     """The plan of a draft pull request (rebuild stage 1, 26.11.2026): only the smoke test
     (ui_groups.SMOKE_TESTS, quick, one Mac). No earlier result is read: the smoke test is no
-    evidence, and no group runs, so none is reused or known red."""
+    evidence for a group and always runs; its red blocks later verdicts (smoke_red)."""
     missing = [t for t in ui_groups.SMOKE_TESTS if t not in groups.tests]
     if missing:
         print(f"::error title=UI smoke test::{' '.join(missing)} not found among the UI tests "
               "(renamed or moved? see ui_groups.SMOKE_TESTS)")
         return 1
-    entry = ui_groups.smoke_entry(app)
+    entry = ui_groups.smoke_entry(app, groups.smoke_fingerprint())
     print(f"UI_PLAN app {app} smoke: {entry['only']}")
     append("GITHUB_STEP_SUMMARY", "\n".join([
         f"### UI smoke test for app {app[:ui_groups.SHORT]} (draft pull request)", "",
@@ -701,6 +705,15 @@ def plan_smoke(groups, app: str) -> int:
     append("GITHUB_OUTPUT", f"matrix={json.dumps({'include': [entry]}, separators=(',', ':'))}\ncount=1\n"
                             "known_red=\nknown_red_text=\n")
     return 0
+
+
+def smoke_red(app: str, groups, entries: list[dict], verifier) -> list[dict]:
+    """[the smoke test's decision] when the smoke test of a draft was red for this app and smoke
+    test code, else []: then the verdict of every later run of this content is red too (a red
+    test is never re-run to green, also not by marking the draft ready; second review 26.11.).
+    A green or missing smoke test changes nothing: it is no evidence for a group."""
+    found = decide(ui_groups.SMOKE_GROUP, app, groups.smoke_fingerprint(), entries, verifier)
+    return [found] if found["state"] == "red" else []
 
 
 def known_red(decisions: list[dict]) -> tuple[list[str], str]:
@@ -753,6 +766,8 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
         return 1
     print(f"UI_API_CALLS {call.count} (budget {MAX_CALLS})")
     decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in checked]
+    if not stress_only:
+        decisions += smoke_red(app, groups, entries, verifier)
     if size:
         decisions.append(decide(stress_group(*size.groups()), app, stress_fingerprint(groups, *size.groups()),
                                 entries, verifier))

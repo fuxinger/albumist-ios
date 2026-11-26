@@ -502,19 +502,41 @@ class CommandTests(unittest.TestCase):
         self.assertEqual((entry["group"], entry["quick"], entry["device"]), ("smoke", True, "pro"))
         self.assertEqual(entry["only"], "AlbumistFlowUITests/test1_FullFlow AlbumistFlowUITests/test1c_UndoFromHistory")
         self.assertEqual(entry["app"], ui_groups.app_fingerprint(smoke)[:12])
-        # Its job name can never be evidence for a group: no group has this test key.
-        self.assertEqual(entry["tests"], "0" * 12)
-        self.assertNotIn("0" * 12, [fp[:12] for fp in ui_groups.Groups(smoke).fingerprints().values()])
+        # Its own test key, never a group's: its result is no evidence for a group.
+        smoke_fp = ui_groups.Groups(smoke).smoke_fingerprint()
+        self.assertEqual(entry["tests"], smoke_fp[:12])
+        self.assertNotIn(smoke_fp[:12], [fp[:12] for q in (False, True)
+                                         for fp in ui_groups.Groups(smoke).fingerprints(q).values()])
         self.assertEqual((self.outputs()["count"], self.outputs()["known_red"]), ("1", ""))
         self.assertIn("ready for review", self.read(self.summary))
-        # A smoke job in the history is ignored by the groups' decisions.
-        smoke_job = job("device", tests="0" * 12)
-        smoke_job["name"] = f"UI smoke test, full flow and undo (quick) [smoke app {APP[:12]} tests {'0' * 12}]"
+        smoke_job = job("device", tests=smoke_fp)
+        smoke_job["name"] = f"UI smoke test, full flow and undo (quick) [smoke app {APP[:12]} tests {smoke_fp[:12]}]"
         entries = ui_evidence.results([run(5, "a" * 40, [smoke_job])])
         self.assertEqual([e["group"] for e in entries], ["smoke"])
         for quick in (True, False):
             found = ui_evidence.decide_mode("device", APP, ui_groups.Groups(HEAD), entries, VERIFIER, quick)
             self.assertEqual(found["state"], "missing")
+
+    def test_a_red_smoke_test_blocks_the_verdicts_of_this_content(self):
+        # Second review 26.11.: marking a draft ready must not re-run a red smoke test to green.
+        groups = ui_groups.Groups(TEST_ONLY)
+        key = groups.smoke_fingerprint()
+        red_job = job("device", "failure", "failure", tests=key, end="2026-11-19T13:00:00Z")
+        red_job["name"] = f"UI smoke test, full flow and undo (quick) [smoke app {APP[:12]} tests {key[:12]}]"
+        green_here = [job(g, tests=TEST_ONLY_FPS[g], job_id=200 + i) for i, g in enumerate(NAMES)]
+        runs = [run(8, "b" * 40, [red_job], event="pull_request"), run(9, "b" * 40, green_here)]
+        self.assertEqual(self.gate(runs)[0], 1)
+        self.assertIn("smoke", self.read(self.summary))
+        # The plan says so at once ("UI known red").
+        code, _ = self.plan("auto", runs)
+        self.assertEqual((code, self.outputs()["known_red"]), (0, "smoke"))
+        # A green smoke test changes nothing: the groups decide.
+        os.remove(self.output)
+        green_smoke = dict(red_job, conclusion="success", steps=job("device")["steps"])
+        self.assertEqual(self.gate([run(8, "b" * 40, [green_smoke], event="pull_request"), run(9, "b" * 40, green_here)])[0], 0)
+        # Changed smoke test code (another key) no longer blocks.
+        other = dict(red_job, name=red_job["name"].replace(key[:12], "f" * 12))
+        self.assertEqual(self.gate([run(8, "b" * 40, [other], event="pull_request"), run(9, "b" * 40, green_here)])[0], 0)
 
     def test_a_smoke_test_that_was_renamed_stops_the_plan(self):
         with contextlib.redirect_stdout(io.StringIO()) as log:

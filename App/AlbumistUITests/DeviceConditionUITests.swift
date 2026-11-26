@@ -1530,12 +1530,14 @@ final class DeviceConditionUITests: XCTestCase {
         shot("24-large-library")
         timed("start page tab", limit: 10, { tabButton("Vorschläge").tap() }, until: { UITestScreens.Analysis.line(app).exists })
         let atlas = app.buttons.matching(NSPredicate(format: "identifier == %@ OR label CONTAINS %@", "startPage.atlas", "Reise-Atlas")).firstMatch
-        timed("atlas", limit: 15, {
-            if atlas.waitForExistence(timeout: 5) {
-                UITestScreens.Cards.reach(atlas, in: app)
-                atlas.tap()
-            }
-        }, until: { app.navigationBars["Reise-Atlas"].exists })
+        // Found and brought clear of the tab bar before the clock starts: the time is how long
+        // the atlas takes to open, not how long XCTest takes to read the busy start page (UI run
+        // 45759464360: the start page with 3,000 photos showed the card, yet no swipe and no tap
+        // came within the 5 s the search had, and the step took 36 s without opening anything).
+        let found = atlas.waitForExistence(timeout: 30)
+        if found { UITestScreens.Cards.reach(atlas, in: app) }
+        print("UI_FACT large atlas entry found \(found), hittable \(found && atlas.isHittable), frame \(found ? atlas.frame : .zero)")
+        timed("atlas", limit: 15, { if found { atlas.tap() } }, until: { app.navigationBars["Reise-Atlas"].exists })
         // pacing: kept, the atlas map draws its tiles before the screenshot (no element shows it)
         sleep(2)
         shot("25-large-atlas")

@@ -35,6 +35,9 @@ LIMIT = 4000
 
 # Last line of a small-gate build (testflight.yml, gate small): who it is for.
 SMALL_GATE = "Täglicher Build mit kleinem Tor: nur für dich, nicht an Tester weitergeben"
+# Last line of a fast-gate build (testflight.yml, gate fast, 26.11.2026).
+FAST_GATE = "Schnell-Build, nur intern: nur für dich, nie an externe Tester oder in den App Store"
+GATE_LINES = {"small": SMALL_GATE, "fast": FAST_GATE}
 
 
 def render(notes_path, build, sha, gate="big"):
@@ -51,7 +54,7 @@ def render(notes_path, build, sha, gate="big"):
         line = re.sub(r"(?<!\w)[*_](\S[^*_]*?)[*_](?!\w)", r"\1", line)  # italics
         lines.append(line.rstrip())
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
-    footer = f"\n\nBuild {build} · {sha[:7]}" + (f"\n{SMALL_GATE}" if gate == "small" else "")
+    footer = f"\n\nBuild {build} · {sha[:7]}" + (f"\n{GATE_LINES[gate]}" if gate in GATE_LINES else "")
     if len(text) + len(footer) > LIMIT:
         text = text[: LIMIT - len(footer) - 1].rstrip() + "…"
     return text + footer
@@ -151,7 +154,7 @@ def main():
     parser.add_argument("--sha", required=True)
     parser.add_argument("--bundle-id", default="app.albumist.ios")
     parser.add_argument("--wait-minutes", type=float, default=40)
-    parser.add_argument("--gate", choices=["big", "small"], default="big",
+    parser.add_argument("--gate", choices=["big", "small", "fast"], default="big",
                         help="the gate the build passed (testflight.yml); small names it in the last line")
     args = parser.parse_args()
     if args.command == "text":

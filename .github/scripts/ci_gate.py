@@ -17,8 +17,9 @@ Used before a release tag (release.yml, without waiting). Green means:
      code (ui_evidence.py), so for a merge commit with an already tested app it takes minutes.
      Since 18.11. the run must also have a green job "UI verdict (full)": its check
      (ui_evidence.py gate) says every group is green, in full mode, for this app and its own
-     test code and none is red for that pair. A run whose verdict is "quick" (every pull
-     request; the long device test skips itself) never counts: the newest full run decides,
+     test code and none is red for that pair. A run whose verdict is "quick" (by hand; the
+     long device test skips itself) or "smoke" (a draft pull request since 26.11.2026) never
+     counts: the newest full run decides (a ready pull request's run is full since then),
      and a commit with quick runs only needs a full "UI flow" run by hand (only the groups
      whose quick and full test code differ run then).
 
@@ -50,6 +51,8 @@ POLL = 60
 CI, CI_JOB = "ci.yml", "iOS build and tests"
 UI = "ui.yml"
 UI_VERDICT, UI_QUICK_VERDICT = "UI verdict (full)", "UI verdict (quick)"
+# A draft pull request's smoke run (rebuild stage 1, 26.11.2026): never counts, like a quick run.
+UI_SMOKE_VERDICT = "UI verdict (smoke)"
 NO_CI, NO_UI = "no CI run", "no UI flow run"
 RED = {"failure", "timed_out"}
 
@@ -133,7 +136,7 @@ def check():
         return True, False, (f"the iOS tests did not run for this commit ({state}); only documentation "
                              "changed since the last tested commit, so there is nothing new to ship (to test this exact "
                              "commit anyway, start CI by hand on it)")
-    # The same for the UI flow, quick runs (pull requests) included: a red in either mode blocks
+    # The same for the UI flow, quick and smoke runs included: a red in any mode blocks
     # (as in ui_evidence.py). Then the newest UI flow run in full mode decides.
     ui_runs = runs(UI)
     bad = spoiled(ui_runs)
@@ -142,7 +145,7 @@ def check():
     quick = 0
     for ui in sorted(ui_runs, key=lambda r: -r["run_number"]):
         jobs = api(f"actions/runs/{ui['id']}/jobs", per_page=100).get("jobs", [])  # its newest attempt
-        if any(j.get("name", "").endswith(UI_QUICK_VERDICT) for j in jobs):
+        if any(j.get("name", "").endswith((UI_QUICK_VERDICT, UI_SMOKE_VERDICT)) for j in jobs):
             quick += 1
             continue
         if ui["status"] != "completed":
@@ -168,7 +171,7 @@ def missing_run(kind):
                 "pushes to main; start it by hand)")
     return (f"{NO_UI} in full mode for {SHA[:7]} (none appeared within {minutes} min after CI passed): the "
             f"gate needs a green UI flow run on exactly this commit with a green '{UI_VERDICT}' job. Pull "
-            "request runs are quick and do not count; start 'UI flow' by hand on this commit (quick off), "
+            "request runs of drafts (smoke) and quick runs do not count; start 'UI flow' by hand on this commit (quick off), "
             "then run this workflow again")
 
 

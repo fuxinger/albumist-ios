@@ -2,7 +2,8 @@ name: TestFlight
 # The daily build (gate small; daily-build.yml starts it) says so in the run list; every other
 # run keeps the workflow's name (an empty run-name falls back to it).
 run-name: >-
-  ${{ inputs.gate == 'small' && 'TestFlight daily build (small gate, only for the owner)' || '' }}
+  ${{ inputs.gate == 'small' && 'TestFlight daily build (small gate, only for the owner)'
+  || (inputs.gate == 'fast' && 'TestFlight fast build (fast gate, internal only)' || '') }}
 
 # Builds a signed App Store build and uploads it to TestFlight, so Albumist can be installed on
 # a real iPhone (docs/TESTFLIGHT.md). One run does it all for one commit (Profi-Analyse 16.11.,
@@ -21,7 +22,18 @@ run-name: >-
 #     flow-full and contrast (about 18 min each), the small stress pass, the UI gate over those
 #     two groups. No other UI group. The run name, the tag message and "Was testen" say "small
 #     gate"; such a build is not given to testers.
-#   The stress pass belongs to both gates: the owner's rule 17.11. and his decision 4 want it
+#   - fast (the owner's decision of 26.11.2026, rule text approved by the coordinator that day):
+#     a build only for the owner as internal tester, in about 30-40 min. CI with every fast
+#     test (data safety, undo and purchases included; hard time limits), the Release build smoke
+#     test and the smoke test of the UI flow (ui_groups.SMOKE_TESTS: full flow and undo from the
+#     history), both Mac jobs beside CI instead of after it, the UI gate over the smoke test
+#     (--smoke-only). No stress pass and no other UI group. Refused (job check, fast_gate.py)
+#     when anything outside views, map, texts, tests and documents changed since the last
+#     TestFlight build: analysis, counting, albums, purchases, stored data and the pipeline
+#     always take the small or the big gate. The run name, the tag message and "Was testen"
+#     say "fast build, internal only"; such a build never goes to external testers or the App
+#     Store.
+#   The stress pass belongs to the big and the small gate: the owner's rule 17.11. and his decision 4 want it
 #   before every upload, and the daily build uploads too (an internal build for the owner).
 #   Since the owner's decision of 20.11.2026, 17:20 it runs once before the merge (by hand on the
 #   pull request's branch, beside the full UI pass); ui-stress.yml skips it here when a green
@@ -126,9 +138,9 @@ on:
   workflow_dispatch:
     inputs:
       gate:
-        description: 'Gate: big (for testers and the App Store: every UI group, stress pass) or small (daily build only for the owner: CI, the UI groups flow-full and contrast, stress pass)'
+        description: 'Gate: big (for testers and the App Store: every UI group, stress pass), small (daily build only for the owner: CI, the UI groups flow-full and contrast, stress pass) or fast (internal build only for the owner, about 30-40 min: CI, Release smoke test, UI smoke test; refused when analysis, albums, purchases, data or the pipeline changed)'
         type: choice
-        options: [big, small]
+        options: [big, small, fast]
         default: big
       ui_groups:
         description: 'UI groups of the big gate: auto (only those without a green result for this app and their test code) or all'
@@ -178,6 +190,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/scripts
+          # The history and the build tags, for the fast gate's check (fast_gate.py).
+          fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
       - name: Upload setup checked
         id: setup
@@ -204,10 +219,16 @@ jobs:
           case "$GATE" in
             big) groups="$UI_GROUPS"; checked="" ;;
             small) groups="$SMALL_GATE_GROUPS"; checked="$SMALL_GATE_GROUPS" ;;
-            *) echo "::error title=Gate::unknown gate $GATE (big or small)"; exit 1 ;;
+            fast) groups=""; checked="" ;;
+            *) echo "::error title=Gate::unknown gate $GATE (big, small or fast)"; exit 1 ;;
           esac
           { echo "gate=$GATE"; echo "ui_groups=$groups"; echo "gate_groups=$checked"; } >> "$GITHUB_OUTPUT"
-          echo "### Gate: $GATE (UI groups: $groups)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Gate: $GATE (UI groups: ${groups:-the smoke test only})" >> "$GITHUB_STEP_SUMMARY"
+      - name: Fast gate allowed for these changes
+        # Fails closed: only views, map, texts, tests and documents may have changed since the
+        # last TestFlight build (fast_gate.py), else the small or the big gate applies.
+        if: ${{ steps.gate.outputs.gate == 'fast' }}
+        run: python3 .github/scripts/fast_gate.py check
 
   tests:
     name: Tests
@@ -225,6 +246,7 @@ jobs:
   ui:
     name: UI flow
     needs: [check, tests]
+    if: ${{ needs.check.outputs.gate != 'fast' }}
     uses: ./.github/workflows/ui.yml
     # actions: read for its "UI plan" (earlier results of the groups); checks: read for its
     # "UI verdict" job, which is skipped here (release) but must not ask for more than it gets.
@@ -239,11 +261,29 @@ jobs:
       # Big gate: auto or all (input ui_groups); small gate: its two groups (job check).
       groups: ${{ needs.check.outputs.ui_groups }}
 
+  ui-fast:
+    name: UI smoke test (fast gate)
+    # The fast gate (26.11.2026): only the smoke test of the UI flow, beside CI instead of after
+    # it (the run's time is CI's then, not CI's plus the smoke test's). A red CI still blocks the
+    # upload; it only no longer holds back this one Mac.
+    needs: check
+    if: ${{ needs.check.outputs.ready == 'true' && needs.check.outputs.gate == 'fast' }}
+    uses: ./.github/workflows/ui.yml
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    with:
+      release: true
+      quick: false
+      smoke: true
+
   stress:
     name: Stress pass
-    # Both gates (the owner's rule 17.11. and decision 4: before every upload, the daily build
-    # included, as it uploads too).
-    needs: tests
+    # The big and the small gate (the owner's rule 17.11. and decision 4: before every upload,
+    # the daily build included, as it uploads too); not the fast gate (26.11.2026).
+    needs: [check, tests]
+    if: ${{ needs.check.outputs.gate != 'fast' }}
     uses: ./.github/workflows/ui-stress.yml
     # actions: read for its "Stress plan" (earlier passes, reuse by content); checks: read for its
     # "UI stress verdict", which is skipped here (release) but must not ask for more than it gets.
@@ -294,7 +334,11 @@ jobs:
     # this job's own key in its name and a check in the UI gate; not done.
     # Unverified until a Mac run.
     name: Release build smoke test (UI)
-    needs: tests
+    # Since 26.11.2026 (fast gate) beside CI, not after it, with every gate: one Mac from the
+    # start, and the upload no longer waits CI's ~20 min plus this job's ~25. A red CI still
+    # blocks the upload (job release).
+    needs: check
+    if: ${{ needs.check.outputs.ready == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 75
     steps:
@@ -428,9 +472,9 @@ jobs:
     # flaky-summary over their build/flaky-*.json): nothing that was repeated stays hidden in a
     # single job's log. Never fails the run; the tests decide that.
     name: Repeats and flaky tests (UI flow and stress pass)
-    needs: [ui, stress, release-smoke]
+    needs: [ui, ui-fast, stress, release-smoke]
     if: >-
-      ${{ always() && (needs.ui.result != 'skipped' || needs.stress.result != 'skipped'
+      ${{ always() && (needs.ui.result != 'skipped' || needs.ui-fast.result != 'skipped' || needs.stress.result != 'skipped'
       || needs.release-smoke.result != 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -476,10 +520,11 @@ jobs:
     # it as machinery: it decides from the results alone). The stress pass must be green with
     # either gate.
     name: UI gate (every group of the gate green for this app and its test code)
-    needs: [check, tests, ui, stress]
+    needs: [check, tests, ui, ui-fast, stress]
     if: >-
       ${{ !cancelled() && needs.check.outputs.ready == 'true' && needs.tests.result == 'success'
-      && needs.ui.result == 'success' && needs.stress.result == 'success' }}
+      && ((needs.check.outputs.gate != 'fast' && needs.ui.result == 'success' && needs.stress.result == 'success')
+      || (needs.check.outputs.gate == 'fast' && needs.ui-fast.result == 'success')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # actions: read for the runs and jobs, checks: read for the flaky warnings of reused jobs.
@@ -500,10 +545,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # Empty for the big gate (every group); the small gate's two groups.
           GATE_GROUPS: ${{ needs.check.outputs.gate_groups }}
+          GATE: ${{ needs.check.outputs.gate }}
         run: |
           # The stress pass of this run or, since the owner's decision of 20.11.2026, 17:20, the
-          # one before the merge for exactly this content (ui-stress.yml skips it then).
-          if [ -n "$GATE_GROUPS" ]; then
+          # one before the merge for exactly this content (ui-stress.yml skips it then). The fast
+          # gate (26.11.2026): the smoke test alone, no group and no stress pass.
+          if [ "$GATE" = fast ]; then
+            python3 .github/scripts/ui_evidence.py gate --smoke-only
+          elif [ -n "$GATE_GROUPS" ]; then
             python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS" --stress 10000-15
           else
             python3 .github/scripts/ui_evidence.py gate --stress 10000-15
@@ -511,13 +560,16 @@ jobs:
 
   release:
     name: Archive and upload to TestFlight
-    needs: [check, tests, ui, stress, release-smoke, ui-gate, tsan]
+    needs: [check, tests, ui, ui-fast, stress, release-smoke, ui-gate, tsan]
     # The tests, the UI flow, the stress pass, the Release smoke test, the UI gate and the Thread
-    # Sanitizer pass of this run must all be green, with either gate; nothing skips them.
+    # Sanitizer pass of this run must all be green, with the big and the small gate; with the
+    # fast gate the UI smoke test stands for the UI flow and there is no stress pass (26.11.2026).
+    # Nothing else skips them.
     if: >-
       ${{ !cancelled() && needs.check.outputs.ready == 'true' && needs.tests.result == 'success'
-      && needs.ui.result == 'success' && needs.stress.result == 'success' && needs.tsan.result == 'success'
-      && needs.release-smoke.result == 'success' && needs.ui-gate.result == 'success' }}
+      && ((needs.check.outputs.gate != 'fast' && needs.ui.result == 'success' && needs.stress.result == 'success')
+      || (needs.check.outputs.gate == 'fast' && needs.ui-fast.result == 'success'))
+      && needs.tsan.result == 'success' && needs.release-smoke.result == 'success' && needs.ui-gate.result == 'success' }}
     # No click since the owner's decision of 19.11.2026 (it replaced decision 5 of 18.11.): the job
     # starts when every gate above is green, in the environment testflight-upload, which only
     # the branch main may use (job check made sure it exists with that rule, so this job never
@@ -648,9 +700,15 @@ jobs:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GATE: ${{ needs.check.outputs.gate }}
         run: |
           plutil -create xml1 "$EXPORT_OPTIONS"
           plutil -insert method -string app-store-connect "$EXPORT_OPTIONS"
+          # The fast gate (26.11.2026, second review): App Store Connect itself keeps the build to
+          # internal testers; it can be added to no external group and never submitted for review.
+          if [ "$GATE" = fast ]; then
+            plutil -insert testFlightInternalTestingOnly -bool YES "$EXPORT_OPTIONS"
+          fi
           plutil -insert destination -string upload "$EXPORT_OPTIONS"
           plutil -insert signingStyle -string automatic "$EXPORT_OPTIONS"
           plutil -insert teamID -string "$TEAM_ID" "$EXPORT_OPTIONS"
@@ -732,6 +790,8 @@ jobs:
           about="TestFlight build $GITHUB_RUN_NUMBER of $GITHUB_SHA (run $GITHUB_RUN_ID, attempt ${ATTEMPT:-$GITHUB_RUN_ATTEMPT}${EARLIER:+; $EARLIER}${UI_GATE:+; $UI_GATE})"
           if [ "$GATE" = small ]; then
             message="$about: small gate (daily build for the owner, not for testers): CI, the UI groups of the small gate and the stress pass green"
+          elif [ "$GATE" = fast ]; then
+            message="$about: fast gate (internal build for the owner only, never for external testers or the App Store): CI, the Release smoke test and the UI smoke test green; no stress pass, no other UI group"
           else
             message="$about: CI, UI flow and stress pass green"
           fi

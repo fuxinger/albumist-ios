@@ -13,6 +13,10 @@ name: UI stress
 #     minutes 15) and uploads only when the pass is green (testflight.yml). The same pass by
 #     hand (the defaults):
 #       gh workflow run ui-stress.yml --ref BRANCH
+#   - every other night on main (rebuild stage 1, the owner's decision of 26.11.2026: the
+#     small pass is no longer a merge check, it runs before each TestFlight build and every
+#     night): the small pass, reused when main's content already has a green one (the daily
+#     build's usually), so a quiet night costs no Mac.
 #   - weekly at night and before the App Store launch: the full pass, 50,000 photos and 45 min
 #     of measuring (~1.5 h, up to ~2.5 h when creating the photos is slow). The schedule below
 #     starts it every Sunday night; by hand:
@@ -45,11 +49,15 @@ name: UI stress
 on:
   schedule:
     # Sunday 00:40 UTC = 01:40 in Berlin in winter, 02:40 in summer (cron has no time zones):
-    # the full pass (a scheduled run has no inputs, see STRESS_PHOTOS below). Usually done by
+    # the full pass (a scheduled run has no inputs; STRESS_PHOTOS below tells the two schedules
+    # apart by github.event.schedule). Usually done by
     # about 03:20 Berlin time in winter (04:20 in summer; stress run 44116350940, which FAILED
     # (see above), took 1 h 40 min: build 9, creating 23, measuring 45, diagnostics 14); the job
     # ends 170 min after its start at the latest.
     - cron: '40 0 * * 0'
+    # Monday to Saturday, same time: the small pass of 10,000 photos (stage 1, 26.11.2026).
+    # The size depends on which of the two schedules started the run (github.event.schedule).
+    - cron: '40 0 * * 1-6'
   workflow_dispatch:
     inputs:
       photos:
@@ -90,10 +98,14 @@ env:
   HOMEBREW_NO_INSTALL_CLEANUP: 1
   # The size of this pass. A run by hand takes its inputs (defaults: the small pass before each
   # TestFlight build), and so does a TestFlight run (it passes 10000 and 15); a scheduled run
-  # has no inputs (they are empty then) and is the full pass. The job name repeats this fallback.
-  STRESS_PHOTOS: ${{ inputs.photos || (github.event_name == 'schedule' && '50000' || '10000') }}
-  STRESS_MINUTES: ${{ inputs.minutes || (github.event_name == 'schedule' && '45' || '15') }}
+  # has no inputs (they are empty then): Sunday's is the full pass, the other nights' the small
+  # one (stage 1, 26.11.2026). The job name repeats this fallback.
+  STRESS_PHOTOS: ${{ inputs.photos || (github.event.schedule == '40 0 * * 0' && '50000' || '10000') }}
+  STRESS_MINUTES: ${{ inputs.minutes || (github.event.schedule == '40 0 * * 0' && '45' || '15') }}
 
+# Since 26.11.2026 a group per branch ("stress-branch-<ref>"), and "stress-main" on main: a
+# waiting pass is replaced only by a newer pass of the same branch, never by a UI run or another
+# strand's pass (ui.yml, "concurrency", same date). What follows describes the groups before.
 # In the Mac queue with the UI runs (see ui.yml, "concurrency"): one UI run or stress pass at a
 # time across all branches. A running pass is never cancelled; at most one run waits, and a
 # run that joins later takes its place (the waiting one is cancelled and has to be started
@@ -102,8 +114,9 @@ env:
 #   - the pass of a TestFlight run, like its UI flow: "testflight-stress-<run id>". It is
 #     called with release: true, and github.workflow is the caller's name "TestFlight" in a
 #     called workflow (a second guard).
-#   - the weekly full pass (schedule): "stress-weekly". A run joining the queue at night can
-#     no longer cancel it while it waits; it may run beside a UI run then (one Mac more).
+#   - the passes at night (schedule, the weekly full one and the nightly small one):
+#     "stress-night". A run joining the queue at night can no longer cancel them while they
+#     wait; they may run beside a UI run then (one Mac more).
 #   - a pass on main (by hand, e.g. after a merge): "mac-queue-main", with the UI runs on main,
 #     so that no pull request run replaces it while it waits (19.11.2026: a rebased Dependabot
 #     pull request did). A newer run on main still replaces a waiting one.
@@ -117,18 +130,17 @@ env:
 # Reuse (the owner's decision of 20.11.2026, 17:20): the first job, "Stress plan", names the
 # pass's evidence key (app fingerprint, stress test fingerprint, size; ui_evidence.py
 # stress-plan) and, for a run by hand or from TestFlight, skips the pass when a green pass of
-# this size exists for exactly this content and none is red for that key. The weekly pass
-# always runs. The key is in the stress job's name ("[stress-10000-15 app ... tests ...]"),
+# this size exists for exactly this content and none is red for that key. The weekly full pass
+# always runs; the nightly small pass reuses like a run by hand. The key is in the stress job's name ("[stress-10000-15 app ... tests ...]"),
 # where the TestFlight gate (ui_evidence.py gate --stress 10000-15) and later plans find it.
 # "UI stress verdict" (not in TestFlight, whose UI gate checks it) is the pass's check with a
 # fixed name: green only when this size is green for this content, from this run or reused.
 concurrency:
   group: >-
     ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-stress-{0}', github.run_id)
-    || (github.event_name == 'schedule' && 'stress-weekly')
-    || (github.ref == 'refs/heads/main' && 'mac-queue-main')
-    || (github.event_name == 'workflow_dispatch' && 'stress-branch')
-    || 'mac-queue' }}
+    || (github.event_name == 'schedule' && 'stress-night')
+    || (github.ref == 'refs/heads/main' && 'stress-main')
+    || format('stress-branch-{0}', github.ref) }}
   cancel-in-progress: false
 
 jobs:
@@ -154,11 +166,11 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          REUSE: ${{ github.event_name != 'schedule' && 'yes' || '' }}
+          REUSE: ${{ !(github.event.schedule == '40 0 * * 0') && 'yes' || '' }}
         run: python3 .github/scripts/ui_evidence.py stress-plan --photos "$STRESS_PHOTOS" --minutes "$STRESS_MINUTES" ${REUSE:+--reuse}
 
   stress:
-    name: UI stress ${{ inputs.photos || (github.event_name == 'schedule' && '50000' || '10000') }} photos [${{ needs.plan.outputs.group }} app ${{ needs.plan.outputs.app }} tests ${{ needs.plan.outputs.tests }}]
+    name: UI stress ${{ inputs.photos || (github.event.schedule == '40 0 * * 0' && '50000' || '10000') }} photos [${{ needs.plan.outputs.group }} app ${{ needs.plan.outputs.app }} tests ${{ needs.plan.outputs.tests }}]
     needs: plan
     if: ${{ needs.plan.outputs.run == 'true' }}
     runs-on: xcode-27

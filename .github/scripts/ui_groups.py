@@ -944,6 +944,30 @@ def definition(group: dict) -> dict:
     return {k: v for k, v in group.items() if not k.startswith("_") and k not in REPORT_ONLY}
 
 
+# The smoke test of a draft pull request (rebuild stage 1, the owner's decision of 26.11.2026,
+# "alles wie empfohlen"): while a pull request is a draft, ui.yml runs only these two tests,
+# quick, on one Mac (the full flow from onboarding to plan, and undo from the history; each
+# onboards by itself), instead of all six groups. The full UI run comes once, when the pull
+# request is marked ready for review. Not a group: its result is no evidence for any group
+# (its job name carries the test key SMOKE_TESTS_KEY, which no group's fingerprint can be), so
+# the verdict of a ready pull request, the TestFlight gate and every plan run the groups
+# themselves. Its job name carries its own test fingerprint (Groups.smoke_fingerprint): a red
+# smoke test blocks every later verdict for this app and smoke test code (ui_evidence.py), so a
+# red is never re-run to green by marking the draft ready (second review 26.11.).
+SMOKE_GROUP = "smoke"
+SMOKE_TESTS = ("AlbumistFlowUITests/test1_FullFlow", "AlbumistFlowUITests/test1c_UndoFromHistory")
+SMOKE_BUDGET_MIN = 25
+
+
+def smoke_entry(app: str, tests: str) -> dict:
+    """ui.yml's job matrix entry for the smoke test of a draft pull request (`tests`: its
+    fingerprint, Groups.smoke_fingerprint)."""
+    return {"group": SMOKE_GROUP, "title": "smoke test, full flow and undo (quick)", "device": "pro",
+            "only": " ".join(SMOKE_TESTS), "skip": "", "video": False, "reduce_motion": False,
+            "increase_contrast": False, "budget_min": SMOKE_BUDGET_MIN, "quick": True,
+            "app": app[:SHORT], "tests": tests[:SHORT]}
+
+
 class Groups:
     """The groups of one tree, their tests, files and fingerprints."""
 
@@ -1007,6 +1031,18 @@ class Groups:
             # Every group, not only those whose files read the switch (reads_quick): a switch
             # read where this reader cannot see it must not make a quick result look full.
             lines.append(f"mode quick ({QUICK_SWITCH}=1)")
+        return _digest(lines)
+
+    def smoke_fingerprint(self) -> str:
+        """The smoke test's test fingerprint, built like a quick group's: its two tests' files,
+        the helpers they use, the shared files and the harness. Never equal to a group's (its
+        own first line)."""
+        blobs = self.tree.files()
+        own = {p for t in SMOKE_TESTS for p in self.tests.get(t, ())}
+        lines = [json.dumps({"smoke": list(SMOKE_TESTS)}, sort_keys=True)]
+        lines += [f"{p}\0{self.code_ids.get(p) or blobs[p]}"
+                  for p in sorted(closure(own, self.graph) | set(self.shared))]
+        lines.append(f"mode quick ({QUICK_SWITCH}=1)")
         return _digest(lines)
 
     def fingerprints(self, quick: bool = False) -> dict[str, str]:

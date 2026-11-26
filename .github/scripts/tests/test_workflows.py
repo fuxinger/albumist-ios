@@ -299,7 +299,7 @@ class TestFlightWiringTests(unittest.TestCase):
         text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         self.assertIn("python3 .github/scripts/ui_evidence.py gate", text)
         release = text.split("\n  release:\n", 1)[1].split("\n  tag:\n", 1)[0]
-        self.assertIn("needs: [check, tests, ui, stress, release-smoke, ui-gate, tsan]", release)
+        self.assertIn("needs: [check, tests, ui, ui-fast, stress, release-smoke, ui-gate, tsan]", release)
         self.assertIn("needs.ui-gate.result == 'success'", release)
 
     def test_upload_needs_the_thread_sanitizer(self):
@@ -340,30 +340,53 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertEqual(job_field(text, "tests", "if"), "needs.check.outputs.ready == 'true'")
         for job in ("ui", "stress"):
             self.assertIn("tests", [need.strip() for need in job_field(text, job, "needs").split(",")])
-        # The two gates (the owner's decision 10 of 18.11.2026) differ only in the UI groups: the
-        # stress pass runs before every upload, also before the daily build with the small gate
-        # (the owner's rule of 17.11. and decision 4), so it has no condition of its own and the
-        # UI gate and the upload need it green with either gate. The check job turns the input
-        # into big or small and stops on anything else.
-        self.assertEqual(job_field(text, "stress", "if"), "")
+        # Three gates. Big and small (the owner's decision 10 of 18.11.2026) differ only in the UI
+        # groups, and both have the stress pass (the owner's rule of 17.11. and decision 4). The
+        # fast gate (the owner's decision of 26.11.2026) has the UI smoke test (job ui-fast)
+        # instead of the UI flow and no stress pass; CI, Thread Sanitizer, the Release smoke test
+        # and the UI gate it has like the others. Evaluated for every gate and every result: the
+        # upload and the UI gate run only when exactly the jobs of that gate are green.
+        self.assertEqual(job_field(text, "stress", "if"), "${{ needs.check.outputs.gate != 'fast' }}")
+        self.assertEqual(job_field(text, "ui", "if"), "${{ needs.check.outputs.gate != 'fast' }}")
+        self.assertEqual(job_field(text, "ui-fast", "if"),
+                         "${{ needs.check.outputs.ready == 'true' && needs.check.outputs.gate == 'fast' }}")
         stress = job_blocks(text)["stress"]
-        self.assertNotIn("gate", stress)  # the same small pass with either gate
         self.assertIn("photos: '10000'", stress)
         self.assertIn("minutes: '15'", stress)
-        for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "release-smoke", "ui-gate"))):
-            with self.subTest(job=job):
-                rule = job_field(text, job, "if")
-                self.assertNotIn("||", rule)
-                self.assertNotIn("inputs.", rule)
-                self.assertNotIn("gate", rule.replace("needs.ui-gate.result", ""))
-                self.assertIn("needs.check.outputs.ready == 'true'", rule)
-                for need in needed:
-                    self.assertIn(f"needs.{need}.result == 'success'", rule)
+        self.assertIn("smoke: true", job_blocks(text)["ui-fast"])
+        self.assertIn("quick: false", job_blocks(text)["ui-fast"])
+        always = ("tests", "release-smoke", "ui-gate", "tsan")
+        need_of = {"big": ("ui", "stress"), "small": ("ui", "stress"), "fast": ("ui-fast",)}
+        jobs = ("tests", "ui", "ui-fast", "stress", "release-smoke", "ui-gate", "tsan")
+        for job, own in (("ui-gate", ("tests",)), ("release", always)):
+            rule = job_field(text, job, "if")
+            self.assertTrue(rule.startswith("${{ ") and rule.endswith(" }}"), rule)
+            expr = rule[4:-3]
+            self.assertNotIn("inputs.", rule)
+            for gate in ("big", "small", "fast"):
+                for broken in (None,) + jobs:
+                    with self.subTest(job=job, gate=gate, red=broken):
+                        needs = {"check": {"outputs": {"ready": "true", "gate": gate}}}
+                        for j in jobs:
+                            needs[j] = {"result": "failure" if j == broken else "success"}
+                        # The jobs a gate does not have are skipped.
+                        for j in ("ui", "stress") if gate == "fast" else ("ui-fast",):
+                            if j != broken:
+                                needs[j] = {"result": "skipped"}
+                        required = set(own) | set(need_of[gate])
+                        expected = broken is None or broken not in required
+                        self.assertEqual(bool(gh_expr(expr.replace("!cancelled()", "true"), {"needs": needs})),
+                                         expected)
         check = job_blocks(text)["check"]
         self.assertIn("GATE: ${{ inputs.gate || 'big' }}", check)
         self.assertIn("big) groups=\"$UI_GROUPS\"; checked=\"\" ;;", check)
         self.assertIn("small) groups=\"$SMALL_GATE_GROUPS\"; checked=\"$SMALL_GATE_GROUPS\" ;;", check)
-        self.assertIn("*) echo \"::error title=Gate::unknown gate $GATE (big or small)\"; exit 1 ;;", check)
+        self.assertIn("fast) groups=\"\"; checked=\"\" ;;", check)
+        self.assertIn("*) echo \"::error title=Gate::unknown gate $GATE (big, small or fast)\"; exit 1 ;;", check)
+        # The fast gate is refused for risky changes, in the check job before any Mac starts.
+        self.assertIn("python3 .github/scripts/fast_gate.py check", check)
+        self.assertIn("fetch-tags: true", check)
+        self.assertIn("gate --smoke-only", job_blocks(text)["ui-gate"])
 
     def test_the_small_gate_is_the_two_short_ui_groups(self):
         # docs/TESTFLIGHT.md ("Messung", "Zwei Tore"): flow-full and contrast, about 18 min each.
@@ -410,13 +433,25 @@ class TestFlightWiringTests(unittest.TestCase):
     def test_ui_flow_ends_in_a_verdict_and_quick_never_uploads(self):
         text = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
         verdict = text.split("\n  verdict:\n", 1)[1].split("\n  summary:\n", 1)[0]
-        quick = "(!inputs.release && (github.event_name == 'pull_request' || inputs.quick))"
-        # ci_gate.py looks for this name; the gate runs also when no group ran.
-        self.assertIn(f"name: UI verdict (${{{{ {quick} && 'quick' || 'full' }}}})", verdict)
+        quick = "(!inputs.release && github.event_name != 'pull_request' && inputs.quick)"
+        draft = "(github.event_name == 'pull_request' && github.event.pull_request.draft)"
+        # ci_gate.py and the merge look for "UI verdict (full)"; the gate runs also when no group
+        # ran. Since stage 1 (26.11.2026) a ready pull request's run is full, a draft's the smoke test.
+        self.assertIn(f"name: UI verdict (${{{{ {draft} && 'smoke' || ({quick} && 'quick' || 'full') }}}})", verdict)
         self.assertIn("if: ${{ !cancelled() && needs.plan.result == 'success' && !inputs.release }}", verdict)
         self.assertIn("python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}", verdict)
         self.assertIn(f"UI_QUICK: ${{{{ {quick} && 'true' || '' }}}}", text)
-        self.assertIn("plan --groups \"$UI_GROUPS\" ${UI_QUICK:+--quick}", text)
+        self.assertIn(f"UI_SMOKE: ${{{{ ({draft} || inputs.smoke) && 'true' || '' }}}}", text)
+        self.assertIn("plan --groups \"$UI_GROUPS\" ${UI_QUICK:+--quick} ${UI_SMOKE:+--smoke}", text)
+        # A draft's verdict checks the smoke test only; every other run checks the groups.
+        self.assertIn("- name: Smoke test green (draft)", verdict)
+        gate_step = verdict.split("- name: UI groups green for this app and test code\n", 1)[1]
+        self.assertTrue(gate_step.startswith(f"        if: ${{{{ !{draft} }}}}\n"))
+        # The hard macOS core tests belong to every full run, a ready pull request's too.
+        core = text.split("\n  core-macos:\n", 1)[1].split("\n  build:\n", 1)[0]
+        self.assertIn(f"if: ${{{{ needs.plan.result == 'success' && !inputs.release && !inputs.quick && !{draft} }}}}", core)
+        self.assertIn("      ALBUMIST_TIMING: hard\n", core)
+        self.assertIn("    types: [opened, synchronize, reopened, ready_for_review]\n", text)
         self.assertIn("TEST_RUNNER_ALBUMIST_UI_QUICK: ${{ matrix.quick && '1' || '' }}", text)
         testflight = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         # Full, never --quick; the stress pass of 10,000 photos too (decision 20.11.2026, 17:20).
@@ -626,6 +661,79 @@ class HangLimitTests(unittest.TestCase):
             self.assertIn("apt_install.sh libsqlite3-dev python3", text)
 
 
+class DraftAndReadyTests(unittest.TestCase):
+    """Stage 1 (26.11.2026), evaluated: which verdict, mode and hard core tests each kind of run
+    gets (draft, ready pull request, by hand, by hand quick, from TestFlight)."""
+
+    def setUp(self):
+        self.text = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+
+    def expr(self, pattern):
+        return re.search(pattern, self.text, re.M).group(1)
+
+    def contexts(self):
+        ready, draft = pr_context(), pr_context(draft=True)
+        hand = dispatch_context("refs/heads/claude/x")
+        hand_quick = dispatch_context("refs/heads/claude/x")
+        hand_quick["inputs"] = {"quick": True}
+        release = dispatch_context("refs/heads/main", "TestFlight", True, "workflow_call")
+        return {"draft": draft, "ready": ready, "hand": hand, "hand quick": hand_quick, "release": release}
+
+    def test_each_kind_of_run(self):
+        verdict = self.expr(r"^    name: UI verdict \(\$\{\{ (.*) \}\}\)$")
+        quick = self.expr(r"^  UI_QUICK: \$\{\{ (.*) \}\}$")
+        smoke = self.expr(r"^  UI_SMOKE: \$\{\{ (.*) \}\}$")
+        core = self.text.split("\n  core-macos:\n", 1)[1]
+        core_if = re.search(r"^    if: \$\{\{ (.*) \}\}$", core, re.M).group(1)
+        expected = {  # verdict name, UI_QUICK, UI_SMOKE, core-macos runs (plan green)
+            "draft": ("smoke", "", "true", False),
+            "ready": ("full", "", "", True),
+            "hand": ("full", "", "", True),
+            "hand quick": ("quick", "true", "", False),
+            "release": ("full", "", "", False),
+        }
+        for kind, ctx in self.contexts().items():
+            with self.subTest(kind=kind):
+                ctx = dict(ctx, needs={"plan": {"result": "success"}})
+                got = (gh_expr(verdict, ctx), gh_expr(quick, ctx) or "", gh_expr(smoke, ctx) or "",
+                       bool(gh_expr(core_if, ctx)))
+                self.assertEqual(got, expected[kind])
+
+
+class StressEveryNightTests(unittest.TestCase):
+    """Rebuild stage 1 (the owner's decision of 26.11.2026): the 10,000-photo pass is no merge
+    check any more; it runs before each TestFlight build and every night on main (Monday to
+    Saturday small and reused when main has a green one, Sunday the full 50,000)."""
+
+    def setUp(self):
+        self.text = read(os.path.join(ROOT, ".github", "workflows", "ui-stress.yml"))
+
+    def env_expr(self, key):
+        return re.search(rf"^  {key}: \$\{{\{{ (.*) \}}\}}$", self.text, re.M).group(1)
+
+    def context(self, schedule=None, photos=None):
+        event = "schedule" if schedule else "workflow_dispatch"
+        return {"github": {"event_name": event, "event": {"schedule": schedule} if schedule else {}},
+                "inputs": {"photos": photos, "minutes": None} if photos else {}}
+
+    def test_two_schedules_and_their_sizes(self):
+        self.assertIn("    - cron: '40 0 * * 0'\n", self.text)
+        self.assertIn("    - cron: '40 0 * * 1-6'\n", self.text)
+        photos, minutes = self.env_expr("STRESS_PHOTOS"), self.env_expr("STRESS_MINUTES")
+        reuse = re.search(r"REUSE: \$\{\{ (.*) \}\}", self.text).group(1)
+        cases = {"40 0 * * 0": ("50000", "45", ""), "40 0 * * 1-6": ("10000", "15", "yes"), None: ("10000", "15", "yes")}
+        for schedule, (p, m, r) in cases.items():
+            with self.subTest(schedule=schedule):
+                ctx = self.context(schedule)
+                self.assertEqual((gh_expr(photos, ctx), gh_expr(minutes, ctx), gh_expr(reuse, ctx)), (p, m, r))
+        self.assertEqual(gh_expr(photos, self.context(photos="50000")), "50000")
+
+    def test_the_merge_needs_no_stress_pass(self):
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        self.assertNotIn("UI stress verdict' and 'UI verdict (full)' must be green", ui)
+        self.assertIn("The 10,000-photo stress pass is no longer a merge check", ui)
+
+
 class StressBeforeMergeTests(unittest.TestCase):
     """The owner's decision of 20.11.2026, 17:20: the stress pass runs once before the merge, and
     TestFlight takes its green by content; without one it runs there as before."""
@@ -636,8 +744,8 @@ class StressBeforeMergeTests(unittest.TestCase):
         self.assertEqual(list(jobs)[:3], ["plan", "stress", "verdict"])
         plan = {n: r for n, _, r in job_steps(text, "plan")}["Key of this pass and whether it runs"]
         self.assertIn('ui_evidence.py stress-plan --photos "$STRESS_PHOTOS" --minutes "$STRESS_MINUTES" ${REUSE:+--reuse}', plan)
-        # The weekly pass never reuses.
-        self.assertIn("REUSE: ${{ github.event_name != 'schedule' && 'yes' || '' }}", jobs["plan"])
+        # The weekly full pass never reuses; the nightly small one does (stage 1, 26.11.2026).
+        self.assertIn("REUSE: ${{ !(github.event.schedule == '40 0 * * 0') && 'yes' || '' }}", jobs["plan"])
         self.assertIn("fetch-depth: 0", jobs["plan"])
         # The key in the job's name, where the gate and later plans find it.
         self.assertIn("[${{ needs.plan.outputs.group }} app ${{ needs.plan.outputs.app }} tests ${{ needs.plan.outputs.tests }}]",
@@ -736,9 +844,10 @@ class ReleaseSmokeTests(unittest.TestCase):
         self.assertIn("TEST_RUNNER_ALBUMIST_RELEASE_SMOKE: '1'", smoke)
         # A skipped test is no pass (the test skips itself without the variable).
         self.assertIn("Test Case '-[AlbumistUITests.ReleaseSmokeUITests test1_ReleaseBuildOnboardsAnalysesAndApplies]' passed", run)
-        # Beside the UI flow and the stress pass, not after them: it needs the tests only.
-        self.assertEqual([n.strip() for n in job_field(text, "release-smoke", "needs").split(",")], ["tests"])
-        self.assertEqual(job_field(text, "release-smoke", "if"), "")
+        # Beside CI, the UI flow and the stress pass (since 26.11.2026, fast gate): it needs the
+        # check only; a red CI still blocks the upload.
+        self.assertEqual([n.strip() for n in job_field(text, "release-smoke", "needs").split(",")], ["check"])
+        self.assertEqual(job_field(text, "release-smoke", "if"), "${{ needs.check.outputs.ready == 'true' }}")
         # The upload needs it green, with either gate.
         self.assertIn("release-smoke", [n.strip() for n in job_field(text, "release", "needs").split(",")])
         self.assertIn("needs.release-smoke.result == 'success'", job_field(text, "release", "if"))
@@ -758,10 +867,14 @@ class ReleaseSmokeTests(unittest.TestCase):
         # Outside TestFlight five groups (tempo plan 20.11.; beside CI's Mac job GitHub queues one).
         self.assertEqual(otherwise, 5)
         tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
-        beside = [job for job in ("stress", "release-smoke")
-                  if [n.strip() for n in job_field(tf, job, "needs").split(",")] == ["tests"]]
-        self.assertEqual(beside, ["stress", "release-smoke"])
-        self.assertLessEqual(in_release + len(beside), 5)
+        # After CI: the groups, the stress pass and the Release smoke test (it starts with CI
+        # since 26.11. and may still run). During CI: CI's Mac job, the Release smoke test and,
+        # with the fast gate, the UI smoke test (one Mac; the UI flow and the stress pass skip).
+        after_ci = [job for job in ("stress", "release-smoke")
+                    if set(n.strip() for n in job_field(tf, job, "needs").split(",")) & {"tests", "check"}]
+        self.assertEqual(after_ci, ["stress", "release-smoke"])
+        self.assertLessEqual(in_release + len(after_ci), 5)
+        self.assertEqual([n.strip() for n in job_field(tf, "ui-fast", "needs").split(",")], ["check"])
 
     def test_the_smoke_test_runs_only_there_and_as_a_user_would(self):
         path = os.path.join(ROOT, "App", "AlbumistUITests", "ReleaseSmokeUITests.swift")
@@ -850,10 +963,11 @@ def concurrency_group(text):
     return " ".join(strip_comment(line) for line in found.group(1).split("\n")).replace("${{", "").replace("}}", "")
 
 
-def pr_context(user="someone", fork=False):
+def pr_context(user="someone", fork=False, draft=False):
     return {"github": {"event_name": "pull_request", "workflow": "UI flow", "run_id": 7,
                        "ref": "refs/pull/8/merge",
-                       "event": {"pull_request": {"user": {"login": user}, "head": {"repo": {"fork": fork}}}}},
+                       "event": {"pull_request": {"user": {"login": user}, "head": {"repo": {"fork": fork}},
+                                                  "draft": draft, "number": 8}}},
             "inputs": {}}
 
 
@@ -877,15 +991,20 @@ class MacQueueTests(unittest.TestCase):
         for name, text in (("ui", self.ui), ("ui-stress", self.stress)):
             group = concurrency_group(text)
             with self.subTest(workflow=name):
-                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main")), "mac-queue-main")
-                # The stress pass before the merge runs beside the branch's full UI pass (the
-                # owner's decision of 20.11.2026, 17:20): a group per branch, not the Mac queue.
+                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main")),
+                                 "stress-main" if name == "ui-stress" else "mac-queue-main")
+                # 26.11.2026: a group per branch and kind; no run of another strand or kind can
+                # replace a waiting one (GitHub keeps one waiting run per group).
                 self.assertEqual(gh_expr(group, dispatch_context("refs/heads/feature")),
-                                 "stress-branch" if name == "ui-stress" else "mac-queue")
+                                 "stress-branch-refs/heads/feature" if name == "ui-stress" else "ui-branch-refs/heads/feature")
 
     def test_no_pull_request_joins_the_queue_of_main(self):
         group = concurrency_group(self.ui)
-        self.assertEqual(gh_expr(group, pr_context()), "mac-queue")
+        # Each pull request its own group (26.11.2026): another strand's run never replaces it.
+        self.assertEqual(gh_expr(group, pr_context()), "ui-pr-8")
+        # A draft's smoke test never waits in (and never replaces a run of) the Mac queue.
+        self.assertEqual(gh_expr(group, pr_context(draft=True)), "ui-smoke-8")
+        self.assertEqual(gh_expr(group, pr_context(draft=True, fork=True)), "ui-fork")
         self.assertEqual(gh_expr(group, pr_context(fork=True)), "ui-fork")
         self.assertEqual(gh_expr(group, pr_context(user="dependabot[bot]")), "ui-dependabot")
 
@@ -895,7 +1014,7 @@ class MacQueueTests(unittest.TestCase):
         group = concurrency_group(self.stress)
         self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main", "TestFlight", True, "workflow_call")),
                          "testflight-stress-7")
-        self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main", "UI stress", event="schedule")), "stress-weekly")
+        self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main", "UI stress", event="schedule")), "stress-night")
 
     def test_a_dependabot_pull_request_starts_no_mac(self):
         bot, person = pr_context(user="dependabot[bot]"), pr_context()

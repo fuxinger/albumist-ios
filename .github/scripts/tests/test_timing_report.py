@@ -48,6 +48,12 @@ class TimingReportTests(unittest.TestCase):
             self.assertIn("ALBUMIST_TIMING: ${{ (!inputs.release && github.event_name == 'pull_request') && 'report' || 'hard' }}",
                           text, name)
             self.assertIn("timing_report.py", text, name)
+        with open(os.path.join(root, ".github", "workflows", "ui.yml")) as f:
+            ui = f.read()
+        # The merge gate holds the limits hard: macOS core tests and the load test in a full run.
+        self.assertIn("core-macos:", ui)
+        self.assertIn("needs: [plan, ui, core-macos]", ui)
+        self.assertIn("Load test, hard limits (merge gate)", ui)
         for name in ("nightly.yml", "testflight.yml", "ui-stress.yml"):
             with open(os.path.join(root, ".github", "workflows", name)) as f:
                 self.assertNotIn("ALBUMIST_TIMING", f.read(), name)

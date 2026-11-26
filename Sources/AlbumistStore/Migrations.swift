@@ -137,6 +137,14 @@ enum Migrations {
         ALTER TABLE assets ADD COLUMN out_of_view INTEGER NOT NULL DEFAULT 0;
         CREATE INDEX idx_assets_out_of_view ON assets(id) WHERE out_of_view = 1;
         """),
+        // v7: the photos a plan's suggestions want in each album (`ChangePlan.wanted`, review
+        // P2-09) in a row of their own. In the plan header they were written again with every
+        // step (100,000 photos into 200 albums: 165 s instead of under 20 s, UI run
+        // 45759223743); here they are written when they change, so once per plan. Plans saved
+        // before keep them in `plans.payload` until they are saved again.
+        (7, """
+        CREATE TABLE plan_wanted (plan_id TEXT PRIMARY KEY, payload BLOB NOT NULL) WITHOUT ROWID;
+        """),
     ]
 
     /// Optional full-text index over `text_plain` (external content), kept in sync by

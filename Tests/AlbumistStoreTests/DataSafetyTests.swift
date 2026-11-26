@@ -139,7 +139,7 @@ struct DataSafetyTests {
 
     /// Everything of `makeDatabase` reads back through the store, unchanged.
     func expectIntact(_ s: AlbumistStore, _ c: Contents, version: Int) async throws {
-        #expect(await s.schemaVersion == 6)
+        #expect(await s.schemaVersion == 7)
         #expect(try await s.integrityReport() == "ok")
         #expect(try await s.asset("a") == c.asset)
         // Every photo of an older version is in view (version 6, review P1-07).
@@ -191,7 +191,7 @@ struct DataSafetyTests {
         }
         // Opened again: nothing runs twice, the data is still there.
         let reopened = try AlbumistStore(url: url)
-        #expect(await reopened.schemaVersion == 6)
+        #expect(await reopened.schemaVersion == 7)
         #expect(try await reopened.overrides() == [c.override])
         #expect(try await reopened.searchText("Bordkarte") == ["a"])
         // A photo set aside (version 6) stays set aside in the file, with its results.
@@ -227,7 +227,7 @@ struct DataSafetyTests {
             #expect(try old.query("SELECT 1 FROM sqlite_master WHERE name = 'text_plain_v3' OR name = 'plan_steps'").isEmpty)
         }
         let s = try AlbumistStore(url: url)
-        #expect(await s.schemaVersion == 6)
+        #expect(await s.schemaVersion == 7)
         #expect(try await s.integrityReport() == "ok")
         #expect(try await s.searchText("Bäckerei", limit: 10_000).count == 3_000)
         #expect(try await s.searchText("Hotel") == ["a"])
@@ -341,7 +341,7 @@ struct DataSafetyTests {
         let url = dir.appendingPathComponent("albumist.sqlite")
         FileManager.default.createFile(atPath: url.path, contents: Data())
         let s = try AlbumistStore(url: url)
-        #expect(await s.schemaVersion == 6)
+        #expect(await s.schemaVersion == 7)
         #expect(try await s.hasSafetyData() == false)
     }
 
@@ -375,7 +375,7 @@ struct DataSafetyTests {
         for suffix in ["", "-wal", "-shm"] { #expect(!FileManager.default.fileExists(atPath: url.path + suffix)) }
 
         let rebuilt = try AlbumistStore(url: url)
-        #expect(await rebuilt.schemaVersion == 6)
+        #expect(await rebuilt.schemaVersion == 7)
         let backup = try #require(try SafetyBackup.read(from: backupURL))
         #expect(try await rebuilt.restore(backup, includingLibraryState: backup.belongsToLibrary(access: .full, visibleAlbums: Set(c.inventory.collections.keys)) == true))
         #expect(try await rebuilt.overrides() == [c.override])
@@ -728,7 +728,7 @@ struct DataSafetyTests {
         try await s.setValue(["t"], forKey: "analysis.proposals")
         let libraryBefore = try await lib.currentInventory()
 
-        let kept = ["assets", "collections", "collection_members", "overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media"]
+        let kept = ["assets", "collections", "collection_members", "overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media", "plan_wanted"]
         var before: [String: Int] = [:]
         for table in kept { before[table] = try await s.rowCount(table) }
         let userSettings = try await s.rowCount("settings", where: "key NOT LIKE 'analysis.%'")
@@ -774,7 +774,8 @@ struct DataSafetyTests {
         try await s.save(saved)
         #expect(try await s.rowCount("plan_steps") > 0)
         try await s.resetAnalysis(includingDecisions: true)
-        for table in ["overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media", "settings", "analysis_results", "text_plain"] {
+        let cleared = ["overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media", "plan_wanted", "settings", "analysis_results", "text_plain"]
+        for table in cleared {
             #expect(try await s.rowCount(table) == 0, "\(table) not cleared")
         }
         #expect(try await s.hasSafetyData() == false)

@@ -863,6 +863,43 @@ final class AlbumistFlowUITests: XCTestCase {
     /// No audits of atlas, country, share card, library, photo, albums and search here: their
     /// audit here only printed findings, and `AccessibilityUITests` audits the same screens and
     /// fails on findings (docs/TEST_PLAN.md, "UI-Tests: Dauer und Verlagerung").
+    /// Every swipe in the photo viewer goes to the next photo (iPhone, Build 41, 26.11.: "reagiert
+    /// teilweise nicht auf Weiterwischen, erst beim 3.–4. Mal"). Four swipes, each must move the
+    /// position ("viewer.position", "n von m") within 2 s; a swipe without effect is counted and
+    /// fails the test, never repeated. Back to the first photo afterwards.
+    private func swipesGoToTheNextPhoto() {
+        let position = app.descendants(matching: .any)["viewer.position"]
+        guard position.waitForExistence(timeout: 5) else {
+            XCTFail("The photo viewer shows no position")
+            return
+        }
+        func number() -> Int? {
+            (try? position.snapshot().label).flatMap { Int($0.replacingOccurrences(of: ".", with: "").prefix { $0.isNumber }) }
+        }
+        let label = (try? position.snapshot().label) ?? ""
+        let total = Int(label.components(separatedBy: " von ").last?.replacingOccurrences(of: ".", with: "") ?? "") ?? 0
+        let began = Date()
+        defer { print("UI_TIMING viewer swipes \(String(format: "%.1f", Date().timeIntervalSince(began))) s") }
+        let swipes = min(4, max(total - (number() ?? 1), 0))
+        XCTAssertGreaterThan(swipes, 0, "No photo to swipe to in the viewer ('\(label)')")
+        var missed: [Int] = []
+        for swipe in stride(from: 1, through: swipes, by: 1) {
+            let before = number() ?? 0
+            let swipedAt = Date()
+            app.swipeLeft()
+            let moved = UITestWait.holds(timeout: 2, interval: 0.1) { (number() ?? before) > before }
+            print("UI_FACT viewer swipe \(swipe): \(before) -> \(number() ?? -1) after \(Int(Date().timeIntervalSince(swipedAt) * 1000)) ms")
+            if !moved { missed.append(swipe) }
+        }
+        print(missed.isEmpty ? "UI_STEP_OK every swipe goes to the next photo" : "UI_STEP_MISSING swipes without effect: \(missed)")
+        XCTAssertTrue(missed.isEmpty, "\(missed.count) of \(swipes) swipes in the photo viewer did not go to the next photo: \(missed)")
+        for _ in 0..<swipes {
+            let before = number() ?? 0
+            app.swipeRight()
+            _ = UITestWait.holds(timeout: 2, interval: 0.1) { (number() ?? before) < before }
+        }
+    }
+
     func test1b_AtlasLibrarySearch() {
         continueAfterFailure = true
         prepare()
@@ -968,6 +1005,7 @@ final class AlbumistFlowUITests: XCTestCase {
                     // viewer's close is).
                     _ = UITestWait.holds(timeout: 10) { !detailClose.exists }
                 }
+                swipesGoToTheNextPhoto()
                 let close = app.buttons["viewer.close"]
                 app.swipeDown(velocity: .slow)
                 let closed = waitGone(close, timeout: 5)

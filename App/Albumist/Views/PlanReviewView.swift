@@ -597,7 +597,7 @@ struct PlanReviewView: View {
     private func freeAlbumNote(_ facts: PlanReviewFacts) -> some View {
         let albums = facts.freeAlbumUse
         if !purchases.isUnlocked && !Purchases.unlockedForUITests && albums > 0 && purchases.allows(albums: albums) {
-            Text("Kostenlos. Danach hast du noch \(purchases.remainingFreeAlbums - albums) von \(Purchases.freeAlbumLimit) Gratis-Alben.")
+            Text("Kostenlos. Danach hast du noch \(purchases.remainingFreeAlbums - albums) von \(Purchases.freeAlbumLimit) kostenlosen Alben.")
                 .font(.footnote).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
         }

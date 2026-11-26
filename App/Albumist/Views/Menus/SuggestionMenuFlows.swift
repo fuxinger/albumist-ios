@@ -6,7 +6,7 @@ struct SuggestionMenuFlow {
     enum Kind {
         /// "Anpassen".
         case adjust
-        /// "Reise teilen oder zusammenlegen".
+        /// "Reise aufteilen oder zusammenlegen".
         case reshapeTrip
         /// "Keine Reise, hier bin ich öfter", asked first.
         case notATrip

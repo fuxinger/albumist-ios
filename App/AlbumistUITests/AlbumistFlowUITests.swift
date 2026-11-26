@@ -70,7 +70,7 @@ final class AlbumistFlowUITests: XCTestCase {
 
     /// The actions of a suggestion besides its two buttons ("Album anlegen", "Nicht jetzt"): in
     /// the "…" menu at the top right since review P3-06.
-    private static let menuActions = ["Anpassen", "Reise teilen oder zusammenlegen", "Keine Reise, hier bin ich öfter"]
+    private static let menuActions = ["Anpassen", "Reise aufteilen oder zusammenlegen", "Keine Reise, hier bin ich öfter"]
 
     /// The "…" button at the top right of a suggestion, by its identifier or, where the toolbar
     /// does not pass that on, by its name.
@@ -1479,7 +1479,7 @@ final class AlbumistFlowUITests: XCTestCase {
             guard tap(row.buttons["photoCard.body"], "open trip for " + step, timeout: 10) else { return false }
             // Review P3-06: the workshop is in the "…" menu at the top right of the trip.
             guard tap(moreActionsButton(), "more actions of the trip for " + step, timeout: 5) else { return false }
-            let reshape = menuItem("proposal.reshapeTrip", "Reise teilen oder zusammenlegen")
+            let reshape = menuItem("proposal.reshapeTrip", "Reise aufteilen oder zusammenlegen")
             if step == "split" {
                 // The open menu holds the trip's other actions too: "Anpassen" is in every
                 // suggestion's. Both can be tapped before the picture is taken.

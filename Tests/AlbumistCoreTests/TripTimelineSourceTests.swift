@@ -31,7 +31,7 @@ struct TripTimelineSourceTests {
     static let model = "App/Albumist/Model/AppModel+TripTimeline.swift"
 
     /// The trip reads in the order of time, each part a section under its own heading (review
-    /// G3): the trip before it ("Reise davor"), its days ("An einem Tag teilen", or "Diese Reise"
+    /// G3): the trip before it ("Reise davor"), its days ("Ab einem Tag aufteilen", or "Diese Reise"
     /// for a trip of one day, which cannot be split) with the hint under them, the trip after it
     /// ("Reise danach"). What merging is for stands under the first merge row shown, with why it
     /// waits (review G4); the days between the trips are said in the merge rows.
@@ -44,7 +44,7 @@ struct TripTimelineSourceTests {
         #expect(!body.contains("timelineSection(") && !body.contains("splitSection(") && !body.contains("mergeSection("))
         // The days: their heading and the hint belong to them.
         let days = Self.squeezed(try Self.body(["func daysSection("], in: Self.workshop))
-        #expect(days.contains("}header:{iftimeline.days.count>1{Text(\"AneinemTagteilen\")}else{Text(\"DieseReise\")}}footer:{iftimeline.days.count>1"
+        #expect(days.contains("}header:{iftimeline.days.count>1{Text(\"AbeinemTagaufteilen\")}else{Text(\"DieseReise\")}}footer:{iftimeline.days.count>1"
                               + "{Text(\"TippeaufdenTag,andemdiezweiteReisebeginnt.\")}}"))
         #expect(!days.contains("mergeButton(") && !days.contains("neighbour") && !days.contains("Pause"))
         // A neighbour: a heading of its own; under the first one shown why it waits and what it is for.

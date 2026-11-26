@@ -4,7 +4,7 @@ extension TripCorrections {
     /// Splits and merges the user made (photos taken out of trips are counted elsewhere).
     public var changeCount: Int { forcedBreaks.count + forcedJoins.count }
 
-    /// "Reise teilen": a new trip starts at `date`. A split always wins over an earlier merge
+    /// "Reise aufteilen": a new trip starts at `date`. A split always wins over an earlier merge
     /// (`TripDetector` checks breaks first), so nothing else has to change.
     public func splitting(at date: Date) -> TripCorrections {
         var copy = self

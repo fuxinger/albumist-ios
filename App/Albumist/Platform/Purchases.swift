@@ -417,7 +417,7 @@ final class Purchases {
                 lastError = String(localized: "Der Kauf konnte nicht bestätigt werden. Tippe auf „Kauf wiederherstellen“ oder versuche es später noch einmal.")
             }
         case .pending:
-            lastError = String(localized: "Der Kauf wartet noch auf eine Bestätigung, zum Beispiel durch die Familienfreigabe. Albumist schaltet sich danach von selbst frei.")
+            lastError = String(localized: "Der Kauf muss noch bestätigt werden, zum Beispiel über eine Kaufanfrage in der Familienfreigabe. Danach schaltet sich Albumist von selbst frei.")
             watchPending()
         case .userCancelled:
             // The user decided against it: an older message would only confuse.
@@ -476,7 +476,7 @@ final class Purchases {
             handle(syncError)
         } else {
             // Without a word the button would seem to do nothing.
-            lastError = String(localized: "Kein Kauf gefunden. Wenn du Albumist mit einem anderen Apple Account gekauft hast, melde dich damit im App Store an.")
+            lastError = String(localized: "Kein Kauf gefunden. Wenn du die Vollversion mit einem anderen Apple Account gekauft hast, melde dich damit im App Store an.")
         }
     }
 }

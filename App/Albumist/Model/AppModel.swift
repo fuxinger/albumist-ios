@@ -2309,7 +2309,7 @@ final class AppModel {
         return (around.before.map { trips[$0] }, around.after.map { trips[$0] })
     }
 
-    /// "Reise teilen": a new trip starts on `day`. The analysis runs again right away.
+    /// "Reise aufteilen": a new trip starts on `day`. The analysis runs again right away.
     func splitTrip(at day: TripWorkshop.Day) async -> Bool {
         await changeTrips { $0.splitting(at: TripWorkshop.splitInstant(before: day)) }
     }

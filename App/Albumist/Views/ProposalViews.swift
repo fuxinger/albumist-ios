@@ -1386,7 +1386,7 @@ struct ProposalDetailView: View {
                     // Reise-Werkstatt (I07): only before Albumist made the trip's album.
                     if model.canReshape(proposal) {
                         Button { showWorkshop = true } label: {
-                            Label("Reise teilen oder zusammenlegen", systemImage: "scissors")
+                            Label("Reise aufteilen oder zusammenlegen", systemImage: "scissors")
                         }
                         .disabled(busy)
                         .accessibilityIdentifier("proposal.reshapeTrip")

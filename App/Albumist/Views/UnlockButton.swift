@@ -31,7 +31,7 @@ struct UnlockButton: View {
                     .accessibilityLabel(Text("Kauf läuft"))
             case .buy:
                 if let product = purchases.product {
-                    Text("Freischalten für \(product.displayPrice)")
+                    Text("Für \(product.displayPrice) freischalten")
                 }
             case .loadingPrice:
                 HStack(spacing: Theme.Spacing.s) {

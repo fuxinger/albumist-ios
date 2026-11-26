@@ -106,7 +106,7 @@ struct SettingsView: View {
             } header: {
                 Text("Datenschutz")
             } footer: {
-                Text("Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst, nie ein Foto. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst.")
+                Text("Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst, nie ein Foto. Aus iCloud lädt Albumist nur Screenshots und Dokumente, nie Videos, und nur, wenn du es einschaltest (dann standardmäßig nur im WLAN).")
             }
 
             if rejectedCount > 0 {
@@ -471,7 +471,7 @@ struct PrivacyView: View {
                 Text("Ausweise und medizinische Dokumente werden nicht als Text gespeichert. IBANs und Kartennummern werden unkenntlich gemacht.")
             }
             Section("Was dein Gerät verlässt") {
-                Text("Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Fotos verlassen dein Gerät nie.")
+                Text("Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Albumist lädt keine Fotos hoch.")
                 Text("Käufe laufen über Apple. Albumist sieht keine Zahlungsdaten.")
                 Text("Die Diagnose nur, wenn du sie selbst teilst: Zustände und Zahlen, keine Fotos, Namen oder Orte.")
             }

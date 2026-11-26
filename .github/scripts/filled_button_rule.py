@@ -106,7 +106,7 @@ TAKE_TURNS = {
     )],
     "TripWorkshopView": [(
         {"TripWorkshopView.splitBar", "TripWorkshopView.finished"},
-        "the bar with \"Reise teilen\" stands only while nothing is done; \"Zu den Reisen\" only once a "
+        "the bar with \"Reise aufteilen\" stands only while nothing is done; \"Zu den Reisen\" only once a "
         "change is done",
         [("App/Albumist/Views/TripWorkshopView.swift", r"if done == nil, working == nil"),
          ("App/Albumist/Views/TripWorkshopView.swift", r"if let done \{\s*finished\(done\)")],

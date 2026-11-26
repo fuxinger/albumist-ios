@@ -2,6 +2,14 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- 26.11. Texte nach dem Lektorat (A26, noch in keinem Build): Die Frage nach dem Fotozugriff ist kürzer und sagt
+  „analysiert“ und „in der Fotos-App“. Die App sagt wie die Datenschutzseiten, dass iOS für Ortsnamen einzelne
+  Aufnahmeorte schickt, „etwa einen pro Gegend“ (Englisch „a sample of photo locations, roughly one per area“),
+  „Albumist lädt keine Fotos hoch“ statt „Fotos verlassen dein Gerät nie“, und dass iCloud-Downloads erst
+  eingeschaltet werden müssen. „Reise teilen“ heißt „Reise aufteilen“, „An einem Tag teilen“ „Ab einem Tag
+  aufteilen“; „Für … freischalten“, „kostenlose Alben“ statt „Gratis-Alben“, „Kaufanfrage“ in der
+  Familienfreigabe. Englisch: Zähler „N free albums left“, „backup“ statt „copy“, „Full Version“, „Ask to Buy“,
+  kein Leerzeichen vor „…“.
 - 25.11. Raster und Vorschlag nach dem vollen Mac-Lauf 262 (Design-Welle 3, noch in keinem Build): Beim Auswählen
   auf der Seite eines Vorschlags hakt ein Finger, der seitlich über die Fotos zieht, sie wieder an; vorher hielt
   iOS das für den Wisch zurück über den Inhalt und ging zurück. Der Wisch vom linken Rand geht weiter zurück. Nach

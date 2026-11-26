@@ -2,7 +2,7 @@
 """A suggestion shows two large buttons; its other actions are in the "…" menu at the top right.
 
 Review P3-06 (18.11.): a suggestion showed up to six actions in a column ("Album anlegen",
-"Anpassen", "Nicht jetzt", "Auswählen und später anlegen", "Reise teilen oder zusammenlegen",
+"Anpassen", "Nicht jetzt", "Auswählen und später anlegen", "Reise aufteilen oder zusammenlegen",
 "Keine Reise, hier bin ich öfter"); the last lay half behind the tab bar (screenshot
 ui-08c-trip-detail), and a user read six choices to create one album. Apple's way, as in Photos
 and Files: one or two actions in view, the rest in a "…" menu in the toolbar (`Menu`). Decision 9
@@ -57,7 +57,7 @@ VIEW = "ProposalDetailView"
 # The actions of a suggestion besides its two buttons, by their German titles.
 MENU_ACTIONS = (
     "Anpassen",
-    "Reise teilen oder zusammenlegen",
+    "Reise aufteilen oder zusammenlegen",
     "Keine Reise, hier bin ich öfter",
 )
 MOST_LARGE_BUTTONS = 2

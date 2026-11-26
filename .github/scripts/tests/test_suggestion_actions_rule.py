@@ -25,7 +25,7 @@ COLUMN = textwrap.dedent('''\
                     Card { matchContent }
                     actions
                     Button { showWorkshop = true } label: {
-                        Label("Reise teilen oder zusammenlegen", systemImage: "scissors")
+                        Label("Reise aufteilen oder zusammenlegen", systemImage: "scissors")
                     }
                     Button { confirmOftenHere = true } label: {
                         Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
@@ -82,7 +82,7 @@ MENU = textwrap.dedent('''\
         var body: some View {
             ScrollView {
                 VStack {
-                    // A comment may name "Anpassen" and "Reise teilen oder zusammenlegen".
+                    // A comment may name "Anpassen" and "Reise aufteilen oder zusammenlegen".
                     Card { Text("Neues Album") }
                     Card { matchContent }
                     actions
@@ -96,7 +96,7 @@ MENU = textwrap.dedent('''\
                             Button { showAdjust = true } label: { Label("Anpassen", systemImage: "slider.horizontal.3") }
                         }
                         Section {
-                            Button { showWorkshop = true } label: { Label("Reise teilen oder zusammenlegen", systemImage: "scissors") }
+                            Button { showWorkshop = true } label: { Label("Reise aufteilen oder zusammenlegen", systemImage: "scissors") }
                             Button { confirmOftenHere = true } label: {
                                 Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
                                 if let reason { Text(reason) }
@@ -136,7 +136,7 @@ NAMED = textwrap.dedent('''\
         private var moreActions: some View {
             Menu("Weitere Aktionen", systemImage: "ellipsis") {
                 Button("Anpassen") { adjust() }
-                Button("Reise teilen oder zusammenlegen") { reshape() }
+                Button("Reise aufteilen oder zusammenlegen") { reshape() }
                 Button("Keine Reise, hier bin ich öfter") { oftenHere() }
             }
         }
@@ -152,7 +152,7 @@ class SuggestionActionsRuleTests(unittest.TestCase):
             rule.TOO_MANY,
             rule.NO_MENU,
             rule.OUTSIDE.format("Anpassen"),
-            rule.OUTSIDE.format("Reise teilen oder zusammenlegen"),
+            rule.OUTSIDE.format("Reise aufteilen oder zusammenlegen"),
             # The button on the page; the one in its dialog confirms and is no action of its own.
             rule.OUTSIDE.format("Keine Reise, hier bin ich öfter"),
             # "Anpassen" on the page is no way from the album card.

@@ -66,7 +66,7 @@ struct SuggestionMenuTests {
 
     // MARK: Trips
 
-    /// A trip Albumist has not made an album of yet: "Reise teilen oder zusammenlegen" and "Keine
+    /// A trip Albumist has not made an album of yet: "Reise aufteilen oder zusammenlegen" and "Keine
     /// Reise, hier bin ich öfter" in a group of their own, as in the open suggestion's "…".
     @Test func aTripAddsItsTwoItemsInAGroupOfTheirOwn() {
         let menu = Self.menu(.create, canReshape: true, offersNotATrip: true)

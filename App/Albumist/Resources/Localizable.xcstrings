@@ -2446,7 +2446,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist then starts fresh and restores your decisions from the copy. Your photos, albums and purchase stay as they are."
+            "value" : "Albumist then starts fresh and restores your decisions from the backup. Your photos, albums, and purchase stay as they are."
           }
         }
       }
@@ -2496,7 +2496,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist restored your decisions and settings from the copy of %@. Albumist’s albums and the history follow as soon as Albumist may see all photos."
+            "value" : "Albumist restored your decisions and settings from the backup of %@. Albumist’s albums and the history follow as soon as Albumist may see all photos."
           }
         }
       }
@@ -2506,7 +2506,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist restored your decisions and settings from the copy of %@. Your photos are being analyzed again."
+            "value" : "Albumist restored your decisions and settings from the backup of %@. Your photos are being analyzed again."
           }
         }
       }
@@ -2516,7 +2516,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist restored your decisions and settings from the copy of %@. The copy comes from another library, so the history starts fresh here. Your albums in Photos stay as they are."
+            "value" : "Albumist restored your decisions and settings from the backup of %@. The backup comes from another library, so the history starts fresh here. Your albums in Photos stay as they are."
           }
         }
       }
@@ -2526,7 +2526,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist restored your decisions, settings, albums and history from the copy of %@. Your photos are being analyzed again."
+            "value" : "Albumist restored your decisions, settings, albums, and history from the backup of %@. Your photos are being analyzed again."
           }
         }
       }
@@ -2576,7 +2576,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist is planning your trips and suggestions again …"
+            "value" : "Albumist is planning your trips and suggestions again…"
           }
         }
       }
@@ -2596,7 +2596,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist is splitting the trip and planning the suggestions again …"
+            "value" : "Albumist is splitting the trip and planning the suggestions again…"
           }
         }
       }
@@ -2701,12 +2701,12 @@
         }
       }
     },
-    "An einem Tag teilen" : {
+    "Ab einem Tag aufteilen" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Split at a day"
+            "value" : "Split at a Day"
           }
         }
       }
@@ -4071,7 +4071,7 @@
         }
       }
     },
-    "Freischalten für %@" : {
+    "Für %@ freischalten" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4969,13 +4969,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld more album free."
+                  "value" : "%lld free album left."
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld more albums free."
+                  "value" : "%lld free albums left."
                 }
               }
             }
@@ -5281,7 +5281,7 @@
         }
       }
     },
-    "Reise teilen" : {
+    "Reise aufteilen" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5291,7 +5291,7 @@
         }
       }
     },
-    "Reise teilen oder zusammenlegen" : {
+    "Reise aufteilen oder zusammenlegen" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5466,7 +5466,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Screenshots by content: orders, tickets, recipes …"
+            "value" : "Screenshots by content: orders, tickets, recipes…"
           }
         }
       }
@@ -5936,7 +5936,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Loading home …"
+            "value" : "Loading home…"
           }
         }
       }
@@ -6016,7 +6016,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Full version"
+            "value" : "Full Version"
           }
         }
       }
@@ -7661,12 +7661,12 @@
         }
       }
     },
-    "Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst, nie ein Foto. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst." : {
+    "Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst, nie ein Foto. Aus iCloud lädt Albumist nur Screenshots und Dokumente, nie Videos, und nur, wenn du es einschaltest (dann standardmäßig nur im WLAN)." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The analysis always runs on your device. For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service, never a photo. Only screenshots and documents are downloaded from iCloud, never videos, and only over Wi‑Fi unless you choose otherwise."
+            "value" : "The analysis always runs on your device. For place names, iOS sends a sample of photo locations, roughly one per area (only coordinates and the language for place names) to Apple’s map service, never a photo. Albumist downloads only screenshots and documents from iCloud, never videos, and only if you turn this on (then over Wi‑Fi by default)."
           }
         }
       }
@@ -7751,12 +7751,12 @@
         }
       }
     },
-    "Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Fotos verlassen dein Gerät nie." : {
+    "Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Albumist lädt keine Fotos hoch." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service. This is on by default and can be turned off under “Refine places online”. Photos never leave your device."
+            "value" : "For place names, iOS sends a sample of photo locations, roughly one per area (only coordinates and the language for place names) to Apple’s map service. This is on by default and can be turned off under “Refine places online”. Albumist never uploads your photos."
           }
         }
       }
@@ -7871,12 +7871,12 @@
         }
       }
     },
-    "Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten." : {
+    "Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist needs full access to analyze your library and create albums. The analysis happens only on this device. For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service; you can turn this off in Settings."
+            "value" : "Albumist needs full access to analyze your library and create albums. The analysis happens only on this device. For place names, iOS sends a sample of photo locations, roughly one per area (only coordinates and the language for place names) to Apple’s map service; you can turn this off in Settings."
           }
         }
       }
@@ -8186,17 +8186,17 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The purchase could not be verified. Tap “Restore Purchase” or try again later."
+            "value" : "The purchase couldn’t be verified. Tap “Restore Purchase” or try again later."
           }
         }
       }
     },
-    "Der Kauf wartet noch auf eine Bestätigung, zum Beispiel durch die Familienfreigabe. Albumist schaltet sich danach von selbst frei." : {
+    "Der Kauf muss noch bestätigt werden, zum Beispiel über eine Kaufanfrage in der Familienfreigabe. Danach schaltet sich Albumist von selbst frei." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The purchase is waiting for approval, for example through Family Sharing. Albumist unlocks itself afterwards."
+            "value" : "This purchase is waiting for approval, for example through Ask to Buy. Albumist will unlock automatically once it’s approved."
           }
         }
       }
@@ -8501,12 +8501,12 @@
         }
       }
     },
-    "Kostenlos. Danach hast du noch %lld von %lld Gratis-Alben." : {
+    "Kostenlos. Danach hast du noch %lld von %lld kostenlosen Alben." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Free. Afterwards you have %1$lld of %2$lld free albums left."
+            "value" : "Free. You’ll still have %1$lld of %2$lld free albums left."
           }
         }
       }
@@ -9821,12 +9821,12 @@
         }
       }
     },
-    "Kein Kauf gefunden. Wenn du Albumist mit einem anderen Apple Account gekauft hast, melde dich damit im App Store an." : {
+    "Kein Kauf gefunden. Wenn du die Vollversion mit einem anderen Apple Account gekauft hast, melde dich damit im App Store an." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No purchase found. If you bought Albumist with a different Apple Account, sign in with it in the App Store."
+            "value" : "No purchase found. If you bought the full version with a different Apple Account, sign in to the App Store with that account."
           }
         }
       }
@@ -10056,7 +10056,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Pausing …"
+            "value" : "Pausing…"
           }
         }
       }
@@ -13616,7 +13616,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Loading price …"
+            "value" : "Loading price…"
           }
         }
       }
@@ -14066,7 +14066,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Updating suggestions …"
+            "value" : "Updating suggestions…"
           }
         }
       }
@@ -14786,7 +14786,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Gathering photos …"
+            "value" : "Gathering photos…"
           }
         }
       }

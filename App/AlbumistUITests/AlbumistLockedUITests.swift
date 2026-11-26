@@ -240,7 +240,7 @@ final class AlbumistLockedUITests: XCTestCase {
         // What is free afterwards: the free albums less what this plan uses ("Die ersten N"
         // made the plan anew, so its summary is read again).
         let used = cardShown ? (rowCount("Neue Alben", timeout: 10) ?? 0) + (rowCount("Ergänzte Alben", timeout: 0) ?? 0) : planned
-        let expected = "noch \(left - used) von 10 Gratis-Alben"
+        let expected = "noch \(left - used) von 10 kostenlosen Alben"
         let rest = anything(expected).exists
         print(rest ? "UI_STEP_OK free albums left after this plan (\(expected))" : "UI_STEP_MISSING free albums left after this plan (\(expected))")
         XCTAssertTrue(rest, "The plan does not say \"\(expected)\" (\(left) free, the plan uses \(used))")

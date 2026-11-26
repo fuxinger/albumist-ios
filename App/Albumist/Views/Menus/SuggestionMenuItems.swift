@@ -9,7 +9,7 @@ import AlbumistCore
 ///   action (`act`): "Anlegen" at once with its banner only where the button does it
 ///   (`quickCreateAtOnce`), the purchase sheet or the suggestion otherwise, "Ergänzen …" the
 ///   preview first.
-/// - "Anpassen", "Reise teilen oder zusammenlegen" and "Keine Reise, hier bin ich öfter" open
+/// - "Anpassen", "Reise aufteilen oder zusammenlegen" and "Keine Reise, hier bin ich öfter" open
 ///   what the open suggestion's "…" opens, on the page (`suggestionMenuFlows(_:)`): its sheets,
 ///   and the question before "Keine Reise", which waits and says why as it does there.
 /// - "Nicht jetzt" sets the suggestion aside as its button does; photos and albums stay.
@@ -107,7 +107,7 @@ struct SuggestionMenuItems: View {
         Button {
             open(.reshapeTrip)
         } label: {
-            Label("Reise teilen oder zusammenlegen", systemImage: "scissors")
+            Label("Reise aufteilen oder zusammenlegen", systemImage: "scissors")
         }
         .accessibilityIdentifier("suggestionMenu.reshapeTrip")
     }

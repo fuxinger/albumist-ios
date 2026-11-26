@@ -245,7 +245,7 @@ struct LongPressSourceTests {
         }
         // The menus use the app's words for everything else (no second word for the same).
         let items = try Self.code(Self.suggestionItems)
-        for word in ["\"Anpassen\"", "\"Reise teilen oder zusammenlegen\"", "\"Keine Reise, hier bin ich öfter\"", "\"Nicht jetzt\""] {
+        for word in ["\"Anpassen\"", "\"Reise aufteilen oder zusammenlegen\"", "\"Keine Reise, hier bin ich öfter\"", "\"Nicht jetzt\""] {
             #expect(items.contains(word), "\(word)")
             #expect(english(String(word.dropFirst().dropLast())) != nil, "\(word)")
         }

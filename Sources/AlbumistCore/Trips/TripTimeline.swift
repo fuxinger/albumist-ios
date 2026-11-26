@@ -26,7 +26,7 @@ public enum TripTimeline {
         public var hidesPreview: Bool
         /// Calendar days without photos between the day before and this one.
         public var quietDaysBefore: Int
-        /// A new trip can start with this day ("Reise teilen"): every day but the first.
+        /// A new trip can start with this day ("Reise aufteilen"): every day but the first.
         public var canStartNewTrip: Bool
 
         public var id: Date { day.start }

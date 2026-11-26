@@ -246,7 +246,7 @@ struct TripWorkshopView: View {
 
     /// The trip's days as a timeline (DS-14, `TripTimeline`): each with where it was and its
     /// photos, and the days without photos between them. A tap on a day after the first chooses
-    /// it as the start of the second trip (the bar below says what the split makes, "Reise teilen"
+    /// it as the start of the second trip (the bar below says what the split makes, "Reise aufteilen"
     /// does it); the line breaks there, with scissors. The heading and the hint belong to the days
     /// (review G3); a trip of one day cannot be split and stands under "Diese Reise", between
     /// "Reise davor" and "Reise danach".
@@ -265,7 +265,7 @@ struct TripWorkshopView: View {
             }
         } header: {
             if timeline.days.count > 1 {
-                Text("An einem Tag teilen")
+                Text("Ab einem Tag aufteilen")
             } else {
                 Text("Diese Reise")
             }
@@ -317,7 +317,7 @@ struct TripWorkshopView: View {
             Button {
                 perform(.split) { await model.splitTrip(at: day) }
             } label: {
-                Label("Reise teilen", systemImage: "scissors")
+                Label("Reise aufteilen", systemImage: "scissors")
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(busy)

@@ -7,7 +7,7 @@ import Foundation
 ///
 /// 1. The card's own word ("Anlegen", "Ergänzen …", "Benennen …", "Ansehen …"), doing what its
 ///    button does, and "Anpassen": both decide the album.
-/// 2. For a trip, as in the open suggestion's "…": "Reise teilen oder zusammenlegen" (before
+/// 2. For a trip, as in the open suggestion's "…": "Reise aufteilen oder zusammenlegen" (before
 ///    Albumist made its album) and "Keine Reise, hier bin ich öfter" (where the suggestion
 ///    offers it; it waits while the suggestions cannot change, `AppModel.canChangeHome`).
 /// 3. "Nicht jetzt", unless the suggestion is set aside already.
@@ -25,7 +25,7 @@ public struct SuggestionMenu: Equatable, Sendable {
         case action(ProposalCardAction)
         /// "Anpassen": a new album or one of the user's albums (`AdjustProposalView`).
         case adjust
-        /// "Reise teilen oder zusammenlegen" (`TripWorkshopView`).
+        /// "Reise aufteilen oder zusammenlegen" (`TripWorkshopView`).
         case reshapeTrip
         /// "Keine Reise, hier bin ich öfter", asked first ("Keine Reise?").
         case notATrip

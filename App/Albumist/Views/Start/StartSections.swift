@@ -42,6 +42,26 @@ struct StartSections: View {
     /// them, "Alle 41" shows the rest.
     private static let rowLimitAtLargestText = 3
 
+    /// "Alle N" of one area: "startPage.all.<area>", each spelled out, so the Linux rule
+    /// test_ui_identifiers.py sees every identifier a UI test may ask for (an interpolated one it
+    /// cannot see). A new area without its line here does not build.
+    private static func allIdentifier(_ area: OrganizationArea) -> String {
+        switch area {
+        case .places: identifier("startPage.all.places")
+        case .trips: identifier("startPage.all.trips")
+        case .frequentPlaces: identifier("startPage.all.frequentPlaces")
+        case .peopleAndPets: identifier("startPage.all.peopleAndPets")
+        case .messenger: identifier("startPage.all.messenger")
+        case .screenshots: identifier("startPage.all.screenshots")
+        case .imageCategories: identifier("startPage.all.imageCategories")
+        case .documents: identifier("startPage.all.documents")
+        case .chronology: identifier("startPage.all.chronology")
+        case .mediaTypes: identifier("startPage.all.mediaTypes")
+        }
+    }
+
+    private static func identifier(_ fixed: String) -> String { fixed }
+
     var body: some View {
         // How often the page is drawn, for the main thread's stall lines in UI runs.
         let _: Void = MainThreadWatch.shared.count("start page body")
@@ -186,7 +206,7 @@ struct StartSections: View {
         let shown = typeSize.isAccessibilitySize ? Array(cards.prefix(Self.rowLimitAtLargestText)) : cards
         return VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             StartSectionHeader(title: Text(row.area.title), all: row.showsAll ? row.openCount : nil,
-                               allIdentifier: "startPage.all.\(row.area.rawValue)") {
+                               allIdentifier: Self.allIdentifier(row.area)) {
                 Navigator.push(.areaProposals(row.area), on: navigator)
             }
             .padding(.horizontal, Theme.Spacing.l)

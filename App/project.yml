@@ -64,9 +64,6 @@ targets:
           - app.albumist.ios.refinement
           - app.albumist.ios.analysis.*
         ITSAppUsesNonExemptEncryption: false
-        # A display link may run above 60 Hz on a ProMotion iPhone: the photo grid scrolls by
-        # itself with the screen while a finger selects at an edge (design wave 3, review L13).
-        CADisableMinimumFrameDurationOnPhone: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.albumist.ios

@@ -340,15 +340,16 @@ struct PhotoGridSourceTests {
         #expect(try Self.code(Self.scrolling).contains("private static var calibration = PhotoGridAutoScroll.Calibration()"))
     }
 
-    /// Scrolling by itself steps with the screen, up to 120 times a second on a ProMotion iPhone
-    /// (review L13): the frame clock asks for it, and the app's Info.plist lets an iPhone give a
-    /// display link more than 60 Hz (`CADisableMinimumFrameDurationOnPhone`, only that key).
+    /// Scrolling by itself steps with the screen, never below 60 times a second (review L13): the
+    /// frame clock asks for up to 120 Hz. The app's Info.plist does not unlock more than 60 Hz on an
+    /// iPhone (`CADisableMinimumFrameDurationOnPhone` changes every animation; the map decides it in
+    /// wave 1, MapPrototypeGateTests).
     @Test func scrollingByItselfStepsWithTheScreen() throws {
         let start = Self.squeezed(try Self.body(["final class PhotoGridTicker", "func start("], in: Self.state))
         #expect(start.contains("link.preferredFrameRateRange=CAFrameRateRange(minimum:60,maximum:120,preferred:120)"), "\(start)")
         let project = try AppSource.read("App/project.yml")
         let info = try #require(project.range(of: "      path: Albumist/Resources/Info.plist\n"), "the app's Info.plist")
         let settings = try #require(project.range(of: "    settings:", range: info.upperBound..<project.endIndex))
-        #expect(project[info.upperBound..<settings.lowerBound].contains("        CADisableMinimumFrameDurationOnPhone: true\n"))
+        #expect(!project[info.upperBound..<settings.lowerBound].contains("CADisableMinimumFrameDurationOnPhone"))
     }
 }

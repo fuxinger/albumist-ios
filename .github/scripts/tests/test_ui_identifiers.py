@@ -53,6 +53,19 @@ CEILING = {
     "UITestKeyboardTip.swift": 3,
     "UITestOnboarding.swift": 12,
     "UITestSuggestions.swift": 4,
+    # The design branch's files (PR #28, counted when main with this rule was merged in, 26.11.2026).
+    "AlbumistLockedUITests+Counts.swift": 6,
+    "FrameUITests+LongPress.swift": 7,
+    "FrameUITests.swift": 3,
+    "PhotoGridUITests+DragToSelect.swift": 1,
+    "PhotoGridUITests+Zoom.swift": 3,
+    "PhotoGridUITests.swift": 4,
+    "ShowAndHandwritingUITests+Handwriting.swift": 7,
+    "ShowAndHandwritingUITests.swift": 4,
+    "UITestScreens+Analysis.swift": 6,
+    "UITestScreens+StartPage.swift": 9,
+    "UITestScreens+UnsortedAndAlbums.swift": 17,
+    "UITestScreens.swift": 4,
 }
 
 

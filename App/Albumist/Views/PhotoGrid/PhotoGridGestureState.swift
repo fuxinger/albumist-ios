@@ -372,8 +372,10 @@ final class PhotoGridTicker: NSObject {
         guard link == nil else { return }
         last = nil
         let link = CADisplayLink(target: self, selector: #selector(step(_:)))
-        // Up to the screen's own rate: 120 Hz on a ProMotion iPhone (the app's Info.plist allows
-        // it, `CADisableMinimumFrameDurationOnPhone`), never below 60 (review L13).
+        // Never below 60 (review L13). Asks for up to 120 Hz; an iPhone stays at 60 Hz because the
+        // app does not set `CADisableMinimumFrameDurationOnPhone`: it would change every animation
+        // of the app, and the map decides it in wave 1 with a measurement (docs/IMPROVEMENTS.md,
+        // map's second check 25.11.; MapPrototypeGateTests). Each step uses the real frame time.
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
         self.link = link

@@ -47,7 +47,7 @@ enum LedgerKeychain {
         /// while the keychain answers must not be what the read sees, or the merge would drop
         /// the keychain's own count); the returned function waits for its answer.
         func beginLoad() -> @Sendable () async -> FreeAlbumLedger? {
-            let answer = Answer()
+            let answer = LedgerKeychainAnswer()
             let done = DispatchGroup()
             queue.async(group: done) { [read] in answer.set(read()) }
             return {
@@ -55,13 +55,6 @@ enum LedgerKeychain {
                     done.notify(queue: .global(qos: .userInitiated)) { finished.resume(returning: answer.get()) }
                 }
             }
-        }
-
-        private final class Answer: @unchecked Sendable {
-            private let lock = NSLock()
-            private var ledger: FreeAlbumLedger?
-            func set(_ value: FreeAlbumLedger?) { lock.withLock { ledger = value } }
-            func get() -> FreeAlbumLedger? { lock.withLock { ledger } }
         }
 
         /// Queued after every read and write asked for before it; returns at once. The write
@@ -112,4 +105,12 @@ enum LedgerKeychain {
             SecItemAdd(item as CFDictionary, nil)
         }
     }
+}
+
+/// The ledger a queued keychain read found, handed from the queue to the waiting task.
+private final class LedgerKeychainAnswer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ledger: FreeAlbumLedger?
+    func set(_ value: FreeAlbumLedger?) { lock.withLock { ledger = value } }
+    func get() -> FreeAlbumLedger? { lock.withLock { ledger } }
 }

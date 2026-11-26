@@ -214,7 +214,7 @@ struct TwoPlansOneAlbumTests {
             if case .addAssets(_, let assets) = step.operation { return assets }
             return []
         } == ids("a", 10..<15).sorted())
-        var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(plan)) as! [String: Any]
+        var old = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(plan)) as? [String: Any])
         old["wanted"] = nil
         let decoded = try JSONDecoder().decode(ChangePlan.self, from: JSONSerialization.data(withJSONObject: old))
         #expect(decoded.wanted == nil)

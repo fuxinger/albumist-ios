@@ -153,24 +153,35 @@ extension UndoPlanner {
         let finished = plans.filter { $0.status == .completed || $0.status == .completedWithErrors }
         var retriedFrom: [AlbumistID: AlbumistID] = [:]
         for plan in plans { if let r = plan.retries { retriedFrom[plan.id] = r } }
-        // Photos a later change took out of the album ("Album entfernen", not taken back): a
-        // wish from before it no longer holds for them (second review of P2-09).
-        var removals: [(at: Date, album: CollectionID, assets: Set<AssetID>)] = []
-        for plan in finished where plan.reverts == nil && !undone.contains(plan.id) {
-            for step in plan.steps {
-                guard case .removeAssets(let album, _) = step.operation, albums.contains(album) else { continue }
-                let taken = plan.confirmedMedia(of: step)
-                if !taken.isEmpty { removals.append((plan.createdAt, album, Set(taken))) }
-            }
-        }
+        let removals = Self.removals(in: finished, albums: albums, undone: undone)
         var result: [CollectionID: Set<AssetID>] = [:]
         for plan in finished where plan.reverts == nil && !undone.contains(plan.id) && !executed.isSameChange(as: plan, retriedFrom: retriedFrom) {
             for (album, assets) in plan.wantedMembers() where albums.contains(album) {
                 var still = assets
-                for r in removals where r.album == album && r.at > plan.createdAt { still.subtract(r.assets) }
+                for removal in removals where removal.album == album && removal.at > plan.createdAt { still.subtract(removal.assets) }
                 if !still.isEmpty { result[album, default: []].formUnion(still) }
             }
         }
         return result
+    }
+
+    /// Photos a later change took out of an album ("Album entfernen", not taken back): a wish
+    /// from before it no longer holds for them (second review of P2-09).
+    private struct Removal {
+        let at: Date
+        let album: CollectionID
+        let assets: Set<AssetID>
+    }
+
+    private static func removals(in finished: [ChangePlan], albums: Set<CollectionID>, undone: Set<AlbumistID>) -> [Removal] {
+        var removals: [Removal] = []
+        for plan in finished where plan.reverts == nil && !undone.contains(plan.id) {
+            for step in plan.steps {
+                guard case .removeAssets(let album, _) = step.operation, albums.contains(album) else { continue }
+                let taken = plan.confirmedMedia(of: step)
+                if !taken.isEmpty { removals.append(Removal(at: plan.createdAt, album: album, assets: Set(taken))) }
+            }
+        }
+        return removals
     }
 }

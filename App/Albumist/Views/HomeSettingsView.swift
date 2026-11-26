@@ -321,6 +321,8 @@ struct HomeSettingsView: View {
                 }
                 .accessibilityIdentifier("home.suggestHomeAlbum")
             } footer: {
+                // A localized sentence is one key: it is not split (swiftlint line_length).
+                // swiftlint:disable:next line_length
                 Text("Fotos, die bei dir zu Hause entstehen, bekommen sonst kein eigenes Album. Orte in deiner Nähe, an denen du oft bist, werden weiter vorgeschlagen.")
             }
         }

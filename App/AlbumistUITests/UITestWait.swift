@@ -324,22 +324,6 @@ enum UITestWait {
         return false
     }
 
-    /// True once XCTest reads `app` in the foreground or the app wrote that it became active after
-    /// `since` (its watch file, `UITestLifecycle.inForeground`), whichever comes first; false
-    /// after `seconds`. In UI run 45552393361 (device test03) the app was active a second after
-    /// it was brought to the front while XCTest read state 3 for 15 s more: that stale state alone
-    /// made the counted retry, as the stale state 4 after a Home press did (`toBackground`).
-    private static func inForeground(_ app: XCUIApplication, since: Date, within seconds: TimeInterval) -> Bool {
-        holds(timeout: seconds, interval: 0.25) {
-            let state = app.state
-            if state == .runningForeground { return true }
-            guard let text = try? String(contentsOfFile: UITestStalls.path, encoding: .utf8),
-                  let active = UITestLifecycle.inForeground(text, since: since.timeIntervalSince1970) else { return false }
-            print("UI_FACT app reported active at \(UITestLifecycle.clock(active)) UTC, XCTest state \(state.rawValue)")
-            return true
-        }
-    }
-
     /// "DeviceConditionUITests.test03_…" for UI_FLAKY_RETRY (XCTest's name is "-[Module.Class test]").
     static func testID(_ test: XCTestCase) -> String {
         let parts = test.name.trimmingCharacters(in: CharacterSet(charactersIn: "-[]")).split(separator: " ")
@@ -382,6 +366,25 @@ enum UITestWait {
         } else {
             print("UI_STEP_MISSING \(what) (timeout \(Int(timeout)) s)")
             XCTFail("Not within \(Int(timeout)) s: \(what)", file: file, line: line)
+        }
+    }
+}
+
+@MainActor
+extension UITestWait {
+    /// True once XCTest reads `app` in the foreground or the app wrote that it became active after
+    /// `since` (its watch file, `UITestLifecycle.inForeground`), whichever comes first; false
+    /// after `seconds`. In UI run 45552393361 (device test03) the app was active a second after
+    /// it was brought to the front while XCTest read state 3 for 15 s more: that stale state alone
+    /// made the counted retry, as the stale state 4 after a Home press did (`toBackground`).
+    fileprivate static func inForeground(_ app: XCUIApplication, since: Date, within seconds: TimeInterval) -> Bool {
+        holds(timeout: seconds, interval: 0.25) {
+            let state = app.state
+            if state == .runningForeground { return true }
+            guard let text = try? String(contentsOfFile: UITestStalls.path, encoding: .utf8),
+                  let active = UITestLifecycle.inForeground(text, since: since.timeIntervalSince1970) else { return false }
+            print("UI_FACT app reported active at \(UITestLifecycle.clock(active)) UTC, XCTest state \(state.rawValue)")
+            return true
         }
     }
 }

@@ -151,7 +151,7 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
     /// of one leaves the photos another plan still wants (`UndoPlanner`, `keptForOthers`), and
     /// the later undo of that one takes them. Nil in plans of older versions and in undo,
     /// removal and retry plans: what they added stands for what they want (`wantedMembers`).
-    public var wanted: [AlbumWish]? = nil
+    public var wanted: [AlbumWish]?
 
     public var summary: PlanSummary { PlanSummary(self) }
 
@@ -513,34 +513,8 @@ extension ChangePlan {
     /// put in, as the record says (planned media of a step that succeeded, for plans without
     /// a record).
     public func wantedMembers() -> [CollectionID: Set<AssetID>] {
-        func resolved(_ ref: AlbumRef) -> CollectionID? {
-            switch ref {
-            case .existing(let id): id
-            case .planned(let key): resolvedKeys[key]
-            }
-        }
+        if let wanted { return wishedMembers(wanted) }
         var result: [CollectionID: Set<AssetID>] = [:]
-        if let wanted {
-            // Per suggestion and album: whether it had adds there, and whether one was carried
-            // out. A wish whose adds all failed or were skipped wants nothing (second review of
-            // P2-09: its plan finished because of another suggestion); one that needed no add
-            // (everything was there already) holds.
-            var hadAdds = Set<String>(), carriedOut = Set<String>()
-            for step in steps {
-                guard case .addAssets(let ref, _) = step.operation, let album = resolved(ref) else { continue }
-                let key = "\(step.sourceID?.rawValue ?? "")|\(album.rawValue)"
-                hadAdds.insert(key)
-                let done: Bool = if case .succeeded = step.state { true } else { !(record?.media[step.id] ?? []).isEmpty }
-                if done { carriedOut.insert(key) }
-            }
-            for wish in wanted {
-                guard let album = resolved(wish.album) else { continue }
-                let key = "\(wish.sourceID?.rawValue ?? "")|\(album.rawValue)"
-                guard !hadAdds.contains(key) || carriedOut.contains(key) else { continue }
-                result[album, default: []].formUnion(wish.assets)
-            }
-            return result
-        }
         for step in steps {
             guard case .addAssets(let ref, let assets) = step.operation, let album = resolved(ref) else { continue }
             let added: [AssetID]
@@ -552,6 +526,36 @@ extension ChangePlan {
                 added = []
             }
             if !added.isEmpty { result[album, default: []].formUnion(added) }
+        }
+        return result
+    }
+
+    /// The album a reference names: an existing one, or the one created for a planned key.
+    private func resolved(_ ref: AlbumRef) -> CollectionID? {
+        switch ref {
+        case .existing(let id): id
+        case .planned(let key): resolvedKeys[key]
+        }
+    }
+
+    /// `wantedMembers` of a plan with `wanted`. Per suggestion and album: whether it had adds
+    /// there, and whether one was carried out. A wish whose adds all failed or were skipped
+    /// wants nothing (second review of P2-09: its plan finished because of another
+    /// suggestion); one that needed no add (everything was there already) holds.
+    private func wishedMembers(_ wanted: [AlbumWish]) -> [CollectionID: Set<AssetID>] {
+        func key(_ source: AlbumistID?, _ album: CollectionID) -> String { "\(source?.rawValue ?? "")|\(album.rawValue)" }
+        var hadAdds = Set<String>(), carriedOut = Set<String>()
+        for step in steps {
+            guard case .addAssets(let ref, _) = step.operation, let album = resolved(ref) else { continue }
+            hadAdds.insert(key(step.sourceID, album))
+            let done: Bool = if case .succeeded = step.state { true } else { !(record?.media[step.id] ?? []).isEmpty }
+            if done { carriedOut.insert(key(step.sourceID, album)) }
+        }
+        var result: [CollectionID: Set<AssetID>] = [:]
+        for wish in wanted {
+            guard let album = resolved(wish.album) else { continue }
+            guard !hadAdds.contains(key(wish.sourceID, album)) || carriedOut.contains(key(wish.sourceID, album)) else { continue }
+            result[album, default: []].formUnion(wish.assets)
         }
         return result
     }

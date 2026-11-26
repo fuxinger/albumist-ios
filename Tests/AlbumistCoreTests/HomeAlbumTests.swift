@@ -41,22 +41,21 @@ struct HomeAlbumTests {
     }
 
     /// A year at home: photos at the flat every second day, in the park every ninth.
-    static func year() -> (home: [AssetFacts], park: [AssetFacts], analysis: AnalysisSnapshot) {
+    static func year() -> AnalysisSnapshot {
         let home = facts("flat", at: flat, days: 180, every: 2)
         let park = facts("park", at: park, days: 40, every: 9, from: "2025-01-05")
-        let analysis = AnalysisSnapshot(facts: home + park, frequentPlaces: [place("fp-flat", at: flat, home), place("fp-park", at: Self.park, park)])
-        return (home, park, analysis)
+        return AnalysisSnapshot(facts: home + park, frequentPlaces: [place("fp-flat", at: flat, home), place("fp-park", at: Self.park, park)])
     }
 
     /// The finding: the flat came as "Häufiger Ort in München". Now only the park comes.
     @Test func theHomeIsNotSuggestedButAParkInTheHomeTownIs() {
-        let found = frequent(Self.year().analysis)
+        let found = frequent(Self.year())
         #expect(found.map(\.id) == [AlbumistID("fp-park")], "\(found.map(\.title))")
     }
 
     /// "Album fürs Zuhause" on: the home comes like any frequent place.
     @Test func onRequestTheHomeIsSuggested() {
-        let found = frequent(Self.year().analysis, suggestHome: true)
+        let found = frequent(Self.year(), suggestHome: true)
         #expect(Set(found.map(\.id)) == [AlbumistID("fp-flat"), AlbumistID("fp-park")])
         #expect(found.contains { $0.title == "Häufiger Ort in München" })
     }
@@ -64,7 +63,7 @@ struct HomeAlbumTests {
     /// A name the user gave the home, a suggestion they chose or an album it already has: the
     /// home stays, nothing the user did disappears.
     @Test func aHomeTheUserNamedChoseOrKeptStays() {
-        let analysis = Self.year().analysis
+        let analysis = Self.year()
         let named = frequent(analysis, names: [AlbumistID("fp-flat"): "Daheim"])
         #expect(named.contains { $0.id == AlbumistID("fp-flat") && $0.title == "Daheim" })
         var chosen = analysis
@@ -165,7 +164,8 @@ struct HomeAlbumTests {
         settings.titleLanguage = .german
         var berlin = Fixture.calendar
         berlin.timeZone = TimeZone(identifier: "Europe/Berlin")!
-        let analysis = AnalysisSnapshot(facts: office + home, frequentPlaces: [Self.place("fp-office", at: nyOffice, office), Self.place("fp-flat", at: nyFlat, home)])
+        let analysis = AnalysisSnapshot(facts: office + home,
+                                        frequentPlaces: [Self.place("fp-office", at: nyOffice, office), Self.place("fp-flat", at: nyFlat, home)])
         let found = ProposalEngine(settings: settings, calendar: berlin).proposals(for: analysis).filter { $0.kind == .frequentPlace }
         #expect(found.map(\.id) == [AlbumistID("fp-office")])
     }
@@ -190,7 +190,8 @@ struct HomeAlbumTests {
         let cafe = Self.facts("cafe", at: nextDoor, days: 30, every: 7, from: "2025-01-02")
         let partner = Self.facts("partner", at: nextDoor, days: 80, every: 3, from: "2025-01-02")
         for (name, other) in [("fp-cafe", cafe), ("fp-partner", partner)] {
-            let analysis = AnalysisSnapshot(facts: home + other, frequentPlaces: [Self.place("fp-flat", at: Self.flat, home), Self.place(name, at: nextDoor, other)])
+            let analysis = AnalysisSnapshot(facts: home + other,
+                                            frequentPlaces: [Self.place("fp-flat", at: Self.flat, home), Self.place(name, at: nextDoor, other)])
             #expect(frequent(analysis).map(\.id) == [AlbumistID(name)])
         }
         // A café with a third of the evenings at home, the flat no frequent place: shown, also
@@ -198,7 +199,8 @@ struct HomeAlbumTests {
         let alone = Self.facts("cafe", at: Self.park, days: 40, every: 9)
         let town = (0..<80).map { i -> AssetFacts in
             let spot = GeoCoordinate(latitude: 48.10 + Double(i % 40) * 0.002, longitude: 11.50 + Double(i / 40) * 0.01)
-            let asset = AssetSnapshot(id: AssetID("town-\(i)"), creationDate: Fixture.date("2025-01-01").addingTimeInterval(Double(i) * 4 * 86_400 + 20 * 3_600), location: spot)
+            let date = Fixture.date("2025-01-01").addingTimeInterval(Double(i) * 4 * 86_400 + 20 * 3_600)
+            let asset = AssetSnapshot(id: AssetID("town-\(i)"), creationDate: date, location: spot)
             return AssetFacts(asset: asset, place: Self.munich, placeSource: .gpsReverseGeocoded, atHome: true)
         }
         let far = GeoCoordinate(latitude: 48.30, longitude: 11.70)
@@ -223,7 +225,8 @@ struct HomeAlbumTests {
         // Photos all over town on most days, never twice at the same spot.
         let town = (0..<300).map { i -> AssetFacts in
             let spot = GeoCoordinate(latitude: 48.10 + Double(i % 50) * 0.002, longitude: 11.50 + Double(i / 50) * 0.01)
-            let asset = AssetSnapshot(id: AssetID("town-\(i)"), creationDate: Fixture.date("2025-01-01").addingTimeInterval(Double(i) * 86_400 + 20 * 3_600), location: spot)
+            let date = Fixture.date("2025-01-01").addingTimeInterval(Double(i) * 86_400 + 20 * 3_600)
+            let asset = AssetSnapshot(id: AssetID("town-\(i)"), creationDate: date, location: spot)
             return AssetFacts(asset: asset, place: Self.munich, placeSource: .gpsReverseGeocoded, atHome: true)
         }
         let analysis = AnalysisSnapshot(facts: cafe + town, frequentPlaces: [Self.place("fp-cafe", at: Self.park, cafe)])
@@ -238,9 +241,9 @@ struct HomeAlbumTests {
     @Test func theHomesLeftOutAreNamed() {
         var settings = OrganizationSettings()
         settings.titleLanguage = .german
-        let found = ProposalEngine(settings: settings, calendar: Fixture.calendar).suggestions(for: Self.year().analysis)
+        let found = ProposalEngine(settings: settings, calendar: Fixture.calendar).suggestions(for: Self.year())
         #expect(found.homePlaces == [AlbumistID("fp-flat")])
         settings.frequentPlaces.suggestHome = true
-        #expect(ProposalEngine(settings: settings, calendar: Fixture.calendar).suggestions(for: Self.year().analysis).homePlaces.isEmpty)
+        #expect(ProposalEngine(settings: settings, calendar: Fixture.calendar).suggestions(for: Self.year()).homePlaces.isEmpty)
     }
 }

@@ -122,7 +122,9 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
         self.matcherVersion = matcherVersion
     }
 
-    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly, matcherVersion, datedAfterwards, homePlaces }
+    enum CodingKeys: String, CodingKey {
+        case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly, matcherVersion, datedAfterwards, homePlaces
+    }
 
     /// Snapshots stored before dismissed suggestions and stand-ins were kept still load.
     public init(from decoder: any Decoder) throws {

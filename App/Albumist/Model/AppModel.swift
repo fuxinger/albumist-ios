@@ -3437,14 +3437,15 @@ final class AppModel {
         // found in Photos (review P2-01).
         if let finished = execution.finished, finished.id == undoPlan.id, finished.status == .completed {
             let remainder = Self.remainderMessage(UndoRemainder(plan: executed, current: inventory), inHistory: false)
-            let kept = Self.keptMessage(undoPlan.notes, inventory: inventory)
-            switch (remainder, kept) {
-            case let (r?, k?): message = AppMessage(title: r.title, text: r.text + "\n\n" + k.text)
-            case let (r?, nil): message = r
-            case let (nil, k?): message = k
-            case (nil, nil): break
-            }
+            if let said = Self.joined(remainder, Self.keptMessage(undoPlan.notes, inventory: inventory)) { message = said }
         }
+    }
+
+    /// Both messages of an undo in one, the remainder's title first. Nil when neither applies.
+    static func joined(_ remainder: AppMessage?, _ kept: AppMessage?) -> AppMessage? {
+        guard let remainder else { return kept }
+        guard let kept else { return remainder }
+        return AppMessage(title: remainder.title, text: remainder.text + "\n\n" + kept.text)
     }
 
     /// Photos the undo left because another change of the user's still wants them there

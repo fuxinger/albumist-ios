@@ -3435,12 +3435,15 @@ final class AppModel {
         // What the undo left because Albumist cannot prove it was its own (an album found by its
         // name after an interruption, photos in the user's own album) is said, not left to be
         // found in Photos (review P2-01).
-        if let finished = execution.finished, finished.id == undoPlan.id, finished.status == .completed,
-           let said = Self.remainderMessage(UndoRemainder(plan: executed, current: inventory), inHistory: false) {
-            message = said
-        } else if let finished = execution.finished, finished.id == undoPlan.id, finished.status == .completed,
-                  let said = Self.keptMessage(undoPlan.notes, inventory: inventory) {
-            message = said
+        if let finished = execution.finished, finished.id == undoPlan.id, finished.status == .completed {
+            let remainder = Self.remainderMessage(UndoRemainder(plan: executed, current: inventory), inHistory: false)
+            let kept = Self.keptMessage(undoPlan.notes, inventory: inventory)
+            switch (remainder, kept) {
+            case let (r?, k?): message = AppMessage(title: r.title, text: r.text + "\n\n" + k.text)
+            case let (r?, nil): message = r
+            case let (nil, k?): message = k
+            case (nil, nil): break
+            }
         }
     }
 

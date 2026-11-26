@@ -68,8 +68,8 @@ public struct OrganizationPlanner: Sendable {
         var optionalNotIncluded = 0
         /// Every photo each suggestion wants in its album, also those there already (P2-09).
         var wanted: [AlbumWish] = []
-        func wish(_ assets: [AssetID], in album: AlbumRef) {
-            if !assets.isEmpty { wanted.append(AlbumWish(album: album, assets: assets)) }
+        func wish(_ assets: [AssetID], in album: AlbumRef, for source: AlbumistID) {
+            if !assets.isEmpty { wanted.append(AlbumWish(album: album, assets: assets, sourceID: source)) }
         }
 
         // Detect duplicate titles among new albums before building.
@@ -124,13 +124,13 @@ public struct OrganizationPlanner: Sendable {
                 }
                 let key = builder.createAlbum(title: albumTitle, parent: parent, source: sourceID)
                 let assets = filtered(for: nil)
-                wish(assets, in: .planned(key))
+                wish(assets, in: .planned(key), for: sourceID)
                 builder.add(assets, to: .planned(key), source: sourceID)
 
             case .extendExisting(let albumID):
                 guard requireEditable(albumID) else { continue }
                 let assets = filtered(for: albumID)
-                wish(assets, in: .existing(albumID))
+                wish(assets, in: .existing(albumID), for: sourceID)
                 let missing = assets.filter { !(inventory[albumID]?.assetIDs.contains($0) ?? false) }
                 builder.add(missing, to: .existing(albumID), source: sourceID)
 
@@ -142,7 +142,7 @@ public struct OrganizationPlanner: Sendable {
                 }
                 if extend {
                     let assets = filtered(for: albumID)
-                    wish(assets, in: .existing(albumID))
+                    wish(assets, in: .existing(albumID), for: sourceID)
                     builder.add(assets.filter { !album.assetIDs.contains($0) }, to: .existing(albumID), source: sourceID)
                 }
 
@@ -154,7 +154,7 @@ public struct OrganizationPlanner: Sendable {
                 }
                 if extend {
                     let assets = filtered(for: albumID)
-                    wish(assets, in: .existing(albumID))
+                    wish(assets, in: .existing(albumID), for: sourceID)
                     builder.add(assets.filter { !album.assetIDs.contains($0) }, to: .existing(albumID), source: sourceID)
                 }
 
@@ -180,7 +180,7 @@ public struct OrganizationPlanner: Sendable {
                     ref = .planned(builder.createAlbum(title: AlbumTitle.sanitize(title ?? item.proposal.title), parent: parent, source: sourceID))
                     targetMembers = []
                 }
-                wish(union.sorted(), in: ref)
+                wish(union.sorted(), in: ref, for: sourceID)
                 builder.add(union.subtracting(targetMembers).sorted(), to: ref, source: sourceID)
             }
         }

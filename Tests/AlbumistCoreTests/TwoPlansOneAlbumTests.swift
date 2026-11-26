@@ -143,6 +143,52 @@ struct TwoPlansOneAlbumTests {
         #expect(!UndoPlanner.keptForOthers(undoing: p, plans: [p, q], undone: []).isEmpty)
     }
 
+    /// Second review: "Album entfernen" took P's photos out of the user's album; Q later wants
+    /// some of them again. P's wish from before the removal no longer keeps them: Q's undo
+    /// takes all of Q's photos out.
+    @Test func aWishFromBeforeARemovalNoLongerHolds() async throws {
+        let family = CollectionSnapshot(id: "familie", title: "Familie", assetIDs: ["a-90"])
+        let world = World(library: InMemoryPhotoLibrary(assets: allAssets, collections: [family]))
+        _ = try await world.run(planner.makePlan(from: [extend("p", "familie", ids("a", 0..<10))], inventory: try await world.library.currentInventory()))
+        let state = try #require(world.states.first { $0.albumID == "familie" })
+        _ = try await world.run(ManagedAlbumTracker().removalPlan(for: state, current: try await world.library.currentInventory()))
+        #expect(try await world.members("familie") == ["a-90"])
+        let q = try await world.run(planner.makePlan(from: [extend("q", "familie", ids("a", 5..<15))], inventory: try await world.library.currentInventory()))
+        let undoQ = try await world.undoPlan(q)
+        #expect(!undoQ.notes.contains { if case .keptForOtherPlans = $0 { true } else { false } })
+        _ = try await world.run(undoQ)
+        #expect(try await world.members("familie") == ["a-90"])
+    }
+
+    /// Second review: a suggestion whose add failed wants nothing, even when its plan finished
+    /// because of another suggestion.
+    @Test func aWishWhoseAddFailedKeepsNothing() async throws {
+        let world = World(library: InMemoryPhotoLibrary(assets: allAssets))
+        let p = try await world.run(planner.makePlan(from: [newAlbum("p", "Rom", ids("a", 0..<10))], inventory: try await world.library.currentInventory()))
+        let rome = try #require(world.states.first { $0.lastKnownTitle == "Rom" }).albumID
+        var q = planner.makePlan(from: [extend("q", rome, ids("a", 0..<15))], inventory: try await world.library.currentInventory())
+        q.status = .completedWithErrors
+        for i in q.steps.indices { q.steps[i].state = .failed(reason: "test") }
+        world.plans.append(q)
+        #expect(q.wantedMembers().isEmpty)
+        _ = try await world.undo(p)
+        #expect(try await world.members(rome) == nil)
+    }
+
+    /// Second review: a retry of a retry is the same change too.
+    @Test func aRetryOfARetryIsTheSameChange() {
+        let base = ChangePlan(id: AlbumistID("p"), createdAt: Date(), confirmedAt: Date(), status: .completedWithErrors, baseline: [:],
+                              baselineCollectionIDs: [], steps: [], conflicts: [], notes: [], resolvedKeys: [:])
+        var r1 = base, r2 = base, other = base
+        r1.id = AlbumistID("r1"); r1.retries = AlbumistID("p")
+        r2.id = AlbumistID("r2"); r2.retries = AlbumistID("r1")
+        other.id = AlbumistID("q")
+        let chain = [AlbumistID("r1"): AlbumistID("p"), AlbumistID("r2"): AlbumistID("r1")]
+        #expect(base.isSameChange(as: r2, retriedFrom: chain))
+        #expect(r2.isSameChange(as: base, retriedFrom: chain))
+        #expect(!base.isSameChange(as: other, retriedFrom: chain))
+    }
+
     /// Plans of older versions wrote down no wishes: what they added stands for them, and the
     /// undo works as before.
     @Test func plansWithoutWishesWorkAsBefore() async throws {
@@ -163,7 +209,7 @@ struct TwoPlansOneAlbumTests {
     @Test func thePlanRecordsWhatItWantsAndOldPlansStillRead() throws {
         let rome = CollectionSnapshot(id: "rom", title: "Rom", assetIDs: ids("a", 0..<10))
         let plan = planner.makePlan(from: [extend("q", "rom", ids("a", 0..<15))], inventory: CollectionInventory([rome]))
-        #expect(plan.wanted == [AlbumWish(album: .existing("rom"), assets: ids("a", 0..<15).sorted())])
+        #expect(plan.wanted == [AlbumWish(album: .existing("rom"), assets: ids("a", 0..<15).sorted(), sourceID: AlbumistID("q"))])
         #expect(plan.steps.flatMap { step -> [AssetID] in
             if case .addAssets(_, let assets) = step.operation { return assets }
             return []

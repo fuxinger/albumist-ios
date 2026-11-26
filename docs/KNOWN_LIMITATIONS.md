@@ -336,6 +336,11 @@ mit eingeschränkten Rechten: nur lesend.
   dieser Änderung haben ihre Wünsche nicht aufgeschrieben; für sie zählt, was sie selbst
   hinzugefügt haben, und ihr Rückgängig verhält sich wie vorher. Ein unterbrochener Plan, der
   mit „Alles zurücknehmen“ zurückgeht, prüft andere Pläne nicht (er legt nur Fehlendes dazu).
+  Behält ein Rückgängig ein von Albumist angelegtes Album für einen anderen Vorschlag, gibt es
+  das Gratis-Album trotzdem zurück; hat der andere Vorschlag dort nichts hinzugefügt, zählt das
+  Album danach nicht mehr (zugunsten des Nutzers). Das Rückgängig eines Plans nimmt auch Fotos
+  aus seinen Alben, die er dort haben wollte und die von Albumist sind, wenn kein anderer Plan
+  sie mehr will (so gehen die Fotos mit, die ein früheres Rückgängig für ihn ließ).
 - Beispielfotos entfernen (Prüfer 2, P2-05): Gelöscht wird nur ein Foto, dessen Dateiname und
   Aufnahmedatum im Löschblock selbst noch zu einem Beispielfoto passen
   (`SampleLibrary.isSample`), egal was in der gespeicherten Liste steht; ein Album nur, solange

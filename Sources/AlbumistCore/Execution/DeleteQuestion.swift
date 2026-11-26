@@ -150,11 +150,25 @@ extension UndoPlanner {
     public static func keptForOthers(undoing executed: ChangePlan, plans: [ChangePlan], undone: Set<AlbumistID>) -> [CollectionID: Set<AssetID>] {
         let albums = Set(executed.wantedMembers().keys).union(executed.touchedCollections)
         guard !albums.isEmpty else { return [:] }
+        let finished = plans.filter { $0.status == .completed || $0.status == .completedWithErrors }
+        var retriedFrom: [AlbumistID: AlbumistID] = [:]
+        for plan in plans { if let r = plan.retries { retriedFrom[plan.id] = r } }
+        // Photos a later change took out of the album ("Album entfernen", not taken back): a
+        // wish from before it no longer holds for them (second review of P2-09).
+        var removals: [(at: Date, album: CollectionID, assets: Set<AssetID>)] = []
+        for plan in finished where plan.reverts == nil && !undone.contains(plan.id) {
+            for step in plan.steps {
+                guard case .removeAssets(let album, _) = step.operation, albums.contains(album) else { continue }
+                let taken = plan.confirmedMedia(of: step)
+                if !taken.isEmpty { removals.append((plan.createdAt, album, Set(taken))) }
+            }
+        }
         var result: [CollectionID: Set<AssetID>] = [:]
-        for plan in plans where plan.reverts == nil && !undone.contains(plan.id) && !executed.isSameChange(as: plan)
-            && (plan.status == .completed || plan.status == .completedWithErrors) {
+        for plan in finished where plan.reverts == nil && !undone.contains(plan.id) && !executed.isSameChange(as: plan, retriedFrom: retriedFrom) {
             for (album, assets) in plan.wantedMembers() where albums.contains(album) {
-                result[album, default: []].formUnion(assets)
+                var still = assets
+                for r in removals where r.album == album && r.at > plan.createdAt { still.subtract(r.assets) }
+                if !still.isEmpty { result[album, default: []].formUnion(still) }
             }
         }
         return result

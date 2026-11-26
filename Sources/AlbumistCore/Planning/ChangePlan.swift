@@ -104,10 +104,14 @@ public enum PlanStatus: String, Sendable, Codable {
 public struct AlbumWish: Hashable, Sendable, Codable {
     public var album: AlbumRef
     public var assets: [AssetID]
+    /// The suggestion that wants them: a wish counts only once its adds there were carried
+    /// out (`ChangePlan.wantedMembers`).
+    public var sourceID: AlbumistID?
 
-    public init(album: AlbumRef, assets: [AssetID]) {
+    public init(album: AlbumRef, assets: [AssetID], sourceID: AlbumistID? = nil) {
         self.album = album
         self.assets = assets
+        self.sourceID = sourceID
     }
 }
 
@@ -517,8 +521,22 @@ extension ChangePlan {
         }
         var result: [CollectionID: Set<AssetID>] = [:]
         if let wanted {
+            // Per suggestion and album: whether it had adds there, and whether one was carried
+            // out. A wish whose adds all failed or were skipped wants nothing (second review of
+            // P2-09: its plan finished because of another suggestion); one that needed no add
+            // (everything was there already) holds.
+            var hadAdds = Set<String>(), carriedOut = Set<String>()
+            for step in steps {
+                guard case .addAssets(let ref, _) = step.operation, let album = resolved(ref) else { continue }
+                let key = "\(step.sourceID?.rawValue ?? "")|\(album.rawValue)"
+                hadAdds.insert(key)
+                let done: Bool = if case .succeeded = step.state { true } else { !(record?.media[step.id] ?? []).isEmpty }
+                if done { carriedOut.insert(key) }
+            }
             for wish in wanted {
                 guard let album = resolved(wish.album) else { continue }
+                let key = "\(wish.sourceID?.rawValue ?? "")|\(album.rawValue)"
+                guard !hadAdds.contains(key) || carriedOut.contains(key) else { continue }
                 result[album, default: []].formUnion(wish.assets)
             }
             return result
@@ -539,8 +557,14 @@ extension ChangePlan {
     }
 
     /// Whether `other` belongs to the same change as this plan: one is the retry of the other
-    /// ("Erneut versuchen"). Such plans never keep photos for each other in an undo.
-    public func isSameChange(as other: ChangePlan) -> Bool {
-        other.id == id || other.retries == id || retries == other.id || (retries != nil && retries == other.retries)
+    /// ("Erneut versuchen"), also over several retries (`retriedFrom`: plan → the plan it
+    /// retries, of the journal). Such plans never keep photos for each other in an undo.
+    public func isSameChange(as other: ChangePlan, retriedFrom: [AlbumistID: AlbumistID] = [:]) -> Bool {
+        func root(_ plan: ChangePlan) -> AlbumistID {
+            var id = plan.id, next = plan.retries, steps = 0
+            while let n = next, steps < 100 { id = n; next = retriedFrom[n]; steps += 1 }
+            return id
+        }
+        return root(self) == root(other)
     }
 }

@@ -13,7 +13,17 @@ extension PhotoGridUITests {
     /// (the steps after it look from there, `SuggestionPage.photoInReach`). False, and the test
     /// failed with what was found, when none has one.
     func openTrip(_ test: String) -> Bool {
-        let trips = tripCards(test)
+        var trips = tripCards(test)
+        // The group's earlier tests may have made every trip an album (UI run 45717521559: the
+        // start page showed no trips at all): the newest plans are taken back then, as
+        // `testRemovePhotoFromSuggestion` does, and the trips looked for again.
+        if !trips.firstMatch.waitForExistence(timeout: 5) {
+            print("UI_FACT \(test): no trip to open, taking back the newest plans")
+            if UITestScreens.Albums.takeBackNewestPlans(app, limit: 4, test) > 0 {
+                _ = UITestWait.holds(timeout: 60) { app.buttons["startPage.all.trips"].exists }
+                trips = tripCards(test)
+            }
+        }
         var found: [String] = []
         for index in 0..<3 {
             let card = trips.element(boundBy: index)

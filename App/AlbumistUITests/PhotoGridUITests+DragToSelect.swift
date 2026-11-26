@@ -39,31 +39,36 @@ extension PhotoGridUITests {
         // scrolls on by itself (`PhotoGridAutoScroll`), which would tick more.
         let calm = 90.0
         let leading = all.map(\.minX).min() ?? 0
-        guard let first = all.indices.first(where: {
+        let firsts = all.indices.filter {
             span.onScreen(all[$0]) && abs(all[$0].minX - leading) < 1 && all[$0].midY >= top + calm
-        }) else {
+        }
+        guard !firsts.isEmpty else {
             shot("x-no-photo-on-screen")
             XCTFail("\(test): no first photo of a row of \"Unsortiert\" on screen (bars at \(top) and \(bottom))")
             return nil
         }
-        span.first = first
-        let start = all[first]
-        // A photo of a later row two or more places to the right, close enough below that the
-        // line to it is mostly sideways (the drag only selects when it starts sideways).
-        let candidates = all.indices.filter { index in
-            let frame = all[index]
-            return index > first && span.onScreen(frame) && frame.midY <= bottom - calm
-                && frame.minY >= start.maxY && frame.minX >= start.minX + 1.5 * start.width
+        // From the first row's photo that has one (UI run 45717521559: days of four photos, so
+        // from the topmost row every later photo two places on lay too far below).
+        for first in firsts {
+            span.first = first
+            let start = all[first]
+            // A photo of a later row two or more places to the right, close enough below that the
+            // line to it is mostly sideways (the drag only selects when it starts sideways).
+            let candidates = all.indices.filter { index in
+                let frame = all[index]
+                return index > first && span.onScreen(frame) && frame.midY <= bottom - calm
+                    && frame.minY >= start.maxY && frame.minX >= start.minX + 1.5 * start.width
+            }
+            let fromPoint = span.start
+            if let last = candidates.first(where: { abs(span.end($0).y - fromPoint.y) < 0.8 * abs(span.end($0).x - fromPoint.x) }) {
+                span.last = last
+                return span
+            }
         }
-        let fromPoint = span.start
-        guard let last = candidates.first(where: { abs(span.end($0).y - fromPoint.y) < 0.8 * abs(span.end($0).x - fromPoint.x) }) else {
-            shot("x-no-range")
-            let seen = all.prefix(24).map { "\(Int($0.minX)),\(Int($0.minY))" }
-            XCTFail("\(test): no photo of a later row two places to the right on screen: \(seen)")
-            return nil
-        }
-        span.last = last
-        return span
+        shot("x-no-range")
+        let seen = all.prefix(24).map { "\(Int($0.minX)),\(Int($0.minY))" }
+        XCTFail("\(test): no photo of a later row two places to the right on screen: \(seen)")
+        return nil
     }
 
     /// The drag over the range, a tap on the photo after it as soon as the finger is up, and the

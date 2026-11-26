@@ -175,7 +175,9 @@ extension UITestScreens {
                     undo.tap()
                     if confirmUndo(app, springboard: springboard) { undone += 1 }
                 }
-                back()
+                // A receipt whose plan was taken back may go back to the history by itself (UI run
+                // 45717521559: the back tap then left the history too).
+                if !UITestWait.holds(timeout: 2, { history.exists }) { back() }
                 UITestWait.appears(history, "back on the history (\(label))", timeout: 10, file: file, line: line)
             }
             print("UI_FACT \(label): plans taken back to have suggestions again: \(undone)")

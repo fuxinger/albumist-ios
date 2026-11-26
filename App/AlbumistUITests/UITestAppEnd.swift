@@ -34,6 +34,7 @@ enum UITestAppEnd {
     /// "UI_FACT clock … launch", which `ui_tests.py` compares with the process start).
     static func launch(_ app: XCUIApplication, justBefore: () -> Void = {}) {
         end(app)
+        if let took = lastEnd, took >= slowEnd { settleAfterSlowEnd(took) }
         app.launchArguments += UITestStalls.arguments(besides: app.launchArguments)
         mainThreadChecker(app)
         UITestLaunchRecord.shared.launching(app.launchArguments)
@@ -56,10 +57,37 @@ enum UITestAppEnd {
         if environment["ALBUMIST_MTC_PROBE"] == "1" { app.launchEnvironment["ALBUMIST_MTC_PROBE"] = "1" }
     }
 
+    /// Seconds the last `end` took from the request until the app was gone; nil when there was
+    /// nothing to end.
+    private(set) static var lastEnd: TimeInterval?
+    /// An end this slow means the Mac is starved right now (Z4, 27.11.): in each of the four
+    /// launches XCTest lost although the app came up ("does not have a process ID" 3-4 min later;
+    /// device test02 in jobs 140195305412 and 140208691916, test07 in job 139048797216), the end
+    /// before took 11-21 s; of 115 other ends only 4 took 8 s or more (median 1.8 s).
+    static let slowEnd: TimeInterval = 8
+
+    /// After a slow end: the Mac waits until the simulator answers quickly again, up to 60 s
+    /// (UI_HOST_SETTLE, `settle` in ui_tests.py), and answers into a file; then the launch goes
+    /// on, settled or not. Without the CI helper (a run in Xcode) nothing changes.
+    static func settleAfterSlowEnd(_ took: TimeInterval) {
+        let answer = NSTemporaryDirectory() + "uitest-host-answer-\(UUID().uuidString)"
+        guard ProcessInfo.processInfo.environment["ALBUMIST_HOST_HELPER"] == "1", !answer.contains(where: \.isWhitespace) else { return }
+        defer { try? FileManager.default.removeItem(atPath: answer) }
+        let start = Date()
+        print("UI_HOST_SETTLE \(answer)")
+        // 60 s of the Mac's wait, its probes (up to 30 s each) and the 2 s it reads the log.
+        _ = UITestWait.holds(timeout: 100, interval: 1) { FileManager.default.fileExists(atPath: answer) }
+        let reply = (try? String(contentsOfFile: answer, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("UI_TIMING simulator settle after an end of \(Int(took)) s: \(Int(Date().timeIntervalSince(start))) s, "
+              + "the Mac answered '\(reply ?? "nothing")'")
+    }
+
     /// `when`: what the log lines say ("before the next launch", "during the plan").
     static func end(_ app: XCUIApplication, _ when: String = "before the next launch") {
+        lastEnd = nil
         guard app.state != .notRunning else { return }
         let asked = Date()
+        defer { lastEnd = Date().timeIntervalSince(asked) }
         UITestOnboarding.clock("end the app \(when)")
         var way = "XCTest"
         if ProcessInfo.processInfo.environment["ALBUMIST_HOST_HELPER"] == "1" {

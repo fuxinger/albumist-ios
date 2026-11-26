@@ -496,6 +496,16 @@ class SelectionTests(unittest.TestCase):
         code, marker, log = self.run_with_passes([LATE_LAUNCH, "** TEST SUCCEEDED **\n" + PASSED_ONE])
         self.assertEqual((code, marker), (0, False), log)
 
+    def test_an_app_xctest_lost_although_it_came_up_is_repeated_once_and_a_red_repeat_is_red(self):
+        # Z4 (27.11.): one repeat on a fresh simulator, counted; the same again is red.
+        code, marker, log = self.run_with_passes([LOST_UP, LOST_UP])
+        self.assertEqual((code, marker), (1, False), log)
+        self.assertIn("the repeat after a late launch was not green either", log)
+        self.assertIn("UI_RESULT device fail", log)
+        code, marker, log = self.run_with_passes([LOST_UP, "** TEST SUCCEEDED **\n" + PASSED_ONE])
+        self.assertEqual((code, marker), (0, False), log)
+        self.assertIn("app up, XCTest lost it:", log)
+
     def test_a_group_whose_every_test_skipped_itself_is_red(self):
         # G5-08: never green, also not as "no result": the selection tested nothing.
         code, marker, log = self.run_with_passes([SKIPPED_ONLY])
@@ -1970,6 +1980,127 @@ Test Case '-[AlbumistUITests.DeviceConditionUITests test12_StressManyPhotosIClou
 \t Executed 1 test, with 1 failure (0 unexpected) in 190.465 (190.579) seconds
 ** TEST EXECUTE FAILED **
 """
+
+
+# Z4: device test02 of job 140208691916 (PR #29, 26.11.), the lines of that test as xcodebuild
+# wrote them: the end before took 21 s, the app was on screen 15 s after the launch request, and
+# XCTest said "does not have a process ID" 3.5 min later. No crash report.
+LOST_UP = """\
+Test Case '-[AlbumistUITests.DeviceConditionUITests test02_LowBatteryAndLowPowerModeWording]' started.
+UI_FACT clock 23:10:48.7 end the app before the next launch
+UI_HOST_TERMINATE_APP 1795734648 17772
+UI_TIMING app ended before the next launch 21 s (by the Mac, ended)
+UI_FACT clock 23:11:10.2 launch
+<unknown>:0: error: -[AlbumistUITests.DeviceConditionUITests test02_LowBatteryAndLowPowerModeWording] : Application 'app.albumist.ios' does not have a process ID
+UI_FACT app process 21345 started 23:11:15.5 UTC, its code ran from 23:11:24.3 UTC
+UI_FACT app lifecycle foreground at 23:11:24.9 UTC
+UI_FACT app lifecycle active at 23:11:25.1 UTC
+{extra}Test Case '-[AlbumistUITests.DeviceConditionUITests test02_LowBatteryAndLowPowerModeWording]' failed (233.198 seconds).
+Test Case '-[AlbumistUITests.DeviceConditionUITests test03_BackgroundExpiryAndRelaunchContinue]' started.
+UI_FACT clock 23:14:43.7 launch
+UI_FACT app process 22569 started 23:14:45.9 UTC, its code ran from 23:14:55.3 UTC
+UI_FACT app lifecycle active at 23:14:57.2 UTC
+UI_FACT main stall 2.2 s from 23:14:58.6 UTC
+Test Case '-[AlbumistUITests.DeviceConditionUITests test03_BackgroundExpiryAndRelaunchContinue]' passed (60.000 seconds).
+\t Executed 2 tests, with 1 failure (0 unexpected) in 293.198 (293.2) seconds
+** TEST EXECUTE FAILED **
+"""
+LOST_UP_BUNDLE = ["result bundle: Application 'app.albumist.ios' does not have a process ID"]
+
+
+class LostWhileUpTests(unittest.TestCase):
+    """Z4 (27.11.): XCTest lost an app whose own record shows it on screen soon after the launch
+    request: repeated once on a fresh simulator, counted. Anything else about the app keeps it red."""
+
+    def log(self, extra=""):
+        return LOST_UP.replace("{extra}", extra)
+
+    def test_the_three_cases_of_25_and_26_11_are_repeated_once(self):
+        verdict, reasons = ui_tests.decide(65, self.log(), bundle=LOST_UP_BUNDLE)
+        self.assertEqual(verdict, "retry")
+        self.assertEqual(reasons, ["app up, XCTest lost it: the app's process started 5 s and its screen 15 s after the "
+                                   "launch request, no crash report (XCTest side, repeated once)"])
+        self.assertTrue(reasons[0].startswith(ui_tests.ONE_REPEAT))
+        # Foreground alone counts (job 140195305412: on screen after 30 s, no "active" before the end).
+        only_foreground = self.log().replace("UI_FACT app lifecycle active at 23:11:25.1 UTC\n", "") \
+            .replace("foreground at 23:11:24.9", "foreground at 23:11:40.0")
+        self.assertIn("its screen 30 s", ui_tests.decide(65, only_foreground, bundle=LOST_UP_BUNDLE)[1][0])
+
+    def test_a_crash_report_keeps_it_red_on_the_app(self):
+        verdict, reasons = ui_tests.decide(65, self.log(), crash_reports=["/x/Albumist-2026.ips"], bundle=LOST_UP_BUNDLE)
+        self.assertEqual(verdict, "fail")
+        self.assertIn("XCTest lost the app at a launch, and a crash report was written (app side)", reasons)
+
+    def test_an_app_that_never_came_up_or_came_up_late_stays_red(self):
+        never = self.log().replace("UI_FACT app lifecycle foreground at 23:11:24.9 UTC\n", "") \
+            .replace("UI_FACT app lifecycle active at 23:11:25.1 UTC\n", "")
+        verdict, reasons = ui_tests.decide(65, never, bundle=LOST_UP_BUNDLE)
+        self.assertEqual(verdict, "fail")
+        self.assertIn("XCTest lost the app at a launch: the app process started after 5 s but did not come up (app side)", reasons)
+        late = self.log().replace("foreground at 23:11:24.9", "foreground at 23:12:30.0").replace("active at 23:11:25.1", "active at 23:12:30.2")
+        self.assertEqual(ui_tests.decide(65, late, bundle=LOST_UP_BUNDLE)[0], "fail")
+        # The record of the earlier process (before the launch) and of the next test do not count.
+        no_record = self.log().replace("UI_FACT app process 21345 started 23:11:15.5 UTC, its code ran from 23:11:24.3 UTC\n", "")
+        self.assertEqual(ui_tests.decide(65, no_record, bundle=LOST_UP_BUNDLE)[0], "fail")
+
+    def test_a_long_main_stall_points_at_the_app_and_stays_red(self):
+        verdict, _ = ui_tests.decide(65, self.log("UI_FACT main stall 6.0 s from 23:11:26.0 UTC\n"), bundle=LOST_UP_BUNDLE)
+        self.assertEqual(verdict, "fail")
+        # Short stalls (2.1-2.2 s in all three cases) do not.
+        self.assertEqual(ui_tests.decide(65, self.log("UI_FACT main stall 2.1 s from 23:11:26.0 UTC\n"),
+                                         bundle=LOST_UP_BUNDLE)[0], "retry")
+
+    def test_any_other_failure_keeps_it_red(self):
+        other = self.log("/x/DeviceConditionUITests.swift:120: error: -[AlbumistUITests.DeviceConditionUITests "
+                         "test02_LowBatteryAndLowPowerModeWording] : XCTAssertTrue failed - Stromsparmodus\n")
+        verdict, reasons = ui_tests.decide(65, other, bundle=LOST_UP_BUNDLE)
+        self.assertEqual(verdict, "fail")
+        # The verdict still names the side of the loss.
+        self.assertTrue(any("although the app came up" in r and "(XCTest side)" in r for r in reasons), reasons)
+        self.assertEqual(ui_tests.decide(65, self.log(), bundle=LOST_UP_BUNDLE + ["result bundle: XCTAssertTrue failed"])[0],
+                         "fail")
+
+
+class LaunchSettleTests(unittest.TestCase):
+    """Z4 (27.11.): after an end of the app that took 8 s or more, the test asks the Mac to wait
+    for the simulator before the launch (UI_HOST_SETTLE <answer file>)."""
+
+    def test_the_request_is_read_and_answered_after_the_wait(self):
+        device = "/Users/runner/Library/Developer/CoreSimulator/Devices/U/data/Containers/Data/Application/X/tmp"
+        log = f"UI_HOST_SETTLE {device}/uitest-host-answer-1A\nUI_HOST_SETTLE\nUI_HOST_SETTLE tmp/a\n"
+        self.assertEqual(ui_tests.host_requests(log), [("settle", None, f"{device}/uitest-host-answer-1A")])
+        self.assertEqual(ui_tests.host_grant_requests(log), 0)
+        done = []
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "log.txt")
+            with open(path, "w") as out:
+                out.write("UI_HOST_SETTLE /D/a\nUI_HOST_TERMINATE_APP 1700000000 5\nUI_HOST_SETTLE /D/b\n")
+            results = iter([True, False])
+            watcher = ui_tests.HostGrants("U", path, interval=0.01, calm=lambda: done.append("settle") or next(results),
+                                          terminate=lambda asked, pid: done.append(("terminate", pid)),
+                                          answer=lambda answer, text: done.append((answer, text)))
+            watcher.check()
+        self.assertEqual(done, ["settle", ("/D/a", "settled"), ("terminate", 5), "settle", ("/D/b", "busy")])
+
+    def test_the_settle_waits_at_most_a_minute(self):
+        calls = []
+        with mock.patch.object(ui_tests, "settle", lambda probe, **kw: calls.append(kw) or True):
+            self.assertTrue(ui_tests.HostGrants("U", "/nonexistent").settle_simulator())
+        self.assertEqual(calls, [{"limit": 60, "step": 5, "going_on": "the launch goes on"}])
+
+    def test_the_app_end_asks_only_after_a_slow_end(self):
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+        with open(os.path.join(root, "App", "AlbumistUITests", "UITestAppEnd.swift"), encoding="utf-8") as f:
+            helper = f.read()
+        body = helper[helper.index("static func launch(_ app: XCUIApplication"):]
+        body = body[:body.index("\n    }\n")]
+        self.assertIn("if let took = lastEnd, took >= slowEnd { settleAfterSlowEnd(took) }", body)
+        self.assertLess(body.index("end(app"), body.index("settleAfterSlowEnd"))
+        self.assertLess(body.index("settleAfterSlowEnd"), body.index("justBefore()"),
+                        "the launch clock is taken after the wait, so the process start is measured from the launch")
+        self.assertIn("static let slowEnd: TimeInterval = 8", helper)
+        self.assertIn('print("UI_HOST_SETTLE \\(answer)")', helper)
+        self.assertIn('"uitest-host-answer-', helper.split("static func settleAfterSlowEnd", 1)[1])
 
 
 class LateLaunchTests(unittest.TestCase):

@@ -275,9 +275,9 @@ jobs:
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
     # Hang limits as in CI's "Core tests (Linux)" (the watchdog names the tests still running,
-    # swift_test_watch.py). This job, 61 green since 16.11.: p95 5.6, longest 7.0 min; 25 leaves
+    # swift_test_watch.py). This job, 61 green since 16.11.: p95 5.6, longest 7.0 min; 25 (35 since 26.11., build step of its own) leaves
     # room for apt's retries (up to 11.6 min seen in CI during the mirror outage) and the step's 12.
-    timeout-minutes: 25
+    timeout-minutes: 35
     defaults:
       run:
         shell: bash
@@ -287,9 +287,16 @@ jobs:
           persist-credentials: false
       - name: Install SQLite headers
         run: bash .github/scripts/apt_install.sh libsqlite3-dev python3
+      - name: Build the core and its tests
+        # Since 26.11.2026 a step of its own (Design strand's finding, runs 45903536608 and
+        # 45906029051): the watchdog counted the build, which takes 5-7 min since the boundary
+        # tests, and on a slow runner stopped tests that all passed. The build cannot hang a
+        # test; the watchdog below now times the tests alone (153-228 s measured).
+        timeout-minutes: 20
+        run: swift build --build-tests
       - name: Build and test
         timeout-minutes: 12
-        run: python3 .github/scripts/swift_test_watch.py --minutes 10 --log core-linux.log -- swift test --parallel
+        run: python3 .github/scripts/swift_test_watch.py --minutes 10 --log core-linux.log -- swift test --skip-build --parallel
       - name: Time limits reported
         if: ${{ always() }}
         run: python3 .github/scripts/timing_report.py core-linux.log >> "$GITHUB_STEP_SUMMARY"

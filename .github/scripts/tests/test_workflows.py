@@ -656,6 +656,16 @@ class HangLimitTests(unittest.TestCase):
                     watched += 1
         # ci: core, load, macOS core; ui: core, load (merge gate), macOS core (merge gate).
         self.assertEqual(watched, 6)
+        # 26.11.2026 (runs 45903536608, 45906029051): the Linux build is a step of its own, so the
+        # watchdog times the tests alone and a slow build never stops tests that passed.
+        for text in (ci, ui):
+            steps = job_steps(text, "core-linux")
+            names = [name for name, _, _ in steps]
+            runs = dict((name, run) for name, _, run in steps)
+            with self.subTest(file="ci" if text is ci else "ui"):
+                self.assertIn("swift build --build-tests", runs["Build the core and its tests"])
+                self.assertLess(names.index("Build the core and its tests"), names.index("Build and test"))
+                self.assertIn("swift test --skip-build --parallel", runs["Build and test"])
         # The Linux container installs python3 for it.
         for text in (ci, ui):
             self.assertIn("apt_install.sh libsqlite3-dev python3", text)

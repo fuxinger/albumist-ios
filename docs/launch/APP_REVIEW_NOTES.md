@@ -1,8 +1,13 @@
 # Notiz für App Review / Notes for App Review
 
-Stand 21.11.2026. In App Store Connect unter „App Review Information → Notes“ einfügen. Englisch
-reicht; Deutsch für einen deutschsprachigen Prüfer. Kein Konto, kein Login, kein Server, darum
-bleiben „Sign-in required“ und die Demo-Zugangsdaten leer.
+Stand 26.11.2026 (Englisch lektoriert, Knopfnamen mit der App abgeglichen, unabhängige
+Zweitprüfung eingearbeitet). In App Store Connect unter „App Review Information → Notes“ **nur den
+englischen Block** einfügen (mit Karte etwa 3.700 Zeichen, ohne etwa 3.500). Das Feld ist reiner
+Text: Darum steht der Block ohne Fettdruck, ohne Code-Schrift und ohne Zeilenumbrüche mitten im
+Satz; mit der Kopieren-Taste des Blocks kopieren. Der deutsche Teil ist die Übersetzung zum
+Mitlesen. Kein Konto, kein Login, kein Server, darum bleiben „Sign-in required“ und die
+Demo-Zugangsdaten leer. Knopfnamen stehen in „…“, Satzzeichen außerhalb, damit niemand denkt, der
+Punkt gehöre zum Knopf.
 
 Plugin-Prüfung 15.11.2026, K6: Prüfgeräte haben oft nur wenige Fotos ohne Ort, dann gibt es nichts
 vorzuschlagen. Seit 16.11. erklärt die Übersicht das und bietet Beispielfotos an.
@@ -16,110 +21,106 @@ vorzuschlagen. Seit 16.11. erklärt die Übersicht das und bietet Beispielfotos 
       Einreichung raus (steht auch im Kartenstrang).
 - [ ] In-App-Kauf `app.albumist.ios.unlock` angelegt, mit Prüf-Screenshot, **an Version 1.0
       angehängt** (`LAUNCH_CHECKLIST.md`).
-- [ ] Bildschirmaufnahme nach dem Drehbuch unten gemacht, Link unten eingesetzt.
+- [ ] Bildschirmaufnahme nach dem Drehbuch unten gemacht, `[LINK-VIDEO]` im Block ersetzt.
+- [ ] Absatz „[MAP] Map“: nur mit Karte im Build; dann „[MAP] “ löschen und „[label from the
+      build]“ durch den Namen der Einstellung ersetzen. Ohne Karte den ganzen Absatz streichen.
 - [ ] Texte unten mit dem eingereichten Build abgleichen (Knopfnamen, Karte, Einstellungen).
+      „Full Version“ (großes V) ist der Abschnittsname ab dem Design-Paket; im Build davor
+      heißt er „Full version“.
 - [ ] Kontaktdaten für Rückfragen (Name, Telefon, E-Mail) im Feld „Contact Information“.
 
-## English (paste this)
+## English (paste this block)
 
-Albumist finds the trips, places and other themes in the user's own photo library and creates real
-albums for them in the Photos app, after showing a preview; everything can be undone. Everything
-runs on the device; there is no account and no server.
+```text
+Albumist finds the trips, places, and other themes in the user’s own photo library and, after showing a preview, creates real albums for them in the Photos app. Everything can be undone. All analysis happens on the device; there is no account and no developer server.
 
-**See everything in about one minute**
-1. Start the app, tap "Let’s Go", keep the preselected areas and tap "Continue". Allow access to
-   **all photos** (albums can only be created with full access). On "Try a test run first?" keep
-   "The whole library" and tap "Start Analysis".
-2. Review devices usually hold only a few photos without a location, so there is nothing to suggest.
-   The overview then says so ("Not Enough Photos Yet" / "No Photos Yet") and offers
-   **"Try It with Sample Photos"**. Before anything is added, the app explains that the sample photos
-   are really added to the Photos library (only there can it make albums of them). They are drawn by
-   the app itself: 78 pictures of everyday life at home and four trips (Rome, Dolomites, Lisbon,
-   Copenhagen), each with a date and a place.
-3. After a few seconds of analysis the overview shows suggestions. Tap "Review N Suggestions" or the
-   starter set "Create N Albums for Free", look at the preview (nothing changes before you confirm)
-   and tap "Create Albums Now". The albums appear in Photos under Collections › Albums.
-4. "Undo" on the result card takes everything back. The change receipt lists exactly what was done.
-5. Settings › "Remove Sample Photos" deletes the sample photos the app added (by their stored
-   identifiers, with the system's own delete confirmation; they then stay in "Recently Deleted" for
-   30 days) and the albums it made of nothing but them. A sample photo that was edited or put into
-   an album of one's own is deleted too; the reviewer's own photos and albums are never touched.
-   Removing needs full photo access and no plan in progress (the app says so otherwise).
+See everything in about one minute:
+1. Launch the app, tap “Let’s Go”, keep the preselected areas, and tap “Continue”. When iOS asks for photo access, choose “Allow Full Access” (albums can only be created with full access). On “Try a test run first?”, keep “The whole library” and tap “Start Analysis”.
+2. If the device has only a few photos, or none with location data, there is nothing to suggest yet. The overview then says so (“Not Enough Photos Yet” or “No Photos Yet”) and offers “Try It with Sample Photos”. Before adding anything, the app explains that the sample photos are actually added to the Photos library (it can only create albums from photos that are there). The app generates them itself: 78 pictures of everyday life at home and of four trips (Rome, the Dolomites, Lisbon, and Copenhagen), each with a date and a location.
+3. After a few seconds of analysis, the overview shows suggestions. Tap “Review N Suggestions” or the starter set “Create N Albums for Free”, look at the preview (nothing changes until you confirm), and tap “Create Albums Now”. The albums appear in Photos under Collections › Albums.
+4. “Undo” on the result card reverts everything. Settings › “History and Undo” lists exactly what was done.
+5. Settings › “Remove Sample Photos” deletes all of the app’s sample photos, including ones that were edited or added to other albums, plus the albums made only from them. The app finds these photos by their stored identifiers; iOS asks for confirmation before deleting, and the photos then stay in Recently Deleted for 30 days. All other photos and albums are never touched. Removing requires full photo access and isn’t possible while the app is applying changes; the app explains this if needed.
 
-**Purchase:** the first 10 albums are free. A one-time, non-consumable in-app purchase
-("Unlock Albumist") removes the limit; it is submitted together with this version. Restore and offer
-codes are in Settings › Full version.
+Purchase: The first 10 albums are free. A one-time, non-consumable in-app purchase (“Unlock Albumist”) removes the limit; it is submitted together with this version. “Restore Purchase” and “Redeem Code” are in Settings › “Full Version”.
 
-**Privacy:** photos and analysis stay on the device. If "Refine places online" is
-on (the default), coordinates and the language for the names are sent to Apple's geocoder
-(`CLGeocoder`) to name places; nothing is sent to us. Original photos are
-never modified; the app only creates, fills and (on undo) removes its own albums. The only photos it
-ever deletes are its own sample photos, when the user taps "Remove Sample Photos" and confirms in the
-iOS dialog (they stay 30 days in Recently Deleted).
+Privacy: Photos are never uploaded, and all analysis happens on the device. If “Refine places online” is on (the default), coordinates and the language for place names are sent to Apple’s geocoder (CLGeocoder) to name places; nothing is sent to the developer. Original photos are never modified. After the user confirms, the app creates albums and adds photos to matching existing albums; “Undo” removes the albums it created and the photos it added. The only photos it ever deletes are its own sample photos, after the user taps “Remove Sample Photos” and confirms in the iOS dialog (they stay in Recently Deleted for 30 days).
 
-**Background work and notifications:** a long first analysis may continue after the user leaves
-the app as a continued processing task (`BGContinuedProcessingTask`), with the system's progress
-on the Lock Screen; it stops when iOS asks. A local "analysis done" notification is sent only if
-the user allowed notifications in the app. Nothing runs on a server.
+Background work and notifications: A long first analysis runs as a continued processing task (BGContinuedProcessingTask), so it can keep going after the user leaves the app; the system shows its progress on the Lock Screen and can stop it at any time. A local “Analysis complete” notification is sent only if the user has allowed notifications for the app. Nothing runs on a server.
 
-**Map ("Your World"):** the globe and trip replay use the photos' own locations. Map images come
-from Apple (MapKit) only for the visible area; Settings › "Use Apple Maps" turns this off. [MAP]
+[MAP] Map (“Your World”): The globe and trip replay use the photos’ own locations. Map images are loaded from Apple’s map service, only for the visible area; Settings › “[label from the build]” turns this off.
 
-**Siri and Shortcuts:** "Sort new photos with Albumist" starts an analysis of new photos;
-Spotlight lists countries and open suggestions.
+Siri and Shortcuts: “Sort new photos with Albumist” starts an analysis of new photos; Spotlight lists countries and pending suggestions.
 
-**Video:** a 60-second recording of the flow with a real photo library: <link>
+Video: A 60-second screen recording of the flow with a real photo library: [LINK-VIDEO]
+```
 
-## Deutsch
+## Deutsch (zum Mitlesen, nicht einfügen)
 
-Albumist ordnet die eigene Fotomediathek in Alben für Länder und Reisen. Alles läuft auf dem Gerät;
-es gibt kein Konto und keinen Server.
+Albumist findet Reisen, Orte und andere Themen in der eigenen Fotomediathek und legt dafür nach
+einer Vorschau echte Alben in der Fotos-App an. Alles lässt sich rückgängig machen. Die Analyse
+läuft auf dem Gerät; es gibt kein Konto und keinen Server des Entwicklers.
 
 **Alles in etwa einer Minute sehen**
-1. App starten, „Los geht’s“, Bereiche lassen und „Weiter“. Zugriff auf **alle Fotos** erlauben
-   (Alben lassen sich nur mit vollem Zugriff anlegen). Bei „Erst ein Probelauf?“ „Die ganze
-   Mediathek“ lassen und „Analyse starten“.
-2. Prüfgeräte haben meist nur wenige Fotos ohne Ort, dann gibt es nichts vorzuschlagen. Die Übersicht
-   sagt das („Noch zu wenige Fotos“ / „Noch keine Fotos“) und bietet **„Mit Beispielfotos
-   ausprobieren“** an. Vorher erklärt die App, dass die Beispielfotos wirklich in der Fotos-Mediathek
-   angelegt werden (nur dort kann sie Alben daraus machen). Die Bilder zeichnet die App selbst:
-   78 Bilder aus dem Alltag zu Hause und von vier Reisen (Rom, Dolomiten, Lissabon, Kopenhagen), jedes
-   mit Datum und Ort.
-3. Nach wenigen Sekunden Analyse zeigt die Übersicht Vorschläge. „Vorschläge prüfen“ oder das
-   Startpaket „… Alben kostenlos anlegen“ antippen, die Vorschau ansehen (vor dem Bestätigen ändert
-   sich nichts) und „Alben jetzt anlegen“. Die Alben stehen in Fotos unter Sammlungen › Alben.
-4. „Rückgängig machen“ auf der Ergebniskarte nimmt alles zurück; der Änderungsbeleg zeigt genau, was
-   passiert ist.
-5. Einstellungen › „Beispielfotos wieder entfernen“ löscht die Beispielfotos, die die App angelegt
-   hat (anhand der gespeicherten Kennungen, mit der Löschabfrage von iOS; danach liegen sie 30 Tage
-   unter „Zuletzt gelöscht“), und die Alben, die sie nur aus ihnen gemacht hat. Auch ein bearbeitetes
-   oder in ein eigenes Album gelegtes Beispielfoto wird gelöscht; eigene Fotos und Alben bleiben
-   unberührt. Entfernen braucht vollen Fotozugriff und kein laufendes Umsetzen (sonst sagt die App das).
+1. App starten, auf „Los geht’s“ tippen, die vorausgewählten Bereiche unverändert lassen und auf
+   „Weiter“ tippen. Wenn iOS nach dem Fotozugriff fragt, „Vollen Zugriff erlauben“ wählen (Alben
+   lassen sich nur mit vollem Zugriff anlegen). Im Schritt „Erst ein Probelauf?“ die Auswahl „Die
+   ganze Mediathek“ beibehalten und auf „Analyse starten“ tippen.
+2. Hat das Gerät nur wenige Fotos oder keine mit Ortsangabe, gibt es noch nichts vorzuschlagen.
+   Die Übersicht sagt das („Noch zu wenige Fotos“ / „Noch keine Fotos“) und bietet **„Mit
+   Beispielfotos ausprobieren“** an. Vorher erklärt die App, dass die Beispielfotos wirklich in
+   der Fotomediathek angelegt werden (nur dort kann sie Alben daraus anlegen). Die Bilder erzeugt
+   die App selbst: 78 Bilder aus dem Alltag zu Hause und von vier Reisen (Rom, Dolomiten,
+   Lissabon, Kopenhagen), jedes mit Datum und Ort.
+3. Nach wenigen Sekunden Analyse zeigt die Übersicht Vorschläge. Auf „Vorschläge prüfen“ oder
+   das Startpaket „… Alben kostenlos anlegen“ tippen, die Vorschau ansehen (vor dem Bestätigen
+   ändert sich nichts) und auf „Alben jetzt anlegen“ tippen. Die Alben stehen in Fotos unter
+   Sammlungen › Alben.
+4. „Rückgängig machen“ auf der Ergebniskarte nimmt alles zurück; Einstellungen › „Verlauf und
+   Rückgängig“ zeigt genau, was passiert ist.
+5. Einstellungen › „Beispielfotos wieder entfernen“ löscht alle Beispielfotos der App, auch
+   bearbeitete oder in andere Alben gelegte, sowie die Alben, die nur aus ihnen bestehen. Die App
+   erkennt die Fotos an den gespeicherten Kennungen; iOS fragt vor dem Löschen nach, danach liegen
+   sie 30 Tage unter „Zuletzt gelöscht“. Alle anderen Fotos und Alben bleiben unberührt. Das
+   Entfernen braucht vollen Fotozugriff und geht nicht, während die App gerade Änderungen
+   ausführt; sie weist dann darauf hin.
 
 **Kauf:** Die ersten 10 Alben sind kostenlos. Ein einmaliger Kauf („Albumist freischalten“,
-Nicht-Verbrauchsartikel) hebt die Grenze auf; er wird mit dieser Version eingereicht. Wiederherstellen
-und Code einlösen unter Einstellungen › Vollversion.
+Nicht-Verbrauchsartikel) hebt die Grenze auf; er wird mit dieser Version eingereicht. „Kauf
+wiederherstellen“ und „Code einlösen“ unter Einstellungen › Vollversion.
 
-**Datenschutz:** Fotos und Analyse bleiben auf dem Gerät. Ist „Orte online genauer bestimmen“ an
-(ab Werk), gehen Koordinaten und die Sprache der Ortsnamen an Apples Kartendienst (`CLGeocoder`),
-um Orte zu benennen; an uns geht nichts. Originalfotos werden nie
-verändert; die App legt nur eigene Alben an, füllt sie und entfernt sie beim Rückgängigmachen. Fotos löscht
-sie nur, wenn es ihre eigenen Beispielfotos sind: nach „Beispielfotos wieder entfernen“ und der Bestätigung im
-iOS-Dialog (sie liegen dann 30 Tage unter „Zuletzt gelöscht“).
+**Datenschutz:** Fotos werden nie hochgeladen, die Analyse läuft auf dem Gerät. Ist „Orte online
+genauer bestimmen“ an (ab Werk), gehen Koordinaten und die Sprache der Ortsnamen an Apples
+Kartendienst (CLGeocoder), um Orte zu benennen; an mich geht nichts. Originalfotos werden nie
+verändert. Nach der Bestätigung legt die App Alben an und ergänzt vorhandene passende Alben;
+„Rückgängig machen“ entfernt die angelegten Alben und die hinzugefügten Fotos wieder. Fotos löscht
+sie nur, wenn es ihre eigenen Beispielfotos sind: nach „Beispielfotos wieder entfernen“ und der
+Bestätigung im iOS-Dialog (sie liegen dann 30 Tage unter „Zuletzt gelöscht“).
 
-**Hintergrund und Mitteilungen:** Eine lange erste Analyse kann nach dem Verlassen der App als
-fortgesetzte Aufgabe (`BGContinuedProcessingTask`) weiterlaufen, mit dem Fortschritt von iOS auf
-dem Sperrbildschirm; sie endet, sobald iOS es verlangt. Die Mitteilung „Analyse fertig“ kommt nur,
-wenn Mitteilungen in der App erlaubt wurden.
+**Hintergrund und Mitteilungen:** Eine lange erste Analyse läuft als fortgesetzte Aufgabe
+(BGContinuedProcessingTask) und kann deshalb nach dem Verlassen der App weiterlaufen; iOS zeigt
+dabei den Fortschritt auf dem Sperrbildschirm und kann die Aufgabe jederzeit beenden. Die
+Mitteilung „Analyse fertig“ kommt nur, wenn Mitteilungen für die App erlaubt sind.
 
-**Karte („Deine Welt“):** Globus und „Reise abspielen“ nutzen die Aufnahmeorte der Fotos.
-Kartenbilder kommen von Apple (MapKit), nur für den sichtbaren Ausschnitt; abschaltbar unter
-Einstellungen › „Apples Karte verwenden“. [KARTE]
+**[KARTE] Karte („Deine Welt“):** Globus und „Reise abspielen“ nutzen die Aufnahmeorte der Fotos.
+Kartenbilder kommen von Apples Kartendienst, nur für den sichtbaren Ausschnitt; abschaltbar unter
+Einstellungen › „[Name aus dem Build]“.
 
 **Siri und Kurzbefehle:** „Neue Fotos sortieren mit Albumist“ startet die Analyse neuer Fotos;
 Spotlight findet Länder und offene Vorschläge.
 
-**Video:** 60 Sekunden Ablauf mit echter Mediathek: <Link>
+**Video:** 60 Sekunden Ablauf mit echter Mediathek: [LINK-VIDEO]
+
+Was die Zweitprüfung (26.11.) hier korrigiert hat: Die Notiz sagte, die App lege „nur eigene
+Alben“ an; tatsächlich ergänzt sie auch vorhandene passende Alben, und „Rückgängig machen“ nimmt
+die hinzugefügten Fotos wieder heraus (wie Produktseite und Presse sagen). „Allow access to all
+photos“ → der echte Knopf von iOS „Allow Full Access“. „Review devices usually have …“ unterstellte
+den Prüfern, was auf ihren Geräten ist. „the change receipt“ gibt es in der App nicht; der Ort
+heißt Einstellungen › „History and Undo“. Schritt 5 entwirrt.
+
+Nach dem Abgleich mit der Wortlaut-Prüfung im Code (26.11.): Kartenbilder kommen jetzt von
+„Apple’s map service“ / „Apples Kartendienst“, ohne den Namen von Apples Karten-Framework
+(`PromiseWordingTests` lässt ihn hier nicht zu, weil die Ortsnamen über `CLGeocoder` kommen).
+„Full version“ → „Full Version“ wie in der App ab dem Design-Paket.
 
 ## Drehbuch für die Bildschirmaufnahme (ca. 60 Sekunden, echte Mediathek)
 
@@ -130,8 +131,8 @@ löschen und neu installieren, Nicht-Stören an, keine privaten Fotos im Bild, d
 
 | Zeit | Bild | Was zu sehen sein muss |
 |---|---|---|
-| 0–8 s | Start, „Los geht’s“, Bereiche, „Weiter“ | Das Versprechen: Fotos bleiben auf dem Gerät |
-| 8–15 s | Zugriff „Alle Fotos erlauben“, Probelauf, „Analyse starten“ | Der iOS-Dialog für vollen Zugriff |
+| 0–8 s | Start, „Los geht’s“, Bereiche, „Weiter“ | Das Versprechen: Fotos werden nicht hochgeladen |
+| 8–15 s | Zugriff „Vollen Zugriff erlauben“, Probelauf, „Analyse starten“ | Der iOS-Dialog für vollen Zugriff |
 | 15–30 s | Übersicht während der Analyse | Fortschritt, die eigenen Fotos im Mosaik |
 | 30–40 s | „Vorschläge prüfen“, eine Reise öffnen, Fotos wischen | Echte Reisen mit Ort und Datum |
 | 40–50 s | Startpaket oder Auswahl, Vorschau, „Alben jetzt anlegen“ | Vorschau vor jeder Änderung, Fotos fliegen in Alben |
@@ -142,4 +143,4 @@ Mit Karte: nach 50 s zusätzlich 10 s „Deine Welt“ (Globus drehen, eine Reis
 Video darf dann 70 s lang sein, die Prüfnotiz hat keine Grenze.
 
 Danach: Video in App Store Connect bei der Prüfnotiz anhängen (oder als nicht gelisteten Link
-eintragen) und den `<link>` oben ersetzen.
+eintragen) und `[LINK-VIDEO]` im englischen Block ersetzen.

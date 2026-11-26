@@ -1,7 +1,8 @@
 # Plan: Bildschirmfotos, Vorschauvideo, Kopfbild
 
-Stand 21.11.2026. **Umsetzung erst, wenn neues Design und Karte im Build sind.** Bis dahin ist
-das hier das Drehbuch. Bildtexte DE und EN stehen unten.
+Stand 21.11.2026, Bildzeilen lektoriert am 26.11. (nach unabhängiger Zweitprüfung). **Umsetzung
+erst, wenn neues Design und Karte im Build sind.** Bis dahin ist das hier das Drehbuch. Bildtexte
+DE und EN stehen unten.
 
 ## Was Apple vorgibt (gelesen 21.11.2026)
 
@@ -40,13 +41,19 @@ Bilder, die verkaufen). Spalte „ohne Karte“ gilt, falls die Karte nicht rech
 |---|---|---|---|---|
 | 1 | Jede Reise wird ein Album. | Every trip becomes an album. | Vorschläge-Liste im neuen Foto-Look: 4–5 Reisen mit großen Titelfotos, Ort und Monat | gleich |
 | 2 | Echte Alben in deiner Fotos-App. | Real albums in your Photos app. | Ergebnis nach dem Anlegen als Raster der neuen Alben mit Titelfoto und Namen, Knopf „Fotos-App öffnen“ | gleich |
-| 3 | Deine Welt. | Your world. | Globus mit Bögen und Orten, Länderzahl (dunkel) | Reise-Atlas: „Alle Länder auf einen Blick.“ / „Every country at a glance.“ |
-| 4 | Erst ansehen. Dann anlegen. | Look first. Then create. | Vorschau mit Albenliste und „Alben jetzt anlegen“ | gleich |
-| 5 | Nichts ist endgültig. | Nothing is final. | Liste der angelegten Alben mit „Rückgängig machen“ | gleich |
-| 6 | Erlebe jede Reise noch einmal. | Relive every trip. | Bild aus „Reise abspielen“: Route über Gelände, bestes Foto groß (dunkel) | Suche: „Such einfach: Hunde Italien 2023.“ / „Just search: dogs Italy 2023.“ |
-| 7 | Bleibt auf deinem iPhone. | Stays on your iPhone. | Gestaltete Aussage: großes Schild-Symbol über einer Übersicht mit Mosaik, darunter „Keine Fotos hochgeladen · Kein Konto · Kein Abo“ | gleich |
+| 3 | Deine Welt auf einem Globus. | Your world on a globe. | Globus mit Bögen und Orten, Länderzahl (dunkel) | Reise-Atlas: „Alle Länder auf einen Blick.“ / “Every country at a glance.” |
+| 4 | Erst ansehen. Dann anlegen. | Preview first. Then create. | Vorschau mit Albenliste und „Alben jetzt anlegen“ | gleich |
+| 5 | Nichts ist endgültig. | Change your mind? Undo it all. | Liste der angelegten Alben mit „Rückgängig machen“ | gleich |
+| 6 | Erlebe jede Reise noch einmal. | Relive every trip. | Bild aus „Reise abspielen“: Route über Gelände, bestes Foto groß (dunkel) | Suche, Zeile DE: Such einfach „Hunde Italien 2023“. EN: Just search “dogs Italy 2023.” |
+| 7 | Auf deinem iPhone analysiert. Nie hochgeladen. | Analyzed on your iPhone. Never uploaded. | Gestaltete Aussage: großes Schild-Symbol über einer Übersicht mit Mosaik, darunter „Kein Konto · Keine Werbung · Kein Tracking“ / “No account · No ads · No tracking” | gleich |
 
 Bild 1–3 sind, was die Suche zeigt: **was passiert, dass es echt ist, das Wow.**
+
+Warum Bild 7 so heißt (Zweitprüfung 26.11.): „Alles bleibt auf deinem iPhone“ stimmt nicht ganz,
+denn ab Werk gehen für Ortsnamen Koordinaten an Apple (abschaltbar), und die Beschreibung auf
+derselben Seite sagt das. „Analysiert“ und „nie hochgeladen“ stimmen immer. „Kein Abo“ ist eine
+Preisangabe und gehört nicht ins Bild (Apple, Richtlinie 2.3.7); es steht in Werbetext und
+Beschreibung.
 Bilder 3 und 6 dunkel (Globus und Fotos leuchten), sonst hell. **Kein Preis, keine Webadresse,
 keine Auszeichnungen im Bild** (Apple verbietet es). Weder die Fotos-App noch der Sperrbildschirm
 werden gezeigt: Apple will die eigene App sehen, und so bleibt es einheitlich.
@@ -83,10 +90,11 @@ Aufnahme am iPhone mit der Demo-Mediathek (Bildschirmaufnahme), geschnitten auf 
 | 4–10 s | Einen Vorschlag öffnen, Fotos wischen, ein Foto herausnehmen | Du entscheidest. / You decide. |
 | 10–15 s | Vorschau, „Alben jetzt anlegen“, Fotos fliegen in Alben | Echte Alben. / Real albums. |
 | 15–19 s | Raster der neuen Alben, Knopf „Fotos-App öffnen“ (Albumists eigener Bildschirm; Vorschauvideos sollen nur die App zeigen) | In deiner Fotos-App. / In your Photos app. |
-| 19–27 s | Globus „Deine Welt“, dann „Reise abspielen“: Route über Island, bestes Foto groß | Erlebe sie noch einmal. / Relive it. |
+| 19–27 s | Globus „Deine Welt“, dann „Reise abspielen“: Route über Island, bestes Foto groß | Erlebe deine Reisen noch einmal. / Relive your trips. |
 | 27–30 s | Zurück zu den Vorschlägen (Schleife wirkt nahtlos) | Albumist |
 
-Ohne Karte: 19–27 s Reise-Atlas und Suche „Hunde Italien 2023“.
+Ohne Karte: 19–27 s Reise-Atlas und Suche „Hunde Italien 2023“, Einblendung „Alle Länder auf
+einen Blick.“ / “Every country at a glance.” (wie Bild 3 ohne Karte).
 Die ersten Sekunden zeigen die eigentliche Veränderung, nicht den Globus: In der Suche spielt
 Apple nur den Anfang stumm ab.
 

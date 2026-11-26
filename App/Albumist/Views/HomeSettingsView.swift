@@ -103,6 +103,7 @@ struct HomeSettingsView: View {
             currentSection
             formerSection
             placesSection
+            homeAlbumSection
         }
         .navigationTitle("Dein Zuhause")
         .navigationBarTitleDisplayMode(.inline)
@@ -301,6 +302,27 @@ struct HomeSettingsView: View {
             Text("Andere Orte")
         } footer: {
             Text("Zum Beispiel deine Eltern, eine Zweitwohnung oder die Arbeit. Aufenthalte dort zählen nicht als Reisen. Jeder Ort bekommt stattdessen ein eigenes Album.")
+        }
+    }
+
+    // MARK: Album for the home
+
+    /// "Album fürs Zuhause" (review P1-10, decision 7): off, the home is no suggestion of its
+    /// own (`ProposalEngine.withoutHome`). Only where frequent places are suggested and there is
+    /// a home, now or before ("Kein Zuhause" now with former homes: those are still left out).
+    @ViewBuilder
+    private var homeAlbumSection: some View {
+        if model.settings.enabledAreas.contains(.frequentPlaces),
+           model.homeSettings.currentMode != .none || !model.homeSettings.former.isEmpty {
+            Section {
+                Toggle(isOn: Binding(get: { model.settings.frequentPlaces.suggestHome },
+                                     set: { model.settings.frequentPlaces.suggestHome = $0; model.saveSettings() })) {
+                    Text("Album fürs Zuhause vorschlagen")
+                }
+                .accessibilityIdentifier("home.suggestHomeAlbum")
+            } footer: {
+                Text("Fotos, die bei dir zu Hause entstehen, bekommen sonst kein eigenes Album. Orte in deiner Nähe, an denen du oft bist, werden weiter vorgeschlagen.")
+            }
         }
     }
 }

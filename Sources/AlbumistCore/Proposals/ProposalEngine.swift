@@ -67,12 +67,13 @@ public struct ProposalEngine: Sendable {
         if stop() { return none }
         if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable, profile: profile, home: home, routineVisits: &standIns) }
         if stop() { return none }
-        let frequentPlaces = areas.contains(.frequentPlaces) ? analysis.frequentPlaces : []
+        let users = analysis.applied.union(analysis.chosen)
+        let notHome = areas.contains(.frequentPlaces) ? withoutHome(analysis.frequentPlaces, facts: usable, users: users) : (places: [], homes: [])
+        let frequentPlaces = notHome.places
         // A place the user is often at gets one album instead of its trips, so it comes with
         // either area (Trips/RecurringPlaces.swift).
         let recurring = areas.contains(.frequentPlaces) || areas.contains(.trips) ? recurringPlaceProposals(analysis.recurringPlaces, facts: usable) : []
         let named = Set(frequentPlaces.filter { frequentPlaceName($0) != nil }.map(\.id))
-        let users = analysis.applied.union(analysis.chosen)
         let once = Self.suggestEachPlaceOnce(frequent: frequentPlaces, named: named, recurring: recurring,
                                              kept: users, rejected: overrides.isRejected)
         standIns += once.standIns
@@ -96,7 +97,7 @@ public struct ProposalEngine: Sendable {
         if areas.contains(.places) { standIns += placesOfTrips(kept, standIns: standIns) }
         let dismissed = { (p: AlbumProposal) in overrides.isRejected(p.id) || overrides.mustNotRecreate(p.id) }
         return Suggestions(open: kept.filter { !dismissed($0) }, dismissed: kept.filter(dismissed),
-                           standIns: Self.resolved(standIns, kept: Set(kept.map(\.id))))
+                           standIns: Self.resolved(standIns, kept: Set(kept.map(\.id))), homePlaces: notHome.homes)
     }
 
     // MARK: Places (4.1)
@@ -565,6 +566,117 @@ public struct ProposalEngine: Sendable {
         }
         return (frequent.filter { !droppedFrequent.contains($0.id) }, staying, standIns)
     }
+
+    /// The frequent places without the user's own home (review P1-10, decision 7, Fuchs
+    /// 26.11.2026 "Alles wie empfohlen"): "Häufiger Ort in München" was the user's flat. The
+    /// home gets no album of its own unless the user asks for it ("Album fürs Zuhause",
+    /// `FrequentPlaceSettings.suggestHome`), named it, chose its suggestion or already has its
+    /// album (`users`). Which places are home: `homePlaces`. Returns the places to suggest and
+    /// the homes left out (`Suggestions.homePlaces`: their photos are not counted as unsorted).
+    func withoutHome(_ places: [FrequentPlace], facts: [AssetFacts], users: Set<AlbumistID>)
+        -> (places: [FrequentPlace], homes: Set<AlbumistID>) {
+        guard !settings.frequentPlaces.suggestHome else { return (places, []) }
+        let homes = Self.homePlaces(places, facts: facts, calendar: calendar, radius: settings.trips.advanced.homeRadiusMeters)
+            .filter { id in !users.contains(id) && places.first { $0.id == id }.map { frequentPlaceName($0) == nil } == true }
+        guard !homes.isEmpty else { return (places, []) }
+        return (places.filter { !homes.contains($0.id) }, homes)
+    }
+
+    /// The frequent places that are where the user lives. Only evenings and nights count
+    /// (`isEvening`): that is when people are at home, not at work, in the park or at the gym.
+    ///
+    /// Candidates are the places with most of their photos at home (`AssetFacts.atHome`: within
+    /// the home radius of the home of their time, as the trip detection judges it). Candidates
+    /// of the same time and home belong together: within twice the home radius of each other
+    /// (both inside the radius of one home) and taken at the same time (their spans overlap by
+    /// at least half the shorter one). After a move each home has its own group. In each group
+    /// the place with photos on the most evenings is the home when it is clear:
+    /// - at least `minimumHomeEvenings` evenings;
+    /// - at least `homeLead` times the evenings of the next place in the group (a partner's flat
+    ///   on about as many evenings: nothing is left out, rather than the wrong one);
+    /// - at least `homeShareOfEvenings` of the evenings with photos at home in its span (a café
+    ///   visited in the evening among evening photos all over town is not the home).
+    /// "Kein Zuhause" marks no photo at home: then no place is home.
+    static func homePlaces(_ places: [FrequentPlace], facts: [AssetFacts], calendar: Calendar, radius: Double) -> Set<AlbumistID> {
+        guard !places.isEmpty else { return [] }
+        // Days and hours by the offset of the calendar's zone: one lookup per photo, no
+        // `startOfDay` (this runs with every refresh of the suggestions).
+        let zone = calendar.timeZone
+        func evening(_ date: Date) -> Int? {
+            let local = Int(date.timeIntervalSince1970.rounded(.down)) + zone.secondsFromGMT(for: date)
+            let seconds = ((local % 86_400) + 86_400) % 86_400
+            let day = (local - seconds) / 86_400, hour = seconds / 3_600
+            guard isEvening(hour: hour) else { return nil }
+            // Up to 7 in the morning is the evening before.
+            return hour < 12 ? day - 1 : day
+        }
+        var eveningOf: [AssetID: Int] = [:]
+        var eveningsAtHome = Set<Int>()
+        for f in facts where f.atHome {
+            guard let date = f.asset.creationDate, let e = evening(date) else { continue }
+            eveningOf[f.id] = e
+            eveningsAtHome.insert(e)
+        }
+        guard !eveningOf.isEmpty else { return [] }
+        let sortedEvenings = eveningsAtHome.sorted()
+        func eveningsBetween(_ first: Int, _ last: Int) -> Int {
+            func index(_ value: Int) -> Int {
+                var low = 0, high = sortedEvenings.count
+                while low < high { let mid = (low + high) / 2; if sortedEvenings[mid] < value { low = mid + 1 } else { high = mid } }
+                return low
+            }
+            return index(last + 1) - index(first)
+        }
+
+        struct Candidate { var index: Int; var evenings: Set<Int>; var first: Date; var last: Date }
+        let atHomeIDs = Set(facts.lazy.filter(\.atHome).map(\.id))
+        var candidates: [Candidate] = []
+        for (index, place) in places.enumerated() {
+            // Most of its photos at home, evening or not.
+            guard place.assetIDs.lazy.filter(atHomeIDs.contains).count * 2 > place.assetIDs.count else { continue }
+            let evenings = Set(place.assetIDs.compactMap { eveningOf[$0] })
+            candidates.append(Candidate(index: index, evenings: evenings, first: place.firstDate, last: place.lastDate))
+        }
+        guard !candidates.isEmpty else { return [] }
+
+        // Groups: same home, same time (union-find over the few candidates).
+        var parent = Array(candidates.indices)
+        func root(_ i: Int) -> Int { var i = i; while parent[i] != i { parent[i] = parent[parent[i]]; i = parent[i] }; return i }
+        for i in candidates.indices {
+            for j in candidates.indices where j > i {
+                let a = candidates[i], b = candidates[j]
+                guard GeoMath.distance(places[a.index].centroid, places[b.index].centroid) <= 2 * radius else { continue }
+                let overlap = min(a.last, b.last).timeIntervalSince(max(a.first, b.first))
+                let shorter = min(a.last.timeIntervalSince(a.first), b.last.timeIntervalSince(b.first))
+                if overlap >= shorter / 2 { parent[root(j)] = root(i) }
+            }
+        }
+        var groups: [Int: [Candidate]] = [:]
+        for i in candidates.indices { groups[root(i), default: []].append(candidates[i]) }
+
+        var homes = Set<AlbumistID>()
+        for group in groups.values {
+            let ranked = group.sorted { a, b in
+                (a.evenings.count, places[a.index].assetIDs.count, -a.index) > (b.evenings.count, places[b.index].assetIDs.count, -b.index)
+            }
+            guard let top = ranked.first, top.evenings.count >= minimumHomeEvenings,
+                  let first = top.evenings.min(), let last = top.evenings.max() else { continue }
+            let runnerUp = ranked.dropFirst().first?.evenings.count ?? 0
+            guard Double(top.evenings.count) >= homeLead * Double(runnerUp) else { continue }
+            guard Double(top.evenings.count) >= homeShareOfEvenings * Double(eveningsBetween(first, last)) else { continue }
+            homes.insert(places[top.index].id)
+        }
+        return homes
+    }
+
+    /// From 6 in the evening to 7 in the morning, local time.
+    static func isEvening(hour: Int) -> Bool { hour >= 18 || hour < 7 }
+    /// A home has photos on at least this many evenings.
+    static let minimumHomeEvenings = 5
+    /// The home has at least this many times the evenings of the next place of its group.
+    static let homeLead = 2.0
+    /// Of the evenings with photos at home in its time, the share the home itself holds.
+    static let homeShareOfEvenings = 0.25
 
     /// The name the user gave a frequent place in the settings (nil: none yet).
     func frequentPlaceName(_ place: FrequentPlace) -> String? {

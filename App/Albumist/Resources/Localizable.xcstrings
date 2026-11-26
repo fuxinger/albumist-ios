@@ -711,6 +711,16 @@
         }
       }
     },
+    "Album fürs Zuhause vorschlagen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggest an album for your home"
+          }
+        }
+      }
+    },
     "Dafür braucht Albumist Zugriff auf alle Fotos. Gerade sind nur ausgewählte Fotos freigegeben, und Albumist sieht nicht, was sonst in deinen Alben liegt. Ändern kannst du das unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff." : {
       "localizations" : {
         "en" : {
@@ -727,6 +737,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suggesting a date"
+          }
+        }
+      }
+    },
+    "Fotos, die bei dir zu Hause entstehen, bekommen sonst kein eigenes Album. Orte in deiner Nähe, an denen du oft bist, werden weiter vorgeschlagen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Otherwise photos taken at your home don't get an album of their own. Places nearby that you often visit are still suggested."
           }
         }
       }

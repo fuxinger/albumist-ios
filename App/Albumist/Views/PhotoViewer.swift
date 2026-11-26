@@ -65,6 +65,10 @@ struct PhotoViewer: View {
                     Text("\(index + 1) von \(ids.count)")
                         .font(.headline)
                         .monospacedDigit()
+                        // "10.000 von 10.000" stays on one line in the bar at the largest sizes.
+                        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("viewer.position")
                 }

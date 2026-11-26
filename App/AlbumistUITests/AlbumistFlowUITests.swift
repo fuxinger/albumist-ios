@@ -868,17 +868,20 @@ final class AlbumistFlowUITests: XCTestCase {
     /// position ("viewer.position", "n von m") within 2 s; a swipe without effect is counted and
     /// fails the test, never repeated. Back to the first photo afterwards.
     private func swipesGoToTheNextPhoto() {
-        let position = app.staticTexts["viewer.position"]
+        let position = app.descendants(matching: .any)["viewer.position"]
         guard position.waitForExistence(timeout: 5) else {
             XCTFail("The photo viewer shows no position")
             return
         }
-        func number() -> Int? { (try? position.snapshot().label).flatMap { Int($0.prefix { $0.isNumber }) } }
+        func number() -> Int? {
+            (try? position.snapshot().label).flatMap { Int($0.replacingOccurrences(of: ".", with: "").prefix { $0.isNumber }) }
+        }
         let label = (try? position.snapshot().label) ?? ""
         let total = Int(label.components(separatedBy: " von ").last?.replacingOccurrences(of: ".", with: "") ?? "") ?? 0
         let began = Date()
         defer { print("UI_TIMING viewer swipes \(String(format: "%.1f", Date().timeIntervalSince(began))) s") }
         let swipes = min(4, max(total - (number() ?? 1), 0))
+        XCTAssertGreaterThan(swipes, 0, "No photo to swipe to in the viewer ('\(label)')")
         var missed: [Int] = []
         for swipe in stride(from: 1, through: swipes, by: 1) {
             let before = number() ?? 0

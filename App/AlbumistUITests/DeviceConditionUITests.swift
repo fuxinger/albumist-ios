@@ -1713,7 +1713,7 @@ final class DeviceConditionUITests: XCTestCase {
     }
 
     /// For every list of the library tab: the photo viewer opened from it counts as many photos
-    /// as the list says ("n Fotos und Videos"), and its last photo can be reached (iPhone, Build
+    /// as the list says ("n Fotos und Videos"), so every photo of it can be reached (iPhone, Build
     /// 41, 26.11.: "Nicht sortiert" had 3.348 photos, the viewer said "1 von 3.000" and stopped
     /// there; the grid builds 3,000 thumbnails at a time and handed only those over). Runs in
     /// the large library (3,200+ photos) and the stress run (10,000), so the lists lie above the
@@ -1724,6 +1724,7 @@ final class DeviceConditionUITests: XCTestCase {
         }
         let began = Date()
         defer { print("UI_TIMING \(context) viewer counts of the lists \(String(format: "%.1f", Date().timeIntervalSince(began))) s") }
+        var checked: [String] = []
         for list in ["Nicht sortiert", "Unsicher", "Sortiert", "Ignoriert", "Alle"] {
             let chip = app.buttons[list]
             guard chip.waitForExistence(timeout: 5) else {
@@ -1737,14 +1738,21 @@ final class DeviceConditionUITests: XCTestCase {
                 continue
             }
             guard tap(libraryPhotos.firstMatch, "\(context) first photo of \(list)") else { continue }
-            let position = app.staticTexts["viewer.position"]
+            let position = app.descendants(matching: .any)["viewer.position"]
             let label = position.waitForExistence(timeout: 10) ? ((try? position.snapshot().label) ?? "") : ""
             let total = number(label.components(separatedBy: " von ").last)
-            print("UI_FACT \(context) list \(list): \(listed) photos, viewer \(label)")
-            XCTAssertEqual(total, listed, "\(context): the photo viewer of \(list) counts \(total ?? -1) photos, the list \(listed)")
             tap(app.buttons["viewer.close"], "\(context) close the photo of \(list)")
             _ = UITestWait.holds(timeout: 10) { !app.buttons["viewer.close"].exists }
+            // A photo can change lists while the analysis still runs: the count before or after
+            // the viewer counts (second review).
+            let after = header.waitForExistence(timeout: 5) ? number(try? header.snapshot().label) : nil
+            print("UI_FACT \(context) list \(list): \(listed) photos (after \(after ?? -1)), viewer \(label)")
+            XCTAssertTrue(total == listed || (total != nil && total == after),
+                          "\(context): the photo viewer of \(list) counts \(total ?? -1) photos, the list \(listed)")
+            checked.append(list)
         }
+        // Never a pass without a check: "Alle" always has photos here.
+        XCTAssertTrue(checked.contains("Alle"), "\(context): no viewer count was compared (lists checked: \(checked))")
     }
 
     /// The card's progress line as the app recorded it (`-AlbumistUITestProgressLog`): every change

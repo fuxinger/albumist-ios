@@ -331,6 +331,53 @@ def lost_app_at_launch(log: str, crash_reports: list[str] | None = None) -> list
     return reasons
 
 
+LAUNCH_FAIL = re.compile(r"Failed to launch <XCUIApplication|Timed out while launching application")
+
+
+def late_launch(log: str, crash_reports: list[str] | None = None) -> list[str]:
+    """A launch that XCTest gave up on because the simulator started the app process late
+    (rule of 26.11., coordinator for Fuchs): every failure of the pass is a launch failure, no
+    crash report was written, and for each the app process started LATE_START s or more after
+    the launch request (UI_FACT clock ... launch, UI_FACT app process ... started). The delay
+    then lies before any code of the app ran. Stress run 45722861565: 110 s to the process, 44 s
+    more to the app's first code, at load 700-804; in green runs 4-8 s. Such a pass is repeated
+    once on a fresh simulator, counted like every repeat; a red repeat is a real finding.
+    [] when the picture is not this one."""
+    if crash_reports:
+        return []
+    lines = [line for line in log.splitlines() if not DATA_LINE.search(line)]
+    errors = [index for index, line in enumerate(lines) if strong_real(line)]
+    if not errors or not all(LAUNCH_FAIL.search(lines[index]) or AGGREGATE.search(lines[index])
+                             or FAILED_CASE.search(lines[index]) for index in errors):
+        return []
+    launches = [index for index in errors if LAUNCH_FAIL.search(lines[index])]
+    if not launches:
+        return []
+
+    def seconds(match: re.Match, first: int) -> float:
+        return int(match.group(first)) * 3600 + int(match.group(first + 1)) * 60 + float(match.group(first + 2))
+
+    reasons = []
+    for index in launches:
+        launch = process = None
+        for earlier in reversed(lines[:index]):
+            if STARTED.search(earlier):
+                break
+            launch = LAUNCH_CLOCK.search(earlier) if launch is None else launch
+        for later in lines[index + 1:]:
+            if STARTED.search(later):
+                break
+            process = process or APP_PROCESS.search(later)
+        if not (launch and process):
+            return []
+        late = (seconds(process, 2) - seconds(launch, 1)) % 86_400
+        if late < LATE_START:
+            return []
+        reasons.append(f"launch timed out: the simulator started the app process {late:.0f} s after the launch "
+                       f"request, no crash report (simulator side, repeated once)")
+    return reasons[:1]
+
+
 def daemon_crash_tests(log: str) -> set[tuple[str, str]]:
     """(class, test) of each test in which testmanagerd crashed."""
     hit = set()
@@ -396,6 +443,9 @@ def decide(status: int, log: str, crash_reports: list[str] | None = None, probe:
     real += [reason for reason in lost_app_at_launch(log, crash_reports) if reason not in real]
     if crash_reports:
         real.append("crash report " + ", ".join(os.path.basename(p) for p in crash_reports))
+    late = late_launch(log, crash_reports)
+    if late and all(LAUNCH_FAIL.search(finding) for finding in bundle or []):
+        return "retry", late
     real += list(bundle or [])
     if real:
         return "fail", real

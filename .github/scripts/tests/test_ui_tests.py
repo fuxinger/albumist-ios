@@ -1945,5 +1945,48 @@ class SwiftUIStreamTests(unittest.TestCase):
         self.assertNotRegex(source, r"logger\.(debug|info)\(")
 
 
+# Stress run 45722861565 (job 139598107998), cut down: XCTest gave up on the launch while the
+# simulator was still starting the app process (110 s after the request, load 700-804).
+LATE_LAUNCH = """\
+Test Case '-[AlbumistUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' started.
+UI_FACT clock 00:21:01.8 launch
+/Users/runner/work/albumist-ios/albumist-ios/App/AlbumistUITests/UITestAppEnd.swift:41: error: -[AlbumistUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline] : Failed to launch <XCUIApplicationImpl: 0x106603f40 app.albumist.ios at /x/Albumist.app> via Xcode (Timed out while launching application via Xcode)
+UI_FACT app process 15253 started 00:22:51.6 UTC, its code ran from 00:23:36.0 UTC
+Test Case '-[AlbumistUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' failed (190.465 seconds).
+\t Executed 1 test, with 1 failure (0 unexpected) in 190.465 (190.579) seconds
+** TEST EXECUTE FAILED **
+"""
+
+
+class LateLaunchTests(unittest.TestCase):
+    """Rule of 26.11.: a launch the simulator started 30 s or more late, with no crash report,
+    is repeated once on a fresh simulator; anything else stays red."""
+
+    def test_late_process_start_is_repeated_once(self):
+        verdict, reasons = ui_tests.decide(65, LATE_LAUNCH, bundle=["result bundle: Failed to launch <XCUIApplicationImpl: 0x1 app>"])
+        self.assertEqual(verdict, "retry")
+        self.assertIn("110 s after the launch request", reasons[0])
+
+    def test_a_crash_report_keeps_it_red(self):
+        verdict, _ = ui_tests.decide(65, LATE_LAUNCH, crash_reports=["/x/Albumist-2026.ips"])
+        self.assertEqual(verdict, "fail")
+
+    def test_a_quick_process_start_is_the_apps_side(self):
+        quick = LATE_LAUNCH.replace("started 00:22:51.6 UTC", "started 00:21:10.0 UTC")
+        self.assertEqual(ui_tests.decide(65, quick)[0], "fail")
+
+    def test_no_process_line_keeps_it_red(self):
+        missing = "\n".join(l for l in LATE_LAUNCH.splitlines() if "app process" not in l)
+        self.assertEqual(ui_tests.decide(65, missing)[0], "fail")
+
+    def test_another_failure_in_the_pass_keeps_it_red(self):
+        other = LATE_LAUNCH + "/x/A.swift:9: error: -[AlbumistUITests.AlbumistFlowUITests test3_TapThroughSweep] : XCTAssertTrue failed - no plan\n"
+        self.assertEqual(ui_tests.decide(65, other)[0], "fail")
+
+    def test_another_finding_in_the_result_bundle_keeps_it_red(self):
+        verdict, _ = ui_tests.decide(65, LATE_LAUNCH, bundle=["result bundle: XCTAssertTrue failed - no plan"])
+        self.assertEqual(verdict, "fail")
+
+
 if __name__ == "__main__":
     unittest.main()

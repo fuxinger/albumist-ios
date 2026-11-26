@@ -17,11 +17,12 @@ Buildnummer und der Commit werden automatisch angehängt.
   (Beschluss 17.11.).
 
 <!-- testflight:start -->
-Danke fürs Testen! Dieser Build bringt eine Testseite für die kommende Karte „Deine Welt“. Sie gibt es nur in TestFlight, nicht in der App-Store-Version. Bitte achte besonders auf:
+Danke fürs Testen! Dieser Build bringt die neue, einfache Karte „Deine Welt“. Sie gibt es vorerst nur in TestFlight: Reise-Atlas, oben rechts die Weltkugel. Bitte achte besonders auf:
 
-- Kamera-Probe: Öffne die Testseite der Karte, dann „Reise abspielen“ und „Kamera-Probe“. Sieh dir zuerst den Flug an, dann tippe „Nochmal fliegen“, einmal im WLAN und einmal im Mobilfunk. Geh danach mit „Weiter“ durch die 16 Kamera-Blicke und mach Bildschirmfotos von den tiefen Blicken und von Rom.
-- Werte: Tippe am Ende auf „Werte kopieren“ und schick den Text mit. Er enthält das Gerät und Messwerte, keine Fotos und keine Koordinaten.
-- Ruckelt der Flug, bleiben Kartenteile leer oder wird das iPhone warm? Schreib kurz, was du gesehen hast.
+- Antippen: Tippe Länder, Reisen und Orte an. Fliegt die Karte hin, und siehst du unten die passenden Fotos? Tut irgendein Punkt beim Antippen nichts?
+- Reise abspielen: Gibt es nur bei Reisen mit mindestens 3 Stationen. Orte, die näher als 25 km beieinander liegen, sind ein Punkt. Wirkt der Film ruhig, und zeigt er die Gegend statt nur einer Stadt?
+- Kurze Reisen: Reisen mit 1 oder 2 Stationen zeigen „Fotos ansehen“ als Fotogeschichte. Passt das?
+- Die alte Messseite liegt jetzt in der Karte unter „…“ › „Messwerte“.
 - Foto-Ansicht: Öffne in „Nicht sortiert“ ein Foto. Oben steht jetzt „1 von …“ mit derselben Zahl wie in der Liste, nicht mehr 3.000. Wisch ein paar Fotos weiter: Reagiert es beim ersten Wischen?
 - Zuhause: Deine Wohnung sollte nicht mehr als „Häufiger Ort in …“ vorgeschlagen werden. Unter Einstellungen › Dein Zuhause gibt es „Album fürs Zuhause vorschlagen“, falls du es doch willst.
 - Alles andere sollte genau wie im letzten Build funktionieren.

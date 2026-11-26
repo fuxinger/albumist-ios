@@ -105,14 +105,17 @@ Gerätetest vom 15.11.: 14.356 Fotos). Nichts davon wird ohne die Wahl von Fuchs
 
 - **A – die Mediathek:** „I built Albumist for my own library: 14,000 photos, years of trips, and not a single album.“ (91)
   *DE: Ich habe Albumist für meine eigene Mediathek entwickelt: 14.000 Fotos, Jahre voller Reisen und kein einziges Album.*
-- **B – die Herkunft:** „I’m an independent developer from Zwiesel in the Bavarian Forest. Albumist started with my own 14,000 unsorted photos.“ (118)
-  *DE: Ich komme aus Zwiesel im Bayerischen Wald und entwickle unabhängig. Albumist begann mit meinen eigenen 14.000 unsortierten Fotos.*
+- **B – die Herkunft:** „I’m an independent developer from [HOMETOWN]. Albumist started with my own 14,000 unsorted photos.“ (gut 100 Zeichen plus Ort)
+  *DE: Ich komme aus [HEIMATORT] und entwickle unabhängig. Albumist begann mit meinen eigenen 14.000 unsortierten Fotos.*
+  Der Ort steht hier bewusst nicht ausgeschrieben: Das Repository ist öffentlich. Fuchs setzt ihn
+  erst beim Einreichen ein (mit Region, z. B. „[Ort] in the Bavarian Forest“, wirkt er auf
+  englische Leser greifbarer).
 - **C – der Grund:** „I didn’t want yet another app for looking at my photos. I wanted my trips as real albums in Photos, so I built Albumist.“ (120)
   *DE: Ich wollte keine weitere App, nur um Fotos anzusehen. Ich wollte meine Reisen als echte Alben in Fotos, also habe ich Albumist entwickelt.*
 
-Empfehlung: **B + C zusammen** (239 Zeichen). Dann den Satz „Photos are never uploaded, and all
-analysis runs on the iPhone.“ streichen: Er steht schon in der Beschreibung. Ergebnis 461
-Zeichen. (Mit ihm wären es 525, über den selbst gesetzten 500.)
+Empfehlung: **B + C zusammen** (je nach Ort etwa 240 Zeichen). Dann den Satz „Photos are never
+uploaded, and all analysis runs on the iPhone.“ streichen: Er steht schon in der Beschreibung.
+Ergebnis etwa 460 Zeichen. (Mit ihm wären es gut 520, über den selbst gesetzten 500.)
 
 Bei A oder B steht „14,000 photos“ neben dem Härtetest mit 10.000. Das ist kein Widerspruch
 (der Härtetest ist eine künstliche Mediathek, die 14.000 sind echte Fotos), kann aber eine

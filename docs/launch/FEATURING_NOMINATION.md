@@ -1,7 +1,8 @@
 # Featuring-Bewerbung (App Store Connect → Nominierungen)
 
-Stand 26.11.2026: Lektorat (natives Englisch, eine Erzählperspektive, Apples Schreibweisen) und
-jede Aussage am Code gegengeprüft. Ersetzt die Fassung vom 21.11., den Entwurf vom 14.11. und den
+Stand 26.11.2026: Lektorat (natives Englisch, eine Erzählperspektive, Apples Schreibweisen),
+jede Aussage am Code gegengeprüft, danach unabhängige Zweitprüfung (US-Lektorat) eingearbeitet.
+Ersetzt die Fassung vom 21.11., den Entwurf vom 14.11. und den
 Entwurf in `/mnt/project-files/sortly-launch/Featuring-Bewerbung-Entwurf.md`.
 
 ## Was Apple sagt (gelesen 21.11., nachgeprüft 26.11.2026)
@@ -48,22 +49,29 @@ Albumist: every trip becomes a real album in Photos
 
 **Description** (≤ 1.000)
 ```
-Many iPhone libraries hold thousands of photos and hardly any albums. Albumist sorts that out without a single photo leaving the device: it recognizes trips, even ones from a decade ago, and turns each one into a real album in Apple Photos, which iCloud Photos also brings to Mac and iPad. Countries, favorite places, screenshots, and documents can follow.
+Many iPhone libraries hold thousands of photos and hardly any albums. Albumist sorts that out without uploading a single photo: it recognizes trips, even ones from a decade ago, and turns each one into a real album in the Photos app, where iCloud Photos syncs it to Mac and iPad. Countries, frequent places, screenshots, and documents can get albums too.
 
 Trust comes first. Before anything changes, people see each album with its photos and can remove photos or rename trips. Everything can be undone, existing albums are added to rather than duplicated, and people’s photos are never edited or deleted.
 
-“Your World” shows a globe of everywhere someone has taken photos and replays a trip stop by stop with their best shots. [MAP]
+“Your World” puts every place from a library on a globe and replays any trip stop by stop with its best shots. [MAP]
 
 Albumist feels like part of iOS: Siri sorts new photos, Spotlight finds countries, on-device Apple Intelligence understands searches like “barbecue at Grandma’s last summer,” and progress appears on the Lock Screen. No account, no tracking, no ads, no subscription.
 ```
-(995 Zeichen mit dem Kartenabsatz, ohne die Marke „[MAP]“; ohne Karte den dritten Absatz
-streichen: 873.)
+(983 Zeichen mit dem Kartenabsatz, ohne die Marke „[MAP]“; ohne Karte den dritten Absatz
+streichen: 871.)
+
+Warum so formuliert (Zweitprüfung 26.11.): „without uploading a single photo“ statt „without a
+single photo leaving the device“, weil ab Werk Koordinaten für Ortsnamen an Apple gehen und
+iCloud-Fotos Fotos ohnehin in iCloud hält; „Upload“ stimmt immer. „can follow“ las sich wie
+„kommt in einem späteren Update“, darum „can get albums too“. „favorite places“ → „frequent
+places“ (so heißt die Funktion). „the Photos app“ statt „Apple Photos“: So schreibt Apples
+Redaktion selbst. Kein „someone … their“ mehr, das zwischen Einzahl und Mehrzahl sprang.
 
 Belege im Code: Reisen und Ausflüge (`TripSettings`), echte Alben in Fotos, Vorschau vor jeder
 Änderung, Rückgängig, Abgleich mit vorhandenen Alben (`AlbumMatcher`), Siri-Kurzbefehl
 „Sort new photos with Albumist“ (`AppShortcuts.xcstrings`), Spotlight für Länder und Vorschläge
-(`AppEntities.swift`, `IndexedEntity`), Suche in ganzen Sätzen über Apple Intelligence auf dem
-Gerät (`SmartAssistant.searchKeywords`), Fortschritt auf dem Sperrbildschirm
+(`AppEntities.swift`, `IndexedEntity`), Suche in natürlicher Sprache über Apple Intelligence auf
+dem Gerät (`SmartAssistant.searchKeywords`), Fortschritt auf dem Sperrbildschirm
 (`BGContinuedProcessingTask`, `ContinuedAnalysis.swift`).
 
 **Relevant Countries or Regions:** alle (vorausgefüllt lassen)
@@ -81,9 +89,9 @@ Gerät (`SmartAssistant.searchKeywords`), Fortschritt auf dem Sperrbildschirm
 
 **Helpful Details** (≤ 500)
 ```
-[PERSONAL SENTENCE] Privacy is at the core: photos and analysis never leave the iPhone. Every TestFlight build must first pass a stress test with a simulated library of 10,000 photos and Apple’s automated accessibility audit at the largest text size, in Dark Mode, and with Reduce Motion.
+[PERSONAL SENTENCE] Photos are never uploaded, and all analysis runs on the iPhone. Before any TestFlight build goes out, it must pass two automated checks: a stress test with a simulated 10,000-photo library, and Apple’s accessibility audit at the largest text size, in Dark Mode, and with Reduce Motion.
 ```
-(Ohne den persönlichen Satz 268 Zeichen; Platz für gut 230 Zeichen Geschichte.)
+(Ohne den persönlichen Satz 285 Zeichen; Platz für gut 210 Zeichen Geschichte.)
 
 Belege: Härtetest mit 10.000 Fotos vor jedem Zusammenführen in main, der TestFlight-Upload
 übernimmt das grüne Ergebnis nur bei nachweislich gleichem App-Stand (Projektregel, Entscheidung
@@ -92,19 +100,24 @@ Fuchs 20.11.). Barrierefreiheits-Prüfung: `App/AlbumistUITests/AccessibilityUIT
 
 ## Der persönliche Satz: drei Vorschläge (Fuchs wählt)
 
-Nur aus dem, was wir wissen; **Fuchs prüft, ob jede Zahl stimmt** (die 14.000 stammt aus seinem
-Gerätetest vom 15.11.: 14.356 Fotos). Nichts davon wird ohne seine Wahl eingesetzt.
+Nur aus dem, was wir wissen; **Fuchs prüft, ob jede Zahl stimmt** (die 14.000 stammt aus dem
+Gerätetest vom 15.11.: 14.356 Fotos). Nichts davon wird ohne die Wahl von Fuchs eingesetzt.
 
 - **A – die Mediathek:** „I built Albumist for my own library: 14,000 photos, years of trips, and not a single album.“ (91)
-  *DE: Ich habe Albumist für meine eigene Mediathek gebaut: 14.000 Fotos, Jahre voller Reisen und kein einziges Album.*
-- **B – die Herkunft:** „I'm an independent developer from Zwiesel in the Bavarian Forest. Albumist started with my own 14,000 unsorted photos.“ (118)
-  *DE: Ich bin ein unabhängiger Entwickler aus Zwiesel im Bayerischen Wald. Albumist begann mit meinen eigenen 14.000 unsortierten Fotos.*
-- **C – der Grund:** „I didn't want yet another app for looking at my photos. I wanted my trips as real albums in Photos, so I built Albumist.“ (120)
-  *DE: Ich wollte keine weitere App, nur um Fotos anzusehen. Ich wollte meine Reisen als echte Alben in Fotos, also habe ich Albumist gebaut.*
+  *DE: Ich habe Albumist für meine eigene Mediathek entwickelt: 14.000 Fotos, Jahre voller Reisen und kein einziges Album.*
+- **B – die Herkunft:** „I’m an independent developer from Zwiesel in the Bavarian Forest. Albumist started with my own 14,000 unsorted photos.“ (118)
+  *DE: Ich komme aus Zwiesel im Bayerischen Wald und entwickle unabhängig. Albumist begann mit meinen eigenen 14.000 unsortierten Fotos.*
+- **C – der Grund:** „I didn’t want yet another app for looking at my photos. I wanted my trips as real albums in Photos, so I built Albumist.“ (120)
+  *DE: Ich wollte keine weitere App, nur um Fotos anzusehen. Ich wollte meine Reisen als echte Alben in Fotos, also habe ich Albumist entwickelt.*
 
-Empfehlung: **B + C zusammen** (239 Zeichen; mit dem Rest 508, knapp über 500). Wenn B + C, den
-Satz „Privacy is at the core: photos and analysis never leave the iPhone.“ streichen: Er steht
-schon in der Beschreibung. Dann 440 Zeichen.
+Empfehlung: **B + C zusammen** (239 Zeichen). Dann den Satz „Photos are never uploaded, and all
+analysis runs on the iPhone.“ streichen: Er steht schon in der Beschreibung. Ergebnis 461
+Zeichen. (Mit ihm wären es 525, über den selbst gesetzten 500.)
+
+Bei A oder B steht „14,000 photos“ neben dem Härtetest mit 10.000. Das ist kein Widerspruch
+(der Härtetest ist eine künstliche Mediathek, die 14.000 sind echte Fotos), kann aber eine
+Rückfrage auslösen. Dann im Härtetest-Satz „a simulated 10,000-photo library“ durch „a large
+simulated photo library“ ersetzen (gleiche Länge).
 
 ## Weitere Nominierungen (Plan)
 
@@ -117,7 +130,7 @@ schon in der Beschreibung. Dann 440 Zeichen.
 ## Vor dem Absenden prüfen
 
 - [ ] Jede Aussage stimmt im eingereichten Build (Karte, „Reise abspielen“, Sperrbildschirm,
-      Spotlight, Suche in ganzen Sätzen, Voice Control nach dem Test aus
+      Spotlight, Suche in eigenen Worten, Voice Control nach dem Test aus
       `BARRIEREFREIHEIT_ANGABEN.md`).
 - [ ] Öffentlicher TestFlight-Link funktioniert ohne Einladung.
 - [ ] Produktseite fertig (Bilder, Video), denn die Redaktion schaut sie an.

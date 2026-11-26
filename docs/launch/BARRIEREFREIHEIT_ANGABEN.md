@@ -100,10 +100,20 @@ wird ein Befund mit Test.
 
 Für die Support-Seite der Webseite, Abschnitt „Bedienungshilfen“:
 
-> Albumist unterstützt VoiceOver, Sprachsteuerung, große Schrift bis zur größten Stufe, den
+> Albumist unterstützt VoiceOver, Sprachsteuerung, „Größerer Text“ bis zur größten Stufe, den
 > Dunkelmodus, „Kontrast erhöhen“, „Transparenz reduzieren“ und „Bewegung reduzieren“. Jede
 > Version wird vor dem Erscheinen automatisch mit Apples Barrierefreiheits-Prüfung getestet.
-> Fehlt dir etwas? Schreib uns: [Support-Adresse].
+> Fehlt dir etwas? Schreib mir: [Support-Adresse].
+
+English (support page):
+
+> Albumist supports VoiceOver, Voice Control, Larger Text up to the largest size, Dark Mode,
+> Increase Contrast, Reduce Transparency, and Reduce Motion. Every version is tested
+> automatically with Apple’s accessibility audit before release. Missing something? Write to me
+> at [support address].
+
+(Lektorat 26.11.: Apples Namen der Einstellungen, „Schreib mir“ statt „uns“ wie überall, wo
+Albumist als eine Person spricht; englische Fassung ergänzt.)
 
 Erst veröffentlichen, wenn die vier Tests oben gemacht sind.
 

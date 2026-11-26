@@ -136,6 +136,51 @@ struct HomeAlbumTests {
         #expect(frequent(analysis).map(\.id) == [AlbumistID("fp-office")])
     }
 
+    /// Third review: a move within the town, and a park visited in the afternoons for all those
+    /// years. Each flat is judged in its own years: both are left out, the park stays; also
+    /// when the user goes back to the old flat once later.
+    @Test func aMoveWithinTheTownLeavesOutBothFlats() {
+        let newFlat = GeoCoordinate(latitude: 48.1650, longitude: 11.5754)
+        let old = Self.facts("old", at: Self.flat, days: 365, every: 4, from: "2019-01-01")
+        let new = Self.facts("new", at: newFlat, days: 300, every: 4, from: "2023-01-03")
+        let park = Self.facts("park", at: Self.park, days: 280, every: 9, from: "2019-01-05", hour: 14)
+        let places = [Self.place("fp-old", at: Self.flat, old), Self.place("fp-new", at: newFlat, new), Self.place("fp-park", at: Self.park, park)]
+        #expect(frequent(AnalysisSnapshot(facts: old + new + park, frequentPlaces: places)).map(\.id) == [AlbumistID("fp-park")])
+        let revisit = Self.facts("visit", at: Self.flat, days: 1, every: 1, from: "2025-06-01")
+        let withVisit = [Self.place("fp-old", at: Self.flat, old + revisit), places[1], places[2]]
+        #expect(frequent(AnalysisSnapshot(facts: old + revisit + new + park, frequentPlaces: withVisit)).map(\.id) == [AlbumistID("fp-park")])
+    }
+
+    /// Third review: a former home in New York is judged on New York's clock, not the
+    /// calendar's (Berlin): lunch at the office there is no evening.
+    @Test func eveningsAreOnTheClockOfThePlace() {
+        let newYork = TimeZone(identifier: "America/New_York")!
+        let nyFlat = GeoCoordinate(latitude: 40.7300, longitude: -73.9900)
+        let nyOffice = GeoCoordinate(latitude: 40.7500, longitude: -73.9800)
+        func there(_ facts: [AssetFacts]) -> [AssetFacts] { facts.map { var f = $0; f.timeZone = newYork; return f } }
+        // 12:00 and 19:00 in New York (the helper's hours are UTC in the fixture calendar).
+        let office = there(Self.facts("office", at: nyOffice, days: 200, every: 1, hour: 17))
+        let home = there(Self.facts("flat", at: nyFlat, days: 60, every: 5, hour: 24))
+        var settings = OrganizationSettings()
+        settings.titleLanguage = .german
+        var berlin = Fixture.calendar
+        berlin.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        let analysis = AnalysisSnapshot(facts: office + home, frequentPlaces: [Self.place("fp-office", at: nyOffice, office), Self.place("fp-flat", at: nyFlat, home)])
+        let found = ProposalEngine(settings: settings, calendar: berlin).proposals(for: analysis).filter { $0.kind == .frequentPlace }
+        #expect(found.map(\.id) == [AlbumistID("fp-office")])
+    }
+
+    /// Third review: a home split in two clusters 170 m apart: both parts are left out.
+    @Test func aHomeSplitInTwoClustersIsLeftOutWhole() {
+        let part = GeoCoordinate(latitude: 48.1386, longitude: 11.5754)
+        let a = Self.facts("a", at: Self.flat, days: 180, every: 2)
+        let b = Self.facts("b", at: part, days: 60, every: 6)
+        let park = Self.facts("park", at: Self.park, days: 40, every: 9, hour: 14)
+        let analysis = AnalysisSnapshot(facts: a + b + park, frequentPlaces: [Self.place("fp-a", at: Self.flat, a), Self.place("fp-b", at: part, b),
+                                                                              Self.place("fp-park", at: Self.park, park)])
+        #expect(frequent(analysis).map(\.id) == [AlbumistID("fp-park")])
+    }
+
     /// "Kein Zuhause" (no photo is at home) or a place away from home: nothing is left out.
     @Test func withoutAHomeNothingIsLeftOut() {
         let home = Self.facts("flat", at: Self.flat, days: 180, every: 2, atHome: false)
@@ -156,8 +201,9 @@ struct HomeAlbumTests {
         }
         let analysis = AnalysisSnapshot(facts: cafe + town, frequentPlaces: [Self.place("fp-cafe", at: Self.park, cafe)])
         #expect(frequent(analysis).map(\.id) == [AlbumistID("fp-cafe")])
-        // Fewer evenings elsewhere: the café holds over a quarter of them and is taken for home.
-        let fewer = AnalysisSnapshot(facts: cafe + town.prefix(90), frequentPlaces: [Self.place("fp-cafe", at: Self.park, cafe)])
+        // Few evenings elsewhere: the café, the only place, holds over half of them and is taken
+        // for the home.
+        let fewer = AnalysisSnapshot(facts: cafe + town.prefix(20), frequentPlaces: [Self.place("fp-cafe", at: Self.park, cafe)])
         #expect(frequent(fewer).isEmpty)
     }
 

@@ -583,26 +583,31 @@ public struct ProposalEngine: Sendable {
     }
 
     /// The frequent places that are where the user lives. Only evenings and nights count
-    /// (`isEvening`): that is when people are at home, not at work, in the park or at the gym.
+    /// (`isEvening`, on the clock of the place the photo was taken, `AssetFacts.timeZone`): that
+    /// is when people are at home, not at work, in the park or at the gym.
     ///
     /// Candidates are the places with most of their photos at home (`AssetFacts.atHome`: within
-    /// the home radius of the home of their time, as the trip detection judges it). Candidates
-    /// of the same time and home belong together: within twice the home radius of each other
-    /// (both inside the radius of one home) and taken at the same time (their spans overlap by
-    /// at least half the shorter one). After a move each home has its own group. In each group
-    /// the place with photos on the most evenings is the home when it is clear:
-    /// - at least `minimumHomeEvenings` evenings;
-    /// - at least `homeLead` times the evenings of the next place in the group (a partner's flat
-    ///   on about as many evenings: nothing is left out, rather than the wrong one);
-    /// - at least `homeShareOfEvenings` of the evenings with photos at home in its span (a café
-    ///   visited in the evening among evening photos all over town is not the home).
+    /// the home radius of the home of their time, as the trip detection judges it) and photos
+    /// on at least `minimumHomeEvenings` evenings. Each candidate is judged against its
+    /// competitors: the candidates within twice the home radius (both inside the radius of one
+    /// home) with evenings in its span (first to last evening, without the outer twentieth on
+    /// each side), counting only the evenings in that span.
+    /// It is the home when
+    /// - it has at least `homeLead` times the evenings of each competitor there (a partner's
+    ///   flat on more than half as many evenings: nothing is left out rather than the wrong
+    ///   one), and
+    /// - at least `homeShareOfEvenings` of the evenings with photos at home in its span, or
+    ///   `loneHomeShareOfEvenings` without any competitor (a café visited in the evening among
+    ///   evening photos all over town is not the home).
+    /// Judged pairwise, a park or the parents' place visited for years never ties two homes of
+    /// a move together: each flat is judged in its own years. A home split in two clusters: the
+    /// candidates within `sameHomeMeters` of a home with evenings in its span go with it.
     /// "Kein Zuhause" marks no photo at home: then no place is home.
     static func homePlaces(_ places: [FrequentPlace], facts: [AssetFacts], calendar: Calendar, radius: Double) -> Set<AlbumistID> {
         guard !places.isEmpty else { return [] }
-        // Days and hours by the offset of the calendar's zone: one lookup per photo, no
+        // Days and hours by the offset of the photo's zone: one lookup per photo, no
         // `startOfDay` (this runs with every refresh of the suggestions).
-        let zone = calendar.timeZone
-        func evening(_ date: Date) -> Int? {
+        func evening(_ date: Date, in zone: TimeZone) -> Int? {
             let local = Int(date.timeIntervalSince1970.rounded(.down)) + zone.secondsFromGMT(for: date)
             let seconds = ((local % 86_400) + 86_400) % 86_400
             let day = (local - seconds) / 86_400, hour = seconds / 3_600
@@ -612,71 +617,76 @@ public struct ProposalEngine: Sendable {
         }
         var eveningOf: [AssetID: Int] = [:]
         var eveningsAtHome = Set<Int>()
+        var atHomeIDs = Set<AssetID>()
         for f in facts where f.atHome {
-            guard let date = f.asset.creationDate, let e = evening(date) else { continue }
+            atHomeIDs.insert(f.id)
+            guard let date = f.asset.creationDate, let e = evening(date, in: f.timeZone ?? calendar.timeZone) else { continue }
             eveningOf[f.id] = e
             eveningsAtHome.insert(e)
         }
         guard !eveningOf.isEmpty else { return [] }
         let sortedEvenings = eveningsAtHome.sorted()
-        func eveningsBetween(_ first: Int, _ last: Int) -> Int {
-            func index(_ value: Int) -> Int {
-                var low = 0, high = sortedEvenings.count
-                while low < high { let mid = (low + high) / 2; if sortedEvenings[mid] < value { low = mid + 1 } else { high = mid } }
-                return low
-            }
-            return index(last + 1) - index(first)
+        func index(_ value: Int, in list: [Int]) -> Int {
+            var low = 0, high = list.count
+            while low < high { let mid = (low + high) / 2; if list[mid] < value { low = mid + 1 } else { high = mid } }
+            return low
         }
+        func between(_ list: [Int], _ first: Int, _ last: Int) -> Int { index(last + 1, in: list) - index(first, in: list) }
 
-        struct Candidate { var index: Int; var evenings: Set<Int>; var first: Date; var last: Date }
-        let atHomeIDs = Set(facts.lazy.filter(\.atHome).map(\.id))
+        struct Candidate { var index: Int; var evenings: [Int] }
         var candidates: [Candidate] = []
         for (index, place) in places.enumerated() {
             // Most of its photos at home, evening or not.
             guard place.assetIDs.lazy.filter(atHomeIDs.contains).count * 2 > place.assetIDs.count else { continue }
-            let evenings = Set(place.assetIDs.compactMap { eveningOf[$0] })
-            candidates.append(Candidate(index: index, evenings: evenings, first: place.firstDate, last: place.lastDate))
+            let evenings = Set(place.assetIDs.compactMap { eveningOf[$0] }).sorted()
+            if evenings.count >= minimumHomeEvenings { candidates.append(Candidate(index: index, evenings: evenings)) }
         }
-        guard !candidates.isEmpty else { return [] }
-
-        // Groups: same home, same time (union-find over the few candidates).
-        var parent = Array(candidates.indices)
-        func root(_ i: Int) -> Int { var i = i; while parent[i] != i { parent[i] = parent[parent[i]]; i = parent[i] }; return i }
-        for i in candidates.indices {
-            for j in candidates.indices where j > i {
-                let a = candidates[i], b = candidates[j]
-                guard GeoMath.distance(places[a.index].centroid, places[b.index].centroid) <= 2 * radius else { continue }
-                let overlap = min(a.last, b.last).timeIntervalSince(max(a.first, b.first))
-                let shorter = min(a.last.timeIntervalSince(a.first), b.last.timeIntervalSince(b.first))
-                if overlap >= shorter / 2 { parent[root(j)] = root(i) }
+        /// A candidate's span without its outer twentieth on each side: a single visit to the
+        /// old flat years after the move does not stretch it over the new flat's years.
+        func span(_ c: Candidate) -> (first: Int, last: Int) {
+            let cut = c.evenings.count / 20
+            return (c.evenings[cut], c.evenings[c.evenings.count - 1 - cut])
+        }
+        var homes: [Int] = []
+        for c in candidates {
+            let (first, last) = span(c)
+            let mine = between(c.evenings, first, last)
+            let center = places[c.index].centroid
+            var lone = true, leads = true
+            for other in candidates where other.index != c.index
+                && GeoMath.distance(places[other.index].centroid, center) <= 2 * radius {
+                let theirs = between(other.evenings, first, last)
+                guard theirs > 0 else { continue }
+                lone = false
+                if Double(mine) < homeLead * Double(theirs) { leads = false; break }
+            }
+            let share = lone ? loneHomeShareOfEvenings : homeShareOfEvenings
+            if leads, Double(mine) >= share * Double(between(sortedEvenings, first, last)) { homes.append(c.index) }
+        }
+        var result = Set(homes.map { places[$0].id })
+        // A home split in two clusters: the other part goes with it.
+        for c in candidates where !result.contains(places[c.index].id) {
+            let (first, last) = span(c)
+            for h in homes where GeoMath.distance(places[h].centroid, places[c.index].centroid) <= sameHomeMeters {
+                let home = candidates.first { $0.index == h }!
+                if between(home.evenings, first, last) > 0 { result.insert(places[c.index].id); break }
             }
         }
-        var groups: [Int: [Candidate]] = [:]
-        for i in candidates.indices { groups[root(i), default: []].append(candidates[i]) }
-
-        var homes = Set<AlbumistID>()
-        for group in groups.values {
-            let ranked = group.sorted { a, b in
-                (a.evenings.count, places[a.index].assetIDs.count, -a.index) > (b.evenings.count, places[b.index].assetIDs.count, -b.index)
-            }
-            guard let top = ranked.first, top.evenings.count >= minimumHomeEvenings,
-                  let first = top.evenings.min(), let last = top.evenings.max() else { continue }
-            let runnerUp = ranked.dropFirst().first?.evenings.count ?? 0
-            guard Double(top.evenings.count) >= homeLead * Double(runnerUp) else { continue }
-            guard Double(top.evenings.count) >= homeShareOfEvenings * Double(eveningsBetween(first, last)) else { continue }
-            homes.insert(places[top.index].id)
-        }
-        return homes
+        return result
     }
 
     /// From 6 in the evening to 7 in the morning, local time.
     static func isEvening(hour: Int) -> Bool { hour >= 18 || hour < 7 }
     /// A home has photos on at least this many evenings.
     static let minimumHomeEvenings = 5
-    /// The home has at least this many times the evenings of the next place of its group.
+    /// The home has at least this many times the evenings of each competitor in its time.
     static let homeLead = 2.0
     /// Of the evenings with photos at home in its time, the share the home itself holds.
     static let homeShareOfEvenings = 0.25
+    /// The same without any competitor: a lone place must hold half of them.
+    static let loneHomeShareOfEvenings = 0.5
+    /// Another place this close to the home, in its time, is part of it (a home split in two clusters).
+    static let sameHomeMeters = 300.0
 
     /// The name the user gave a frequent place in the settings (nil: none yet).
     func frequentPlaceName(_ place: FrequentPlace) -> String? {

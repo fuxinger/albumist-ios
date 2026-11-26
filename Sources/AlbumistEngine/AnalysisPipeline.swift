@@ -2574,11 +2574,14 @@ public actor AnalysisPipeline {
     /// Returns what the overview says (nil: nothing); nothing is made when there are no
     /// suggestions yet (the next analysis applies the settings) or a run already applied the
     /// change. Waits for a run in progress, like a run does.
-    public func resuggest() async throws -> HomeChangeNotice? {
+    /// `always`: also without a pending home change, for a setting that only changes which
+    /// suggestions are made ("Album fürs Zuhause vorschlagen", review P1-10).
+    public func resuggest(always: Bool = false) async throws -> HomeChangeNotice? {
         await beginRun()
         defer { endRun() }
         guard let previous = try await latestProposals() else { return nil }
-        guard try await pendingHomeChange() != nil else { return try await homeChangeNotice() }
+        let pending = always ? nil : try await pendingHomeChange()
+        guard always || pending != nil else { return try await homeChangeNotice() }
         // Before the trips are detected: a change stored while they are stays pending.
         let homeChange = homeGeneration
         let all = try await store.allAssets()

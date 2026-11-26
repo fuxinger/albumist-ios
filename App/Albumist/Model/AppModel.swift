@@ -1087,6 +1087,13 @@ final class AppModel {
             // lookups or hidden photos need a run.
             if let previous = await pipeline?.update(settings: settings) {
                 runAfterSettingsChange(from: previous, to: settings)
+                // "Album fürs Zuhause vorschlagen" needs no run, only the suggestions again
+                // (review P1-10): the home comes or goes at once. The choices as they are now
+                // are stored first, as before a home change.
+                if previous.frequentPlaces.suggestHome != settings.frequentPlaces.suggestHome, let pipeline {
+                    try? await store?.setValue(storedDecisions(decisions), forKey: Key.decisions)
+                    _ = try? await pipeline.resuggest(always: true)
+                }
             }
             await refreshDerived()
         }

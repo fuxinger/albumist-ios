@@ -1788,6 +1788,14 @@ final class DeviceConditionUITests: XCTestCase {
         // Never a pass without a check: "Unsortiert" has photos here (the large library and the
         // stress run are analysed only in part, or sort far fewer photos than they hold).
         XCTAssertTrue(checked.contains("unorganized"), "\(context): no viewer count was compared (lists checked: \(checked))")
+        // Back on the first list ("Unsortiert"), as the tab opened: the steps after this check use
+        // its photos. UI run 45884483812 left it on an empty "Ignoriert", and the large library's
+        // "scroll library" waited 48 s for a photo that list never shows.
+        if let first = UITestScreens.Unsorted.filters.first {
+            let chip = UITestScreens.Unsorted.filter(app, first)
+            if chip.waitForExistence(timeout: 5) { chip.tap() }
+            _ = libraryPhotos.firstMatch.waitForExistence(timeout: 15)
+        }
     }
 
     /// The card's progress line as the app recorded it (`-AlbumistUITestProgressLog`): every change

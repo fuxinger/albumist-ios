@@ -10,7 +10,7 @@ import Testing
 struct LaunchOffMainTests {
     @Test func theDatabaseFolderIsMadeOffTheMainThread() async throws {
         let (url, onMain) = try await Task.detached(priority: .userInitiated) {
-            (try AppModel.databaseURL(), Thread.isMainThread)
+            (try AppModel.databaseURL(), Self.onMainThread())
         }.value
         #expect(!onMain)
         let folder = url.deletingLastPathComponent()
@@ -19,4 +19,7 @@ struct LaunchOffMainTests {
         let values = try folder.resourceValues(forKeys: [.isExcludedFromBackupKey])
         #expect(values.isExcludedFromBackup == true)
     }
+
+    /// `Thread.isMainThread` is not available in an async context; a plain function may ask it.
+    private static func onMainThread() -> Bool { Thread.isMainThread }
 }

@@ -195,7 +195,7 @@ extension MapHomeTests {
         }
         let settings = HomeSettings(former: [FormerHome(id: AlbumistID("early"), place: Self.home(Self.hamburg, country: "DE"),
                                                         until: Self.date("2013-01-01"))])
-        let clock = ContinuousClock()
+        let clock = ThreadCPUClock()
         var fastest = Duration.seconds(60)
         var homes: [AlbumistID: RoundedHome] = [:]
         for _ in 0..<3 {

@@ -87,9 +87,9 @@ struct SearchPerformanceTests {
                      ms(build), sorted.count, average, sorted[sorted.count / 2], ms(slowest.1), slowest.0))
         // Debug builds on CI are several times slower than the app; the bound only catches
         // a search that scans the facts again.
-        #expect(average < 100)
-        #expect(ms(slowest.1) < 500)
-        #expect(ms(build) < 20_000)
+        #expect(TimingLimit.holds(.milliseconds(average), under: .milliseconds(100), "search average"))
+        #expect(TimingLimit.holds(slowest.1, under: .milliseconds(500), "slowest search (\(slowest.0))"))
+        #expect(TimingLimit.holds(build, under: .milliseconds(20_000), "search index build"))
     }
 }
 

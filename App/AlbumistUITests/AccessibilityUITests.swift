@@ -534,6 +534,7 @@ final class AccessibilityUITests: XCTestCase {
             if field.waitForExistence(timeout: 5) {
                 field.tap()
                 field.typeText(w.searchQuery)
+                UITestKeyboardTip.dismissIfShown(app, step: "\(tag) search typed", timeout: 1)
                 // The search's answer before the audit: its chips, results or empty state
                 // (SearchView sets them together). What they say is checked in SearchUITests.
                 let answer = app.descendants(matching: .any)

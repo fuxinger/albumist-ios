@@ -48,6 +48,8 @@ SWIFT_LIMITS = (
     (re.compile(r"\btimeout\s*:\s*(?:TimeInterval\s*=\s*)?" + NUMBER + r"(?![\w.])"), lambda m: 1.0),
     (re.compile(r"\btimed\(.*?\blimit\s*:\s*" + NUMBER + r"(?![\w.])"), lambda m: 1.0),
     (re.compile(r"<=?\s*\.(seconds|milliseconds|minutes)\(\s*" + NUMBER + r"\s*\)"), lambda m: UNITS[m.group(1)]),
+    # TimingLimit.holds(measured, under: .seconds(5), ...) (wall-clock limits, 26.11.).
+    (re.compile(r"\bunder\s*:\s*\.(seconds|milliseconds|minutes)\(\s*" + NUMBER + r"\s*\)"), lambda m: UNITS[m.group(1)]),
     (re.compile(r"\.timeLimit\(\s*\.minutes\(\s*" + NUMBER + r"\s*\)\s*\)"), lambda m: 60.0),
     # A deadline the test builds itself: `Date().addingTimeInterval(900)`, `Date(timeIntervalSinceNow: 40)`.
     (re.compile(r"\bDate\(\)\.addingTimeInterval\(\s*" + NUMBER + r"\s*\)"), lambda m: 1.0),

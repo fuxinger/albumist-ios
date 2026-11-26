@@ -685,7 +685,13 @@ final class AccessibilityUITests: XCTestCase {
             }
             auditFailures = []
             pendingContrast = []
+            // What keeps changing right after the timeout, and later after the second one
+            // (`UITestScreenProbe`): evidence, not a retry.
+            UITestScreenProbe.logChanges(app, screen: "\(screen) after attempt \(attempt)")
             if attempt == 1 { waitForResponsiveApp(before: screen) }
+        }
+        XCTExpectFailure("The screen changed during the accessibility audit", options: options) {
+            UITestScreenProbe.auditTypesAlone(app, screen: screen)
         }
         // "Audit failed to complete in time" twice: the screen went unaudited, and a screen nobody
         // checked must not pass (Prüfer B G5-06). The tree checks still ran; check() fails the test.

@@ -29,4 +29,23 @@ struct KeptForOthersStoreTests {
         try await store.save(plan("undo-q", status: .completed, reverts: q.id, wants: []))
         #expect(try await store.keptForOthers(undoing: p) == [:])
     }
+
+    /// What a plan wants is a row of its own (v7), not part of the header that is written again
+    /// with every step: 100,000 photos into 200 albums took 165 s instead of under 20 s
+    /// (journal load test, UI run 45759223743).
+    @Test func wantedIsStoredOnceBesideTheHeader() async throws {
+        let store = try AlbumistStore(url: nil)
+        var p = plan("p", status: .running, wants: (0..<1_000).map { AssetID("a-\($0)") })
+        try await store.save(p)
+        p.notes = [.keptForOtherPlans(album: "rom", count: 1)]
+        try await store.save(p)
+        #expect(try await store.rowCount("plan_wanted") == 1)
+        #expect(try await store.rowCount("plans", where: "CAST(payload AS TEXT) LIKE '%a-999%'") == 0)
+        #expect(try await store.plan(p.id) == p)
+        // A plan that wants nothing any more leaves no row behind.
+        p.wanted = nil
+        try await store.save(p)
+        #expect(try await store.rowCount("plan_wanted") == 0)
+        #expect(try await store.plan(p.id) == p)
+    }
 }

@@ -2,6 +2,8 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- Datenbank v7: was ein Plan je Album will, steht in `plan_wanted` und wird einmal je Plan
+  geschrieben, nicht mit jedem Schritt (Lasttest: 100.000 Fotos in 200 Alben wieder in 3 s statt 165 s).
 - „Album fürs Zuhause vorschlagen“ in „Dein Zuhause“: die eigene Wohnung kommt nur noch auf
   Wunsch als „Häufiger Ort“ (P1-10). Rückgängig nimmt nur Fotos heraus, die kein anderer
   angenommener Vorschlag im selben Album braucht, und sagt, was bleibt (P2-09). Die Foto-Ansicht

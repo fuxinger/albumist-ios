@@ -54,7 +54,13 @@ public actor AlbumistStore: PlanJournal {
     var backupSequence = 0
     /// What the database holds of each plan saved by this store: the next save of that plan
     /// writes only what differs (see `insertPlan`).
-    var journalCache: [AlbumistID: (steps: [PlanStep], media: [String: [AssetID]])] = [:]
+    var journalCache: [AlbumistID: JournalEntry] = [:]
+    /// What is on disk for a plan besides its header (`insertPlan`).
+    struct JournalEntry {
+        var steps: [PlanStep]
+        var media: [String: [AssetID]]
+        var wanted: [AlbumWish]?
+    }
     /// The header row this store last wrote for each plan, and the ids written down for new
     /// albums and folders it holds: a save that finds exactly that row stored takes them from
     /// here instead of decoding it again (`storedNotedIDs`). A row written in another way (from
@@ -910,7 +916,9 @@ public actor AlbumistStore: PlanJournal {
 
     /// The plan without its steps and media, its steps one row each, and the media of each
     /// step one row each (audit 2, 5.3). Only what changed since the last save of this plan
-    /// is written: after a step that is the plan header, that step and its media.
+    /// is written: after a step that is the plan header, that step and its media. What the
+    /// plan's suggestions want (`wanted`, as many photos as the plan) is a row of its own,
+    /// written when it changes (v7).
     ///
     /// The ids written down for new albums and folders in the plan as stored are kept (S1):
     /// they may have been written from inside a change after the copy being saved was taken
@@ -921,6 +929,7 @@ public actor AlbumistStore: PlanJournal {
         var header = plan
         header.steps = []
         header.record?.media = [:]
+        header.wanted = nil
         let payload = try encoder.encode(header)
         try db.execute("INSERT OR REPLACE INTO plans (id, status, created_at, payload) VALUES (?, ?, ?, ?)", [
             .text(plan.id.rawValue), .text(plan.status.rawValue), Self.date(plan.createdAt), .blob(payload),
@@ -952,7 +961,14 @@ public actor AlbumistStore: PlanJournal {
                 try db.execute("INSERT INTO plan_media (plan_id, step_id, payload) VALUES (?, ?, ?)", [id, .text(step), try json(assets)])
             }
         }
-        journalCache[plan.id] = (plan.steps, media)
+        if known == nil || known?.wanted != plan.wanted {
+            if let wanted = plan.wanted {
+                try db.execute("INSERT OR REPLACE INTO plan_wanted (plan_id, payload) VALUES (?, ?)", [id, try json(wanted)])
+            } else {
+                try db.execute("DELETE FROM plan_wanted WHERE plan_id = ?", [id])
+            }
+        }
+        journalCache[plan.id] = JournalEntry(steps: plan.steps, media: media, wanted: plan.wanted)
     }
 
     /// A plan from its row: the header with its steps and media put back. Plans saved by
@@ -963,6 +979,9 @@ public actor AlbumistStore: PlanJournal {
         let steps = try db.query("SELECT payload FROM plan_steps WHERE plan_id = ? ORDER BY idx", [id])
         if !steps.isEmpty {
             plan.steps = try steps.compactMap { try decode(PlanStep.self, $0["payload"]) }
+        }
+        if let row = try db.query("SELECT payload FROM plan_wanted WHERE plan_id = ?", [id]).first {
+            plan.wanted = try decode([AlbumWish].self, row["payload"])
         }
         let media = try db.query("SELECT step_id, payload FROM plan_media WHERE plan_id = ?", [id])
         if !media.isEmpty {
@@ -1148,7 +1167,7 @@ public actor AlbumistStore: PlanJournal {
             // otherwise the app would keep showing them until the next run finished.
             try db.execute("DELETE FROM settings WHERE key LIKE 'analysis.%'")
             if includingDecisions {
-                for table in ["overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media"] {
+                for table in ["overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media", "plan_wanted"] {
                     try db.execute("DELETE FROM \(table)")
                 }
                 // The database stays the same database: its stamp stays.

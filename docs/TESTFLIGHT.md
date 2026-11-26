@@ -200,6 +200,15 @@ Actions > **TestFlight feedback** > Run workflow.
   Lauf 44116350940 (17.11.), ist **fehlgeschlagen**: zu Beginn von Schritt 4 stand die
   Fortschrittszeile 13,7 s still (Grenze 10 s). Die Korrektur (9ff0dfc) ist in diesem Stand; ein
   neuer voller Durchgang damit steht aus.
+- **Seit 26.11.2026 keine gemeinsame Schlange `mac-queue` mehr** (Befund des Koordinators: GitHub
+  hält je Gruppe nur einen wartenden Lauf und bricht ihn still ab, sobald ein weiterer kommt; so
+  verdrängte ein Härtetest den wartenden UI-Lauf eines anderen Strangs). Jetzt hat jeder Pull
+  Request eine eigene Gruppe (`ui-pr-<Nummer>`, Rauchtest eines Entwurfs `ui-smoke-<Nummer>`),
+  jeder Zweig-Lauf von Hand `ui-branch-<ref>`, jeder Zweig-Härtetest `stress-branch-<ref>`, `main`
+  `mac-queue-main` und `stress-main`. Einen wartenden Lauf ersetzt nur ein neuerer desselben PRs
+  oder Zweigs (er prüft den neueren Stand). Läufe verschiedener Stränge warten auf einen freien
+  Mac in der Warteschlange des Kontos (fünf Macs), die nie etwas abbricht. Der folgende Punkt
+  beschreibt den Stand davor.
 - Mac-Warteschlange (Profi-Analyse, 17.11.2026): UI-Läufe und Härtetests aller Zweige laufen
   nacheinander, nie zwei zugleich. Es wartet höchstens einer; startet ein weiterer, ersetzt er den
   wartenden, der dann als „abgebrochen“ erscheint und später neu gestartet werden muss. Ein
@@ -380,7 +389,8 @@ Testcode gibt.
   macht dieselbe Prüfung wie das Gate von TestFlight, auch wenn keine Gruppe laufen musste.
   Das Freigabe-Gate (`ci_gate.py`, Workflow „Release“) verlangt einen grünen Job
   „UI verdict (full)“.
-- **Schnellmodus** (`quick`): Pull Requests laufen schnell. Die Tests bekommen
+- **Schnellmodus** (`quick`): Läufe von Hand mit `quick` und der Rauchtest eines Entwurfs (seit
+  26.11.; ein PR auf „Ready“ läuft voll). Die Tests bekommen
   `ALBUMIST_UI_QUICK=1` (im Workflow als `TEST_RUNNER_ALBUMIST_UI_QUICK`), und
   `DeviceConditionUITests.test11_LargeLibrary` (große Mediathek, rund 25 Minuten) überspringt
   sich. Im Schnellmodus hat jede Gruppe einen anderen Test-Fingerabdruck (sicherheitshalber
@@ -483,14 +493,24 @@ Regeländerung: Der volle UI-Lauf läuft einmal vor dem Merge, nicht noch einmal
 TestFlight-Lauf. Der volle Lauf vor jedem Upload bleibt Pflicht; das UI-Tor von TestFlight
 weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
 
-- **Vor dem Merge (Stufe 1)**: nach dem letzten Push des Pull Requests Actions > UI flow > Run
-  workflow auf seinem Zweig, „quick“ aus (`gh workflow run ui.yml --ref <zweig> -f quick=false`).
-  Der Lauf führt nur die Gruppen aus, die für diesen Inhalt noch kein volles Grün haben. Die
-  Pull-Request-Läufe selbst bleiben schnell (quick) und sagen das im Urteil-Job als Hinweis.
+- **Vor dem Merge, seit 26.11. (Umbau Stufe 1, Entscheidung Fuchs „alles wie empfohlen“)**:
+  Ein Pull Request wird als **Entwurf** geöffnet. Solange er Entwurf ist, läuft bei jedem Push
+  nur der **Rauchtest** (`ui_groups.SMOKE_TESTS`: kompletter Ablauf `test1` und Rückgängig aus
+  dem Verlauf `test1c`, schnell, ein Mac, rund 25 Minuten mit Bau; Urteil „UI verdict
+  (smoke)“; zählt für keine Gruppe). Ist der letzte Commit drin, stellt der Strang den PR auf
+  **„Ready for review“**: dann startet von selbst der volle UI-Lauf (alle Gruppen ohne volles
+  Grün für diesen Inhalt, voll, mit „Core tests hard (macOS)“), und sein „UI verdict (full)“ ist
+  das Merge-Tor. Nichts mehr von Hand starten. Danach läuft bei einem Fix-Push wieder der volle
+  Lauf, übernimmt aber jede Gruppe, deren App- und Testschlüssel gleich blieb (nur ein reiner
+  Testfix lässt also nur die betroffene Gruppe laufen). „UI supersede“ bricht beim Wechsel auf
+  „Ready“ den noch laufenden Rauchtest desselben Commits ab. Ein Lauf von Hand (`gh workflow run
+  ui.yml --ref <zweig> -f quick=false`) geht weiter, ist aber nicht mehr nötig.
 - **Merge-Tor**: „UI verdict (full)“ dieses Laufs grün auf dem letzten Commit des Zweigs. Es
   verlangt für jede Gruppe ein volles Grün (nie ein schnelles) für genau den App- und
-  Test-Fingerabdruck, kein Rot für diesen Schlüssel, und im Schritt „Merge content same as this
-  commit“, dass der Merge in `main` dieselben Fingerabdrücke hat (`ui_evidence.py
+  Test-Fingerabdruck, kein Rot für diesen Schlüssel (auch kein rotes Rauchtest-Ergebnis für
+  diesen App- und Rauchtest-Schlüssel: ein Rot wird nie durch „Ready“ grün gelaufen), und bei
+  einem Lauf von Hand im Schritt „Merge content same as this commit“ (der PR-Lauf testet ohnehin
+  den Merge-Commit), dass der Merge in `main` dieselben Fingerabdrücke hat (`ui_evidence.py
   merge-content`, `git merge-tree`). Hat `main` seitdem App oder Testcode geändert oder gibt es
   Konflikte, ist er rot: `main` in den Zweig holen und den vollen Lauf neu starten (Gruppen mit
   gleichem Schlüssel werden übernommen, kosten also keinen Mac).
@@ -499,7 +519,7 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   volle Lauf prüft sie hart: Job „Core tests hard (macOS)“ (macOS-Core-Tests und Lasttest). „UI verdict (full)“ ist nur grün, wenn „Core tests hard (macOS)“
   grün ist. Nur diese fehlenden Teile, keine zweite App-Build oder UI-Gruppe.
 - **Damit GitHub es erzwingt** (nur Fuchs, Einstellung, P5-09): Schutzregel für `main` mit
-  Pflicht-Prüfungen „UI verdict (full)“ und „UI stress verdict“ (seit 17:20, unten) und „Require
+  Pflicht-Prüfung „UI verdict (full)“ (seit 26.11. ohne „UI stress verdict“, unten) und „Require
   branches to be up to date before merging“.
   Bis dahin gilt es als Regel für Agenten und Fuchs.
 - **TestFlight (großes Tor)**: unverändert `ui_groups: auto`; es laufen nur Gruppen ohne volles
@@ -509,11 +529,23 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   neben dem Release-Kurztest, Hochladen rund 10); letzter Push bis Upload rund 2,5 statt 3,5–4
   Stunden. Unterscheidet sich der Inhalt doch (etwas kam nach dem vollen Lauf auf `main`),
   laufen die betroffenen Gruppen im TestFlight-Lauf wie bisher: langsamer, nie ungeprüft.
-- Achtung Mac-Warteschlange: der Lauf von Hand wartet in `mac-queue`; ein neuer Push auf
-  irgendeinen Pull Request kann ihn dort ersetzen (GitHub hält je Gruppe einen wartenden Lauf).
-  Darum erst starten, wenn der schnelle Lauf des letzten Pushs fertig ist.
+- (Stand vor dem 26.11.2026; seitdem hat jeder PR eine eigene Gruppe, siehe oben, und ein anderer
+  PR verdrängt keinen wartenden vollen Lauf mehr.) Achtung Mac-Warteschlange: der volle Lauf wartet in `mac-queue`; ein neuer Push auf
+  einen anderen Pull Request auf „Ready“ kann ihn dort ersetzen (GitHub hält je Gruppe einen
+  wartenden Lauf; Rauchtests von Entwürfen haben je PR eine eigene Gruppe und ersetzen ihn nie).
+  Neu starten durch „Convert to draft“ und wieder „Ready for review“, nicht mit „Re-run all
+  jobs“ (ein zweiter Versuch zählt für die Freigabe nie). Darum einen PR erst auf „Ready“
+  stellen, wenn kein anderer voller Lauf wartet.
 
 ### Härtetest einmal vor dem Merge (Entscheidung Fuchs 20.11. 17:20 Uhr)
+
+**Ersetzt am 26.11.2026 (Umbau Stufe 1, Entscheidung Fuchs „alles wie empfohlen“):** Der kleine
+Härtetest ist **kein Merge-Tor mehr**. Er läuft vor jedem TestFlight-Upload (beide Tore,
+unverändert) und jede Nacht auf `main` (`ui-stress.yml`, Montag bis Samstag 00:40 UTC der kleine
+Durchgang, übernommen, wenn `main` für diesen Inhalt schon ein Grün hat; Sonntag der volle mit
+50.000 Fotos). Ein roter nächtlicher Durchgang ist ein Befund wie jeder rote Lauf: sofort beheben.
+Von Hand auf einem Zweig geht er weiter (z. B. bei Änderungen an Analyse oder Speicher). Der Rest
+dieses Abschnitts beschreibt den Stand vom 20.11.
 
 Regeländerung: Der kleine Härtetest (10.000 Fotos, 15 Minuten) läuft einmal vor dem Merge,
 neben dem vollen UI-Lauf, und TestFlight übernimmt sein Grün, wenn der Inhalt nachweislich gleich
@@ -663,6 +695,33 @@ Jobs davor brauchen sie nicht.
 | Hochladen | von selbst, wenn alles grün ist (seit 19.11.2026; jeden Tag, an dem sich die App geändert hat) | von selbst, wenn alles grün ist (seit 19.11.2026) |
 | Erkennbar an | Laufname „TestFlight daily build (small gate, only for the owner)“, Nachricht des Tags, letzte Zeile von „Was testen“ | Laufname „TestFlight“ |
 | Für wen | nur dich (interne Tests); nicht an externe Tester geben | Tester und App Store |
+
+### Drittes Tor: Schnell-Build nur für Fuchs (Entscheidung Fuchs 26.11.2026, Regeltext vom Koordinator freigegeben)
+
+Ein Build nur für Fuchs als internen Tester, in rund 30–40 statt 70 Minuten:
+TestFlight > Run workflow auf `main`, **gate** `fast`.
+
+- **Läuft**: CI mit allen schnellen Tests (auch Datensicherheit, Rückgängig, Käufe, harte
+  Zeitgrenzen auf macOS), der Release-Kurztest und der UI-Rauchtest (`test1` kompletter Ablauf und
+  `test1c` Rückgängig aus dem Verlauf, `ui_groups.SMOKE_TESTS`). Die zwei Mac-Jobs laufen neben CI
+  statt danach; der Release-Kurztest tut das seit 26.11. mit jedem Tor. Ein rotes CI sperrt den
+  Upload wie immer. Thread Sanitizer (Linux) und UI-Tor (`ui_evidence.py gate --smoke-only`) wie
+  bei den anderen Toren.
+- **Läuft nicht**: kein 10k-Härtetest, keine weiteren UI-Gruppen.
+- **Gesperrt** (Job „Upload setup“, `fast_gate.py`, schließt im Zweifel): Hat sich seit dem letzten
+  TestFlight-Build (`build-<Nummer>`) etwas außerhalb von Ansichten, Karte, Texten, Tests und
+  Dokumenten geändert (Analyse, Zählung, Alben anlegen/rückgängig, Käufe, Speicher, Modell und
+  Plattform-Code der App, StoreKit, Paket- und Projektdateien, die Bau-Strecke `.github/` und das
+  Datenschutz-Manifest), bricht der Lauf ab und nennt die Dateien. Dann gilt das kleine oder das
+  große Tor. Gesperrt sind auch die Ansichten, die kaufen, Pläne umsetzen oder zurücknehmen, Alben
+  oder Reisen ändern oder nach dem Löschen fragen (`UnlockButton`, `PlanReviewView`,
+  `PlanReceiptView`, `OverviewView`, `DeleteQuestionNote`, `ManagedAlbumsView`,
+  `TripWorkshopView`, `SettingsView`), und die Texte der Zugriffsfragen (`InfoPlist.xcstrings`).
+- **Erkennbar an**: Laufname „TestFlight fast build (fast gate, internal only)“, Nachricht des
+  Tags, letzte Zeile von „Was testen“ („Schnell-Build, nur intern“). Geht nie an externe Tester
+  oder in den App Store; dafür bleibt das große Tor. Das hält App Store Connect selbst fest: der
+  Export setzt beim Schnell-Tor `testFlightInternalTestingOnly`, so lässt sich der Build keiner
+  externen Gruppe zuweisen und nicht zur Prüfung einreichen.
 
 - Beide Tore laufen in `testflight.yml` (Eingabe **gate**), damit Build-Nummern, Tags und „ein
   TestFlight-Lauf zur Zeit“ bleiben, wie sie sind. `daily-build.yml` (Linux, eine Minute, ohne

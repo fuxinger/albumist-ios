@@ -7,9 +7,18 @@ on for about an hour after 945446e had the fix, and the run of 945446e waited be
 concurrency setting cannot cancel per branch there (one group for all branches), so this
 script does it: it cancels the runs of ui.yml that belong to this pull request (same branch,
 same repository, event pull_request), are still waiting or running, and test another commit.
+Since 26.11.2026 every pull request has a group of its own ("ui-pr-<number>"); GitHub then
+replaces a waiting older run by itself, but still never cancels a running one, so this script
+stays: it stops the running run of an outdated commit.
 
 Never cancelled: runs of other branches, a run started by hand (workflow_dispatch), and the
 UI flow of a TestFlight run (it runs inside testflight.yml, not as a run of ui.yml).
+
+When a draft is marked ready for review (ACTION ready_for_review; rebuild stage 1, 26.11.2026)
+the head commit stays the same, and the earlier runs of that commit are cancelled too: the
+draft's smoke run, or the full run of an earlier ready mark (its finished groups are reused by
+content). The full UI run of the same commit replaces it (it would otherwise hold the Mac queue first; PR #23
+on 26.11.: the full run waited 45 min behind the pull request's own quicker run).
 
 A newer push must never lose its run to the job of an older push (second review, 19.11.): only
 runs created before this job's own run are cancelled (a run of a newer push is always created
@@ -19,7 +28,7 @@ an older commit's run is a pull request run too and is cancelled like it: it tes
 commit. Never on the default branch's own runs (HEAD_REF main is refused).
 
 Environment: GH_TOKEN (actions: write), GITHUB_REPOSITORY, GITHUB_API_URL, GITHUB_RUN_ID, PR_NUMBER,
-HEAD_SHA, HEAD_REF, GITHUB_STEP_SUMMARY (optional).
+HEAD_SHA, HEAD_REF, ACTION (the pull request event's action), GITHUB_STEP_SUMMARY (optional).
 """
 from __future__ import annotations
 
@@ -27,6 +36,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +45,12 @@ API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 WORKFLOW = ".github/workflows/ui.yml"
 # Every state of a run that has not ended (GitHub's run statuses).
 ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
+SAME_COMMIT_GAP = 60  # seconds, see older_runs
+
+
+def _seconds(stamp: str) -> float:
+    """Seconds of an ISO time of the API ("2026-11-26T02:33:44Z")."""
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
 
 
 class ApiError(RuntimeError):
@@ -66,17 +82,24 @@ def api(path: str, method: str = "GET", **params):
     raise ApiError(f"{path}: {last}", getattr(last, "code", None))
 
 
-def older_runs(runs: list[dict], repo: str, branch: str, head_sha: str, before: str) -> list[int]:
+def older_runs(runs: list[dict], repo: str, branch: str, head_sha: str, before: str,
+               same_commit: bool = False) -> list[int]:
     """Ids of the runs of ui.yml for this pull request that have not ended, test another commit
-    than `head_sha` and were created before `before` (ISO time of this job's own run)."""
+    than `head_sha` (with `same_commit`, also that commit: the smoke run of a draft that is now
+    ready) and were created before `before` (ISO time of this job's own run). A run of the same
+    commit only when created at least SAME_COMMIT_GAP seconds before: the full run of the
+    ready event is created in the same second as this job's run, maybe one earlier, and must
+    never be the one cancelled (a ready mark within a minute of the push keeps the smoke run;
+    the full run then waits for it)."""
     ids = []
     for run in runs:
         source = (run.get("head_repository") or {}).get("full_name")
         created = run.get("created_at") or ""
         if (run.get("path") == WORKFLOW and run.get("event") == "pull_request"
                 and run.get("head_branch") == branch and source == repo
-                and run.get("status") in ACTIVE and run.get("head_sha") != head_sha
-                and created and created < before):
+                and run.get("status") in ACTIVE and created and created < before
+                and (run.get("head_sha") != head_sha
+                     or (same_commit and _seconds(before) - _seconds(created) >= SAME_COMMIT_GAP))):
             ids.append(run["id"])
     return ids
 
@@ -99,7 +122,8 @@ def main(call=api, env=os.environ) -> int:
         before = call(f"actions/runs/{env['GITHUB_RUN_ID']}")["created_at"]
         runs = call("actions/workflows/ui.yml/runs", branch=branch, event="pull_request",
                     per_page=100)["workflow_runs"]
-        ids = older_runs(runs, repo, branch, head_sha, before)
+        ready = env.get("ACTION") == "ready_for_review"
+        ids = older_runs(runs, repo, branch, head_sha, before, same_commit=ready)
         if ids and (newer := moved()):
             lines.append(f"A newer commit ({newer[:7]}) was pushed meanwhile; its own job cancels "
                          f"the older UI runs. Nothing cancelled for {head_sha[:7]}.")
@@ -108,8 +132,9 @@ def main(call=api, env=os.environ) -> int:
         for run_id in ids:
             try:
                 call(f"actions/runs/{run_id}/cancel", method="POST")
-                lines.append(f"Cancelled UI run {run_id} (commit {shas[run_id][:7]}): "
-                             f"{head_sha[:7]} is newer.")
+                why = ("the pull request is ready for review: the full UI run replaces it"
+                       if shas[run_id] == head_sha else f"{head_sha[:7]} is newer")
+                lines.append(f"Cancelled UI run {run_id} (commit {shas[run_id][:7]}): {why}.")
             except ApiError as error:
                 ended = error.code == 409
                 lines.append(f"UI run {run_id} not cancelled ({error})"

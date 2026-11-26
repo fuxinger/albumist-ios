@@ -20,7 +20,9 @@ struct ListBoundaryStoreTests {
         let store = try AlbumistStore(url: nil)
         let start = Fixture.date("2020-01-01")
         // Seven photos share each time (burst shots), so many pages end inside a group of equal times.
-        let assets = (0..<count).map { AssetSnapshot(id: AssetID(String(format: "edge-%06d", $0)), creationDate: start.addingTimeInterval(Double($0 / 7) * 60)) }
+        let assets = (0..<count).map {
+            AssetSnapshot(id: AssetID(String(format: "edge-%06d", $0)), creationDate: start.addingTimeInterval(Double($0 / 7) * 60))
+        }
         try await store.upsertAssets(assets)
         #expect(try await store.assetCount() == count)
         #expect(try await store.allAssets().count == count)

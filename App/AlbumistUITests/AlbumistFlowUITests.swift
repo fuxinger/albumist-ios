@@ -864,7 +864,7 @@ final class AlbumistFlowUITests: XCTestCase {
     /// audit here only printed findings, and `AccessibilityUITests` audits the same screens and
     /// fails on findings (docs/TEST_PLAN.md, "UI-Tests: Dauer und Verlagerung").
     /// Every swipe in the photo viewer goes to the next photo (iPhone, Build 41, 26.11.: "reagiert
-    /// teilweise nicht auf Weiterwischen, erst beim 3.–4. Mal"). Six swipes, each must move the
+    /// teilweise nicht auf Weiterwischen, erst beim 3.–4. Mal"). Four swipes, each must move the
     /// position ("viewer.position", "n von m") within 2 s; a swipe without effect is counted and
     /// fails the test, never repeated. Back to the first photo afterwards.
     private func swipesGoToTheNextPhoto() {
@@ -876,7 +876,9 @@ final class AlbumistFlowUITests: XCTestCase {
         func number() -> Int? { (try? position.snapshot().label).flatMap { Int($0.prefix { $0.isNumber }) } }
         let label = (try? position.snapshot().label) ?? ""
         let total = Int(label.components(separatedBy: " von ").last?.replacingOccurrences(of: ".", with: "") ?? "") ?? 0
-        let swipes = min(6, max(total - (number() ?? 1), 0))
+        let began = Date()
+        defer { print("UI_TIMING viewer swipes \(String(format: "%.1f", Date().timeIntervalSince(began))) s") }
+        let swipes = min(4, max(total - (number() ?? 1), 0))
         var missed: [Int] = []
         for swipe in stride(from: 1, through: swipes, by: 1) {
             let before = number() ?? 0

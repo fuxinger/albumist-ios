@@ -17,6 +17,30 @@ Buildnummer und der Commit werden automatisch angehängt.
   (Beschluss 17.11.).
 
 <!-- testflight:start -->
+Danke fürs Testen! Dieser Build bringt das neue Aussehen von Albumist: große Fotos statt Listen, nah an Apple Fotos. Bitte achte besonders auf:
+
+- Startseite „Vorschläge“: Deine Vorschläge sind jetzt Fotokarten. „Anlegen“ legt das Album sofort an, der Hinweis unten bietet „Widerrufen“. Fliegt das Titelbild dabei zum Tab „Alben“?
+- Ein offener Vorschlag zeigt ein großes Titelbild und darunter seine Fotos nach Tagen.
+- Langes Drücken auf eine Karte oder ein Foto zeigt eine Vorschau mit Menü, wie in Fotos.
+- Foto-Ansicht: Tag und Ort stehen oben. Videos spielen von selbst ohne Ton, Live Photos bewegen sich kurz. „Teilen“ gibt ein Foto über iOS weiter.
+- „Unsortiert“ ist nach Tagen geordnet wie in Fotos. Mit zwei Fingern zoomst du das Raster, durch Ziehen wählst du mehrere Fotos aus. Fühlt sich das an wie in Fotos?
+- Alben: Titelbilder, Ordner und „Verlauf und Rückgängig“, auch dort mit Titelbildern.
+- Suche: Der runde Knopf am Ende der Tab-Leiste öffnet sie. Ohne Eingabe zeigt sie Vorschläge mit Fotos. Wechselst du den Tab und kommst zurück, steht deine Suche noch da. Die Tastatur kommt erst, wenn du ins Feld tippst.
+- Reise-Werkstatt: eine Zeitleiste mit Bildern für jeden Tag.
+- Sortier-Show nach „Jetzt anlegen“: größere Fotos, und jedes Album kommt mit seinem Titelbild.
+- Einmal: Wird die erste Analyse fertig, während Albumist offen ist, zeigt die Karte kurz 100 %.
+- Neues App-Symbol im Stil von iOS 26. Wie sieht es auf deinem Home-Bildschirm aus, hell, dunkel und getönt?
+- Foto-Ansicht: Wischen geht durch alle Fotos der Liste, auch in großen Mediatheken, nicht nur durch die ersten 3.000. Reagiert es beim ersten Wischen?
+- Zuhause: Deine Wohnung wird nicht mehr als „Häufiger Ort in …“ vorgeschlagen. Unter Einstellungen › Dein Zuhause gibt es „Album fürs Zuhause vorschlagen“, falls du es doch willst.
+- Größte Schrift und VoiceOver: Ist alles lesbar und jeder Knopf erreichbar?
+
+Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
+<!-- testflight:end -->
+
+## Frühere Builds
+
+### Build vom 26.11.2026 (Karten-Testseite, Foto-Ansicht ohne 3.000-Grenze)
+
 Danke fürs Testen! Dieser Build bringt eine Testseite für die kommende Karte „Deine Welt“. Sie gibt es nur in TestFlight, nicht in der App-Store-Version. Bitte achte besonders auf:
 
 - Kamera-Probe: Öffne die Testseite der Karte, dann „Reise abspielen“ und „Kamera-Probe“. Sieh dir zuerst den Flug an, dann tippe „Nochmal fliegen“, einmal im WLAN und einmal im Mobilfunk. Geh danach mit „Weiter“ durch die 16 Kamera-Blicke und mach Bildschirmfotos von den tiefen Blicken und von Rom.
@@ -27,9 +51,6 @@ Danke fürs Testen! Dieser Build bringt eine Testseite für die kommende Karte �
 - Alles andere sollte genau wie im letzten Build funktionieren.
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
-<!-- testflight:end -->
-
-## Frühere Builds
 
 ### Build 41 (21.11.2026)
 

@@ -700,9 +700,15 @@ jobs:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GATE: ${{ needs.check.outputs.gate }}
         run: |
           plutil -create xml1 "$EXPORT_OPTIONS"
           plutil -insert method -string app-store-connect "$EXPORT_OPTIONS"
+          # The fast gate (26.11.2026, second review): App Store Connect itself keeps the build to
+          # internal testers; it can be added to no external group and never submitted for review.
+          if [ "$GATE" = fast ]; then
+            plutil -insert testFlightInternalTestingOnly -bool YES "$EXPORT_OPTIONS"
+          fi
           plutil -insert destination -string upload "$EXPORT_OPTIONS"
           plutil -insert signingStyle -string automatic "$EXPORT_OPTIONS"
           plutil -insert teamID -string "$TEAM_ID" "$EXPORT_OPTIONS"

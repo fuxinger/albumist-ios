@@ -15,6 +15,12 @@ import AlbumistTestSupport
 ///
 /// What a list should hold is counted here by hand from the facts (one plain filter per list), not
 /// taken from the code under test.
+///
+/// Not here: that bug itself sat in the view (`LibraryView` and `SearchView` handed the viewer only
+/// `prefix(shown)`), which these tests cannot reach on Linux. Its fix and the rule that a view hands
+/// the viewer the whole list (`test_viewer_list_rule.py`) come with the hang strand's branch. These
+/// tests make sure the lists the views get are whole, and the viewer's window reaches every photo
+/// of what it is given.
 @Suite("Lists at boundary sizes")
 struct ListBoundaryTests {
     /// 0 and 1, both sides of the grid's page of 3,000, the stress pass and the weekly pass.

@@ -713,10 +713,15 @@ TestFlight > Run workflow auf `main`, **gate** `fast`.
   Dokumenten geändert (Analyse, Zählung, Alben anlegen/rückgängig, Käufe, Speicher, Modell und
   Plattform-Code der App, StoreKit, Paket- und Projektdateien, die Bau-Strecke `.github/` und das
   Datenschutz-Manifest), bricht der Lauf ab und nennt die Dateien. Dann gilt das kleine oder das
-  große Tor.
+  große Tor. Gesperrt sind auch die Ansichten, die kaufen, Pläne umsetzen oder zurücknehmen, Alben
+  oder Reisen ändern oder nach dem Löschen fragen (`UnlockButton`, `PlanReviewView`,
+  `PlanReceiptView`, `OverviewView`, `DeleteQuestionNote`, `ManagedAlbumsView`,
+  `TripWorkshopView`, `SettingsView`), und die Texte der Zugriffsfragen (`InfoPlist.xcstrings`).
 - **Erkennbar an**: Laufname „TestFlight fast build (fast gate, internal only)“, Nachricht des
   Tags, letzte Zeile von „Was testen“ („Schnell-Build, nur intern“). Geht nie an externe Tester
-  oder in den App Store; dafür bleibt das große Tor.
+  oder in den App Store; dafür bleibt das große Tor. Das hält App Store Connect selbst fest: der
+  Export setzt beim Schnell-Tor `testFlightInternalTestingOnly`, so lässt sich der Build keiner
+  externen Gruppe zuweisen und nicht zur Prüfung einreichen.
 
 - Beide Tore laufen in `testflight.yml` (Eingabe **gate**), damit Build-Nummern, Tags und „ein
   TestFlight-Lauf zur Zeit“ bleiben, wie sie sind. `daily-build.yml` (Linux, eine Minute, ohne

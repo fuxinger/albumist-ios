@@ -15,7 +15,7 @@ import fast_gate  # noqa: E402
 
 class RefusedTests(unittest.TestCase):
     def test_views_map_texts_tests_and_documents_may_change(self):
-        ok = ["App/Albumist/Views/Overview/OverviewView.swift", "App/Albumist/DesignSystem/Colors.swift",
+        ok = ["App/Albumist/Views/LibraryView.swift", "App/Albumist/DesignSystem/Colors.swift",
               "App/Albumist/Map/Globe/Globe.swift", "App/Albumist/Resources/Localizable.xcstrings",
               "Sources/AlbumistMap/Route.swift", "Sources/AlbumistWorldMap/Coast.swift",
               "App/AlbumistUITests/FlowUITests.swift", "Tests/AlbumistCoreTests/X.swift",
@@ -37,6 +37,21 @@ class RefusedTests(unittest.TestCase):
         paths = ["Sources/AlbumistNew/Thing.swift", ".github/workflows/testflight.yml",
                  ".github/scripts/fast_gate.py", ".github/rules.md", "App/Albumist/Resources/PrivacyInfo.xcprivacy"]
         self.assertEqual(fast_gate.refused(paths), paths)
+
+    def test_views_that_buy_apply_undo_or_change_albums_are_refused(self):
+        # Second review 26.11.: these views call the purchase, the plan, the undo and the album and
+        # trip changes; the permission texts are what Apple reviews. Every denied path still exists.
+        self.assertEqual(fast_gate.refused(list(fast_gate.DENIED)), list(fast_gate.DENIED))
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+        for path in fast_gate.DENIED:
+            with self.subTest(path=path):
+                self.assertTrue(os.path.exists(os.path.join(root, path)), f"{path} moved: update DENIED")
+
+    def test_the_fast_build_is_for_internal_testers_only_in_app_store_connect(self):
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+        with open(os.path.join(root, ".github", "workflows", "testflight.yml"), encoding="utf-8") as f:
+            workflow = f.read()
+        self.assertIn('if [ "$GATE" = fast ]; then\n            plutil -insert testFlightInternalTestingOnly -bool YES', workflow)
 
 
 class CheckTests(unittest.TestCase):

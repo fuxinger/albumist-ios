@@ -43,8 +43,22 @@ ALLOWED = (
     "docs/",
     "website/",
 )
-# Refused although under ALLOWED: what Apple reviews about data and privacy.
-DENIED = ("App/Albumist/Resources/PrivacyInfo.xcprivacy",)
+# Refused although under ALLOWED: what Apple reviews about data and privacy (the privacy manifest,
+# the permission texts), and the views that buy, apply, undo or change albums and trips, or ask
+# about deleting (second review 26.11.2026: a change there can rewire which plan is undone or what
+# the unlock button does, which no path check can tell from a change of looks).
+DENIED = (
+    "App/Albumist/Resources/PrivacyInfo.xcprivacy",
+    "App/Albumist/Resources/InfoPlist.xcstrings",
+    "App/Albumist/Views/UnlockButton.swift",
+    "App/Albumist/Views/PlanReviewView.swift",
+    "App/Albumist/Views/PlanReceiptView.swift",
+    "App/Albumist/Views/OverviewView.swift",
+    "App/Albumist/Views/DeleteQuestionNote.swift",
+    "App/Albumist/Views/ManagedAlbumsView.swift",
+    "App/Albumist/Views/TripWorkshopView.swift",
+    "App/Albumist/Views/SettingsView.swift",
+)
 DOCUMENT = re.compile(r"\.md$")
 TAG = re.compile(r"^build-(\d+)$")
 

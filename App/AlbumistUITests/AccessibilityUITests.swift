@@ -685,7 +685,7 @@ final class AccessibilityUITests: XCTestCase {
             let took = Date().timeIntervalSince(started)
             print("A11Y_AUDIT_TIME \(screen) attempt \(attempt) \(String(format: "%.1f", took)) s \(finished ? "completed" : "timed out")")
             if finished {
-                if took > 5 { UITestScreenProbe.logPixels(screen: screen) }
+                if took > 5 { UITestScreenProbe.logPixels(app, screen: screen) }
                 confirmContrast(screen)
                 return
             }
@@ -694,7 +694,7 @@ final class AccessibilityUITests: XCTestCase {
             // What keeps changing right after the timeout, and later after the second one
             // (`UITestScreenProbe`): evidence, not a retry.
             UITestScreenProbe.logChanges(app, screen: "\(screen) after attempt \(attempt)")
-            UITestScreenProbe.logPixels(screen: "\(screen) after attempt \(attempt)")
+            UITestScreenProbe.logPixels(app, screen: "\(screen) after attempt \(attempt)")
             if attempt == 1 { waitForResponsiveApp(before: screen) }
         }
         XCTExpectFailure("The screen changed during the accessibility audit", options: options) {

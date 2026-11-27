@@ -697,3 +697,31 @@ class RepositoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PullRequestGroupsTests(unittest.TestCase):
+    """27.11.: a group with "pull_requests": false (large-library) runs before uploads, at night
+    and by hand only."""
+
+    def test_the_flag_and_the_real_groups(self):
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+        with open(os.path.join(root, ".github", "ui-groups.json"), encoding="utf-8") as f:
+            listed = json.load(f)["groups"]
+        self.assertEqual([g["group"] for g in listed if g.get("pull_requests", True) is False], ["large-library"])
+        fake = type("G", (), {"group": lambda self, name: next(g for g in listed if g["group"] == name)})()
+        self.assertFalse(ui_groups.Groups.on_pull_requests(fake, "large-library"))
+        self.assertTrue(all(ui_groups.Groups.on_pull_requests(fake, g["group"]) for g in listed if g["group"] != "large-library"))
+
+    def test_ui_yml_hands_the_pull_request_mode_to_plan_and_verdict_and_runs_the_group_at_night(self):
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+        with open(os.path.join(root, ".github", "workflows", "ui.yml"), encoding="utf-8") as f:
+            workflow = f.read()
+        self.assertIn("UI_PR: ${{ (!inputs.release && github.event_name == 'pull_request') && 'true' || '' }}", workflow)
+        self.assertRegex(workflow, r"ui_evidence\.py plan --groups \"\$UI_GROUPS\" .*\$\{UI_PR:\+--pr\}")
+        self.assertRegex(workflow, r"ui_evidence\.py gate .*\$\{UI_PR:\+--pr\} \$\{UI_NIGHT:\+--groups large-library\}")
+        self.assertIn("(github.event_name == 'schedule' && 'large-library')", workflow)
+        self.assertRegex(workflow, r"\n  schedule:\n    - cron: '10 2 \* \* \*'\n")
+        # TestFlight's gate never passes --pr: it checks large-library too.
+        with open(os.path.join(root, ".github", "workflows", "testflight.yml"), encoding="utf-8") as f:
+            self.assertNotIn("--pr", f.read())
+

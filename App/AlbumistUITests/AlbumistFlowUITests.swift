@@ -387,9 +387,32 @@ final class AlbumistFlowUITests: XCTestCase {
     /// Every test except test1 may be the first on a fresh simulator: the onboarding counts as
     /// done (`-AlbumistUITestFastStart`), the demo library is created and analysed. On a
     /// simulator where that already happened this only waits until nothing runs.
-    private func prepare() {
+    ///
+    /// `test`: the test's name when a cut-off test 1 may have left the app unfinished
+    /// (`completeOnboardingIfCutOff`). `extra`: the test's own launch arguments when the app is
+    /// to run with them afterwards; nil leaves it as the fast start. Once a `prepare` on this
+    /// simulator found the library ready (`UITestOnboarding.preparedLibrary`, bundle C 27.11.),
+    /// the check for a cut-off test 1 and the wait run in the one launch with the test's own
+    /// arguments, and the app is launched again only when that launch did work or did not stand
+    /// at rest at every check, so the test still starts in a launch nothing happened in. Before
+    /// (full UI run 45865545486, flow-other) each of tests 3-7 launched three times: for the
+    /// cut-off check (about 12 s), for `prepare` (16-25 s) and with its own arguments.
+    private func prepare(_ test: String? = nil, then extra: [String]? = nil) {
         let started = Date()
-        launch(["-AlbumistUITestFastStart"])
+        let fastStart = ["-AlbumistUITestFastStart"]
+        let reuse = UITestOnboarding.preparedLibrary.reachedItsEnd
+        // A fresh simulator keeps the launches of before: the onboarding helpers and the fast
+        // start's demo library must not run with a test's switches.
+        if let test, !reuse { completeOnboardingIfCutOff(test) }
+        let first = reuse ? (extra ?? fastStart) : fastStart
+        launch(first)
+        // Whether this launch did more than wait: onboarding, photo access, the demo library or
+        // the rest of a cut-off analysis. Then the test gets a launch of its own, as before.
+        var worked = false
+        if let test, reuse, !UITestOnboarding.fullFlowReachedItsEnd {
+            if UITestOnboarding.completeIfNeeded(app, in: test) { shot("x-onboarded-again-\(test)") }
+            worked = UITestOnboarding.lastCompletionDidWork
+        }
         let noAccess = app.buttons["access.continue"]
         // The first screen: the overview, "Kein Zugriff" or the welcome screen, within the 5 s
         // the wait for "Kein Zugriff" alone had. The app picks it once when it has loaded
@@ -400,13 +423,15 @@ final class AlbumistFlowUITests: XCTestCase {
             app.tabBars.firstMatch.exists || noAccess.exists || button("Los geht").exists
         }
         if noAccess.exists {
+            worked = true
             // Photo access is not granted (the CI grant did not hold, or a test took it away):
             // with the introduction done the app shows "Kein Zugriff auf deine Fotos" (W4).
             noAccess.tap()
             allowPhotosIfAsked()
             // Opened once more, so the fast start runs as with access (demo library, if missing).
-            launch(["-AlbumistUITestFastStart"])
+            launch(first)
         } else if button("Los geht").exists {
+            worked = true
             // A first start without the fast start's introduction: the real onboarding.
             tap(button("Los geht"), "welcome (prepare)")
             // The areas step is pushed: its "Weiter" (the welcome screen has none) can be tapped.
@@ -427,7 +452,10 @@ final class AlbumistFlowUITests: XCTestCase {
         let demo = button("Beispiel-Mediathek anlegen")
         let demoUntil = Date().addingTimeInterval(3)
         var demoTapped = false
+        // At rest: the condition held at every check (three), so nothing ran in this launch.
+        var checks = 0
         let ready = waitStable("demo library analysed", timeout: 900) {
+            checks += 1
             if !demoTapped, Date() < demoUntil, demo.exists, !anything("Beispielfotos werden angelegt").exists {
                 demoTapped = true
                 demo.tap()
@@ -438,7 +466,14 @@ final class AlbumistFlowUITests: XCTestCase {
         }
         print(ready ? "UI_STEP_OK prepared" : "UI_STEP_MISSING prepared")
         XCTAssertTrue(ready, "The demo library was not created and analysed")
+        if ready { UITestOnboarding.preparedLibrary.ends() }
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
+        guard let extra else { return }
+        if ready, reuse, !worked, checks == 3, first == extra {
+            print("UI_FACT prepared in the test's own launch (at rest at every check), no second launch")
+        } else {
+            launch(extra)
+        }
     }
 
     /// Two photos from the library into a new album: opens its plan ("Umsetzen").
@@ -1889,9 +1924,8 @@ final class AlbumistFlowUITests: XCTestCase {
     /// Third run: every tab, every row, one level deep.
     func test3_TapThroughSweep() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("test3")
         let prepared = Date()
-        prepare()
+        prepare("test3")
         UITestWait.appears(app.tabBars.firstMatch, "tab bar before the sweep", timeout: 60)
         ensureAlbumForSweep()
         // The old 5 s at least (second review of C2): the overview settles before the sweep.
@@ -1961,10 +1995,8 @@ final class AlbumistFlowUITests: XCTestCase {
     /// must bring the decisions and the history back and say so.
     func test4_DecisionsComeBackAfterRebuild() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("test4")
-        prepare()
         // Decisions and a plan in the history, made in a run that keeps the backup copy.
-        launch(["-AlbumistUITestBackup"])
+        prepare("test4", then: ["-AlbumistUITestBackup"])
         applyRecommended("backup", relaunchWith: ["-AlbumistUITestBackup"])
         UITestWait.appears(app.tabBars.firstMatch, "app back after the backup plan", timeout: 60)
         // The copy must hold a history to bring back: when the earlier tests left none (test 1
@@ -2027,11 +2059,9 @@ final class AlbumistFlowUITests: XCTestCase {
     /// (Fortsetzen and Rückgängig: DeviceConditionUITests.test07.)
     func test5_InterruptedPlanCanBeLeftAndRetried() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("test5")
-        prepare()
         // The first change in Photos goes through at once, every later one waits 30 s, so the
         // app is always closed half way.
-        launch(["-AlbumistUITestSlowPlan"])
+        prepare("test5", then: ["-AlbumistUITestSlowPlan"])
         _ = waitStable("analysis idle before interruption", timeout: 120) { analysisIdle }
         // Something to apply: the selection of earlier runs, else the recommended ones, else a
         // new album of two photos. Tests 1c and 4 apply the recommended suggestions on this
@@ -2140,8 +2170,9 @@ final class AlbumistFlowUITests: XCTestCase {
     /// year: choosing one shows it on the overview, "Alle Jahre" takes it back.
     func test6_AnalysisKeepsGoingThroughBackgroundAndTabs() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("test6")
-        prepare()
+        prepare("test6")
+        // A launch of its own, not `prepare`'s: the slowed analysis must not be the one that
+        // finishes a cut-off analysis there.
         launch(["-AlbumistUITestSlowAnalysis"])
         _ = waitStable("analysis idle before rebuild", timeout: 300) { analysisIdle }
         // A full run from scratch: "Analyse neu aufbauen" in the settings.
@@ -2307,8 +2338,7 @@ final class AlbumistFlowUITests: XCTestCase {
     /// missing there). The test goes back before creating anything: nothing is stored.
     func test7_PersonalPlaceAsksForName() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("test7")
-        prepare()
+        prepare("test7")
         guard tap(reviewSuggestionsButton(), "open suggestions for a personal place", timeout: 30) else { return }
         // The list with its rows before it is scrolled (the overview has none). Not asserted:
         // the row is looked for below.
@@ -2434,8 +2464,7 @@ final class AlbumistFlowUITests: XCTestCase {
     /// ansehen". While selecting, the tab bar is hidden (as in Photos); afterwards it is back.
     func testRemovePhotoFromSuggestion() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("testRemovePhotoFromSuggestion")
-        prepare()
+        prepare("testRemovePhotoFromSuggestion")
         guard tap(reviewSuggestionsButton(), "open suggestions to remove a photo", timeout: 30),
               tap(suggestionRow(), "open a suggestion to remove a photo", timeout: 10),
               UITestWait.appears(app.navigationBars["Vorschlag"], "suggestion detail", timeout: 5) else { return }

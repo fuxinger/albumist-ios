@@ -50,6 +50,23 @@ enum UITestOnboarding {
     static func fullFlowFinished() { fullFlow.ends() }
     static var fullFlowReachedItsEnd: Bool { fullFlow.reachedItsEnd }
 
+    /// Set by `prepare` (AlbumistFlowUITests, DeviceConditionUITests) once it found the demo
+    /// library created and analysed on this simulator; the test runner's folder belongs to the
+    /// simulator, so a group's fresh simulator starts without it. With it a later `prepare`
+    /// launches the app with the test's own arguments right away, and only launches again when
+    /// that launch did not stand at rest from its first check on (bundle C, 27.11.): in the full
+    /// UI run 45865545486 every test after the group's first launched the app for `prepare`
+    /// (16-32 s, its idle wait held at the first check in all 9 device tests) and then again
+    /// with its own arguments, and the flow tests 3-7 launched once more before that for
+    /// `completeOnboardingIfCutOff` (about 12 s).
+    static let preparedLibrary = Markers("library-prepared")
+
+    /// Whether the last `completeIfNeeded` changed anything: it onboarded, created the demo
+    /// library or analysed the rest of a cut-off analysis ("Neu prüfen"). Its return value leaves
+    /// out the last; `prepare` launches again after any of them, so the test's own launch never
+    /// begins with work the onboarding helpers did in it.
+    private(set) static var lastCompletionDidWork = false
+
     /// The overview says the analysis is done and nothing runs (as `analysisIdle` in the tests).
     static func analysisIdle(_ app: XCUIApplication) -> Bool {
         func anything(_ text: String) -> Bool {
@@ -90,9 +107,10 @@ enum UITestOnboarding {
             let overview = app.navigationBars["Übersicht"]
             _ = UITestWait.holds(timeout: 5) { demo.exists || overview.exists }
             guard demo.exists else {
-                finishInterruptedAnalysis(app, in: test)
+                lastCompletionDidWork = finishInterruptedAnalysis(app, in: test)
                 return false
             }
+            lastCompletionDidWork = true
             print("UI_FACT \(test): past the onboarding without the demo library, creating it first")
             demo.tap()
             XCTAssertTrue(demoLibraryCreated(app), "\(test): demo library not created")
@@ -102,6 +120,7 @@ enum UITestOnboarding {
             expectCompleteAnalysis(app, in: test)
             return true
         }
+        lastCompletionDidWork = true
         print("UI_FACT \(test): the app is at its welcome screen, onboarding first")
         button("Los geht").tap()
         if button("Weiter").waitForExistence(timeout: 10) { button("Weiter").tap() }
@@ -218,25 +237,27 @@ enum UITestOnboarding {
     /// (run 43918684247: the runner was restarted in accessibility test 1, and tests 2 to 4
     /// found "No suggestions yet"). "Neu prüfen" analyses the rest, as a user would. Photos that
     /// could not be read are no cut-off: checking again would not change them, so they fail at
-    /// once with their count instead of after a 20-minute wait.
-    static func finishInterruptedAnalysis(_ app: XCUIApplication, in test: String) {
-        guard let partial = partialAnalysis(app) else { return }
+    /// once with their count instead of after a 20-minute wait. True when it tapped "Neu prüfen"
+    /// (the analysis ran again in this launch).
+    @discardableResult
+    static func finishInterruptedAnalysis(_ app: XCUIApplication, in test: String) -> Bool {
+        guard let partial = partialAnalysis(app) else { return false }
         if partial.readFailed {
             print("UI_STEP_MISSING \(test) partial count readable")
             XCTFail("\(test): the analysis card shows a partial count that could not be read")
-            return
+            return false
         }
         guard partial.cutOff else {
             print("UI_STEP_MISSING \(test) readable demo photos: \(partial.unreadableText)")
             XCTFail("\(test): \(partial.unreadableText)")
-            return
+            return false
         }
         print("UI_FACT \(test): the analysis was cut off at '\(partial.label)' (\(partial.unreadable) unreadable), checking again")
         let again = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Neu prüfen")).firstMatch
         guard again.waitForExistence(timeout: 5) else {
             print("UI_STEP_MISSING \(test) check again after a cut-off analysis")
             XCTFail("\(test): an analysis was cut off and the overview offers no \"Neu prüfen\"")
-            return
+            return false
         }
         // Below other cards the button can sit under the tab bar, where a tap lands on the bar.
         let tabs = app.tabBars.firstMatch
@@ -251,6 +272,7 @@ enum UITestOnboarding {
         print(done ? "UI_STEP_OK \(test) cut-off analysis finished" : "UI_STEP_MISSING \(test) cut-off analysis finished")
         XCTAssertTrue(done, "\(test): the cut-off analysis did not finish after \"Neu prüfen\"")
         if done { expectCompleteAnalysis(app, in: test) }
+        return true
     }
 
     private static func allowPhotosIfAsked(_ app: XCUIApplication) {

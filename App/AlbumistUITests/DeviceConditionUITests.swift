@@ -306,10 +306,21 @@ final class DeviceConditionUITests: XCTestCase {
     /// test can find "180 von 246 Fotos analysiert". Every test after them starts its own run
     /// ("Analyse neu aufbauen") or waits for every photo itself (test11); a new test that needs
     /// a fully analysed library checks `everyPhotoAnalysed` after `prepare()`.
-    private func prepare() {
+    ///
+    /// `extra`: the test's own arguments of its next launch (`start(extra)`), nil when the test
+    /// launches as it needs by itself. Once a `prepare` on this simulator found the library ready
+    /// (`UITestOnboarding.preparedLibrary`, bundle C 27.11.), the wait runs in the test's own
+    /// launch, and the app is launched again only when that launch did more than wait (a screen
+    /// before the overview) or did not stand at rest at every check: a heat script, a full disk
+    /// or unreadable photos are then still all there for the test, as in a launch of its own.
+    /// In the full UI run 45865545486 the wait held at its first check in all 9 tests after a
+    /// group's first, and the second launch cost each of them 12-15 s (end, launch, first screen).
+    /// Not for a switch that starts work at launch (the large library, a rebuilt database).
+    private func prepare(then extra: [String]? = nil) {
         let started = Date()
-        start()
-        onboardIfNeeded()
+        let reuse = extra != nil && UITestOnboarding.preparedLibrary.reachedItsEnd
+        start(reuse ? (extra ?? []) : [])
+        let worked = onboardIfNeeded()
         // "Beispiel-Mediathek anlegen" is tapped (once) when it shows in the first 3 s of the
         // wait below (its checks at about 0 and 2 s). It used to get a wait of its own of the
         // same 3 s before it, which a seeded library (every test after the group's first)
@@ -322,7 +333,10 @@ final class DeviceConditionUITests: XCTestCase {
         // what the overview showed. The state is now printed every 60 s and at the end, with a
         // screenshot when it never got ready.
         var lastState = Date.distantPast
+        // At rest: the condition held at every check (three), so nothing ran in this launch.
+        var checks = 0
         let ready = waitStable("demo library analysed", timeout: 900) {
+            checks += 1
             if !demoTapped, Date() < demoUntil, demo.exists, !anything("Beispielfotos werden angelegt").exists {
                 demoTapped = true
                 UITestOnboarding.clock("tap demo library")
@@ -342,7 +356,14 @@ final class DeviceConditionUITests: XCTestCase {
         }
         print(ready ? "UI_STEP_OK prepared" : "UI_STEP_MISSING prepared")
         XCTAssertTrue(ready, "The demo library was not created and analysed")
+        if ready { UITestOnboarding.preparedLibrary.ends() }
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
+        guard let extra else { return }
+        if ready, reuse, !worked, checks == 3 {
+            print("UI_FACT prepared in the test's own launch (at rest at every check), no second launch")
+        } else {
+            start(extra)
+        }
     }
 
     /// What `prepare` waits on, in one line: the headline, "Pause", "Fortsetzen", the seeding
@@ -364,16 +385,20 @@ final class DeviceConditionUITests: XCTestCase {
     /// The introduction (fresh install) or the "Kein Zugriff" screen (access taken away after
     /// it), if one of them shows; afterwards the app has full access. A denied access cannot be
     /// given back inside the app: the workflow gives it back from the Mac (`grantFromHost`).
-    private func onboardIfNeeded(attempt: Int = 1) {
+    /// True when a screen before the overview showed (the launch did more than open).
+    @discardableResult
+    private func onboardIfNeeded(attempt: Int = 1) -> Bool {
         let extra = launchExtra
         let welcome = button("Los geht")
         _ = waitStable("first screen", timeout: 20, stableChecks: 1) {
             welcome.exists || app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists
         }
         var asked = false
-        if welcome.exists {
-            if onboarding(.full) { return }
-        } else if askAgain.exists {
+        let onWelcome = welcome.exists
+        let onNoAccess = !onWelcome && askAgain.exists
+        if onWelcome {
+            if onboarding(.full) { return true }
+        } else if onNoAccess {
             asked = grantOnNoAccessScreen(.full)
         }
         // In UI runs 43766407272 and 43795445305 iOS answered for the user after a reset (no
@@ -382,11 +407,13 @@ final class DeviceConditionUITests: XCTestCase {
             print("UI_FACT photo access denied: given back from the Mac")
             grantFromHost(relaunchWith: extra)
             onboardIfNeeded(attempt: attempt + 1)
+            return true
         } else if asked {
             // Opened once more, so the launch runs as with access (the fast start's demo
             // library, if missing), with the test's own arguments.
             launch(extra)
         }
+        return onWelcome || onNoAccess
     }
 
     /// Full photo access given back from outside: the simulator in CI shows no iOS question
@@ -779,10 +806,12 @@ final class DeviceConditionUITests: XCTestCase {
     ///   retry hides a flake and stays only until the switch holds every later change until the
     ///   app is ended (owner's decision, docs/IMPROVEMENTS.md "Wackelige Tests"). A plan that
     ///   did not start, or a card missing after an early end, still fails at once.
-    private func interruptManualPlan(_ title: String) -> String? {
+    /// `launched`: the first attempt finds the app running with the slow plan already
+    /// (`prepare(then:)`); the plan's count of changes starts with its first plan either way.
+    private func interruptManualPlan(_ title: String, launched: Bool = false) -> String? {
         for attempt in 1...2 {
             let name = attempt == 1 ? title : "\(title) Zwei"
-            start(["-AlbumistUITestSlowPlan"])
+            if attempt > 1 || !launched { start(["-AlbumistUITestSlowPlan"]) }
             let apply = app.buttons["plan.apply"]
             guard openManualPlan(name), apply.waitForExistence(timeout: 30) else { return nil }
             let tapped = Date()
@@ -906,9 +935,8 @@ final class DeviceConditionUITests: XCTestCase {
     /// "bricht die Suche ab").
     func test01_WarmAndHotPhoneWaitAndFinish() {
         continueAfterFailure = true
-        prepare()
         // 40 checks normal, 40 warm, 10 hot (about 20 s of waiting), then the real device.
-        start(["-AlbumistUITestPace", "normal:40,gentle:40,hot:10,normal"])
+        prepare(then: ["-AlbumistUITestPace", "normal:40,gentle:40,hot:10,normal"])
         guard rebuildAnalysis() else { return }
         // The card's title (its accessibility label since rc-1's one-element card).
         let heat = anything("Wartet, bis dein iPhone abkühlt")
@@ -935,8 +963,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// Power Mode does not stop it (iOS already slows the phone down) and never shows as paused.
     func test02_LowBatteryAndLowPowerModeWording() {
         continueAfterFailure = true
-        prepare()
-        start(["-AlbumistUITestPace", "normal:30,battery:8,lowpower"])
+        prepare(then: ["-AlbumistUITestPace", "normal:30,battery:8,lowpower"])
         guard rebuildAnalysis() else { return }
         let battery = anything("Wartet aufs Laden")
         let waited = battery.waitForExistence(timeout: 300)
@@ -974,9 +1001,8 @@ final class DeviceConditionUITests: XCTestCase {
     /// DeviceConditionRunTests, a fast test).
     func test03_BackgroundExpiryAndRelaunchContinue() {
         continueAfterFailure = true
-        prepare()
+        prepare(then: ["-AlbumistUITestSlowAnalysis", "-AlbumistUITestExpireInBackground"])
         seen = []
-        start(["-AlbumistUITestSlowAnalysis", "-AlbumistUITestExpireInBackground"])
         guard rebuildAnalysis(), waitForImageStep("image step before leaving") else { return }
         record("before leaving")
         sendToBackground("for the background time to run out", atLeast: 6) // the run ends there: iOS took the time away
@@ -1031,8 +1057,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// photos readable, "Neu prüfen" reads the rest.
     func test04_UnreadableICloudOfflineComplete() {
         continueAfterFailure = true
-        prepare()
-        start(["-AlbumistUITestUnreadable", "7", "-AlbumistUITestICloudOnly", "-AlbumistUITestOffline"])
+        prepare(then: ["-AlbumistUITestUnreadable", "7", "-AlbumistUITestICloudOnly", "-AlbumistUITestOffline"])
         guard rebuildAnalysis() else { return }
         let finished = waitStable("analysis with unreadable photos finished", timeout: 900) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not complete with unreadable photos, iCloud documents and no network")
@@ -1098,8 +1123,9 @@ final class DeviceConditionUITests: XCTestCase {
     /// everything) and AlbumistTests StepProblemTextTests (the sentence the receipt shows for each).
     func test05_UndoWhenDeletionIsDeclinedOrIgnored() {
         continueAfterFailure = true
-        prepare()
-        let asked = undo(fault: nil, title: "Testalbum Frage", reason: "Löschen in der Frage von iOS nicht erlaubt")
+        // The first undo launches as `prepare` does (no switch): it runs in prepare's launch.
+        prepare(then: [])
+        let asked = undo(fault: nil, title: "Testalbum Frage", reason: "Löschen in der Frage von iOS nicht erlaubt", launched: true)
         if !asked {
             undo(fault: "declined", title: "Testalbum Abgelehnt", reason: "Löschen in der Frage von iOS nicht erlaubt")
         }
@@ -1108,9 +1134,10 @@ final class DeviceConditionUITests: XCTestCase {
     /// One album made and undone with the deletion declined or not carried out. False only when
     /// the real question was meant (`fault` nil) and iOS did not ask: then nothing was left over
     /// and the partial receipt was not seen.
+    /// `launched`: the app runs with the arguments already (`prepare(then:)`).
     @discardableResult
-    private func undo(fault: String?, title: String, reason: String) -> Bool {
-        start(fault.map { ["-AlbumistUITestDeletionFault", $0] } ?? [])
+    private func undo(fault: String?, title: String, reason: String, launched: Bool = false) -> Bool {
+        if !launched { start(fault.map { ["-AlbumistUITestDeletionFault", $0] } ?? []) }
         guard applyManualPlan(title), tap(app.buttons["result.receipt"], "receipt of \(title)") else { return true }
         let undo = app.buttons["receipt.undo"]
         // The receipt loads after the screen opens (an empty list until then): its share button
@@ -1165,8 +1192,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// goes on: the analysis by itself, the plan as an interrupted plan.
     func test06_DiskFullDuringAnalysisAndPlan() {
         continueAfterFailure = true
-        prepare()
-        start(["-AlbumistUITestDiskFull", "analysis"])
+        prepare(then: ["-AlbumistUITestDiskFull", "analysis"])
         guard rebuildAnalysis() else { return }
         let notice = app.alerts.firstMatch
         let told = notice.waitForExistence(timeout: 300)
@@ -1223,14 +1249,14 @@ final class DeviceConditionUITests: XCTestCase {
     /// the album the plan made (UI run 43949880264 left "Testalbum Vollendet" with 0 photos).
     func test07_InterruptedPlanContinueAndUndo() {
         continueAfterFailure = true
-        prepare()
+        prepare(then: ["-AlbumistUITestSlowPlan"])
         let card = anything("wurde unterbrochen")
         // Album titles stay clear of the words the tap-through sweep never taps ("Fortsetzen",
         // "Entfernen", …, AlbumistFlowUITests.sweepSkip; UI run 43930271358: "The sweep reached
         // no screen from Alben", both album rows were skipped by their titles). Since 20.11.
         // this test runs in the group device-flows, not on the sweep's simulator; the sweep
         // makes its own album (AlbumistFlowUITests.ensureAlbumForSweep).
-        if let continued = interruptManualPlan("Testalbum Vollendet"), tap(app.buttons["Rest anlegen"], "continue interrupted plan") {
+        if let continued = interruptManualPlan("Testalbum Vollendet", launched: true), tap(app.buttons["Rest anlegen"], "continue interrupted plan") {
             let done = waitGone(card, timeout: 120)
             print(done ? "UI_STEP_OK interrupted plan continued" : "UI_STEP_MISSING interrupted plan continued")
             XCTAssertTrue(done, "\"Rest anlegen\" did not finish the interrupted plan")
@@ -1262,9 +1288,8 @@ final class DeviceConditionUITests: XCTestCase {
     /// Albumist), and that removal is undone: the album is back.
     func test08_RemoveManagedAlbumAndUndo() {
         continueAfterFailure = true
-        prepare()
         let title = "Testalbum Wiederhergestellt" // no sweep-skip word in it (see test07)
-        start()
+        prepare(then: [])
         guard applyManualPlan(title) else { return }
         start()
         guard tap(app.buttons["Einstellungen"], "settings for managed albums", timeout: 20) else { return }

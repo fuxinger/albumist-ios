@@ -96,12 +96,15 @@ struct MapPrototypeEntry: ViewModifier {
                         } label: {
                             Image(systemName: "globe")
                         }
-                        .accessibilityLabel(Text(verbatim: "Karten-Prototyp"))
+                        .accessibilityLabel(Text("Karte"))
+                        .accessibilityIdentifier("atlas.map")
                     }
                 }
             }
             .fullScreenCover(isPresented: $open) {
-                MapPrototypeView()
+                // The map for laypeople (26.11.2026); the measuring page of wave 0 is behind
+                // "Messwerte" in its menu.
+                WorldMapView()
                     .environment(model)
             }
             .task {

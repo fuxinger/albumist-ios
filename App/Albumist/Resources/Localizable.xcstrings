@@ -711,6 +711,46 @@
         }
       }
     },
+    "%lld Weltgegenden" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld world region"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld world regions"
+                }
+              }
+            }
+          }
+        },
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Weltgegend"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Weltgegenden"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "1 Foto bleibt im Album „%@“." : {
       "localizations" : {
         "en" : {
@@ -741,6 +781,36 @@
         }
       }
     },
+    "Alle Fotos ansehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View All Photos"
+          }
+        }
+      }
+    },
+    "Alles an einem Ort, deshalb siehst du die Fotos als Geschichte statt als Film." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Everything in one place, so you see the photos as a story instead of a film."
+          }
+        }
+      }
+    },
+    "Anhalten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pause"
+          }
+        }
+      }
+    },
     "Dafür braucht Albumist Zugriff auf alle Fotos. Gerade sind nur ausgewählte Fotos freigegeben, und Albumist sieht nicht, was sonst in deinen Alben liegt. Ändern kannst du das unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff." : {
       "localizations" : {
         "en" : {
@@ -751,12 +821,52 @@
         }
       }
     },
+    "Das war %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That was %@"
+          }
+        }
+      }
+    },
     "Datum wird vorgeschlagen" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suggesting a date"
+          }
+        }
+      }
+    },
+    "Deine Reisen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your Trips"
+          }
+        }
+      }
+    },
+    "Deine Welt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your World"
+          }
+        }
+      }
+    },
+    "Diese Reise hat zwei Stationen: %@. Ein Film lohnt sich erst ab drei." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This trip has two stops: %@. A film needs at least three."
           }
         }
       }
@@ -781,6 +891,36 @@
         }
       }
     },
+    "Foto %lld von %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photo %1$lld of %2$lld"
+          }
+        }
+      }
+    },
+    "Foto öffnen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open photo"
+          }
+        }
+      }
+    },
+    "Fotos ansehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View Photos"
+          }
+        }
+      }
+    },
     "Fotos, die bei dir zu Hause entstehen, bekommen sonst kein eigenes Album. Orte in deiner Nähe, an denen du oft bist, werden weiter vorgeschlagen." : {
       "localizations" : {
         "en" : {
@@ -797,6 +937,126 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Loading year"
+          }
+        }
+      }
+    },
+    "Karte" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Map"
+          }
+        }
+      }
+    },
+    "Karte wird geladen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading map"
+          }
+        }
+      }
+    },
+    "Keine Fotos gefunden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Photos Found"
+          }
+        }
+      }
+    },
+    "Mehr" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More"
+          }
+        }
+      }
+    },
+    "Messwerte" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Measurements"
+          }
+        }
+      }
+    },
+    "mit %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "with %@"
+          }
+        }
+      }
+    },
+    "Noch keine Reisen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Trips Yet"
+          }
+        }
+      }
+    },
+    "Nochmal" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play Again"
+          }
+        }
+      }
+    },
+    "Nächstes Foto" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next photo"
+          }
+        }
+      }
+    },
+    "Reise abspielen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Play Trip"
+          }
+        }
+      }
+    },
+    "Reise abspielen möglich" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can be played as a film"
+          }
+        }
+      }
+    },
+    "Sobald Albumist Reisen in deinen Fotos findet, stehen sie hier und auf der Karte." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "As soon as Albumist finds trips in your photos, they appear here and on the map."
           }
         }
       }
@@ -4311,6 +4571,16 @@
         }
       }
     },
+    "Vorheriges Foto" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Previous photo"
+          }
+        }
+      }
+    },
     "Vorschläge neu geprüft" : {
       "localizations" : {
         "en" : {
@@ -4337,6 +4607,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "What was missing is done by now, or the album no longer exists."
+          }
+        }
+      }
+    },
+    "Zoomt hinein" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zooms in"
           }
         }
       }
@@ -4377,6 +4657,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Loading home …"
+          }
+        }
+      }
+    },
+    "Zur ganzen Reise „%@“" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Whole Trip “%@”"
           }
         }
       }
@@ -4747,6 +5037,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Opens Albumist and looks for new photos that have suggestions."
+          }
+        }
+      }
+    },
+    "Öffnet die Fotos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens the photos"
           }
         }
       }

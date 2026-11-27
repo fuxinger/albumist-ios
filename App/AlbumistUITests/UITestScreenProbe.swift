@@ -43,7 +43,7 @@ enum UITestScreenProbe {
     /// moment, so no pause between them; the time they spanned is logged); the
     /// region whose pixels differ between them, in points (`A11Y_PROBE_PIXELS`). A view that
     /// keeps drawing (a geometry action cycling, a fade that never ends) shows there.
-    static func logPixels(screen: String) {
+    static func logPixels(_ app: XCUIApplication, screen: String) {
         var shots: [Shot] = []
         let start = Date()
         for _ in 0..<3 {
@@ -84,7 +84,9 @@ enum UITestScreenProbe {
             print("A11Y_PROBE_PIXELS \(screen) still: 3 screenshots in \(span) s alike")
             return
         }
-        let scale = max(XCUIScreen.main.scale, 1)
+        // Pixels per point: the screenshot's width over the app's (as the handwriting test reads it).
+        let points = app.frame.width
+        let scale = points > 0 ? max(CGFloat(first.width) / points, 1) : 1
         let box = String(format: "%.0f,%.0f %.0fx%.0f", CGFloat(minX) / scale, CGFloat(minY) / scale,
                          CGFloat(maxX - minX + 1) / scale, CGFloat(maxY - minY + 1) / scale)
         print("A11Y_PROBE_PIXELS \(screen) changing: \(changed) pixel differences in \(span) s, within \(box) pt")

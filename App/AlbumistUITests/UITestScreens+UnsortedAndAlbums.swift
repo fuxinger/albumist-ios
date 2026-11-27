@@ -103,6 +103,16 @@ extension UITestScreens {
 
     // MARK: Albums
 
+    /// Where `find` saw an album: its first tile, that tile's label when it was seen ("Title,
+    /// 2 Fotos"; the element itself is read again at each use), how many tiles of that name
+    /// stand there, and the place ("shelf", "Alle N", "Deine Alben").
+    struct AlbumFound {
+        let tile: XCUIElement
+        let label: String
+        let count: Int
+        let place: String
+    }
+
     @MainActor
     enum Albums {
         /// "Verlauf und Rückgängig" in the tab "Alben" (`albums.history`): the only way to the
@@ -217,28 +227,42 @@ extension UITestScreens {
             return app.staticTexts["Rückgängig gemacht"].waitForExistence(timeout: 30)
         }
 
-        /// The tile of the album named `title` (`album.tile`, its body says "Title, 2 Fotos"), in
-        /// the tab "Alben" the caller has open: on the shelf "Von Albumist" (newest first; tiles
-        /// far along it are built only once scrolled to), else behind the shelf's "Alle N"
-        /// (`albums.managed`, which stays open then), else further down under "Deine Alben". Nil
-        /// when it shows in none of them.
-        static func tile(_ app: XCUIApplication, titled title: String) -> XCUIElement? {
-            let tile = app.descendants(matching: .any).matching(identifier: "album.tile")
-                .containing(NSPredicate(format: "label BEGINSWITH %@", "\(title), ")).firstMatch
-            if tile.waitForExistence(timeout: 10) { return tile }
+        /// The tiles of the album named `title` (`album.tile`, its body says "Title, 2 Fotos") in
+        /// the tab "Alben" the caller has open: on the shelf "Von Albumist" (newest first; it builds
+        /// only the tiles on screen), else behind the shelf's "Alle N" (`albums.managed`, which
+        /// stays open when the album is there), else further down under "Deine Alben". Nil when
+        /// it shows in none of them. The one way the UI tests look for an album by its name
+        /// (`test_ui_album_lookup.py`): looking only at the screen missed albums far along the
+        /// shelf twice on 27.11. (PR 31's test08 in the night, PR 28's test08 in run 45971115191).
+        static func find(_ app: XCUIApplication, titled title: String) -> AlbumFound? {
+            let tiles = app.descendants(matching: .any).matching(identifier: "album.tile")
+                .matching(NSPredicate(format: "label BEGINSWITH %@", "\(title), "))
+            let tile = tiles.firstMatch
+            func found(_ place: String) -> AlbumFound {
+                let found = AlbumFound(tile: tile, label: tile.label, count: tiles.count, place: place)
+                print("UI_FACT album \(title): \(found.count) tile(s), \(place), '\(found.label)'")
+                return found
+            }
+            if tile.waitForExistence(timeout: 10) { return found("shelf") }
             let all = app.buttons["albums.managed"]
             if all.exists {
                 Cards.reach(all, in: app)
                 all.tap()
-                if tile.waitForExistence(timeout: 10) { return tile }
+                if tile.waitForExistence(timeout: 10) { return found("Alle N") }
+                // Not one of Albumist's: back to the tab for "Deine Alben".
+                let bar = app.navigationBars.firstMatch
+                if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
+                _ = UITestWait.holds(timeout: 10) { !all.exists || all.isHittable }
             }
             var swipes = 0
-            while !tile.exists && swipes < 3 {
+            while !tile.exists && swipes < 4 {
                 app.swipeUp()
                 swipes += 1
                 _ = tile.waitForExistence(timeout: 1)
             }
-            return tile.exists ? tile : nil
+            if tile.exists { return found("Deine Alben") }
+            print("UI_FACT album \(title): no tile on the shelf, behind \"Alle N\" or under \"Deine Alben\"")
+            return nil
         }
 
         /// "…" in an album of Albumist's with something to undo (`album.more`); by its name where

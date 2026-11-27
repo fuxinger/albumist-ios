@@ -1850,7 +1850,7 @@ class SleepRuleTests(unittest.TestCase):
     # when a sleep becomes a condition wait.
     CEILING = {
         "AccessibilityUITests.swift": 5,
-        "DeviceConditionUITests.swift": 14,
+        "DeviceConditionUITests.swift": 13,
         "SearchUITests.swift": 1,
         "AlbumistFlowUITests.swift": 45,
         "AlbumistLockedUITests.swift": 1,

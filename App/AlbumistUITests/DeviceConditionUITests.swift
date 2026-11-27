@@ -894,60 +894,40 @@ final class DeviceConditionUITests: XCTestCase {
         return (done, total)
     }
 
-    /// The album is listed in the albums tab: its tile on the shelf "Von Albumist" (newest first)
-    /// or further down, its body named "Title, 2 Fotos" (design 5C).
+    /// The album is listed in the albums tab: its tile on the shelf "Von Albumist", behind its
+    /// "Alle N" or under "Deine Alben" (`UITestScreens.Albums.find`; design 5C).
     private func albumExists(_ title: String) -> Bool {
-        guard tap(tabButton("Alben"), "albums tab for \(title)") else { return false }
-        // pacing: kept, the albums tab lists the app's inventory, which Photos' change note
-        // brings up to date after a plan or an undo; no element says it is current, and test07
-        // asserts that an album taken back is gone (a wait for the row would stop at a stale one).
-        sleep(2)
-        let album = anything(title)
-        var swipes = 0
-        while !album.exists && swipes < 3 {
-            app.swipeUp()
-            _ = UITestWait.holds(timeout: 1) { album.exists }
-            swipes += 1
-        }
-        let exists = album.exists
-        print("UI_FACT album \(title) exists: \(exists)")
-        tap(tabButton("Vorschläge"), "start page after albums")
-        return exists
+        lookAtAlbum(title, "albums tab for \(title)") != nil
     }
 
     /// How many photos the album's tile in the albums tab names (its body: "Testalbum Vollendet,
     /// 2 Fotos"), nil when the tile is not there.
     private func albumPhotoCount(_ title: String) -> Int? {
-        guard tap(tabButton("Alben"), "albums tab for the photos of \(title)") else { return nil }
-        // pacing: kept, the row's photo count comes from the app's inventory, which Photos'
-        // change note brings up to date after the plan; no element says it is current (a wait
-        // for the row would read a count from before).
-        sleep(2)
-        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
-        var swipes = 0
-        while !row.exists && swipes < 3 {
-            app.swipeUp()
-            _ = UITestWait.holds(timeout: 1) { row.exists }
-            swipes += 1
-        }
-        let label = row.exists ? row.label : ""
+        let label = lookAtAlbum(title, "albums tab for the photos of \(title)")?.label ?? ""
         print("UI_FACT album row \(title): \(label)")
-        tap(tabButton("Vorschläge"), "start page after albums")
         guard let count = label.firstMatch(of: #/([0-9][0-9.]*) Fotos?/#)?.1 else { return nil }
         return Int(count.replacingOccurrences(of: ".", with: ""))
     }
 
-    /// How many tiles of the albums tab show the album (each tile's body: "Testalbum Vollendet, 2
-    /// Fotos"; a merge suggestion naming it reads differently).
+    /// How many tiles of the albums tab show the album, where it stands (each tile's body:
+    /// "Testalbum Vollendet, 2 Fotos"; a merge suggestion naming it reads differently).
     private func albumRowCount(_ title: String) -> Int {
-        guard tap(tabButton("Alben"), "albums tab for the rows of \(title)") else { return 0 }
-        let pattern = "(.*, )?" + NSRegularExpression.escapedPattern(for: title) + ", [0-9][0-9.]* Fotos?"
-        let rows = app.buttons.matching(NSPredicate(format: "label MATCHES %@", pattern))
-        _ = rows.firstMatch.waitForExistence(timeout: 10)
-        let count = rows.count
-        print("UI_FACT album rows \(title): \(count)")
+        lookAtAlbum(title, "albums tab for the rows of \(title)")?.count ?? 0
+    }
+
+    /// The album in the tab "Alben" (`UITestScreens.Albums.find`), then back on the start page;
+    /// a screenshot when it is nowhere.
+    private func lookAtAlbum(_ title: String, _ what: String) -> UITestScreens.AlbumFound? {
+        guard tap(tabButton("Alben"), what) else { return nil }
+        // pacing: kept, the albums tab lists the app's inventory, which Photos' change note
+        // brings up to date after a plan or an undo; no element says it is current, and test07
+        // asserts that an album taken back is gone (a wait for the tile would stop at a stale one).
+        sleep(2)
+        let found = UITestScreens.Albums.find(app, titled: title)
+        if found == nil { shot("x-album-not-found-\(title.replacingOccurrences(of: " ", with: "-"))") }
+        print("UI_FACT album \(title) exists: \(found != nil)")
         tap(tabButton("Vorschläge"), "start page after albums")
-        return count
+        return found
     }
 
     // MARK: 1–2 Heat, battery, Low Power Mode
@@ -1336,7 +1316,7 @@ final class DeviceConditionUITests: XCTestCase {
         start()
         guard tap(tabButton("Alben"), "albums tab for the managed album", timeout: 20) else { return }
         // The album's tile on the shelf "Von Albumist" (newest first), or behind its "Alle N".
-        guard let tile = UITestScreens.Albums.tile(app, titled: title) else {
+        guard let tile = UITestScreens.Albums.find(app, titled: title)?.tile else {
             print("UI_STEP_MISSING managed album tile")
             shot("x-missing-managed-album-tile")
             XCTFail("The albums tab does not show \(title)")

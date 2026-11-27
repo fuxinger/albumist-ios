@@ -1571,7 +1571,22 @@ final class AlbumistFlowUITests: XCTestCase {
         let closed = waitGone(close, timeout: 5)
         print(closed ? "UI_STEP_OK pull down closes the video" : "UI_STEP_MISSING pull down closes the video")
         XCTAssertTrue(closed, "Pulling the video down did not close it")
-        if !closed { closeViewerIfOpen() }
+        if !closed { explainVideoPull() }
+    }
+
+    /// Evidence for a pull that did not close the video (UI run 46012910058, passed in the two
+    /// runs before): what was on screen, and whether a second, quicker pull closes it, which tells
+    /// a pull the viewer missed once from one it never takes. The test stays red either way.
+    private func explainVideoPull() {
+        shot("x-video-pull")
+        let play = app.buttons["viewer.video.play"]
+        let frame = app.frame
+        let controls = play.exists ? "\(Int(play.frame.minY))-\(Int(play.frame.maxY))" : "none"
+        print("UI_FACT video pull: screen \(Int(frame.height)) pt, play button at y \(controls), swipe from the middle")
+        app.swipeDown(velocity: .fast)
+        let second = waitGone(app.buttons["viewer.close"], timeout: 5)
+        print("UI_FACT video pull: a second, quick pull \(second ? "closed it" : "did not close it either")")
+        if !second { closeViewerIfOpen() }
     }
 
     private func closeViewerIfOpen() {

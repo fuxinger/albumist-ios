@@ -520,7 +520,12 @@ final class AlbumistFlowUITests: XCTestCase {
             // Not asserted: the count below is.
             _ = UITestWait.holds(timeout: 5) { photos.count >= 2 }
         }
-        guard tap(app.buttons["Auswählen"], "select photos for \(title)"), photos.count >= 2 else { return false }
+        guard photos.count >= 2 else {
+            // Everything sorted (the full flow before it, UI run 46063808963): a photo of an album.
+            print("UI_FACT \(photos.count) photos left in Unsortiert and Unsicher for \(title): a photo of an album instead")
+            return UITestScreens.Albums.planNewAlbumFromAnAlbum(app, titled: title, "plan for \(title)")
+        }
+        guard tap(app.buttons["Auswählen"], "select photos for \(title)") else { return false }
         photos.element(boundBy: 0).tap()
         photos.element(boundBy: 1).tap()
         guard tap(button("Zu Album hinzufügen"), "add to album for \(title)") else { return false }

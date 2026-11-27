@@ -268,6 +268,47 @@ extension UITestScreens {
             return nil
         }
 
+        /// A plan of one new album with one photo of the first album on the shelf, made as a user
+        /// makes one: the photo's long press, "Zu Album hinzufügen …", its name `title`,
+        /// "Anlegen …" (creating the album and adding the photo: two changes in Photos). For when
+        /// "Unsortiert" and "Unsicher" have nothing left: since the wave-1 tab has no "Alle", the
+        /// photos of albums are the only ones left after the full flow sorted the demo library
+        /// (UI run 46063808963, flow-full: flow test5 after test1, 1b and 4 found 0 to pick).
+        /// True once the preview ("Vorschau") shows; else false with a `UI_STEP_MISSING` line.
+        static func planNewAlbumFromAnAlbum(_ app: XCUIApplication, titled title: String, _ what: String) -> Bool {
+            func missing(_ step: String) -> Bool {
+                print("UI_STEP_MISSING \(what): \(step)")
+                return false
+            }
+            let tab = UITestScreens.tabButton(app, UITestScreens.Tabs.german.albums)
+            guard tab.waitForExistence(timeout: 10) else { return missing("tab Alben") }
+            tab.tap()
+            let tile = app.descendants(matching: .any).matching(identifier: "album.tile").firstMatch
+            guard tile.waitForExistence(timeout: 10) else { return missing("an album on the shelf") }
+            let body = tile.descendants(matching: .any).matching(identifier: "photoCard.body").firstMatch
+            print("UI_FACT \(what): a photo of the album '\(body.exists ? body.label : "?")'")
+            (body.exists ? body : tile).tap()
+            let photo = app.descendants(matching: .any).matching(identifier: "album.photo").firstMatch
+            guard photo.waitForExistence(timeout: 10) else { return missing("a photo in the album") }
+            photo.press(forDuration: 1.0)
+            // The menu passes its identifiers on (UI_FACT photo menu in the flow runs).
+            let add = app.buttons["photoMenu.addToAlbum"]
+            guard add.waitForExistence(timeout: 5) else { return missing("\"Zu Album hinzufügen …\" in the photo's menu") }
+            add.tap()
+            // The sheet's one text field: the new album's name.
+            let field = app.textFields.firstMatch
+            guard field.waitForExistence(timeout: 5) else { return missing("name of the new album") }
+            field.tap()
+            field.typeText(title)
+            let create = Unsorted.createAlbum(app)
+            guard create.waitForExistence(timeout: 5) else { return missing("create \(title)") }
+            create.tap()
+            // The preview: its own bar with "Jetzt anlegen" (`plan.apply`).
+            let preview = app.buttons["plan.apply"].waitForExistence(timeout: 20)
+            print(preview ? "UI_STEP_OK \(what): preview of \(title)" : "UI_STEP_MISSING \(what): preview of \(title)")
+            return preview
+        }
+
         /// "…" in an album of Albumist's with something to undo (`album.more`); by its name where
         /// the bar does not pass the identifier on.
         static func more(_ app: XCUIApplication) -> XCUIElement {

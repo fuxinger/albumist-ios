@@ -97,6 +97,26 @@ enum MainThreadWork {
         return (longest.withLock { $0 }, took)
     }
 
+    /// The longest gap of the same ticker while a detached task only sleeps for `span`: what the
+    /// machine's own load (other jobs on the Mac, the scheduler of a 3-core VM) costs the main
+    /// actor without any of the app's work. Core tests hard (macOS) in UI run 45931544058: the
+    /// main actor stood 59.8 ms while `DerivedLibrary.yearAtlases` ran at 50,000 photos, on a Mac
+    /// on which the whole load test took 20 % longer than two hours before (138 s for 100,000
+    /// photos instead of 113 s), with no change to the code.
+    @MainActor
+    static func baselineStall(for span: Duration) async -> Duration {
+        let seconds = ms(span) / 1000
+        return await mainActorStall { Thread.sleep(forTimeInterval: seconds) }.stall
+    }
+
+    /// The part of `stall` that the work itself caused: what is over the `baseline` of the
+    /// ticker without the work (the smaller of two windows right after it), never below zero. Work
+    /// on the main actor shows as a stall as long as that work (a pass of 60 ms and more over all
+    /// photos), the machine's load as a gap the baseline has too.
+    static func ownStall(_ stall: Duration, baseline: Duration) -> Duration {
+        max(.zero, stall - baseline)
+    }
+
 }
 
 extension LoadTests {
@@ -176,8 +196,16 @@ extension LoadTests {
         var stalls: [(String, Duration, Duration)] = []
         for (name, pass) in passes {
             let (stall, took) = await MainThreadWork.mainActorStall(pass)
-            stalls.append((name, stall, took))
-            lines.append(String(format: "MAIN_STALL %d %@: main actor free but for %.1f ms while it ran %.1f ms", photos, name, MainThreadWork.ms(stall), MainThreadWork.ms(took)))
+            // The machine's own load, on the same ticker for as long as the pass took, in two
+            // windows right after it: only what is over the smaller of the two counts (the
+            // smaller, so a spike in one window cannot hide work on the main actor).
+            let first = await MainThreadWork.baselineStall(for: took)
+            let second = await MainThreadWork.baselineStall(for: took)
+            let baseline = min(first, second)
+            let own = MainThreadWork.ownStall(stall, baseline: baseline)
+            stalls.append((name, own, took))
+            lines.append(String(format: "MAIN_STALL %d %@: main actor free but for %.1f ms while it ran %.1f ms (%.1f ms without the work, %.1f ms its own)",
+                                photos, name, MainThreadWork.ms(stall), MainThreadWork.ms(took), MainThreadWork.ms(baseline), MainThreadWork.ms(own)))
         }
         for line in lines { print(line) }
 
@@ -206,10 +234,37 @@ extension LoadTests {
         #expect(TimingLimit.holds(statusesTook, under: .milliseconds(1_200) * scale, "LibraryStatus.searchStatuses"),
                 "LibraryStatus.searchStatuses took \(statusesTook)")
         // The main actor: never held for anything near a pass (Apple counts a hang from 250 ms;
-        // under 100 ms one seldom notices). Measured 1.4 to 12 ms, the ticker's own rhythm.
+        // under 100 ms one seldom notices). Measured 1.4 to 12 ms, the ticker's own rhythm. The
+        // limit is on the work's own stall (`ownStall`): over what the ticker shows without the
+        // work on the same machine, so a busy Mac is not read as work on the main actor.
         for (name, stall, took) in stalls {
             #expect(TimingLimit.holds(stall, under: .milliseconds(50), "main actor stall while \(name) ran"),
-                    "the main actor stood \(stall) while \(name) ran \(took)")
+                    "the main actor stood \(stall) longer than without the work while \(name) ran \(took)")
         }
+    }
+}
+
+/// `MainThreadWork.ownStall` takes off only the machine's load: work that holds the main actor
+/// still shows (not a load test: it runs in every core test run).
+struct MainThreadWorkStallTests {
+    @Test func theMachinesLoadIsTakenOffNeverMore() {
+        #expect(MainThreadWork.ownStall(.milliseconds(60), baseline: .milliseconds(25)) == .milliseconds(35))
+        #expect(MainThreadWork.ownStall(.milliseconds(10), baseline: .milliseconds(25)) == .zero)
+        #expect(MainThreadWork.ownStall(.milliseconds(300), baseline: .zero) == .milliseconds(300))
+    }
+
+    /// Work that holds the main actor for 300 ms is seen as more than the 50 ms limit of its
+    /// own: the baseline is measured without it.
+    @MainActor
+    @Test func workOnTheMainActorStillCounts() async {
+        let (stall, took) = await MainThreadWork.mainActorStall {
+            // The detached work puts 300 ms on the main actor and runs on past it.
+            Task { @MainActor in Thread.sleep(forTimeInterval: 0.3) }
+            Thread.sleep(forTimeInterval: 0.6)
+        }
+        let baseline = await MainThreadWork.baselineStall(for: took)
+        let own = MainThreadWork.ownStall(stall, baseline: baseline)
+        #expect(stall >= .milliseconds(280), "the ticker saw only \(stall)")
+        #expect(own >= .milliseconds(50), "own stall \(own) of \(stall) with \(baseline) without the work")
     }
 }

@@ -231,20 +231,23 @@ Actions > **TestFlight feedback** > Run workflow.
 
 ## UI-Tests: nur betroffene Gruppen (Regel Fuchs, 17.11.2026)
 
-Die UI-Tests laufen in fünf Gruppen (`.github/ui-groups.json`): große Mediathek und
+Die UI-Tests laufen in sechs Gruppen (`.github/ui-groups.json`): große Mediathek und
 Durchklick-Test (`large-library`, seit 27.11.: nicht in Pull Requests, sondern vor jedem Upload,
-nachts um 02:10 UTC auf main und von Hand), Barrierefreiheit mit Kontrast auf dem kleinen iPhone
-(`accessibility`), übrige Abläufe mit Kauf und Suche (`flow-other`), Gerätezustände (`device`),
-voller Ablauf mit Video (`flow-full`); bis zu vier zugleich (im TestFlight-Lauf drei). Ein Pull
-Request läuft also mit vier Gruppen; mit dem Mac-Job „Core tests hard (macOS)“ sind das fünf
-Macs, so viele, wie das Konto zugleich hat: keine Gruppe wartet mehr (seit 27.11.; vorher
-sieben Mac-Jobs, zwei warteten 10–30 Minuten). Die frühere Gruppe `device-flows` ist aufgeteilt
-(DeviceConditionUITests 07 und 08 in `device`, 05 sowie AlbumistFlowUITests test5 und test7 in
-`flow-other`, test4 in `flow-full`). Der Kontrast-Test (AccessibilityUITests test5, vorher Gruppe
-`contrast`) läuft als zweite Phase von `accessibility`: nach den Tests 1–4 wird der Simulator
-gelöscht, neu gestartet und mit „Kontrast erhöhen“ und „Transparenz reduzieren“ vorbereitet, dann
-läuft test5 allein darauf, wie vorher im eigenen Job (`ui_tests.py --contrast-only`). Ein roter
-Test in einer der beiden Phasen macht die Gruppe rot. Ein Pull Request läuft also mit vier Gruppen, und sein „UI verdict (full)“ prüft `large-library` nicht; das
+nachts um 02:10 UTC auf main und von Hand), Barrierefreiheit auf dem kleinen iPhone
+(`accessibility`), Kontrast auf dem kleinen iPhone (`contrast`), übrige Abläufe mit Kauf und
+Suche (`flow-other`), Gerätezustände (`device`), voller Ablauf mit Video (`flow-full`); bis zu
+vier zugleich (im TestFlight-Lauf drei). Ein Pull Request startet vier Gruppen gleichzeitig; mit
+dem Mac-Job „Core tests hard (macOS)“ sind das fünf Macs, so viele, wie das Konto zugleich hat.
+`contrast` („after_core“) startet im Job `ui-late` erst, wenn dieser Mac-Job fertig ist (12–14
+Min.), auf dem Mac, den er frei macht: nie mehr als fünf Macs, keine Gruppe wartet (seit 27.11.
+abends). Wo der Mac-Job nicht läuft (TestFlight, schneller Lauf, Nachtlauf), ist `contrast` eine
+gewöhnliche Gruppe. Einige Stunden am 27.11. lief der Kontrast-Test als zweite Phase von
+`accessibility` auf dem gelöschten Simulator; das kostete die Gruppe 5 Minuten Löschen und
+Neustart und machte sie zur längsten (45 Min., Lauf 45973048317). Verteilung seit 27.11. abends:
+AlbumistFlowUITests test5 und test7 und DeviceConditionUITests test03 in `flow-full`,
+DeviceConditionUITests test08 in `flow-other` (vor dem Kauf-Test verbrauchten Flow-Test 5 und 7
+die Vorschläge der Demo-Mediathek, er musste erst Pläne zurücknehmen: 345 statt 111 s).
+Ein Pull Request läuft also mit vier Gruppen, und sein „UI verdict (full)“ prüft `large-library` nicht; das
 große Tor jedes TestFlight-Laufs prüft sie (das kleine und das schnelle Tor prüfen wie bisher nur
 ihre Gruppen). Ein Release (`ci_gate.py`) zählt Läufe von Pull Requests und den Nachtlauf
 („UI verdict (night)“) nicht mehr und braucht einen vollen Lauf von Hand auf dem Commit. Die Zählung großer Listen (0 bis 50.000 Fotos) prüfen die

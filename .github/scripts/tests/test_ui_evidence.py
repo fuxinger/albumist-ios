@@ -558,6 +558,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 0, log.getvalue())
         matrix = json.loads(self.outputs()["matrix"])
         self.assertEqual(len(matrix["include"]), 1)
+        self.assertEqual(self.outputs()["late_count"], "0")
         entry = matrix["include"][0]
         self.assertEqual((entry["group"], entry["quick"], entry["device"]), ("smoke", True, "pro"))
         self.assertEqual(entry["only"], "AlbumistFlowUITests/test1_FullFlow AlbumistFlowUITests/test1c_UndoFromHistory")
@@ -711,6 +712,36 @@ class CommandTests(unittest.TestCase):
         self.assertIn("unknown group(s) flow", log)
         # Without --groups every group counts, as before.
         self.assertEqual(self.gate([run(9, "b" * 40, here, workflow="testflight.yml")])[0], 1)
+
+    def test_groups_after_core_go_to_the_late_matrix_only_when_core_macos_runs(self):
+        # 27.11. evening: contrast ("after_core") starts in ui-late after CI's macOS job, on the
+        # Mac it frees. Here "small" plays it.
+        from unittest import mock
+        with mock.patch.object(ui_groups.Groups, "after_core", lambda self, name: name == "small"):
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                code = ui_evidence.plan("all", call=fake_api([]), verifier=VERIFIER, tree=TEST_ONLY, now=NOW, late=True)
+            self.assertEqual(code, 0, log.getvalue())
+            out = self.outputs()
+            self.assertEqual([e["group"] for e in json.loads(out["matrix"])["include"]], ["device", "full", "other"])
+            self.assertEqual([e["group"] for e in json.loads(out["late_matrix"])["include"]], ["small"])
+            # count is every group that runs (the build runs for the late one too).
+            self.assertEqual((out["count"], out["late_count"]), ("4", "1"))
+            self.assertIn("UI_PLAN after CI's macOS job (ui-late): small", log.getvalue())
+            self.assertIn("After CI's macOS job, on the Mac it frees: small", self.read(self.summary))
+            # Only the late group runs: the main matrix holds the placeholder (ui.yml skips ui).
+            os.remove(self.output)
+            with contextlib.redirect_stdout(io.StringIO()):
+                ui_evidence.plan("small", call=fake_api([]), verifier=VERIFIER, tree=TEST_ONLY, now=NOW, late=True)
+            out = self.outputs()
+            self.assertEqual([e["group"] for e in json.loads(out["matrix"])["include"]], ["none"])
+            self.assertEqual((out["count"], out["late_count"]), ("1", "1"))
+            # Without core-macos (TestFlight, quick, night): an ordinary group of the matrix.
+            os.remove(self.output)
+            self.plan("all", [])
+            out = self.outputs()
+            self.assertIn("small", [e["group"] for e in json.loads(out["matrix"])["include"]])
+            self.assertEqual(json.loads(out["late_matrix"])["include"][0]["group"], "none")
+            self.assertEqual(out["late_count"], "0")
 
     def test_a_pull_request_leaves_out_the_groups_that_run_only_before_uploads(self):
         # 27.11. (speed first): large-library has "pull_requests": false. Here "small" plays it.

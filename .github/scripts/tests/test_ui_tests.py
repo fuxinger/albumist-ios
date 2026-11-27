@@ -1020,19 +1020,22 @@ class GroupTests(unittest.TestCase):
 
     def test_four_groups_and_large_library(self):
         groups = self.groups()
-        # 27.11. (four groups): four groups of a pull request's run and CI's macOS job are the
-        # account's five Macs; device-flows was split up, contrast is the second phase of
-        # accessibility.
-        self.assertEqual(set(groups), {"large-library", "device", "flow-other", "accessibility", "flow-full"})
+        # 27.11.: four groups of a pull request's run and CI's macOS job are the account's five
+        # Macs; device-flows was split up. Since the evening contrast is its own group again,
+        # started after CI's macOS job on the Mac it frees (after_core, job ui-late).
+        self.assertEqual(set(groups), {"large-library", "device", "flow-other", "accessibility", "contrast", "flow-full"})
         test5 = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
-        # Tests 1-4 without Increase Contrast, then test5 on the erased small iPhone with it on
-        # (ui_tests.py --contrast-only), with Reduce Motion in both phases, as in its own job.
+        # Tests 1-4 without Increase Contrast, test5 on its own small iPhone with it on, with
+        # Reduce Motion in both.
         self.assertEqual(groups["accessibility"]["only"], "AccessibilityUITests")
         self.assertEqual(groups["accessibility"]["skip"], test5)
-        self.assertEqual(groups["accessibility"]["contrast_only"], test5)
+        self.assertNotIn("contrast_only", groups["accessibility"])
         self.assertEqual(groups["accessibility"]["reduce_motion"], "true")
         self.assertEqual(groups["accessibility"]["device"], "se")
         self.assertNotIn("increase_contrast", groups["accessibility"])
+        self.assertEqual(groups["contrast"]["only"], test5)
+        self.assertEqual((groups["contrast"]["device"], groups["contrast"]["increase_contrast"],
+                          groups["contrast"]["reduce_motion"], groups["contrast"]["after_core"]), ("se", "true", "true", "true"))
         for name in ("device", "flow-other", "flow-full", "large-library"):
             with self.subTest(group=name):
                 self.assertEqual(groups[name]["device"], "pro")
@@ -1056,15 +1059,20 @@ class GroupTests(unittest.TestCase):
         with open(os.path.join(self.ROOT, ".github", "ui-groups.json"), encoding="utf-8") as f:
             listed = json.load(f)["groups"]
         on_pull_requests = [g["group"] for g in listed if g.get("pull_requests", True) is not False]
-        self.assertEqual(len(on_pull_requests), 4)
+        at_once = [g for g in on_pull_requests if not next(x for x in listed if x["group"] == g).get("after_core")]
+        self.assertEqual(len(at_once), 4)
+        # contrast starts after CI's macOS job (job ui-late, one at a time), on the Mac it frees.
+        self.assertEqual([g for g in on_pull_requests if g not in at_once], ["contrast"])
+        self.assertRegex(self.workflow(), r"\n  ui-late:\n(.*\n)*?    needs: \[plan, build, core-macos\]\n")
+        self.assertRegex(self.workflow(), r"\n      max-parallel: 1\n      matrix: \$\{\{ fromJSON\(needs\.plan\.outputs\.late_matrix\) \}\}\n")
         # The longest in a full run start first (TestFlight runs three at a time); a pull
         # request's run leaves large-library out.
-        self.assertEqual(list(self.groups())[:3], ["large-library", "accessibility", "flow-other"])
+        self.assertEqual(list(self.groups())[:3], ["large-library", "accessibility", "contrast"])
 
     def test_other_flows_skip_exactly_what_the_others_run(self):
         groups = self.groups()
         others = set()
-        for name in ("large-library", "device", "flow-full", "accessibility"):
+        for name in ("large-library", "device", "flow-full", "accessibility", "contrast"):
             others |= set(groups[name]["only"].split()) | set(groups[name].get("contrast_only", "").split())
         covered = {t for t in others if not any(t != o and t.startswith(o + "/") for o in others)}
         self.assertEqual(set(groups["flow-other"]["skip"].split()), covered)

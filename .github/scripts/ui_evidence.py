@@ -670,10 +670,12 @@ def current(tree=None):
 
 
 def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, now: datetime | None = None,
-         smoke: bool = False, pr: bool = False) -> int:
+         smoke: bool = False, pr: bool = False, late: bool = False) -> int:
     """`pr`: a pull request's run; a group with "pull_requests": false (large-library) is left
     out of it, also with "all" or by name (only TestFlight, the nightly run and runs by hand
-    have it)."""
+    have it). `late`: CI's macOS job runs in this run (ui.yml); the groups with "after_core"
+    go to `late_matrix` (job ui-late, after that job, on the Mac it frees) instead of `matrix`,
+    so the run never asks for more Macs than the account has (27.11.)."""
     tree, groups, app = current(tree)
     if smoke:
         return plan_smoke(groups, app)
@@ -716,11 +718,15 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
         decisions = [d for d in decisions or [] if d["group"] not in not_here] or None
         print(f"UI_PLAN not in a pull request's run: {' '.join(not_here)} (before an upload, at night and by hand)")
     # An empty matrix is an error in GitHub even for a skipped job: a placeholder, never run (the
-    # group jobs need the build, which is skipped when count is 0).
-    matrix = {"include": [groups.matrix_entry(n, app, quick) for n in run]
-              or [{"group": "none", "title": "none", "app": "0" * ui_groups.SHORT, "tests": "0" * ui_groups.SHORT}]}
+    # group jobs need the build, which is skipped when count is 0; ui-late runs only when
+    # late_count is not 0).
+    later = [n for n in run if late and groups.after_core(n)]
+    matrix = matrix_of([groups.matrix_entry(n, app, quick) for n in run if n not in later])
+    late_matrix = matrix_of([groups.matrix_entry(n, app, quick) for n in later])
     print(f"UI_PLAN app {app} {mode} tests " + " ".join(f"{n}={fps[n]}" for n in names))
     print(f"UI_PLAN runs: {' '.join(run) or 'nothing'} (choice: {choice or 'auto'}, {mode})")
+    if later:
+        print(f"UI_PLAN after CI's macOS job (ui-late): {' '.join(later)}")
     md = [f"### UI groups for app {app[:ui_groups.SHORT]} (choice: {choice or 'auto'}, {mode})", ""]
     if note:
         md += [note, ""]
@@ -734,6 +740,9 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
             md += [f"- Check: {text}"]
     else:
         md.append("Runs: " + (", ".join(run) or "nothing"))
+    if later:
+        md += ["", f"After CI's macOS job, on the Mac it frees: {', '.join(later)} (job ui-late; at most five Macs "
+               "at once)."]
     left = [n for n in names if n not in run and n not in not_here]
     if not_here:
         md += ["", f"Not in a pull request's run: {', '.join(not_here)} (runs before every upload, at night on "
@@ -746,8 +755,15 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
     append("GITHUB_STEP_SUMMARY", "\n".join(md) + "\n")
     red, red_text = known_red(decisions or [])
     append("GITHUB_OUTPUT", f"matrix={json.dumps(matrix, separators=(',', ':'))}\ncount={len(run)}\n"
+                            f"late_matrix={json.dumps(late_matrix, separators=(',', ':'))}\nlate_count={len(later)}\n"
                             f"known_red={' '.join(red)}\nknown_red_text={red_text}\n")
     return 0
+
+
+def matrix_of(entries: list[dict]) -> dict:
+    """A job matrix; an empty one gets the placeholder entry, never run."""
+    return {"include": entries or [{"group": "none", "title": "none", "app": "0" * ui_groups.SHORT,
+                                    "tests": "0" * ui_groups.SHORT}]}
 
 
 def plan_smoke(groups, app: str) -> int:
@@ -767,6 +783,7 @@ def plan_smoke(groups, app: str) -> int:
         "The full UI run (every group, full) starts once the pull request is marked ready for review.",
     ]) + "\n")
     append("GITHUB_OUTPUT", f"matrix={json.dumps({'include': [entry]}, separators=(',', ':'))}\ncount=1\n"
+                            f"late_matrix={json.dumps(matrix_of([]), separators=(',', ':'))}\nlate_count=0\n"
                             "known_red=\nknown_red_text=\n")
     return 0
 
@@ -982,6 +999,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quick", action="store_true", help="a quick run (ALBUMIST_UI_QUICK=1)")
     p.add_argument("--smoke", action="store_true", help="a draft pull request: only the smoke test (ui_groups.SMOKE_TESTS)")
     p.add_argument("--pr", action="store_true", help="a pull request's run: groups with pull_requests false are left out")
+    p.add_argument("--late", action="store_true",
+                   help="CI's macOS job runs in this run: groups with after_core go to late_matrix (job ui-late)")
     g = sub.add_parser("gate")
     g.add_argument("--quick", action="store_true", help="the verdict of a quick run; never for an upload")
     g.add_argument("--groups", default="", help="check only these groups (the small gate of the daily build)")
@@ -1001,7 +1020,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "stress-plan":
         return stress_plan(args.photos.strip(), args.minutes.strip(), args.reuse)
     if args.command == "plan":
-        return plan(args.groups.strip(), quick=args.quick, smoke=args.smoke, pr=args.pr)
+        return plan(args.groups.strip(), quick=args.quick, smoke=args.smoke, pr=args.pr, late=args.late)
     run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
     if args.smoke_only and (args.stress or args.groups or args.stress_only):
         print("::error title=UI gate::--smoke-only checks the smoke test alone")

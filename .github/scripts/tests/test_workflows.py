@@ -388,14 +388,15 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertIn("fetch-tags: true", check)
         self.assertIn("gate --smoke-only", job_blocks(text)["ui-gate"])
 
-    def test_the_small_gate_is_flow_full_and_accessibility(self):
-        # docs/TESTFLIGHT.md ("Zwei Tore"): flow-full and accessibility (with the contrast test,
-        # its second phase since 27.11.), each shorter than the stress pass beside them.
+    def test_the_small_gate_is_flow_full_and_the_small_iphone(self):
+        # docs/TESTFLIGHT.md ("Zwei Tore"): flow-full, accessibility and contrast (for some hours
+        # on 27.11. contrast was a second phase of accessibility), each shorter than the stress
+        # pass beside them.
         # The gate checks exactly the groups the UI flow ran.
         import json
         text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         small = re.search(r"\n          SMALL_GATE_GROUPS: (.+)\n", text).group(1).split()
-        self.assertEqual(small, ["flow-full", "accessibility"])
+        self.assertEqual(small, ["flow-full", "accessibility", "contrast"])
         with open(os.path.join(ROOT, ".github", "ui-groups.json"), encoding="utf-8") as f:
             names = [g["group"] for g in json.load(f)["groups"]]
         self.assertLess(set(small), set(names))

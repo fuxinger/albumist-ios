@@ -619,11 +619,15 @@ def current(tree=None):
 
 
 def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, now: datetime | None = None,
-         smoke: bool = False) -> int:
+         smoke: bool = False, pr: bool = False) -> int:
+    """`pr`: a pull request's run; a group with "pull_requests": false (large-library) is left
+    out of it, also with "all" or by name (only TestFlight, the nightly run and runs by hand
+    have it)."""
     tree, groups, app = current(tree)
     if smoke:
         return plan_smoke(groups, app)
     names = groups.names()
+    not_here = [n for n in names if pr and not groups.on_pull_requests(n)]
     fps = groups.fingerprints(quick)
     words = choice.split()
     unknown = [w for w in words if w not in names + ["auto", "all"]]
@@ -656,6 +660,10 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
         run = names
     else:
         run = [n for n in names if n in words]
+    if not_here:
+        run = [n for n in run if n not in not_here]
+        decisions = [d for d in decisions or [] if d["group"] not in not_here] or None
+        print(f"UI_PLAN not in a pull request's run: {' '.join(not_here)} (before an upload, at night and by hand)")
     # An empty matrix is an error in GitHub even for a skipped job: a placeholder, never run (the
     # group jobs need the build, which is skipped when count is 0).
     matrix = {"include": [groups.matrix_entry(n, app, quick) for n in run]
@@ -675,7 +683,10 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
             md += [f"- Check: {text}"]
     else:
         md.append("Runs: " + (", ".join(run) or "nothing"))
-    left = [n for n in names if n not in run]
+    left = [n for n in names if n not in run and n not in not_here]
+    if not_here:
+        md += ["", f"Not in a pull request's run: {', '.join(not_here)} (runs before every upload, at night on "
+               "main and by hand)."]
     if left and decisions:
         md += ["", f"Not run again: {', '.join(left)} (green for this app and their own test code; the gate "
                "of a TestFlight run checks that again)."]
@@ -730,7 +741,7 @@ def known_red(decisions: list[dict]) -> tuple[list[str], str]:
 
 def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = False,
          now: datetime | None = None, only: str = "", stress: str = "", stress_only: bool = False,
-         smoke_only: bool = False) -> int:
+         smoke_only: bool = False, pr: bool = False) -> int:
     """`stress` ("<photos>-<minutes>", e.g. 10000-15): the stress pass of that size must be green
     for this app and its stress test fingerprint too (the owner's decision of 20.11.2026, 17:20:
     TestFlight takes the pass before the merge by content); `stress_only`: no UI group checked
@@ -746,6 +757,10 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
                                        f"{stress!r}; use some of: {' '.join(names)}; --stress <photos>-<minutes>"))
         return 1
     checked = [] if stress_only or smoke_only else ([n for n in names if n in chosen] if chosen else names)
+    if pr:
+        # A pull request's verdict: the groups that run only before uploads, at night and by hand
+        # (large-library) are not checked; every TestFlight gate checks them (27.11.).
+        checked = [n for n in checked if groups.on_pull_requests(n)]
     left_out = [] if stress_only or smoke_only else [n for n in names if n not in checked]
     verifier = verifier or Verifier()
     mode = "quick" if quick else "full"
@@ -915,12 +930,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--groups", default="auto")
     p.add_argument("--quick", action="store_true", help="a quick run (ALBUMIST_UI_QUICK=1)")
     p.add_argument("--smoke", action="store_true", help="a draft pull request: only the smoke test (ui_groups.SMOKE_TESTS)")
+    p.add_argument("--pr", action="store_true", help="a pull request's run: groups with pull_requests false are left out")
     g = sub.add_parser("gate")
     g.add_argument("--quick", action="store_true", help="the verdict of a quick run; never for an upload")
     g.add_argument("--groups", default="", help="check only these groups (the small gate of the daily build)")
     g.add_argument("--stress", default="", help="<photos>-<minutes>: the stress pass of that size must be green too")
     g.add_argument("--stress-only", action="store_true", help="check only the stress pass (ui-stress.yml's verdict)")
     g.add_argument("--smoke-only", action="store_true", help="check only the smoke test (the fast gate of testflight.yml)")
+    g.add_argument("--pr", action="store_true", help="a pull request's verdict: groups with pull_requests false not checked")
     sp = sub.add_parser("stress-plan")
     sp.add_argument("--photos", required=True)
     sp.add_argument("--minutes", required=True)
@@ -933,13 +950,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "stress-plan":
         return stress_plan(args.photos.strip(), args.minutes.strip(), args.reuse)
     if args.command == "plan":
-        return plan(args.groups.strip(), quick=args.quick, smoke=args.smoke)
+        return plan(args.groups.strip(), quick=args.quick, smoke=args.smoke, pr=args.pr)
     run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
     if args.smoke_only and (args.stress or args.groups or args.stress_only):
         print("::error title=UI gate::--smoke-only checks the smoke test alone")
         return 1
     return gate(run_id, quick=args.quick, only=args.groups, stress=args.stress.strip(), stress_only=args.stress_only,
-                smoke_only=args.smoke_only)
+                smoke_only=args.smoke_only, pr=args.pr)
 
 
 if __name__ == "__main__":

@@ -38,7 +38,7 @@ run-name: >-
 #     the harness; .github/scripts/ui_groups.py). A test-only change runs the groups of the
 #     changed files, a change to a shared helper every group that uses it, any app change all.
 #   - all: every group; or group names (device flow-other accessibility device-flows flow-full
-#     contrast).
+#     contrast large-library). A pull request's run never has large-library (below).
 #   Each group job carries both fingerprints in its name ("[device app ... tests ...]"); that is
 #   where later runs and the TestFlight gate find the result again. A group whose result for
 #   this app and test code was red runs again when asked, but its green never counts (a red test
@@ -52,6 +52,10 @@ run-name: >-
 #   strand opens its pull request as a draft and marks it ready once its last commit is in.
 #   The 10,000-photo stress pass is no longer a merge check (same decision): it runs before
 #   every TestFlight upload (testflight.yml) and every night on main (ui-stress.yml).
+#   The same holds for the group large-library (27.11., plan section 4 of that decision: test11
+#   "nur nachts und vor Upload", the tap-through sweep "nur nachts"): a pull request's run and
+#   verdict leave it out (UI_PR); every TestFlight gate needs it green, and it runs every night
+#   on main (schedule) and by hand.
 #   Quick mode ("quick" by hand, and the smoke test; never in a TestFlight run): the tests get
 #   ALBUMIST_UI_QUICK=1 and DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips
 #   itself. Every group has another test fingerprint then, so a quick green never stands for a
@@ -81,6 +85,12 @@ on:
     # ready_for_review: the draft's smoke test is followed by the full UI run (stage 1).
     types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore: ['**.md']
+  # Every night on main: large-library (DeviceConditionUITests test11 and the tap-through sweep
+  # test3), which a pull request's run leaves out (27.11., "pull_requests": false in
+  # ui-groups.json). 02:10 UTC, after the nightly stress pass (ui-stress.yml, 00:40). GitHub
+  # starts it only from main's copy of this file.
+  schedule:
+    - cron: '10 2 * * *'
   workflow_dispatch:
     inputs:
       groups:
@@ -128,6 +138,12 @@ env:
   UI_QUICK: ${{ (!inputs.release && github.event_name != 'pull_request' && inputs.quick) && 'true' || '' }}
   # A draft pull request, or the fast gate of testflight.yml: only the smoke test (top of this file).
   UI_SMOKE: ${{ ((github.event_name == 'pull_request' && github.event.pull_request.draft) || inputs.smoke) && 'true' || '' }}
+  # A pull request's run (not TestFlight's): groups with "pull_requests": false (large-library)
+  # are neither planned nor checked by its verdict (ui_evidence.py --pr, 27.11.). Every
+  # TestFlight gate checks them; they run there, at night (schedule) and by hand.
+  UI_PR: ${{ (!inputs.release && github.event_name == 'pull_request') && 'true' || '' }}
+  # The nightly run: only large-library, and its verdict checks only that group.
+  UI_NIGHT: ${{ github.event_name == 'schedule' && 'true' || '' }}
 
 # Since 26.11.2026 (coordinator's finding, rebuild): no shared "mac-queue" any more. GitHub keeps
 # one waiting run per concurrency group and cancels it silently when another one joins; with all
@@ -217,8 +233,8 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          UI_GROUPS: ${{ inputs.groups || 'auto' }}
-        run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS" ${UI_QUICK:+--quick} ${UI_SMOKE:+--smoke}
+          UI_GROUPS: ${{ inputs.groups || (github.event_name == 'schedule' && 'large-library') || 'auto' }}
+        run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS" ${UI_QUICK:+--quick} ${UI_SMOKE:+--smoke} ${UI_PR:+--pr}
 
   known-red:
     # Tempo plan 20.11.: a group that is red for exactly this app and its test code makes the
@@ -614,7 +630,7 @@ jobs:
         if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}
+        run: python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick} ${UI_PR:+--pr} ${UI_NIGHT:+--groups large-library}
       - name: Merge content same as this commit
         # Only in a run by hand on a branch. The full run of a ready pull request (stage 1,
         # 26.11.2026) tests the merge commit itself (refs/pull/N/merge), so its content is the

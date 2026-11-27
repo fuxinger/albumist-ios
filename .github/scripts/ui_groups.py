@@ -1003,6 +1003,12 @@ class Groups:
     def names(self) -> list[str]:
         return [g["group"] for g in self.groups]
 
+    def on_pull_requests(self, name: str) -> bool:
+        """Whether a pull request's UI run and its verdict include the group ("pull_requests":
+        false leaves it to TestFlight runs, the nightly run on main and runs by hand; 27.11.,
+        large-library)."""
+        return self.group(name).get("pull_requests", True) is not False
+
     def group(self, name: str) -> dict:
         return next(g for g in self.groups if g["group"] == name)
 

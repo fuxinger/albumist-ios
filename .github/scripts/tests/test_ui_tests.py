@@ -947,7 +947,8 @@ class GroupTests(unittest.TestCase):
 
     def test_six_groups_and_the_contrast_job(self):
         groups = self.groups()
-        self.assertEqual(set(groups), {"device-flows", "device", "flow-other", "accessibility", "flow-full", "contrast"})
+        self.assertEqual(set(groups), {"large-library", "device-flows", "device", "flow-other", "accessibility", "flow-full",
+                                       "contrast"})
         test5 = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
         self.assertEqual(groups["contrast"]["only"], test5)
         self.assertEqual(groups["contrast"]["increase_contrast"], "true")
@@ -960,7 +961,11 @@ class GroupTests(unittest.TestCase):
         # Tempo plan 20.11.: the large library and the undo / interrupted-plan tests have their
         # own group, so neither device conditions nor other flows sets the run's time alone.
         self.assertEqual(groups["device-flows"]["device"], "pro")
-        self.assertIn("DeviceConditionUITests/test11_LargeLibrary", groups["device-flows"]["only"].split())
+        # 27.11. (speed first): the large library (26.8 min) and the tap-through sweep run before
+        # uploads, at night and by hand only, in a group of their own that pull requests leave out.
+        self.assertEqual(groups["large-library"]["device"], "pro")
+        self.assertEqual(set(groups["large-library"]["only"].split()),
+                         {"DeviceConditionUITests/test11_LargeLibrary", "AlbumistFlowUITests/test3_TapThroughSweep"})
 
     def test_at_most_five_groups_at_a_time(self):
         # With CI's one macOS job, six asked for at the peak; GitHub queues the last one
@@ -968,13 +973,14 @@ class GroupTests(unittest.TestCase):
         # Three when TestFlight calls it (test_workflows.py ReleaseSmokeTests: five Macs at most).
         self.assertRegex(self.workflow(), r"\n      max-parallel: \$\{\{ inputs\.release && 3 \|\| 5 \}\}\n")
         self.assertEqual(list(self.groups())[-1], "contrast")
-        # The two longest in a full run start first (TestFlight runs three at a time).
-        self.assertEqual(list(self.groups())[:2], ["device-flows", "device"])
+        # The longest in a full run start first (TestFlight runs three at a time); a pull
+        # request's run leaves large-library out and starts device-flows and device first.
+        self.assertEqual(list(self.groups())[:3], ["large-library", "device-flows", "device"])
 
     def test_other_flows_skip_exactly_what_the_others_run(self):
         groups = self.groups()
         others = set()
-        for name in ("device-flows", "device", "flow-full", "accessibility", "contrast"):
+        for name in ("large-library", "device-flows", "device", "flow-full", "accessibility", "contrast"):
             others |= set(groups[name]["only"].split())
         covered = {t for t in others if not any(t != o and t.startswith(o + "/") for o in others)}
         self.assertEqual(set(groups["flow-other"]["skip"].split()), covered)

@@ -6,21 +6,32 @@
     "flow-other is 'everything the other groups do not run', so a new test class always runs somewhere and no test runs twice",
     "(test_ui_tests.py GroupTests checks every UI test against the groups). Keep its skip list in step with the others.",
     "The order is the start order: the longest in a full run (device-flows, device, flow-other) start first, accessibility (the longest of the short ones) fourth. max-parallel 5 in ui.yml holds back the last group (contrast) until one ends; while CI's macOS job still runs, GitHub's account queue (five Macs) holds one more of the started groups, whichever it picks. In a TestFlight run (max-parallel 3) the three long ones run first and the three short ones follow.",
-    "A change here changes the test fingerprint of the group that changed (ui_groups.py), so that group runs again.",
+    "A change here changes the test fingerprint of the group that changed (ui_groups.py), so that group runs again. Since 27.11. large-library comes first (the longest; a TestFlight run, three at a time, starts it at once); a pull request's run leaves it out and starts device-flows, device and other flows first.",
     "budget_min: minutes for the group's test passes (ui_tests.py budget_check); over it the run shows a warning, never red. Report-only, so not in the fingerprint.",
     "Measured in TestFlight run 44461253154 (19.11.): device 62, flow-full 12, flow-other 52, accessibility 20, contrast 15 min (the step Run UI tests).",
     "Rebalanced 20.11. (tempo plan): DeviceConditionUITests 05, 07, 08 left other flows and 11 left device conditions for the new group device-flows; quick runs measured before: other flows 55.8, device 43.3 min (job, median since 18.11.).",
     "Rebalanced 21.11. by the full UI run 44828248004 (test minutes): other flows 47.2, device-flows 36.3, accessibility 22.8, device 21.0, contrast 9.3, flow-full 8.7. AlbumistFlowUITests/test1b (11.6) left other flows for flow-full: other flows about 36, flow-full about 20. The small gate (flow-full and contrast) grows by those 11.6 minutes.",
-    "Rebalanced 26.11. (runs since 24.11., step Run UI tests): other flows 42-74 (median 48), device-flows 41-48, device 25-35, accessibility 17-32, flow-full 22-31, contrast 12-20 min. test1c (6.8 min in 45690592821) left other flows for device."
+    "Rebalanced 26.11. (runs since 24.11., step Run UI tests): other flows 42-74 (median 48), device-flows 41-48, device 25-35, accessibility 17-32, flow-full 22-31, contrast 12-20 min. test1c (6.8 min in 45690592821) left other flows for device.",
+    "Rebalanced 27.11. (speed first, full UI run 45865545486 of PR #26, test minutes: other flows 43.0, device-flows 42.7 of which test11 26.8, device 26.0, accessibility 22.7, flow-full 16.4, contrast 11.1; setup before the first test 5-13 min per group): test11 and the tap-through sweep test3 form large-library, which runs before uploads, at night and by hand, not in a pull request's run (pull_requests false); flow tests 4, 5 and 7 moved from other flows to device-flows. Expected test minutes per pull request group: device-flows 28.2, other flows 26.1, device 26.0, accessibility 22.7, flow-full 16.4, contrast 11.1 (178 to 130 in all)."
   ],
   "groups": [
     {
-      "group": "device-flows",
-      "budget_min": 50,
-      "title": "undo, interrupted plans and large library",
-      "_why": "DeviceConditionUITests 05, 07, 08 (undo when iOS declines, interrupted plan, removed album; before 20.11. in other flows) and 11 (large library, about 25 min, skips itself in quick mode; before 20.11. in device conditions) on the Pro simulator. Split off so that no group runs much longer than the others (tempo plan 20.11., measured in UI run 44617747359: other flows 55.8 min job, device 43.3, these four tests 17 min quick and about 42 min full).",
+      "group": "large-library",
+      "budget_min": 40,
+      "title": "large library and tap-through sweep (before an upload and at night)",
+      "_why": "Rebuild stage 4 bundle (owner's decision of 26.11.2026, 'alles wie empfohlen', plan section 4: test11 'nur nachts und vor Upload', test3 'nur nachts'; speed first, 27.11.): DeviceConditionUITests/test11 (large library, 26.8 min) and AlbumistFlowUITests/test3 (tap-through sweep, 4.7 min) of the full UI run 45865545486. Not part of a pull request's UI run or its verdict (pull_requests false): the list sizes of a large library are checked on Linux for every change (ListBoundaryTests, ListBoundaryStoreTests: 0 to 50,000 photos), and the 10,000-photo stress pass runs before every upload. It runs in every TestFlight run with the big gate (which checks every group, this one too; the small and the fast gate check only their own), in ui.yml's nightly run on main, and when asked for by hand.",
       "device": "pro",
-      "only": "DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo DeviceConditionUITests/test11_LargeLibrary",
+      "only": "DeviceConditionUITests/test11_LargeLibrary AlbumistFlowUITests/test3_TapThroughSweep",
+      "skip": "",
+      "pull_requests": false
+    },
+    {
+      "group": "device-flows",
+      "budget_min": 35,
+      "title": "undo, interrupted plans and rebuild",
+      "_why": "Undo and interrupted plans on the Pro simulator: DeviceConditionUITests 05, 07, 08 (undo when iOS declines, interrupted plan, removed album) and, since 27.11., AlbumistFlowUITests test4 (decisions come back after a rebuild), test5 (interrupted plan left and retried) and test7 (personal place asks for a name) from other flows. DeviceConditionUITests/test11 (large library, 26.8 min) left this group for large-library on 27.11. (full UI run 45865545486 of PR #26: this group 42.7 test minutes, of them test11 26.8).",
+      "device": "pro",
+      "only": "AlbumistFlowUITests/test4_DecisionsComeBackAfterRebuild AlbumistFlowUITests/test5_InterruptedPlanCanBeLeftAndRetried AlbumistFlowUITests/test7_PersonalPlaceAsksForName DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo",
       "skip": ""
     },
     {
@@ -34,12 +45,12 @@
     },
     {
       "group": "flow-other",
-      "budget_min": 40,
+      "budget_min": 35,
       "title": "other flows, purchase and search",
-      "_why": "Every other UI test except the accessibility tests (flow tests 1d-7 and the remove-photo test, locked purchase, search; 1c runs in device). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
+      "_why": "Every other UI test except the accessibility tests (flow test1d, test6 and the remove-photo test, locked purchase, search, map prototype; 1c runs in device, 4/5/7 in device-flows, the tap-through sweep test3 in large-library since 27.11.). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
       "device": "pro",
       "only": "",
-      "skip": "AlbumistFlowUITests/test1c_UndoFromHistory AlbumistFlowUITests/test1_FullFlow AlbumistFlowUITests/test1b_AtlasLibrarySearch PerformanceUITests AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo"
+      "skip": "AlbumistFlowUITests/test1c_UndoFromHistory AlbumistFlowUITests/test1_FullFlow AlbumistFlowUITests/test1b_AtlasLibrarySearch PerformanceUITests AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo AlbumistFlowUITests/test4_DecisionsComeBackAfterRebuild AlbumistFlowUITests/test5_InterruptedPlanCanBeLeftAndRetried AlbumistFlowUITests/test7_PersonalPlaceAsksForName AlbumistFlowUITests/test3_TapThroughSweep"
     },
     {
       "group": "accessibility",

@@ -231,10 +231,16 @@ Actions > **TestFlight feedback** > Run workflow.
 
 ## UI-Tests: nur betroffene Gruppen (Regel Fuchs, 17.11.2026)
 
-Die UI-Tests laufen in sechs Gruppen (`.github/ui-groups.json`): Rückgängig, unterbrochener
-Plan und große Mediathek (`device-flows`, seit 20.11.), Gerätezustände, übrige Abläufe mit Kauf
-und Suche, Barrierefreiheit, voller Ablauf mit Video, Kontrast; bis zu fünf zugleich (im
-TestFlight-Lauf drei). Seit 18.11. läuft
+Die UI-Tests laufen in sieben Gruppen (`.github/ui-groups.json`): große Mediathek und
+Durchklick-Test (`large-library`, seit 27.11.: nicht in Pull Requests, sondern vor jedem Upload,
+nachts um 02:10 UTC auf main und von Hand), Rückgängig, unterbrochener Plan und Neuaufbau
+(`device-flows`), Gerätezustände, übrige Abläufe mit Kauf und Suche, Barrierefreiheit, voller
+Ablauf mit Video, Kontrast; bis zu fünf zugleich (im TestFlight-Lauf drei). Ein Pull Request
+läuft also mit sechs Gruppen, und sein „UI verdict (full)“ prüft `large-library` nicht; das
+große Tor jedes TestFlight-Laufs prüft sie (das kleine und das schnelle Tor prüfen wie bisher nur
+ihre Gruppen). Ein Release (`ci_gate.py`) zählt Läufe von Pull Requests und den Nachtlauf
+(„UI verdict (night)“) nicht mehr und braucht einen vollen Lauf von Hand auf dem Commit. Die Zählung großer Listen (0 bis 50.000 Fotos) prüfen die
+Linux-Tests bei jeder Änderung (`ListBoundaryTests`). Seit 18.11. läuft
 eine Gruppe nur noch, wenn es für sie kein grünes Ergebnis für genau diese App und genau ihren
 Testcode gibt.
 
@@ -400,7 +406,7 @@ Testcode gibt.
   in beiden Modi. Für die Freigabe eines Commits, der nur schnelle Läufe hat: „UI flow“ von
   Hand ohne `quick` starten; dann laufen alle Gruppen ohne volles Grün für diesen Stand.
 - Von Hand: Actions > **UI flow** > Run workflow, Feld **groups**: `auto` (Vorgabe), `all`
-  (alle Gruppen) oder Gruppennamen (`device-flows device flow-other accessibility flow-full contrast`), und
+  (alle Gruppen) oder Gruppennamen (`large-library device-flows device flow-other accessibility flow-full contrast`), und
   **quick** (aus = voller Lauf). In **TestFlight** gibt es dafür **ui_groups** (`auto` oder
   `all`); TestFlight läuft immer voll.
 

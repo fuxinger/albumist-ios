@@ -652,6 +652,43 @@ class CommandTests(unittest.TestCase):
         # Without --groups every group counts, as before.
         self.assertEqual(self.gate([run(9, "b" * 40, here, workflow="testflight.yml")])[0], 1)
 
+    def test_a_pull_request_leaves_out_the_groups_that_run_only_before_uploads(self):
+        # 27.11. (speed first): large-library has "pull_requests": false. Here "small" plays it.
+        from unittest import mock
+        with mock.patch.object(ui_groups.Groups, "on_pull_requests", lambda self, name: name != "small"):
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                code = ui_evidence.plan("auto", call=fake_api(self.NIGHT), verifier=VERIFIER, tree=TEST_ONLY, now=NOW, pr=True)
+            self.assertEqual(code, 0, log.getvalue())
+            self.assertEqual([e["group"] for e in json.loads(self.outputs()["matrix"])["include"]], ["full", "other"])
+            self.assertIn("UI_PLAN not in a pull request's run: small", log.getvalue())
+            self.assertIn("Not in a pull request's run: small", self.read(self.summary))
+            # Also "all" and a choice by name leave it out of a pull request's run.
+            for choice in ("all", "small full"):
+                os.remove(self.output)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    ui_evidence.plan(choice, call=fake_api([]), verifier=VERIFIER, tree=TEST_ONLY, now=NOW, pr=True)
+                self.assertNotIn("small", [e["group"] for e in json.loads(self.outputs()["matrix"])["include"]], choice)
+            # Without --pr (TestFlight, the night, by hand) it runs as every group.
+            os.remove(self.output)
+            self.plan("auto", self.NIGHT)
+            self.assertIn("small", [e["group"] for e in json.loads(self.outputs()["matrix"])["include"]])
+            # The verdict of a pull request does not check it; every other gate does.
+            here = [job(g, tests=TEST_ONLY_FPS[g], job_id=600 + i) for i, g in enumerate(["full", "other"])]
+            runs = self.NIGHT + [run(9, "b" * 40, here)]
+            os.remove(self.output)
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                code = ui_evidence.gate(9, call=fake_api(runs), verifier=VERIFIER, tree=TEST_ONLY, now=NOW, pr=True)
+            self.assertEqual(code, 0, log.getvalue())
+            self.assertIn("not checked: small", self.outputs()["text"])
+            os.remove(self.output)
+            code, log = self.gate(runs)
+            self.assertEqual(code, 1)
+            self.assertIn("::error title=UI small::no green full result", log)
+            # A red of it still blocks every gate that checks it (the pull request's does not).
+            red = runs + [run(10, "b" * 40, [job("small", "failure", "failure", tests=TEST_ONLY_FPS["small"], job_id=620)])]
+            os.remove(self.output)
+            self.assertEqual(self.gate(red)[0], 1)
+
     def test_history_that_cannot_be_read_runs_everything_and_fails_the_gate(self):
         saved = ui_evidence.MAX_CALLS
         ui_evidence.MAX_CALLS = 1

@@ -437,7 +437,9 @@ class TestFlightWiringTests(unittest.TestCase):
         draft = "(github.event_name == 'pull_request' && github.event.pull_request.draft)"
         # ci_gate.py and the merge look for "UI verdict (full)"; the gate runs also when no group
         # ran. Since stage 1 (26.11.2026) a ready pull request's run is full, a draft's the smoke test.
-        self.assertIn(f"name: UI verdict (${{{{ {draft} && 'smoke' || ({quick} && 'quick' || 'full') }}}})", verdict)
+        # Since 27.11. the nightly run's verdict is "night" (ci_gate.py never takes it).
+        self.assertIn(f"name: UI verdict (${{{{ {draft} && 'smoke' || ({quick} && 'quick' || "
+                      f"(github.event_name == 'schedule' && 'night' || 'full')) }}}})", verdict)
         self.assertIn("if: ${{ !cancelled() && needs.plan.result == 'success' && !inputs.release }}", verdict)
         self.assertIn("python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}", verdict)
         self.assertIn(f"UI_QUICK: ${{{{ {quick} && 'true' || '' }}}}", text)
@@ -449,7 +451,9 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertTrue(gate_step.startswith(f"        if: ${{{{ !{draft} }}}}\n"))
         # The hard macOS core tests belong to every full run, a ready pull request's too.
         core = text.split("\n  core-macos:\n", 1)[1].split("\n  build:\n", 1)[0]
-        self.assertIn(f"if: ${{{{ needs.plan.result == 'success' && !inputs.release && !inputs.quick && !{draft} }}}}", core)
+        # Not at night (27.11.): the nightly run tests large-library only.
+        self.assertIn(f"if: ${{{{ needs.plan.result == 'success' && !inputs.release && !inputs.quick && "
+                      f"github.event_name != 'schedule' && !{draft} }}}}", core)
         self.assertIn("      ALBUMIST_TIMING: hard\n", core)
         self.assertIn("    types: [opened, synchronize, reopened, ready_for_review]\n", text)
         self.assertIn("TEST_RUNNER_ALBUMIST_UI_QUICK: ${{ matrix.quick && '1' || '' }}", text)
@@ -656,6 +660,16 @@ class HangLimitTests(unittest.TestCase):
                     watched += 1
         # ci: core, load, macOS core; ui: core, load (merge gate), macOS core (merge gate).
         self.assertEqual(watched, 6)
+        # 26.11.2026 (runs 45903536608, 45906029051): the Linux build is a step of its own, so the
+        # watchdog times the tests alone and a slow build never stops tests that passed.
+        for text in (ci, ui):
+            steps = job_steps(text, "core-linux")
+            names = [name for name, _, _ in steps]
+            runs = dict((name, run) for name, _, run in steps)
+            with self.subTest(file="ci" if text is ci else "ui"):
+                self.assertIn("swift build --build-tests", runs["Build the core and its tests"])
+                self.assertLess(names.index("Build the core and its tests"), names.index("Build and test"))
+                self.assertIn("swift test --skip-build --parallel", runs["Build and test"])
         # The Linux container installs python3 for it.
         for text in (ci, ui):
             self.assertIn("apt_install.sh libsqlite3-dev python3", text)
@@ -807,7 +821,11 @@ class ReleaseSkipTests(unittest.TestCase):
                     self.assertRegex(build, rf"-scheme\s+{re.escape(scheme)}\b")
         # ui.yml's build runs in release mode (Linux core tests skipped there) and the TestFlight
         # run calls the UI flow after CI.
-        self.assertIn("(inputs.release && needs.core-linux.result == 'skipped')", job_field(ui, "build", "if"))
+        # Since 27.11. the build does not wait for the Linux core tests (9.5 min); the verdict
+        # needs them green instead.
+        self.assertNotIn("core-linux", job_field(ui, "build", "needs"))
+        self.assertIn("core-linux", job_field(ui, "verdict", "needs"))
+        self.assertIn('[ "$CORE_LINUX" = success ]', job_blocks(ui)["verdict"])
         tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         self.assertIn("tests", [need.strip() for need in job_field(tf, "ui", "needs").split(",")])
         self.assertIn("release: true", job_blocks(tf)["ui"])

@@ -129,7 +129,7 @@ class FullGateTests(unittest.TestCase):
         done, ok, reason = ci_gate.check()
         self.assertEqual((done, ok), (False, False))
         self.assertTrue(reason.startswith("no UI flow run in full mode"), reason)
-        self.assertIn("1 quick run(s)", reason)
+        self.assertIn("only 1 run(s) that never count", reason)
         # An older full run of the same commit decides.
         ci_gate.api = self.fake(ui=("completed", "success"), verdict=("quick", "success"),
                                 more=[(10, "completed", "success", ("full", "success"))])
@@ -142,6 +142,23 @@ class FullGateTests(unittest.TestCase):
                                 more=[(10, "completed", "success", ("full", "success"))])
         self.assertEqual(ci_gate.check()[:2], (True, True))
         ci_gate.api = self.fake(ui=("in_progress", None), verdict=("smoke", None),
+                                more=[(10, "completed", "success", ("full", "success"))])
+        self.assertEqual(ci_gate.check()[:2], (True, True))
+
+    def test_pull_request_and_nightly_runs_never_decide_a_release(self):
+        # 27.11.: a pull request's "UI verdict (full)" leaves large-library out, the nightly
+        # "UI verdict (night)" checks only it; neither may open the release gate.
+        ci_gate.api = self.fake(ui=("completed", "success"), verdict=("night", "success"))
+        self.assertEqual(ci_gate.check()[:2], (False, False))
+        api = self.fake(ui=("completed", "success"), verdict=("full", "success"))
+        for event in ("pull_request", "schedule"):
+            with self.subTest(event=event):
+                ci_gate.api = lambda path, **params: (
+                    {"workflow_runs": [dict(r, event=event) for r in api(path)["workflow_runs"]]}
+                    if path == "actions/workflows/ui.yml/runs" else api(path, **params))
+                self.assertEqual(ci_gate.check()[:2], (False, False))
+        # A full run by hand on the commit decides as before.
+        ci_gate.api = self.fake(ui=("completed", "success"), verdict=("night", "success"),
                                 more=[(10, "completed", "success", ("full", "success"))])
         self.assertEqual(ci_gate.check()[:2], (True, True))
 

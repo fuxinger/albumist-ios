@@ -15,10 +15,12 @@ import AlbumistTestSupport
 struct SheetSizeSourceTests {
     static let rule = "App/Albumist/DesignSystem/SheetSize.swift"
     /// The map's sheets ("Teilen" in the atlas, `ShareCardSheet`; "Seit wann?" in the home
-    /// settings, `HomeSinceSheet`) belong to the map's own thread of work and keep their own
-    /// heights until it takes the rule: left out on purpose, by name, so every other sheet of
-    /// their files is read like any other (review S9 of H14).
-    static let mapsOwn: Set<String> = ["ShareCardSheet", "HomeSinceSheet"]
+    /// settings, `HomeSinceSheet`; the world map's own sheet over it, `WorldMapSheet`, which
+    /// stays up at 42 % like Apple Maps' and lets the map be used above it) belong to the map's
+    /// own thread of work and keep their own heights until it takes the rule: left out on
+    /// purpose, by name, so every other sheet of their files is read like any other (review S9
+    /// of H14; the world map came from main on 27.11.).
+    static let mapsOwn: Set<String> = ["ShareCardSheet", "HomeSinceSheet", "WorldMapSheet"]
 
     /// Every Swift file of the App.
     static var files: [String] { AppSource.swiftFiles(under: "App/Albumist") }
@@ -89,6 +91,8 @@ struct SheetSizeSourceTests {
             "SearchView.swift: AddToAlbumSheet .page",
             "SuggestionMenuFlows.swift: AdjustProposalView .short",
             "SuggestionMenuFlows.swift: TripWorkshopView .page",
+            "WorldMapSheet.swift: CountryPhotosView .page",
+            "WorldMapView.swift: WorldMapSheet (the map's own)",
         ], "\(sheets.sorted())")
     }
 
@@ -129,7 +133,7 @@ struct SheetSizeSourceTests {
             let solid = path == "App/Albumist/Views/PhotoViewer.swift" ? ["Theme.background", "Theme.background"] : []
             #expect(grounds == solid, "\(path): \(grounds)")
         }
-        #expect(mapsHeights.sorted() == ["[.large]", "[.medium, .large]"], "\(mapsHeights)")
+        #expect(mapsHeights.sorted() == ["[.fraction(0.42), .large]", "[.large]", "[.medium, .large]"], "\(mapsHeights)")
     }
 
     /// The scan finds a sheet's content however it is opened (a binding with closures, an

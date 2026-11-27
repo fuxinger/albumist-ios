@@ -49,7 +49,14 @@ struct WorldMapSheet: View {
                     }
             }
             .environment(model)
+            // A whole page with its own navigation (DS-12b, `SheetSize`).
+            .sheetSize(.page)
         }
+        // The map's own heights (`SheetSizeSourceTests.mapsOwn`): it stays up at 42 % like Apple
+        // Maps' sheet, and the map above it can be used. Set here, in the sheet's own view.
+        .presentationDetents([.fraction(0.42), .large])
+        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.42)))
+        .interactiveDismissDisabled()
     }
 
     // MARK: Parts
@@ -92,7 +99,7 @@ struct WorldMapSheet: View {
             HStack(spacing: Theme.Spacing.m) {
                 Group {
                     if let cover = data.photos(trip).all.first ?? trip.geometry.places.first?.coverCandidates.first {
-                        AssetThumbnail(id: cover, side: 112)
+                        AssetThumbnail(id: cover, side: 112).environment(\.thumbnailShowsVideoLength, false)
                     } else {
                         Rectangle().fill(Color(uiColor: .tertiarySystemFill))
                     }
@@ -125,7 +132,7 @@ struct WorldMapSheet: View {
                 Button {
                     viewing = PhotoViewer.Start(id: id, ids: all)
                 } label: {
-                    AssetThumbnail(id: id, side: 240)
+                    AssetThumbnail(id: id, side: 240).environment(\.thumbnailShowsVideoLength, false)
                         .aspectRatio(1, contentMode: .fill)
                         .overlay {
                             if offset == shown.count - 1 && ids.count > shown.count {

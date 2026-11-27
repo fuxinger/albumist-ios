@@ -165,7 +165,7 @@ struct TripFilmOverlay: View {
             if !ids.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(ids, id: \.self) { id in
-                        AssetThumbnail(id: id, side: 300)
+                        AssetThumbnail(id: id, side: 300).environment(\.thumbnailShowsVideoLength, false)
                             .frame(maxWidth: .infinity)
                             .frame(height: 110)
                             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))

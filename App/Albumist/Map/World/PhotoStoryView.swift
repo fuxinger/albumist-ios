@@ -49,7 +49,7 @@ struct PhotoStoryView: View {
             Color.black.ignoresSafeArea()
             if story.pages.indices.contains(index) {
                 let page = story.pages[index]
-                AssetThumbnail(id: page.photo, side: 600)
+                AssetThumbnail(id: page.photo, side: 600).environment(\.thumbnailShowsVideoLength, false)
                     .ignoresSafeArea()
                     .id(page.photo)
                     .transition(.opacity)

@@ -1566,7 +1566,7 @@ def swiftui_stream_command(udid: str) -> list[str]:
 def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str, str, float, bool]:
     """One xcodebuild run; returns (status, log text, result bundle path, start time, whether
     the watchdog stopped it)."""
-    suffix = "" if label == "first" else "-retry"
+    suffix = "" if label == "first" else f"-{label}"
     log_path = os.path.join(args.out, f"{args.name}{suffix}-log.txt")
     result = os.path.join(args.out, f"{args.name}{suffix}.xcresult")
     if args.xctestrun:
@@ -1731,29 +1731,16 @@ def budget_check(name: str, seconds: float, budget_min: float) -> bool:
     return within
 
 
-def run_group(args) -> int:
-    global MTC_DYLIB, MTC_PROBE_ON
-    os.makedirs(args.out, exist_ok=True)
-    gate = load_gate()
-    MTC_DYLIB = ""
-    if gate["main_thread_checker"].get("inject", True):
-        found = mtc_dylib(args.udid)
-        if not found:
-            print("::warning title=UI Main Thread Checker::library of the simulator runtime not found: "
-                  "this group runs without the checker", flush=True)
-        elif not mtc_preflight(args.udid, found):
-            print(f"::warning title=UI Main Thread Checker::{found} stopped a test launch: this group runs without "
-                  "the checker", flush=True)
-        else:
-            MTC_DYLIB = found
-    MTC_PROBE_ON = bool(gate["main_thread_checker"].get("probe"))
-    print(f"UI_MTC_DYLIB {MTC_DYLIB or 'none (the app runs without the Main Thread Checker)'}", flush=True)
-    CONSOLES.clear()
-    chosen = selection(args.only, args.skip)
-    if args.increase_contrast:
-        prepare(args.udid, increase_contrast=True, basics=False)
-    status, text, bundle_path, started, stopped = run_pass(args, "first", chosen, build=True)
-    report(text, status, "first")
+def run_phase(args, only: list[str], skip: list[str], increase_contrast: bool, first: str = "first") -> dict:
+    """One selection of the group on the prepared simulator: its pass and, after a simulator
+    failure, the repeat on an erased one (prepared again with `increase_contrast`). `first` names
+    the pass ("first", or "contrast" for the second phase of a group with --contrast-only); its
+    repeat is "retry" or "contrast-retry". Returns its passes, its flaky record (without the boot
+    retries), its logs, whether its last pass failed and whether only on the simulator or XCTest."""
+    again_label = "retry" if first == "first" else f"{first}-retry"
+    chosen = selection(only, skip)
+    status, text, bundle_path, started, stopped = run_pass(args, first, chosen, build=True)
+    report(text, status, first)
     crashes = crash_reports(started) if status else []
     # Whether the simulator is still there after a failed pass ("device is not booted").
     probe = sh(["xcrun", "simctl", "spawn", args.udid, "launchctl", "getenv", "HOME"], timeout=60, quiet=True)[1] if status else ""
@@ -1761,14 +1748,14 @@ def run_group(args) -> int:
     if stopped:
         bundle = watchdog_bundle(bundle)
     verdict, reasons = decide(status, text, crashes, probe[:4000], bundle)
-    print(f"UI_VERDICT {args.name} first: {verdict}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
-    print_crash_reports(crashes + other_crash_reports(started) if status else [], "first")
-    passes = [("first", 0 if verdict == "pass" else (status or 1), verdict, reasons, text)]
+    print(f"UI_VERDICT {args.name} {first}: {verdict}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
+    print_crash_reports(crashes + other_crash_reports(started) if status else [], first)
+    passes = [(first, 0 if verdict == "pass" else (status or 1), verdict, reasons, text)]
     first_log, retry_reasons, retry_log, retry_result = text, [], None, None
     stays_red = False
     if verdict == "retry":
         retry_reasons = reasons
-        retry = retry_arguments(args.only, args.skip, text)
+        retry = retry_arguments(only, skip, text)
         if retry is None:
             stays_red = True
             print(f"UI_VERDICT {args.name}: every selected test passed, nothing to repeat; the failed pass stays red")
@@ -1780,7 +1767,7 @@ def run_group(args) -> int:
                 print(f"UI_VERDICT retry skipped: {max(0, deadline - time.time()) / 60:.0f} min left before the job's "
                       "deadline, too little for an erase and a repeat")
                 retry_result = "not started (too little time before the deadline)"
-            elif not reset(args.udid, args.reduce_motion, args.increase_contrast):
+            elif not reset(args.udid, args.reduce_motion, increase_contrast):
                 print("UI_VERDICT retry impossible: the simulator did not come back after the erase")
                 retry_result = "not started (simulator did not come back)"
             elif deadline and deadline - time.time() < RETRY_AFTER_RESET:
@@ -1788,8 +1775,8 @@ def run_group(args) -> int:
                       "before the job's deadline")
                 retry_result = "not started (too little time before the deadline)"
             else:
-                status, text, bundle_path, started, stopped = run_pass(args, "retry", retry, build=False)
-                report(text, status, "retry")
+                status, text, bundle_path, started, stopped = run_pass(args, again_label, retry, build=False)
+                report(text, status, again_label)
                 crashes = crash_reports(started) if status else []
                 bundle = read_bundle(bundle_path) if status else []
                 verdict, reasons = decide(status, text, crashes, bundle=watchdog_bundle(bundle) if stopped else bundle,
@@ -1811,19 +1798,91 @@ def run_group(args) -> int:
                     final = "fail"
                     reasons = ["testmanagerd crashed again in the same test: "
                                + ", ".join(f"{c}/{t}" for c, t in sorted(again)) + " (likely app-caused)"] + reasons
-                print(f"UI_VERDICT {args.name} retry: {final}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
-                print_crash_reports(crashes + other_crash_reports(started) if status else [], "retry")
-                passes.append(("retry", 0 if final == "pass" else (status or 1), final, reasons, text))
+                print(f"UI_VERDICT {args.name} {again_label}: {final}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
+                print_crash_reports(crashes + other_crash_reports(started) if status else [], again_label)
+                passes.append((again_label, 0 if final == "pass" else (status or 1), final, reasons, text))
                 retry_log, retry_result = text, final
         if retry is None:
             retry_reasons = []
-    record = flaky_record(args.name, first_log, retry_reasons, retry_log, retry_result, boot_retries(args.out))
-    record["sweep_skips"] = sweep_skips(first_log + "\n" + (retry_log or ""))
-    write_flaky(args, record)
+    record = flaky_record(args.name, first_log, retry_reasons, retry_log, retry_result)
     # The result is the last pass: the first one when nothing was repeated, else the repeat
     # (which ran every test that had not passed in the first one).
     failed = passes[-1][1] != 0
     infra_only = failed and passes[-1][2] in ("retry", "infra") and not stays_red
+    return {"passes": passes, "record": record, "log": first_log + "\n" + (retry_log or ""),
+            "failed": failed, "infra_only": infra_only}
+
+
+# The second phase of a group with --contrast-only (the small iPhone group "accessibility" since
+# 27.11.: AccessibilityUITests test5 left its own job "contrast", so that the groups of a full UI
+# run and CI's macOS job fit the account's five Macs at once). After the first phase the
+# simulator is shut down, erased, booted and prepared again with Reduce Motion as before and
+# Increase Contrast and Reduce Transparency on (reset), so test5 meets the same fresh simulator
+# as in its own job: the welcome screen, no library, the switches on before the app's first
+# launch. Too little time before the job's deadline (before the erase, or after it, as for a
+# repeat) or a simulator that does not come back: no result for the group (infra), never a green
+# and never a red cut off by the deadline. A phase that did not start is no repeat: the flaky
+# record keeps it out of "retries".
+def contrast_phase(args, only: list[str]) -> dict:
+    def left() -> float:
+        deadline = getattr(args, "deadline", 0) or 0
+        return deadline - time.time() if deadline else float("inf")
+    print(f"UI_PHASE {args.name} contrast: erase, Increase Contrast on, then {' '.join(only)}", flush=True)
+    started = time.monotonic()
+    why = ""
+    if left() < RETRY_BEFORE_RESET:
+        why = f"{max(0, left()) / 60:.0f} min left before the job's deadline"
+    elif not reset(args.udid, args.reduce_motion, True):
+        why = "the simulator did not come back after the erase"
+    elif left() < RETRY_AFTER_RESET:
+        why = f"the erase took until {max(0, left()) / 60:.0f} min before the job's deadline"
+    timing("contrast phase: simulator erased and prepared", started)
+    if why:
+        reasons = [f"contrast phase not started ({why})"]
+        print(f"::warning title=UI {args.name}::{reasons[0]}: no result for this group", flush=True)
+        print(f"UI_VERDICT {args.name} contrast: infra ({reasons[0]})", flush=True)
+        return {"passes": [("contrast", 1, "infra", reasons, "")], "log": "", "failed": True, "infra_only": True,
+                "record": {"retries": [], "flaky": []}}
+    return run_phase(args, only, [], True, first="contrast")
+
+
+def run_group(args) -> int:
+    global MTC_DYLIB, MTC_PROBE_ON
+    os.makedirs(args.out, exist_ok=True)
+    gate = load_gate()
+    MTC_DYLIB = ""
+    if gate["main_thread_checker"].get("inject", True):
+        found = mtc_dylib(args.udid)
+        if not found:
+            print("::warning title=UI Main Thread Checker::library of the simulator runtime not found: "
+                  "this group runs without the checker", flush=True)
+        elif not mtc_preflight(args.udid, found):
+            print(f"::warning title=UI Main Thread Checker::{found} stopped a test launch: this group runs without "
+                  "the checker", flush=True)
+        else:
+            MTC_DYLIB = found
+    MTC_PROBE_ON = bool(gate["main_thread_checker"].get("probe"))
+    print(f"UI_MTC_DYLIB {MTC_DYLIB or 'none (the app runs without the Main Thread Checker)'}", flush=True)
+    CONSOLES.clear()
+    if args.increase_contrast:
+        prepare(args.udid, increase_contrast=True, basics=False)
+    phases = [run_phase(args, args.only, args.skip, args.increase_contrast)]
+    contrast_only = getattr(args, "contrast_only", None) or []
+    if contrast_only:
+        phases.append(contrast_phase(args, contrast_only))
+    passes = [p for phase in phases for p in phase["passes"]]
+    record = phases[0]["record"]
+    for phase in phases[1:]:
+        record["retries"] += phase["record"]["retries"]
+        record["flaky"] += phase["record"]["flaky"]
+    record["boot"] = boot_retries(args.out)
+    record["sweep_skips"] = sweep_skips("\n".join(phase["log"] for phase in phases))
+    write_flaky(args, record)
+    # A test that failed in any phase makes the group red; otherwise a phase without a result
+    # (the simulator or XCTest failed in every pass of it, or it could not start) leaves the
+    # group without one (never green).
+    failed = any(phase["failed"] for phase in phases)
+    infra_only = failed and not any(phase["failed"] and not phase["infra_only"] for phase in phases)
     system_log_path = os.path.join(args.out, f"{args.name}-swiftui.txt")
     if swiftui_warnings(system_log_path) != 0:
         failed, infra_only = True, False
@@ -2314,6 +2373,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--skip", action="append", default=[])
     r.add_argument("--reduce-motion", action="store_true")
     r.add_argument("--increase-contrast", action="store_true")
+    r.add_argument("--contrast-only", action="append", default=[],
+                   help="tests of a second phase after the first: erased simulator, Increase Contrast on")
     r.add_argument("--video")
     r.add_argument("--a11y-summary", action="store_true")
     r.add_argument("--budget-min", type=float, default=0,
@@ -2333,7 +2394,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--earlier", help="for a repeat: the log of the group's first pass")
     args = parser.parse_args(argv)
     # Space-separated lists are allowed too (matrix values in ui.yml).
-    for key in ("only", "skip"):
+    for key in ("only", "skip", "contrast_only"):
         if hasattr(args, key):
             setattr(args, key, [t for value in getattr(args, key) for t in value.split()])
 

@@ -388,13 +388,14 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertIn("fetch-tags: true", check)
         self.assertIn("gate --smoke-only", job_blocks(text)["ui-gate"])
 
-    def test_the_small_gate_is_the_two_short_ui_groups(self):
-        # docs/TESTFLIGHT.md ("Messung", "Zwei Tore"): flow-full and contrast, about 18 min each.
+    def test_the_small_gate_is_flow_full_and_accessibility(self):
+        # docs/TESTFLIGHT.md ("Zwei Tore"): flow-full and accessibility (with the contrast test,
+        # its second phase since 27.11.), each shorter than the stress pass beside them.
         # The gate checks exactly the groups the UI flow ran.
         import json
         text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         small = re.search(r"\n          SMALL_GATE_GROUPS: (.+)\n", text).group(1).split()
-        self.assertEqual(small, ["flow-full", "contrast"])
+        self.assertEqual(small, ["flow-full", "accessibility"])
         with open(os.path.join(ROOT, ".github", "ui-groups.json"), encoding="utf-8") as f:
             names = [g["group"] for g in json.load(f)["groups"]]
         self.assertLess(set(small), set(names))
@@ -880,10 +881,10 @@ class ReleaseSmokeTests(unittest.TestCase):
         # before the groups.
         ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
         found = re.search(r"\n      max-parallel: \$\{\{ inputs\.release && (\d) \|\| (\d) \}\}\n", ui)
-        self.assertIsNotNone(found, "ui.yml: max-parallel ${{ inputs.release && N || 5 }}")
+        self.assertIsNotNone(found, "ui.yml: max-parallel ${{ inputs.release && N || 4 }}")
         in_release, otherwise = int(found.group(1)), int(found.group(2))
-        # Outside TestFlight five groups (tempo plan 20.11.; beside CI's Mac job GitHub queues one).
-        self.assertEqual(otherwise, 5)
+        # Outside TestFlight four groups (27.11.): with CI's Mac job five, the account's limit.
+        self.assertEqual(otherwise, 4)
         tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         # After CI: the groups, the stress pass and the Release smoke test (it starts with CI
         # since 26.11. and may still run). During CI: CI's Mac job, the Release smoke test and,

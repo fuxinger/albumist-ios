@@ -73,6 +73,16 @@ class AlbumLookupTests(unittest.TestCase):
                 found += violations(os.path.basename(path), f.read())
         self.assertEqual(found, [], "\n".join(found))
 
+    def test_find_looks_inside_the_tile(self):
+        # The tile is a container without a label; its body says "Title, 2 Fotos". A match on the
+        # tile's own label finds nothing (second review of 27.11.), so test07's "the album is gone"
+        # would pass without looking.
+        with open(os.path.join(UI_TESTS, HELPER), encoding="utf-8") as f:
+            helper = code(f.read())
+        find = helper[helper.index("static func find("):]
+        self.assertRegex(find, r'matching\(identifier: "album\.tile"\)\s*\.containing\(NSPredicate')
+        self.assertNotRegex(find, r'matching\(identifier: "album\.tile"\)\s*\.matching\(NSPredicate')
+
     def test_the_rule_sees_a_lookup_on_screen_only(self):
         old = '''
     private func albumExists(_ title: String) -> Bool {

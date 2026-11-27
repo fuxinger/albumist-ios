@@ -926,6 +926,12 @@ final class DeviceConditionUITests: XCTestCase {
         let found = UITestScreens.Albums.find(app, titled: title)
         if found == nil { shot("x-album-not-found-\(title.replacingOccurrences(of: " ", with: "-"))") }
         print("UI_FACT album \(title) exists: \(found != nil)")
+        // Out of "Alle N" again, so the next look starts on the tab itself.
+        if found?.place == "Alle N", !app.buttons["albums.managed"].exists {
+            let bar = app.navigationBars.firstMatch
+            if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
+            _ = UITestWait.holds(timeout: 10) { app.buttons["albums.managed"].exists }
+        }
         tap(tabButton("Vorschläge"), "start page after albums")
         return found
     }

@@ -103,7 +103,7 @@ extension UITestScreens {
 
     // MARK: Albums
 
-    /// Where `find` saw an album: its first tile, that tile's label when it was seen ("Title,
+    /// Where `find` saw an album: its first tile, its body's label when it was seen ("Title,
     /// 2 Fotos"; the element itself is read again at each use), how many tiles of that name
     /// stand there, and the place ("shelf", "Alle N", "Deine Alben").
     struct AlbumFound {
@@ -235,11 +235,14 @@ extension UITestScreens {
         /// (`test_ui_album_lookup.py`): looking only at the screen missed albums far along the
         /// shelf twice on 27.11. (PR 31's test08 in the night, PR 28's test08 in run 45971115191).
         static func find(_ app: XCUIApplication, titled title: String) -> AlbumFound? {
+            // The tile is a container without words of its own; its body (`photoCard.body`) says
+            // "Title, 2 Fotos" (second review of 27.11.: a match on the tile's own label found none).
             let tiles = app.descendants(matching: .any).matching(identifier: "album.tile")
-                .matching(NSPredicate(format: "label BEGINSWITH %@", "\(title), "))
+                .containing(NSPredicate(format: "label BEGINSWITH %@", "\(title), "))
             let tile = tiles.firstMatch
             func found(_ place: String) -> AlbumFound {
-                let found = AlbumFound(tile: tile, label: tile.label, count: tiles.count, place: place)
+                let body = tile.descendants(matching: .any).matching(identifier: "photoCard.body").firstMatch
+                let found = AlbumFound(tile: tile, label: body.exists ? body.label : "", count: tiles.count, place: place)
                 print("UI_FACT album \(title): \(found.count) tile(s), \(place), '\(found.label)'")
                 return found
             }

@@ -286,7 +286,7 @@ class GroupTests(unittest.TestCase):
         groups = ui_groups.Groups(tree)
         entry = groups.matrix_entry("small", "a" * 64)
         self.assertEqual(entry, {"group": "small", "title": "small iPhone", "device": "se", "only": "FlowUITests/test2_Other",
-                                 "skip": "", "video": False, "reduce_motion": True, "increase_contrast": False, "quick": False,
+                                 "skip": "", "contrast_only": "", "video": False, "reduce_motion": True, "increase_contrast": False, "quick": False,
                                  "budget_min": 0, "app": "a" * 12, "tests": groups.fingerprint("small")[:12]})
 
     def test_a_time_budget_reports_and_runs_nothing_again(self):

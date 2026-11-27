@@ -15,20 +15,18 @@ run-name: >-
 #      them green.
 #   2. UI build: builds the app and the UI tests once (build-for-testing) and hands them on.
 #   3. The test groups (.github/ui-groups.json), each on its own runner and freshly booted
-#      simulator (test-without-building), at most five at a time (max-parallel; three when
+#      simulator (test-without-building), at most four at a time (max-parallel; three when
 #      TestFlight calls it, beside its stress pass and Release smoke test), so the slowest
 #      group sets the wall time, not the sum. Measured times per group: docs/TESTFLIGHT.md
 #      ("Messung"). "other flows" is defined as "everything the other groups do not run", so a
 #      new test class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests
 #      checks every UI test against the groups).
-#      max-parallel 5 holds back the sixth group (the last listed, contrast) until one of the
-#      five ends. With CI's one macOS job that is still six macOS jobs asked for at the peak,
-#      for the first 15-25 min of the groups while CI's job still runs; the account runs five
-#      at once, so one of the five started groups waits in GitHub's account queue until a Mac
-#      is free, and which one GitHub picks is not fixed (a queued job waits, it never fails;
-#      its timeout counts from its start). Tempo plan 20.11.: six groups of at most about 45
-#      min instead of five with one of 56-65 min (before: max-parallel 4, five macOS jobs at
-#      the peak, accepted on 16.11.).
+#      Since 27.11. four groups in a pull request's run (large-library aside): with CI's one
+#      macOS job five macOS jobs, the account's five Macs, so every group starts at once
+#      (max-parallel 4). Before, six groups and CI's job asked for seven and two waited 10-30
+#      min (tempo plan 20.11.: six groups; full UI runs 45939666948 and 45920259957). The small
+#      iPhone group accessibility runs its contrast test in a second phase on the erased
+#      simulator (ui_tests.py --contrast-only) instead of a job of its own.
 #      The stress pass is not part of this run: .github/workflows/ui-stress.yml (10,000 photos
 #      before each TestFlight build, 50,000 weekly at night and before the App Store launch).
 #
@@ -38,8 +36,8 @@ run-name: >-
 #     fingerprint of the group: its test files, the shared helpers they use, its definition and
 #     the harness; .github/scripts/ui_groups.py). A test-only change runs the groups of the
 #     changed files, a change to a shared helper every group that uses it, any app change all.
-#   - all: every group; or group names (device flow-other accessibility device-flows flow-full
-#     contrast large-library). A pull request's run never has large-library (below).
+#   - all: every group; or group names (device flow-other accessibility flow-full
+#     large-library). A pull request's run never has large-library (below).
 #   Each group job carries both fingerprints in its name ("[device app ... tests ...]"); that is
 #   where later runs and the TestFlight gate find the result again. A group whose result for
 #   this app and test code was red runs again when asked, but its green never counts (a red test
@@ -431,25 +429,26 @@ jobs:
     timeout-minutes: 150
     strategy:
       fail-fast: false
-      # Five groups + CI's macOS job = six asked for at the peak; the account queue holds one of
-      # them, whichever GitHub picks, until a Mac is free (top of this file, tempo plan 20.11.).
-      # Called by TestFlight (release): three, as the stress pass and the Release smoke test run
-      # beside the groups there (CI's Mac job has ended), so five Macs at most, the account's
-      # limit. The group order (.github/ui-groups.json) starts the longest in a full run
-      # (device-flows, device, other flows) first, accessibility (the longest of the short ones)
-      # on the first free Mac, then flow-full and contrast. Estimate for a full run (job minutes
-      # from TestFlight run 44461253154 and the pull-request medians since 18.11.): about 70-76
-      # min for the groups, before about 68-74; six jobs on three Macs cannot do better than
-      # about 70 (second review of C7; test_workflows.py ReleaseSmokeTests).
-      max-parallel: ${{ inputs.release && 3 || 5 }}
+      # Four groups + CI's macOS job = five at the peak, the account's limit: a pull request's
+      # full run starts all its groups at once (27.11., four groups; before six groups and CI's
+      # job asked for seven and two waited 10-30 min). A run by hand with large-library holds
+      # back the last group until one ends. Called by TestFlight (release): three, as the stress
+      # pass and the Release smoke test run beside the groups there (CI's Mac job has ended), so
+      # five Macs at most. The group order (.github/ui-groups.json) starts large-library and the
+      # longest (accessibility, other flows) first. Estimate (full UI runs 45939666948 and
+      # 45920259957): about 37-47 job minutes per group.
+      max-parallel: ${{ inputs.release && 3 || 4 }}
       # The groups of .github/ui-groups.json that run (UI plan): group, title, device, only,
-      # skip, video, reduce_motion, increase_contrast, budget_min, app, tests.
+      # skip, contrast_only, video, reduce_motion, increase_contrast, budget_min, app, tests.
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       GROUP: ${{ matrix.group }}
       DEVICE: ${{ matrix.device }}
       ONLY: ${{ matrix.only }}
       SKIP: ${{ matrix.skip }}
+      # Tests of a second phase on the erased simulator with Increase Contrast on (the small
+      # iPhone group accessibility: its contrast test, 27.11.; ui_tests.py --contrast-only).
+      CONTRAST_ONLY: ${{ matrix.contrast_only }}
       INCREASE_CONTRAST: ${{ matrix.increase_contrast }}
       REDUCE_MOTION: ${{ matrix.reduce_motion }}
       VIDEO: ${{ matrix.video }}
@@ -513,6 +512,7 @@ jobs:
           flags=()
           [ "$REDUCE_MOTION" = "true" ] && flags+=(--reduce-motion --a11y-summary)
           [ "$INCREASE_CONTRAST" = "true" ] && flags+=(--increase-contrast)
+          [ -n "$CONTRAST_ONLY" ] && flags+=(--contrast-only "$CONTRAST_ONLY")
           [ "$VIDEO" = "true" ] && flags+=(--video build/sorting-show.mp4)
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP" --xctestrun "$XCTESTRUN" \
             --only "$ONLY" --skip "$SKIP" --deadline "$((UI_JOB_START + (150 - 12) * 60))" \

@@ -18,8 +18,9 @@ run-name: >-
 #     the merge (ui.yml by hand on the pull request's branch, quick off), and the UI flow here
 #     runs only the groups without such a green (usually none), the gate takes the others.
 #   - small (the daily build for the owner's own iPhone; daily-build.yml starts it each morning
-#     when the app changed, and it can be started by hand): CI, the two short UI groups
-#     flow-full and contrast (about 18 min each), the small stress pass, the UI gate over those
+#     when the app changed, and it can be started by hand): CI, the UI groups flow-full and
+#     accessibility (with the contrast test, its second phase since 27.11.; about 35-45 min each,
+#     beside the stress pass of about 45), the small stress pass, the UI gate over those
 #     two groups. No other UI group. The run name, the tag message and "Was testen" say "small
 #     gate"; such a build is not given to testers.
 #   - fast (the owner's decision of 26.11.2026, rule text approved by the coordinator that day):
@@ -138,7 +139,7 @@ on:
   workflow_dispatch:
     inputs:
       gate:
-        description: 'Gate: big (for testers and the App Store: every UI group, stress pass), small (daily build only for the owner: CI, the UI groups flow-full and contrast, stress pass) or fast (internal build only for the owner, about 30-40 min: CI, Release smoke test, UI smoke test; refused when analysis, albums, purchases, data or the pipeline changed)'
+        description: 'Gate: big (for testers and the App Store: every UI group, stress pass), small (daily build only for the owner: CI, the UI groups flow-full and accessibility, stress pass) or fast (internal build only for the owner, about 30-40 min: CI, Release smoke test, UI smoke test; refused when analysis, albums, purchases, data or the pipeline changed)'
         type: choice
         options: [big, small, fast]
         default: big
@@ -213,8 +214,9 @@ jobs:
         env:
           GATE: ${{ inputs.gate || 'big' }}
           UI_GROUPS: ${{ inputs.ui_groups || 'auto' }}
-          # The small gate's UI groups: the two short ones (docs/TESTFLIGHT.md, "Zwei Tore").
-          SMALL_GATE_GROUPS: flow-full contrast
+          # The small gate's UI groups (docs/TESTFLIGHT.md, "Zwei Tore"): the full flow with video
+          # and the small iPhone (accessibility with its contrast phase; contrast until 27.11.).
+          SMALL_GATE_GROUPS: flow-full accessibility
         run: |
           case "$GATE" in
             big) groups="$UI_GROUPS"; checked="" ;;

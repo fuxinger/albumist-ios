@@ -684,6 +684,7 @@ final class AccessibilityUITests: XCTestCase {
             // shows here before it times out on a busy one; a slow one gets the pixel probe.
             let took = Date().timeIntervalSince(started)
             print("A11Y_AUDIT_TIME \(screen) attempt \(attempt) \(String(format: "%.1f", took)) s \(finished ? "completed" : "timed out")")
+            if attempt == 1 { logTextsUnderBars(screen, chrome: chrome) }
             if finished {
                 if took > 5 { UITestScreenProbe.logPixels(app, screen: screen) }
                 confirmContrast(screen)
@@ -718,6 +719,8 @@ final class AccessibilityUITests: XCTestCase {
                 : "contrast audit hung twice and the screen changed in the background, no retry"
             print("A11Y_FAIL \(screen) | audit | \(why)")
             auditFailures.append(why)
+            // What the retry recorded before it hung is no finding of the next screen (review round 2).
+            pendingContrast = []
             return
         case .otherTypesHung:
             break
@@ -729,6 +732,23 @@ final class AccessibilityUITests: XCTestCase {
         // checked must not pass (Prüfer B G5-06). The tree checks still ran; check() fails the test.
         print("A11Y_FAIL \(screen) | audit | did not complete in 2 attempts, screen not audited")
         auditFailures.append("audit did not complete in 2 attempts, screen not audited")
+    }
+
+    /// How many texts a bar cuts (partly under it, partly not): evidence for A28, whether the
+    /// contrast audit is slow or hangs where text runs under a bar's blur ("en plan lower" in
+    /// UI run 45997759108, "xxxl suggestion detail lower" in 45971115191 both had such text).
+    private func logTextsUnderBars(_ screen: String, chrome: [CGRect]) {
+        guard let root = try? app.snapshot() else { return }
+        var cut: [String] = []
+        var stack: [any XCUIElementSnapshot] = [root]
+        while let node = stack.popLast() {
+            stack.append(contentsOf: node.children)
+            guard node.elementType == .staticText, !node.frame.isEmpty else { continue }
+            if chrome.contains(where: { $0.intersects(node.frame) && !$0.contains(node.frame) }) {
+                cut.append("'\(node.label.prefix(24))' \(Int(node.frame.minY))-\(Int(node.frame.maxY))")
+            }
+        }
+        print("A11Y_TEXTS_UNDER_BARS \(screen) \(cut.count): \(cut.joined(separator: "; "))")
     }
 
     /// The audit types other than contrast. Run on their own when the whole audit did not

@@ -97,17 +97,63 @@ enum UITestAppEnd {
             // access is taken away) let the test launch it again, and the Mac's late end hit
             // that new launch (test09, PR #9 UI run 44464687545).
             let pid = processID(of: app)
-            print("UI_HOST_TERMINATE_APP \(Int(asked.timeIntervalSince1970))" + (pid.map { " \($0)" } ?? ""))
-            if app.wait(for: .notRunning, timeout: 60) {
+            // The Mac answers "ended" or "not ended" into this file once its end is done
+            // (`HostGrants` in ui_tests.py); a path with a space could not be named in the line.
+            let answer = NSTemporaryDirectory() + "uitest-host-answer-\(UUID().uuidString)"
+            let answered = !answer.contains(where: \.isWhitespace)
+            defer { try? FileManager.default.removeItem(atPath: answer) }
+            print("UI_HOST_TERMINATE_APP \(Int(asked.timeIntervalSince1970))" + (pid.map { " \($0)" } ?? "")
+                  + (answered ? " \(answer)" : ""))
+            switch waitForEnd(app, answer: answered ? answer : nil) {
+            case .gone:
                 print("UI_TIMING app ended \(when) \(Int(Date().timeIntervalSince(asked))) s (by the Mac, ended)")
                 return
+            case .staleAfterMacEnd:
+                print("UI_FACT the Mac ended the app, XCTest still reads it running \(Int(Date().timeIntervalSince(asked))) s after the request: XCTest ends it")
+                way = "by XCTest after the Mac ended it"
+            case .running:
+                print("UI_FACT app still running \(Int(Date().timeIntervalSince(asked))) s after asking the Mac to end it: XCTest ends it")
+                way = "by XCTest after the Mac"
             }
-            print("UI_FACT app still running \(Int(Date().timeIntervalSince(asked))) s after asking the Mac to end it: XCTest ends it")
-            way = "by XCTest after the Mac"
         }
         app.terminate()
         let gone = app.wait(for: .notRunning, timeout: 60)
         print("UI_TIMING app ended \(when) \(Int(Date().timeIntervalSince(asked))) s (\(way), \(gone ? "ended" : "still running"))")
+    }
+
+    /// How long the test waits for the Mac's end (TERMINATE_WAIT in ui_tests.py).
+    static let macEndWait: TimeInterval = 60
+    /// XCTest's time to see the app gone after the Mac answered "ended".
+    static let staleStateWait: TimeInterval = 5
+
+    /// What `waitForEnd` saw.
+    enum MacEnd {
+        /// XCTest reads the app as not running.
+        case gone
+        /// The Mac answered that the process is gone, and XCTest still read it as running
+        /// `staleStateWait` s later.
+        case staleAfterMacEnd
+        /// Still running after `macEndWait` s, and the Mac did not say it ended it.
+        case running
+    }
+
+    /// Waits up to `macEndWait` s until XCTest reads `app` as not running, as the single wait
+    /// before did, and stops early when the Mac answered "ended" into `answer` and XCTest still
+    /// does not see it within `staleStateWait` s: then XCTest ends it at once, as it did after the
+    /// whole wait. Device test07 in the full UI run 45865545486 (job 140074115643): the Mac ended
+    /// the app 12 s after the request ("ended by SIGTERM (10 s)"), XCTest read it as running for
+    /// 60 s and its own terminate then took 17 s (77 s for the end).
+    private static func waitForEnd(_ app: XCUIApplication, answer: String?) -> MacEnd {
+        let start = Date()
+        while true {
+            let left = macEndWait - Date().timeIntervalSince(start)
+            guard left > 0 else { return .running }
+            // Short slices of the same wait, so the answer is read in between.
+            if app.wait(for: .notRunning, timeout: min(2, left)) { return .gone }
+            guard let answer, let text = try? String(contentsOfFile: answer, encoding: .utf8),
+                  text.trimmingCharacters(in: .whitespacesAndNewlines) == "ended" else { continue }
+            return app.wait(for: .notRunning, timeout: staleStateWait) ? .gone : .staleAfterMacEnd
+        }
     }
 
     /// The process id the app of the last launch wrote first thing ("@ <pid> <start> <now>")

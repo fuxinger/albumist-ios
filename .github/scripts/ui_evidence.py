@@ -301,6 +301,21 @@ def late_log(logs, job: dict):
     return text
 
 
+# Jobs whose log GitHub never stored and that are approved, one by one, to count as "no result"
+# instead of red (never as green: the group runs again and must be green). Each entry says why
+# and who approved it (coordinator 27.11.: device job 140302168847, cancelled by a newer push).
+UNREADABLE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ui-evidence-unreadable.json")
+
+
+def approved_unreadable(path: str = UNREADABLE_FILE) -> set[int]:
+    """The job ids of `path` (none when the file is missing)."""
+    try:
+        with open(path, encoding="utf-8") as file:
+            return {int(job_id) for job_id in json.load(file).get("jobs", {})}
+    except FileNotFoundError:
+        return set()
+
+
 def results(runs_and_jobs, logs=None) -> list[dict]:
     """One entry per group job: group, app, tests (short), result, and where it ran. `logs`
     (job id -> log text or None) confirms a red; without it a red stays red."""
@@ -319,7 +334,9 @@ def results(runs_and_jobs, logs=None) -> list[dict]:
             limit = STRESS_TIMEOUT_MINUTES if stress else GROUP_TIMEOUT_MINUTES
             if result == "red" and logs is not None and not ran_out_of_time(job, limit):
                 text = late_log(logs, job)
-                if text is None:
+                if text is None and job.get("id") in approved_unreadable():
+                    result, log_state = "none", "gone, approved as no result"
+                elif text is None:
                     log_state = "gone"  # red: whether a test failed cannot be checked any more
                 elif not red_in_log(text, "stress" if stress else match.group(1)):
                     result = "none"  # stopped during the tests without a test result (a cancel)

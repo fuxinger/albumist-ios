@@ -417,6 +417,29 @@ class RedFromTheLogTests(unittest.TestCase):
         self.assertEqual((entry["result"], entry["log"]), ("red", "gone"))
         self.assertEqual(len(waits), ui_evidence.LOG_LATE_TRIES)
 
+    def test_only_an_approved_job_without_a_log_is_no_result(self):
+        """Coordinator 27.11.: device job 140302168847 of run 45936196002, cancelled by a newer
+        push, GitHub never stored its log. Listed, it counts as no result (never green); any other
+        job without a log stays red."""
+        self.assertIn(140302168847, ui_evidence.approved_unreadable())
+        listed = [run(1, "a" * 40, [dict(job("device", "cancelled", "cancelled", job_id=140302168847))])]
+        other = [run(2, "a" * 40, [dict(job("device", "cancelled", "cancelled", job_id=140302168848))])]
+        with mock.patch.object(ui_evidence.time, "sleep", lambda s: None):
+            entry = ui_evidence.results(listed, logs=lambda job_id: None)[0]
+            self.assertEqual((entry["result"], entry["log"]), ("none", "gone, approved as no result"))
+            self.assertEqual(ui_evidence.results(other, logs=lambda job_id: None)[0]["result"], "red")
+            # A listed job whose log is there is read as any other.
+            red_log = "UI_RESULT device fail\n"
+            self.assertEqual(ui_evidence.results(listed, logs=lambda job_id: red_log)[0]["result"], "red")
+
+    def test_every_approved_entry_says_why_and_who(self):
+        with open(ui_evidence.UNREADABLE_FILE, encoding="utf-8") as file:
+            jobs = json.load(file)["jobs"]
+        for job_id, entry in jobs.items():
+            self.assertTrue(job_id.isdigit(), job_id)
+            for key in ("group", "run", "why", "approved"):
+                self.assertTrue(entry.get(key), f"{job_id}: {key} missing")
+
 
 class QuickTests(unittest.TestCase):
     """A quick run (pull requests) may take a full green; a full check never takes a quick one; a

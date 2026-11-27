@@ -215,6 +215,18 @@ class GateTests(unittest.TestCase):
         self.assertNotIn("UI_MAIN_HANG", out.getvalue())
         self.assertNotIn("main thread checker", out.getvalue())
 
+    def test_a_runtime_warning_says_in_which_minutes_it_came(self):
+        cycling = "F  Albumist[1:2] [com.apple.SwiftUI:Invalid Configuration] Geometry action is cycling between duplicate values."
+        log = "\n".join(["2026-11-26 23:56:20.100 " + cycling, "2026-11-26 23:56:40.900 " + cycling,
+                         "2026-11-26 23:58:01.000 " + cycling, "Filtering the log data using ..."])
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write(log)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ui_tests.swiftui_warnings(f.name)
+        os.unlink(f.name)
+        self.assertIn("UI_RUNTIME_WARNING       3 " + cycling + " | at 23:56 2x, 23:58 1x", out.getvalue())
+
 
 class MacSideTests(unittest.TestCase):
     def test_the_library_of_the_devices_runtime(self):

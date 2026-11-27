@@ -164,7 +164,8 @@ struct WorldMapSheet: View {
         let trips = data.trips(inCountry: key)
         let name = WorldMapText.countryName(key)
         let photos = trips.reduce(0) { $0 + ($1.geometry.countryPhotos[key] ?? 0) }
-        header(name, [String(localized: "\(trips.count) Reisen"), String(localized: "\(photos) \(photos.formatted()) Fotos")].joined(separator: " · "), closable: true)
+        let photoCount = String(localized: "\(photos) \(photos.formatted()) Fotos")
+        header(name, [String(localized: "\(trips.count) Reisen"), photoCount].joined(separator: " · "), closable: true)
         mainButton("Alle Fotos ansehen", systemImage: "photo.on.rectangle", identifier: "worldmap.country.photos") {
             countryPhotos = CountryCode(id: key)
         }
@@ -174,7 +175,9 @@ struct WorldMapSheet: View {
     @ViewBuilder private func tripView(_ trip: MapTrip) -> some View {
         let film = data.film(trip)
         let photos = data.photos(trip)
-        header(trip.title, [WorldMapText.when(trip.geometry), String(localized: "\(trip.geometry.photoCount) \(trip.geometry.photoCount.formatted()) Fotos")].joined(separator: " · "), closable: true)
+        let count = trip.geometry.photoCount
+        let photoCount = String(localized: "\(count) \(count.formatted()) Fotos")
+        header(trip.title, [WorldMapText.when(trip.geometry), photoCount].joined(separator: " · "), closable: true)
         switch film.kind {
         case .film:
             mainButton("Reise abspielen", systemImage: "play.fill", identifier: "worldmap.play") { onPlay(trip) }

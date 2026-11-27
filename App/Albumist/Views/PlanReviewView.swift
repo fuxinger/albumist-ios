@@ -1,4 +1,3 @@
-import StoreKit
 import SwiftUI
 import AlbumistCore
 import AlbumistEngine
@@ -20,26 +19,58 @@ import AlbumistEngine
 struct PlanReviewView: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
-    /// A plan built elsewhere (album merge); otherwise the accepted proposals are planned.
-    var prebuilt: ChangePlan? = nil
+    /// A plan built elsewhere (an album merge, a removal, one suggestion right away).
+    var prebuilt: ChangePlan?
+    /// Otherwise the picks the preview plans ("Dein Startpaket", "N Alben anlegen", "Ergänzen …"
+    /// in a list): exactly these (`AppModel.buildPlan(for:)`); leaving gives them back.
+    var selection: AppModel.PreviewSelection?
+    /// The plan this preview shows: its own, so a preview opened on another tab (a removal
+    /// under "Alben", "Ergänzen …" on a card) never replaces it.
+    @State private var plan: ChangePlan?
+    /// When `plan` was made, and whether it went to its run: a plan made before another run
+    /// ended, or before a choice made elsewhere, is made again or taken away before it can run
+    /// (`makePlanIfNeeded`).
+    @State private var freshness = PlanFreshness()
+    /// Why there is no plan any more (`makePlanIfNeeded`, `take`).
+    @State private var dropped: Dropped?
     @State private var loading = true
     /// Albums of the plan that is running, for the "photos fly into albums" show.
     @State private var show: [SortingShow.Album]?
-    /// What the screen shows of `model.plan`, made by `makeFacts()`.
+    /// "Anlegen" was tapped and its run has not ended yet: the show's albums are cast first
+    /// (`applyButton`), and a second tap meanwhile starts nothing.
+    @State private var starting = false
+    /// The result's moment is still to come (`ResultCard.onMoment`): the success tap waits for
+    /// the main cover to lie down on the stack (draft E3), as it waits for the show's end, but
+    /// never longer than `ResultCoverFan.successDeadline` once the result shows (`momentDue`).
+    @State private var momentPending = false
+    /// The covers of the result's stack loading while the plan runs (`beginMoment`); cancelled as
+    /// the result shows, which takes only what is kept by then, or when the run has no result.
+    @State private var prefetch: Task<Void, Never>?
+    /// The covers that loaded, kept here as they arrive: the covers' store may be emptied
+    /// meanwhile (review E2 of design wave 2, N3). Not observed: nothing is drawn again for them.
+    @State private var momentCovers = ResultMomentCovers()
+    /// What the result's stack of covers knows of the suggestions the plan came from, taken as
+    /// it starts (`AppModel.resultCoverSources`).
+    @State private var coverSources: ResultCoverSources?
+    /// What the screen shows of `plan`, made by `makeFacts()`.
     @State private var facts: PlanReviewFacts?
     /// The plan and album list `facts` were made for.
     @State private var factsMadeFor: FactsKey?
-    /// Suggestions were selected when the facts were made ("Auswahl aufheben" is offered).
-    @State private var hasSelection = false
+    /// The covers of the albums the plan lists (design wave 3, DS-15 part 2), as its receipt will
+    /// show them, with the plan they were worked out for.
+    @State private var albumCovers: AlbumCovers?
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dismiss) private var dismiss
     /// At the accessibility text sizes and in landscape on an iPhone the bar is compact (`compactBar`).
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.displayScale) private var displayScale
     /// The screen loads once; coming back from another tab keeps the result and its undo.
     @State private var didLoad = false
     private static let top = "plan.top"
+    /// Padding around the screen's content; the sorting show keeps it free when it fits itself
+    /// to the screen (`SortingShow.screenPadding`).
+    private static let contentPadding = Theme.Spacing.l
 
     /// The facts are made again for another plan, or when the albums in Photos changed.
     private struct FactsKey: Equatable {
@@ -63,24 +94,34 @@ struct PlanReviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                     if let show {
-                        SortingShow(albums: show) {
+                        SortingShow(albums: show, screenPadding: Self.contentPadding) {
                             withAnimation(.smooth(duration: 0.45)) { self.show = nil }
                         }
                         .transition(.opacity)
                     } else if let result = model.execution.finished, !model.execution.isRunning {
-                        ResultCard(plan: result)
+                        resultCard(result)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     } else if model.execution.isRunning {
                         runningCard
-                    } else if loading || (model.plan != nil && !factsKey.samePlan(as: factsMadeFor)) {
+                    } else if loading || isStale || needsFirstPlan || (plan != nil && !factsKey.samePlan(as: factsMadeFor)) {
                         // Facts of another plan (or of this plan before "Nur die Gratis-Alben"
                         // or a change of steps) are never shown. After a change of the album
                         // list alone the shown facts stay until the new ones are made, so the
                         // screen neither jumps to the top nor takes away "Anlegen" while Photos
-                        // reports a change.
+                        // reports a change. A plan made before another change is being made
+                        // again; one that waited for a run to end is being made.
                         ProgressView("Plan wird erstellt").frame(maxWidth: .infinity).padding(.top, 60)
                     } else if let previewed {
                         planContent(previewed.plan, previewed.facts, obstacle: previewed.obstacle)
+                    } else if let dropped {
+                        switch dropped {
+                        case .changed:
+                            ContentUnavailableView("Inzwischen hat sich etwas geändert", systemImage: "arrow.triangle.2.circlepath",
+                                                   description: Text("Öffne die Vorschau noch einmal, dann zeigt sie den neuen Stand."))
+                        case .nothingLeft:
+                            ContentUnavailableView("Nichts zu tun", systemImage: "checkmark.circle",
+                                                   description: Text("Die Vorschläge dieser Vorschau sind inzwischen erledigt oder nicht mehr aktuell."))
+                        }
                     } else {
                         ContentUnavailableView("Nichts zu tun", systemImage: "checkmark.circle",
                                                description: Text("Es gibt gerade keine ausgewählten Vorschläge."))
@@ -92,7 +133,7 @@ struct PlanReviewView: View {
                         }
                     }
                 }
-                .padding(Theme.Spacing.l)
+                .padding(Self.contentPadding)
                 .id(Self.top)
             }
             // The button in reach while the plan scrolls under it (review P3-05 = G3-05). In the
@@ -114,7 +155,8 @@ struct PlanReviewView: View {
         // Leaving mid-way would look like cancelling; the work goes on either way.
         .navigationBarBackButtonHidden(model.execution.isRunning)
         .navigationBarTitleDisplayMode(.inline)
-        .modifier(ExecutionHaptics(execution: model.execution, holdSuccess: show != nil))
+        .modifier(ExecutionHaptics(execution: model.execution, holdSuccess: show != nil || momentPending))
+        .task(id: momentDue) { await holdMomentAtMost() }
         .task {
             await model.refreshAccess()
             guard !didLoad else { return }
@@ -125,11 +167,32 @@ struct PlanReviewView: View {
                 // every screen that reads `execution`.
                 if model.execution.finished != nil { model.execution.finished = nil }
                 if model.execution.failure != nil { model.execution.failure = nil }
-                if let prebuilt { model.plan = prebuilt } else { await model.buildPlan() }
+                // Read before the plan is made: a change meanwhile makes it stale.
+                let seen = changes
+                if let prebuilt {
+                    plan = prebuilt
+                } else if let selection {
+                    take(await model.buildPlan(for: selection))
+                }
+                freshness.made(after: seen)
             }
+            // While a run is on, no plan is made: its end makes it (`makePlanIfNeeded`).
             loading = false
         }
         .task(id: factsKey) { await makeFacts() }
+        // The albums' covers (DS-15 part 2), worked out off the main thread from what the plan
+        // sets out to add, again for another plan or when the facts change (the photos' dates and
+        // ranks with them), as the receipt's: a photo the analysis finds to be a sensitive
+        // document leaves its cover at once. Not while the plan runs (`albumCoverInputs`).
+        .task(id: albumCoverInputs) {
+            guard albumCoverInputs != nil, let plan else { return }
+            let made = await model.previewCovers(for: plan)
+            guard !Task.isCancelled else { return }
+            albumCovers = AlbumCovers(plan: plan.id, covers: made)
+        }
+        // Each change (a run that ended, a choice made elsewhere), each change of `freshness`
+        // and the end of loading check the plan again.
+        .task(id: StaleCheck(changes: changes, freshness: freshness, loading: loading)) { await makePlanIfNeeded() }
         .onChange(of: scenePhase) { _, phase in
             // Back from the Settings app: the full-access card disappears by itself.
             if phase == .active { Task { await model.refreshAccess() } }
@@ -140,22 +203,94 @@ struct PlanReviewView: View {
     /// progress card), its result, the preview.
     private var phase: PlanReviewPhase {
         PlanReviewPhase(running: model.execution.isRunning, runningPlan: model.execution.planID,
-                        previewedPlan: model.plan?.id, hasResult: model.execution.finished != nil)
+                        previewedPlan: plan?.id, hasResult: model.execution.finished != nil)
     }
 
     private var factsKey: FactsKey {
-        let plan = model.plan
-        return FactsKey(plan: plan?.id, steps: plan?.steps.count ?? 0, conflicts: plan?.conflicts.count ?? 0,
-                        inventory: model.inventoryVersion)
+        FactsKey(plan: plan?.id, steps: plan?.steps.count ?? 0, conflicts: plan?.conflicts.count ?? 0,
+                 inventory: model.inventoryVersion)
     }
 
     /// The plan on screen, with what stops it: nil during the sorting show, the run, over a
-    /// result and while the plan is made. One value for the plan and the bar under it, so the
-    /// button never stands where the plan is not shown.
+    /// result and while the plan is made (also again, `makePlanIfNeeded`). One value for the
+    /// plan and the bar under it, so the button never stands where the plan is not shown.
     private var previewed: (plan: ChangePlan, facts: PlanReviewFacts, obstacle: Obstacle?)? {
         guard show == nil, !model.execution.isRunning, model.execution.finished == nil, !loading,
-              let plan = model.plan, let facts, factsKey.samePlan(as: factsMadeFor) else { return nil }
+              !freshness.isStale(changes: changes),
+              let plan, let facts, factsKey.samePlan(as: factsMadeFor) else { return nil }
         return (plan, facts, obstacle(for: plan, facts))
+    }
+
+    /// What makes the plan stale once it moved on (`PlanFreshness`): each run that ended, and
+    /// each choice made elsewhere that changes what a plan holds (`AppModel.choicesMade`: a
+    /// suggestion set aside, photos taken out of it, another album under "Anpassen", a name).
+    /// Also for a plan built elsewhere: the suggestion it makes may have been set aside.
+    private var changes: Int {
+        model.runsEnded + model.choicesMade
+    }
+
+    /// A plan is on screen that was made before another change (`PlanFreshness`).
+    private var isStale: Bool {
+        plan != nil && freshness.isStale(changes: changes)
+    }
+
+    /// The preview opened while a run was on and has made no plan yet; the run's end makes it
+    /// (`makePlanIfNeeded`). Review B of design wave 1, finding 3: opened while a quick create
+    /// or its "Widerrufen" still ran, it stayed on "Nichts zu tun".
+    private var needsFirstPlan: Bool {
+        didLoad && !freshness.wasMade && dropped == nil
+    }
+
+    /// Why a preview shows no plan any more.
+    private enum Dropped {
+        /// A plan built elsewhere went stale: it cannot be made again here.
+        case changed
+        /// The plan made again plans nothing: its suggestions were made or set aside meanwhile.
+        case nothingLeft
+    }
+
+    /// What `makePlanIfNeeded` looks at.
+    private struct StaleCheck: Equatable {
+        var changes: Int
+        var freshness: PlanFreshness
+        var loading: Bool
+    }
+
+    /// The plan is made again, or for the first time, when it may not fit any more:
+    /// - a run ended after it was made, which may have done part of it already (second review of
+    ///   design wave 1: "Jetzt anlegen" in a preview left open made an album a second time that
+    ///   "Album anlegen" had made on another tab meanwhile), or a choice was made elsewhere
+    ///   meanwhile (review B, finding 2: a suggestion set aside on another tab was made anyway);
+    /// - none was made, because a run was on when the preview opened (finding 3).
+    /// A preview of picks makes its plan again: what was applied or set aside meanwhile plans
+    /// nothing more, and a plan with nothing left says so (`take`). A plan built elsewhere
+    /// cannot be made again here and is taken away, with a word why. Not while a run is on or
+    /// the screen loads: their end checks again.
+    private func makePlanIfNeeded() async {
+        guard !loading, !model.execution.isRunning, isStale || needsFirstPlan else { return }
+        guard prebuilt == nil, let selection else {
+            plan = nil
+            dropped = .changed
+            return
+        }
+        let seen = changes
+        let made = await model.buildPlan(for: selection)
+        // Another change came meanwhile, or the screen went: the next check makes it again.
+        guard !Task.isCancelled else { return }
+        take(made)
+        freshness.made(after: seen)
+    }
+
+    /// The plan of the picks, made on opening or again: one that plans nothing is no plan, and
+    /// the screen says why instead of a plan of zeros with a grey button (review B of design
+    /// wave 1, finding 8).
+    private func take(_ made: ChangePlan?) {
+        if let made, made.steps.isEmpty, made.conflicts.isEmpty {
+            plan = nil
+            dropped = .nothingLeft
+        } else {
+            plan = made
+        }
     }
 
     /// What stops the plan before it runs; shown at the top of the plan instead of the button.
@@ -178,11 +313,12 @@ struct PlanReviewView: View {
 
     /// Works out what the screen shows of the current plan, off the main thread.
     private func makeFacts() async {
-        guard let plan = model.plan else { return }
+        guard let plan else { return }
         let key = factsKey
         let inventory = model.inventory
+        // The albums in the order of the suggestions the preview plans.
         let order = MainThreadWatch.shared.section("plan review: order") {
-            model.acceptedProposals.inDisplayOrder().map(\.id)
+            selection.map { model.plannedProposals(in: $0).map(\.id) } ?? []
         }
         // Covers and the sorting show leave sensitive documents out (`PreviewRank`).
         let ranks = model.previewRanks
@@ -192,7 +328,30 @@ struct PlanReviewView: View {
         guard !Task.isCancelled else { return }
         facts = made
         factsMadeFor = key
-        hasSelection = !order.isEmpty
+    }
+
+    /// The covers of a plan's albums (`AppModel.previewCovers`), and the plan they were worked
+    /// out for.
+    private struct AlbumCovers {
+        var plan: AlbumistID
+        /// By the receipt's name of the album (`PlanCovers.key`); nil before the first facts.
+        var covers: [String: PlanCovers.Cover]?
+    }
+
+    /// What the albums' covers are worked out from (`AppModel.changeCoverInputs`): nil while the
+    /// plan runs, its sorting show included (review M4 of design wave 3). The list is not on
+    /// screen then, and the facts the run brings would draw the screen again and work the covers
+    /// out for nothing; the covers made before stay, and a plan made after the run works out its
+    /// own. Read in this order, the body reads the facts' revision only while the plan can show.
+    private var albumCoverInputs: ChangeCoverInputs? {
+        guard show == nil, !model.execution.isRunning, let plan else { return nil }
+        return model.changeCoverInputs([plan])
+    }
+
+    /// The covers of `plan`'s albums: nil while they are worked out, never another plan's.
+    private func covers(of plan: ChangePlan) -> [String: PlanCovers.Cover]? {
+        guard let albumCovers, albumCovers.plan == plan.id else { return nil }
+        return albumCovers.covers
     }
 
     // MARK: Plan
@@ -207,10 +366,11 @@ struct PlanReviewView: View {
         if let obstacle { obstacleCard(obstacle, facts) }
         Text("Das ändert sich in Fotos").font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
         if plan.retries != nil {
-            // "Fehlendes erneut versuchen" (I16): say that this is not the whole plan again.
-            Text("Nur was beim letzten Anlegen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt.")
-                .font(.subheadline).foregroundStyle(.noteText)
-                .fixedSize(horizontal: false, vertical: true)
+            // "Fehlendes erneut versuchen" (I16): say that this is not the whole plan again; two
+            // lines, the rest behind "Mehr erfahren" (decision 8A).
+            LearnMore(short: Text("Nur was beim letzten Anlegen gefehlt hat."),
+                      full: Text("Nur was beim letzten Anlegen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt."),
+                      title: Text("Fehlendes erneut versuchen"))
         }
         Card {
             if summary.newFolders > 0 { row("folder.badge.plus", "Neue Ordner", summary.newFolders) }
@@ -226,13 +386,14 @@ struct PlanReviewView: View {
             if summary.deletedContainers > 0 { row("rectangle.stack.badge.minus", "Entfernte Alben", summary.deletedContainers) }
         }
 
-        if !facts.albums.isEmpty { PlanAlbumList(albums: facts.albums) }
+        if !facts.albums.isEmpty { PlanAlbumList(albums: facts.albums, covers: covers(of: plan)) }
 
         // The promises themselves stand in one line above the button (`promise`); what they
-        // mean stays here, under the albums.
-        Text("Fotos werden nur in Alben einsortiert. Die Originale bleiben, wo sie sind, und jede Änderung lässt sich rückgängig machen.")
-            .font(.footnote).foregroundStyle(.noteText)
-            .fixedSize(horizontal: false, vertical: true)
+        // mean stays here, under the albums: two lines, the rest behind "Mehr erfahren"
+        // (decision 8A).
+        LearnMore(short: Text("Jede Änderung lässt sich rückgängig machen."),
+                  full: Text("Fotos werden nur in Alben einsortiert. Die Originale bleiben, wo sie sind, und jede Änderung lässt sich rückgängig machen."),
+                  title: Text("Was mit deinen Fotos passiert"))
             .padding(.horizontal, Theme.Spacing.l)
 
         if !facts.conflicts.isEmpty {
@@ -254,15 +415,6 @@ struct PlanReviewView: View {
             }
             .padding(.horizontal, Theme.Spacing.l)
         }
-        if prebuilt == nil && hasSelection {
-            // The way out: nothing selected, back to the open suggestions.
-            Button("Auswahl aufheben") {
-                model.clearSelection()
-                dismiss()
-            }
-            .font(.subheadline.weight(.semibold))
-            .frame(maxWidth: .infinity, minHeight: 44)
-        }
     }
 
     /// What stops the plan, in the words it always had; it stands where the preview opens.
@@ -276,13 +428,15 @@ struct PlanReviewView: View {
             Card {
                 // Names what was cut off: creating albums or taking them back.
                 let isUndo = model.interruptedPlan?.reverts != nil
-                Label(isUndo ? LocalizedStringKey("Erst das unterbrochene Zurücknehmen abschließen") : LocalizedStringKey("Erst das unterbrochene Anlegen abschließen"),
+                Label(isUndo ? LocalizedStringKey("Erst das unterbrochene Rückgängigmachen abschließen") : LocalizedStringKey("Erst das unterbrochene Anlegen abschließen"),
                       systemImage: "pause.circle").font(.headline)
-                Text(isUndo
-                     ? LocalizedStringKey("Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt zurückgenommen.")
-                     : LocalizedStringKey("Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt."))
-                    .font(.subheadline).foregroundStyle(.noteText)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Where to settle it in two lines, the rest behind "Mehr erfahren" (decision 8A).
+                // The plan that was cut off is decided on the tab "Vorschläge".
+                LearnMore(short: Text("Entscheide auf der Seite „Vorschläge“, wie es weitergeht."),
+                          full: Text(isUndo
+                                     ? LocalizedStringKey("Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt rückgängig gemacht.")
+                                     : LocalizedStringKey("Ein früheres Anlegen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt.")),
+                          title: Text(isUndo ? LocalizedStringKey("Rückgängigmachen wurde unterbrochen") : LocalizedStringKey("Anlegen wurde unterbrochen")))
             }
         case .unlock:
             UnlockCard(albumsInPlan: facts.freeAlbumUse, onLimit: limitToFreeAlbums)
@@ -324,22 +478,96 @@ struct PlanReviewView: View {
     /// Runs the plan, with the sorting show when photos go into albums.
     private func applyButton(_ plan: ChangePlan, _ facts: PlanReviewFacts, scrollToTop: @escaping () -> Void) -> some View {
         Button {
-            let albums = SortingShow.albums(from: facts.filledAlbums)
-            if !albums.isEmpty {
-                withAnimation(.smooth(duration: 0.4)) {
-                    show = albums
-                    scrollToTop()
+            // Once: a second tap while the show's albums are cast starts nothing.
+            guard !starting else { return }
+            starting = true
+            // Its own run does not make the plan stale; one that did not take it leaves it as it was.
+            freshness.handOver()
+            let filled = facts.filledAlbums
+            Task {
+                // The capture dates and preview ranks the cards' covers, the result's stack and the
+                // show read, made off the main thread where they are not kept (verification review
+                // V13); then what the show and the stack know of the suggestions, taken once as the
+                // plan starts (second review, K10: each walked the plan's suggestions on the tap).
+                await model.makeDatesAndRanksOffMain()
+                let sources = model.resultCoverSources(for: plan)
+                beginMoment(plan, sources: sources)
+                // The show's albums, cast off the main thread, before the run starts: the show is
+                // always there before the result.
+                let albums = SortingShow.albums(from: await model.sortingShowAlbums(filled, plan: plan, sources: sources))
+                if !albums.isEmpty {
+                    withAnimation(.smooth(duration: 0.4)) {
+                        show = albums
+                        scrollToTop()
+                    }
                 }
+                // Once it ran, the preview never offers it again (the result shows, and a result
+                // cleared later leaves "Nichts zu tun"), whatever runs on other tabs meanwhile.
+                // A plan that did not start, or stopped with an error, has no result: the moment
+                // ends, and with it the waiting success tap and the loading of covers.
+                if await model.execute(plan) { self.plan = nil } else {
+                    freshness.notTaken()
+                }
+                if model.execution.finished?.id != plan.id { endMoment() }
+                starting = false
             }
-            Task { await model.execute(plan) }
         } label: {
-            applyTitle(facts.summary)
+            applyTitle(plan, facts.summary)
         }
         .buttonStyle(PrimaryButtonStyle())
         // Not while a change in "Dein Zuhause" makes the suggestions again (the plan would
         // not start, after the fly animation).
         .disabled(facts.isBlocking || facts.hasNoSteps || model.homeChangeRunning)
         .accessibilityIdentifier("plan.apply")
+    }
+
+    /// The result's moment (draft E3) as the plan starts: the success tap waits for it, what
+    /// the stack must know of the suggestions is taken now (`sources`: the analysis may make them
+    /// anew before the result shows), and the covers load while the plan runs, side by side, kept
+    /// here as they arrive, so they are there with the result (`ResultMomentLoader.prefetch`).
+    private func beginMoment(_ plan: ChangePlan, sources: ResultCoverSources) {
+        coverSources = sources
+        momentPending = true
+        let stack = model.resultCoverStack(for: plan, taken: sources, expected: true)
+        let scale = displayScale
+        let id = plan.id
+        let covers = momentCovers
+        prefetch?.cancel()
+        covers.start(id)
+        prefetch = Task { await ResultMomentLoader.prefetch(stack, plan: id, scale: scale, keepingIn: covers) }
+    }
+
+    /// The moment is over, or there is none: the success tap may come, and no cover loads any more.
+    private func endMoment() {
+        momentPending = false
+        prefetch?.cancel()
+        prefetch = nil
+    }
+
+    /// The result whose moment is still to come is on screen (after the show, once the run ended).
+    private var momentDue: AlbumistID? {
+        guard momentPending, show == nil, !model.execution.isRunning else { return nil }
+        return model.execution.finished?.id
+    }
+
+    /// The result shows: the covers stop loading (its stack takes what is kept by now, it never
+    /// waits for Photos), and the success tap comes after `ResultCoverFan.successDeadline` at the
+    /// latest, whether or not the main cover lay down (review E of design wave 2, finding 1).
+    private func holdMomentAtMost() async {
+        guard momentDue != nil else { return }
+        prefetch?.cancel()
+        prefetch = nil
+        try? await Task.sleep(for: .seconds(ResultCoverFan.successDeadline))
+        guard !Task.isCancelled else { return }
+        endMoment()
+    }
+
+    /// The result of the plan that ran, with its moment (draft E3): the success tap comes as
+    /// the main cover lies down, or as the symbol shows.
+    private func resultCard(_ result: ChangePlan) -> some View {
+        ResultCard(plan: result, sources: coverSources, held: momentCovers, screenPadding: Self.contentPadding) {
+            endMoment()
+        }
     }
 
     /// What the button needs said beside it at every size: why it waits, and that iOS asks
@@ -369,7 +597,7 @@ struct PlanReviewView: View {
     private func freeAlbumNote(_ facts: PlanReviewFacts) -> some View {
         let albums = facts.freeAlbumUse
         if !purchases.isUnlocked && !Purchases.unlockedForUITests && albums > 0 && purchases.allows(albums: albums) {
-            Text("Kostenlos. Danach hast du noch \(purchases.remainingFreeAlbums - albums) von \(Purchases.freeAlbumLimit) Gratis-Alben.")
+            Text("Kostenlos. Danach hast du noch \(purchases.remainingFreeAlbums - albums) von \(Purchases.freeAlbumLimit) kostenlosen Alben.")
                 .font(.footnote).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -391,19 +619,28 @@ struct PlanReviewView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// "Die ersten N jetzt anlegen", only for plans built from accepted suggestions.
+    /// "Die ersten N jetzt anlegen", only for a preview of picked suggestions.
     private var limitToFreeAlbums: (() -> Void)? {
-        guard prebuilt == nil, purchases.remainingFreeAlbums > 0 else { return nil }
+        guard prebuilt == nil, let selection, purchases.remainingFreeAlbums > 0 else { return nil }
         let free = purchases.remainingFreeAlbums
-        return { Task { await model.keepFirstAccepted(free) } }
+        return {
+            Task {
+                let seen = changes
+                plan = await model.keepFirst(free, in: selection)
+                freshness.made(after: seen)
+            }
+        }
     }
 
-    /// The button says what it does (design review W2: "Jetzt umsetzen" was the fourth name
-    /// for this step).
-    private func applyTitle(_ summary: PlanSummary) -> Text {
-        if summary.newAlbums > 0 { return Text("Alben jetzt anlegen") }
-        if summary.removedMemberships == 0 && summary.deletedContainers == 0 { return Text("Fotos jetzt einsortieren") }
-        return Text("Änderungen jetzt ausführen")
+    /// The button says what it does, one verb after "Jetzt" (design W1, Punkt 2; design review
+    /// W2: "Jetzt umsetzen" was the fourth name for this step).
+    private func applyTitle(_ plan: ChangePlan, _ summary: PlanSummary) -> Text {
+        switch PreviewButtonWord(summary, kind: PlanReceipt.Kind(plan)) {
+        case .create: Text("Jetzt anlegen")
+        case .extend: Text("Jetzt ergänzen")
+        case .remove: Text("Jetzt entfernen")
+        case .change: Text("Jetzt ändern")
+        }
     }
 
     private func guarantee(_ text: Text) -> some View {
@@ -473,7 +710,9 @@ struct ExecutionProgressBar: View {
 /// (A separate modifier keeps the screen's body quick to type-check.)
 private struct ExecutionHaptics: ViewModifier {
     var execution: AppModel.ExecutionState
-    /// While the sorting show plays, the success tap waits for its end.
+    /// While the sorting show plays, the success tap waits for its end; then for the result's
+    /// moment (the main cover lies down on the stack, draft E3), at most
+    /// `ResultCoverFan.successDeadline` (`PlanReviewView.holdMomentAtMost`).
     var holdSuccess: Bool
 
     func body(content: Content) -> some View {
@@ -488,129 +727,80 @@ private struct ExecutionHaptics: ViewModifier {
     }
 }
 
-/// Result of an executed plan: what happened, a way to see it in Photos, and undo.
+/// Result of an executed plan (design 7.1, N-07, draft E3): what happened, counted as in its
+/// receipt and named by what the plan did (`ResultHeadline`): the covers of the new albums
+/// fanned above the count (`ResultCoverMoment`), big "10 neue Alben", small "mit 342 Fotos",
+/// where the new albums are, a way to Photos, and "Rückgängig machen" with what it does. A
+/// removal says "1 Album entfernt", never "0 Fotos einsortiert" or where new albums are.
+///
+/// On the screen's ground, as in the draft (no card around it). The stack gives way to everything
+/// below it (the count, "Fotos-App öffnen", "Alle Änderungen ansehen", "Rückgängig machen"),
+/// which stays on screen: it takes only the height they leave (`stackRoom`), down to its smallest
+/// size; below that the screen scrolls.
 struct ResultCard: View {
     @Environment(AppModel.self) private var model
     @Environment(Navigator.self) private var navigator: Navigator?
     var plan: ChangePlan
+    /// What the stack knows of the suggestions the plan came from, taken as it started (nil:
+    /// taken now, `AppModel.resultCoverStack`).
+    var sources: ResultCoverSources?
+    /// The covers the screen kept as they loaded while the plan ran (nil: none).
+    var held: ResultMomentCovers?
+    /// The padding the screen puts around the result (above and below it): kept free when the
+    /// stack fits itself to the screen.
+    var screenPadding: CGFloat = 0
+    /// The moment is there: the main cover lay down on the stack, or the symbol shows. The
+    /// screen's success tap waits for it (`ExecutionHaptics`).
+    var onMoment: () -> Void = {}
     @State private var confirmUndo = false
     /// The undo deletes albums or folders: the confirmation says that iOS asks next (P3-07).
     @State private var undoDeletes = false
     /// Albumist reads the albums to see whether the undo deletes any: a spinner beside the
     /// button, and no second tap meanwhile (third review of P3-07, SHOULD-2).
     @State private var askingUndo = false
-    @State private var appeared = false
     @State private var photosDidNotOpen = false
+    /// The height the screen shows of the scroll view the result stands in: between the
+    /// navigation bar and the tab bar (`containerRelativeFrame`). Nil until measured.
+    @State private var room: CGFloat?
+    /// The height of everything below the stack: the count, the way to the new albums,
+    /// "Fotos-App öffnen", "Alle Änderungen ansehen" and "Rückgängig machen" with its note
+    /// (review E of design wave 2, finding 8). Nil until measured.
+    @State private var belowHeight: CGFloat?
     @Environment(\.openURL) private var openURL
 
+    private static let spacing = Theme.Spacing.l
+
+    /// The height the stack may take: what the screen shows, less its padding above and below
+    /// and everything below the stack. Nil until both are measured: the fan is laid out at its
+    /// smallest meanwhile and can only grow (review E2 of design wave 2, N7).
+    private var stackRoom: CGFloat? {
+        guard let room, let belowHeight else { return nil }
+        return room - 2 * screenPadding - belowHeight - Self.spacing
+    }
+
     var body: some View {
-        // What really happened (photos that were no longer there are not counted).
-        let summary = plan.appliedSummary
-        let failed = summary.failedSteps
-        let isUndo = plan.reverts != nil
-        Card {
+        // What really happened, counted as in the receipt ("Zahlen wie im Beleg"; photos that
+        // were no longer there are not counted), named by what the plan did.
+        let receipt = PlanReceipt(plan: plan, inventory: model.inventory)
+        let headline = ResultHeadline(receipt, plan: plan, albumistAlbums: model.albumistAlbums)
+        // Where the new albums are, above the way to Photos (draft E3). Only after a run that
+        // made new albums: a removal or an undo has none (N-07).
+        let way = ResultText.whereNewAlbums(headline, root: model.settings.rootFolderTitle)
+        // What "Rückgängig machen" does, below it; an undo is not taken back itself.
+        let undoNote: String? = model.undonePlans.contains(plan.id) ? nil : headline.undoNote.map { ResultText.undoNote($0) }
+        VStack(spacing: Self.spacing) {
+            moment(headline, failed: receipt.failedSteps)
+            // The buttons close together below the way to Photos, as in the draft.
             VStack(spacing: Theme.Spacing.s) {
-                Image(systemName: failed > 0 ? "exclamationmark.circle.fill" : isUndo ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(failed == 0 ? Theme.accent : Theme.tint(for: .documents))
-                    .symbolEffect(.bounce, value: appeared)
-                    .accessibilityHidden(true)
-                Text(isUndo ? (failed == 0 ? "Rückgängig gemacht" : "Teilweise rückgängig gemacht") : (failed == 0 ? "Fertig" : "Teilweise fertig"))
-                    .font(.title2.weight(.bold))
-                    .accessibilityAddTraits(.isHeader)
-                Group {
-                    if isUndo {
-                        Text("Albumist hat seine Alben und Zuordnungen wieder entfernt. Deine Fotos sind unverändert.")
-                    } else {
-                        Text(Counted.resultLine(summary))
-                    }
-                }
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                if failed > 0 {
-                    Group {
-                        if isUndo {
-                            Text("\(failed) Schritte konnten nicht ausgeführt werden. Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist.")
-                        } else {
-                            Text("\(failed) Schritte konnten nicht ausgeführt werden. Die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
-                        }
-                    }
-                    .font(.footnote).foregroundStyle(.noteText)
-                    .multilineTextAlignment(.center)
-                }
-                if summary.unavailableAssets > 0 && !isUndo {
-                    Text("\(summary.unavailableAssets) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
-                        .font(.footnote).foregroundStyle(.noteText)
-                        .multilineTextAlignment(.center)
-                }
+                essentials(receipt, headline, way: way)
+                more(undoNote: undoNote)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Spacing.s)
-            if let photos = URL(string: "photos-redirect://") {
-                // iOS lets apps open Fotos, but not a particular album (first device test 15.11.:
-                // "Ich springe nicht zu meinen Alben"). So the button says what it does, and the
-                // way to the albums is written next to it.
-                // "photos-redirect://" is not documented by Apple (plugin review N8). Should iOS
-                // one day not open it, the button says so instead of staying silent.
-                Button("Fotos-App öffnen") {
-                    openURL(photos) { accepted in photosDidNotOpen = !accepted }
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                if photosDidNotOpen {
-                    Text("Die Fotos-App ließ sich nicht öffnen. Öffne sie bitte selbst vom Home-Bildschirm.")
-                        .font(.footnote).foregroundStyle(.noteText)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                }
-                if !isUndo {
-                    Group {
-                        let root = model.settings.rootFolderTitle.trimmingCharacters(in: .whitespaces)
-                        if root.isEmpty {
-                            Text("Deine neuen Alben findest du in Fotos unter Sammlungen › Alben.")
-                        } else {
-                            Text("Deine neuen Alben findest du in Fotos unter Sammlungen › Alben, im Ordner „\(root)“.")
-                        }
-                    }
-                    .font(.footnote).foregroundStyle(.noteText)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            // Pushed by value (`AppScreen`): the receipt may push "Fehlendes erneut versuchen".
-            Button {
-                Navigator.push(.receipt(PlanToken(plan)), on: navigator)
-            } label: {
-                Text("Alle Änderungen ansehen")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 44)
-            }
-            .accessibilityIdentifier("result.receipt")
-            if !isUndo && !model.undonePlans.contains(plan.id) {
-                Button {
-                    guard !askingUndo else { return }
-                    askingUndo = true
-                    Task {
-                        // Full access first: not "not possible" after the dialog was confirmed.
-                        guard await model.changesHaveFullAccess() else { askingUndo = false; return }
-                        undoDeletes = await model.undoDeletesCollections(plan)
-                        askingUndo = false
-                        confirmUndo = true
-                    }
-                } label: {
-                    Text("Rückgängig machen").checkingBeside(askingUndo)
-                }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .disabled(askingUndo)
-                Text("Auch später möglich unter Einstellungen › Verlauf und Rückgängig. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben.")
-                    .font(.footnote).foregroundStyle(.noteText)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { belowHeight = $0 }
         }
-        .onAppear {
-            appeared = true
-            ReviewPrompt.shared.screenAppeared()
-        }
+        .frame(maxWidth: .infinity)
+        // How high the screen is: the scroll view's visible height, without its bars.
+        .background { screenHeight }
+        .onAppear { ReviewPrompt.shared.screenAppeared() }
         // The App Store rating question never covers the result: it may come only once the user
         // has left it (and its receipt), a moment later (`ReviewPrompt`, `ReviewPromptPolicy`).
         .onDisappear { ReviewPrompt.shared.screenDisappeared() }
@@ -624,7 +814,269 @@ struct ResultCard: View {
                 Task { await model.undo(plan) }
             }
         } message: {
-            DeleteQuestionNote.message(Text("Albumist entfernt die angelegten Alben und Zuordnungen wieder."), deletes: undoDeletes)
+            DeleteQuestionNote.message(Text(ResultText.undoQuestion(PlanReceipt.Kind(plan))), deletes: undoDeletes)
+        }
+    }
+
+    // MARK: Parts
+
+    /// The covers of the new albums lying down on their stack (draft E3), or the symbol as
+    /// before: a check, the arrow of an undo, or the mark of steps that did not happen. The
+    /// stack is worked out once per plan by the moment itself, never in this body.
+    private func moment(_ headline: ResultHeadline, failed: Int) -> some View {
+        let symbol = failed > 0 ? "exclamationmark.circle.fill"
+            : headline.kind == .undone ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill"
+        let tint = failed == 0 ? Theme.accent : Theme.tint(for: .documents)
+        return ResultCoverMoment(plan: plan, sources: sources, held: held, symbol: symbol, tint: tint, room: stackRoom,
+                                 onSettled: onMoment)
+    }
+
+    /// What stays in view below the stack: the count with its line, what did not happen, where
+    /// the new albums are and the way to Photos.
+    private func essentials(_ receipt: PlanReceipt, _ headline: ResultHeadline, way: String?) -> some View {
+        let failed = receipt.failedSteps
+        return VStack(spacing: Theme.Spacing.l) {
+            ResultLead(headline: headline, partly: failed > 0)
+            if failed > 0 {
+                note(ResultText.failed(failed, kind: headline.kind))
+            }
+            if receipt.unavailablePhotos > 0 && headline.kind == .created {
+                note(String(localized: "\(receipt.unavailablePhotos) \(receipt.unavailablePhotos.formatted()) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert."))
+            }
+            if let way {
+                Text(way)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+            }
+            photosButton
+        }
+    }
+
+    /// iOS lets apps open Fotos, but not a particular album (first device test 15.11.: "Ich
+    /// springe nicht zu meinen Alben"). So the button says what it does, and the way to the
+    /// albums is written above it. "photos-redirect://" is not documented by Apple (plugin
+    /// review N8): should iOS one day not open it, the button says so instead of staying silent.
+    @ViewBuilder
+    private var photosButton: some View {
+        if let photos = URL(string: "photos-redirect://") {
+            VStack(spacing: Theme.Spacing.s) {
+                Button("Fotos-App öffnen") {
+                    openURL(photos) { accepted in photosDidNotOpen = !accepted }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                if photosDidNotOpen {
+                    note(String(localized: "Die Fotos-App ließ sich nicht öffnen. Öffne sie bitte selbst vom Home-Bildschirm."))
+                }
+            }
+        }
+    }
+
+    /// Below the way to Photos: all changes, and "Rückgängig machen" with what it does.
+    private func more(undoNote: String?) -> some View {
+        VStack(spacing: Theme.Spacing.s) {
+            // Pushed by value (`AppScreen`): the receipt may push "Fehlendes erneut versuchen".
+            Button {
+                Navigator.push(.receipt(PlanToken(plan)), on: navigator)
+            } label: {
+                Text("Alle Änderungen ansehen")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .accessibilityIdentifier("result.receipt")
+            if let undoNote {
+                undoButton
+                note(undoNote)
+            }
+        }
+    }
+
+    /// A real button that says what it does (draft E3).
+    private var undoButton: some View {
+        Button {
+            guard !askingUndo else { return }
+            askingUndo = true
+            Task {
+                // Full access first: not "not possible" after the dialog was confirmed.
+                guard await model.changesHaveFullAccess() else { askingUndo = false; return }
+                undoDeletes = await model.undoDeletesCollections(plan)
+                askingUndo = false
+                confirmUndo = true
+            }
+        } label: {
+            Label("Rückgängig machen", systemImage: "arrow.uturn.backward").checkingBeside(askingUndo)
+        }
+        .buttonStyle(SecondaryButtonStyle())
+        .disabled(askingUndo)
+    }
+
+    /// A small note in the note grey, centred.
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.footnote).foregroundStyle(.noteText)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+    }
+
+    /// The scroll view's visible height (`stackRoom`): drawn behind the result, nothing to see.
+    private var screenHeight: some View {
+        Color.clear
+            .containerRelativeFrame(.vertical)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room = $0 }
+    }
+}
+
+/// The big line of the result (design 7.1): the count in the wide figures with what it counts
+/// below it ("10" over "neue Alben"), read by VoiceOver as one heading ("10 neue Alben"), and
+/// the line below in the note grey ("mit 342 Fotos"; no arrow). Without a count the heading is
+/// a word as before ("Rückgängig gemacht", "Fertig"; the UI tests wait for it).
+private struct ResultLead: View {
+    let headline: ResultHeadline
+    /// Steps did not happen: "Teilweise fertig" above the count.
+    let partly: Bool
+    /// Big like the draft's number; a long count shrinks to fit instead of being cut.
+    @ScaledMetric(relativeTo: .largeTitle) private var numberSize: CGFloat = 60
+
+    var body: some View {
+        VStack(spacing: Theme.Spacing.xs) {
+            if let count = ResultText.count(headline.lead) {
+                if partly {
+                    Text("Teilweise fertig")
+                        .font(.headline)
+                }
+                VStack(spacing: 0) {
+                    Text(count, format: .number)
+                        .font(.system(size: numberSize, weight: .heavy).width(.expanded).monospacedDigit())
+                        .foregroundStyle(Theme.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.4)
+                    Text(ResultText.noun(headline.lead))
+                        .font(.title2.weight(.bold))
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+            } else {
+                Text(ResultText.heading(headline.lead, partly: partly))
+                    .font(.title2.weight(.bold))
+                    .accessibilityAddTraits(.isHeader)
+            }
+            if let detail = headline.detail {
+                Text(ResultText.detail(detail))
+                    .font(.body)
+                    .foregroundStyle(.noteText)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// The words of the result (`ResultHeadline`): what the count counts, the line below it, where
+/// new albums are, and what "Rückgängig machen" does. The counts are the receipt's.
+enum ResultText {
+    /// The big count; nil when the headline has none ("Rückgängig gemacht", "Fertig").
+    static func count(_ lead: ResultHeadline.Lead) -> Int? {
+        switch lead {
+        case .newAlbums(let count), .addedPhotos(let count), .extendedAlbums(let count), .sortedPhotos(let count),
+             .removedAlbums(let count), .takenOutPhotos(let count):
+            count
+        case .undone, .plain:
+            nil
+        }
+    }
+
+    /// What the count counts, below the number (as the atlas's "1 Land", "2 Länder"). Photos
+    /// added to albums of the user's: "12" over "Fotos", the albums in the line below (draft E3);
+    /// to albums Albumist made: "1" over "Album ergänzt", the photos below.
+    static func noun(_ lead: ResultHeadline.Lead) -> String {
+        switch lead {
+        case .newAlbums(let count): count == 1 ? String(localized: "neues Album") : String(localized: "neue Alben")
+        case .addedPhotos(let count): count == 1 ? String(localized: "Foto") : String(localized: "Fotos")
+        case .extendedAlbums(let count): count == 1 ? String(localized: "Album ergänzt") : String(localized: "Alben ergänzt")
+        case .sortedPhotos(let count): count == 1 ? String(localized: "Foto einsortiert") : String(localized: "Fotos einsortiert")
+        case .removedAlbums(let count): count == 1 ? String(localized: "Album entfernt") : String(localized: "Alben entfernt")
+        case .takenOutPhotos(let count):
+            count == 1 ? String(localized: "Foto herausgenommen") : String(localized: "Fotos herausgenommen")
+        case .undone, .plain: heading(lead, partly: false)
+        }
+    }
+
+    /// The heading of a result without a count.
+    static func heading(_ lead: ResultHeadline.Lead, partly: Bool) -> String {
+        if lead == .undone {
+            return partly ? String(localized: "Teilweise rückgängig gemacht") : String(localized: "Rückgängig gemacht")
+        }
+        return partly ? String(localized: "Teilweise fertig") : String(localized: "Fertig")
+    }
+
+    /// The line below the count.
+    static func detail(_ detail: ResultHeadline.Detail) -> String {
+        switch detail {
+        case .withPhotos(let count):
+            String(localized: "mit \(count) \(count.formatted()) Fotos")
+        case .inYourAlbums(let albums):
+            // "in 3 deiner Alben ergänzt", "in einem deiner Alben ergänzt" (a plural in the catalog).
+            String(localized: "in \(albums) deiner Alben ergänzt")
+        case .extendedAndSorted(let albums, let photos):
+            Counted.join([String(localized: "\(albums) Alben ergänzt"),
+                          String(localized: "\(photos) \(photos.formatted()) Fotos einsortiert")])
+        case .photosStay:
+            String(localized: "Die Fotos bleiben in deiner Mediathek.")
+        case .undoRemoved:
+            String(localized: "Albumist hat seine Alben und Zuordnungen wieder entfernt. Deine Fotos sind unverändert.")
+        case .undoRestored:
+            String(localized: "Was Albumist entfernt hatte, ist wieder da. Deine Fotos sind unverändert.")
+        }
+    }
+
+    /// Where the new albums are (draft E3: "Du findest sie in Fotos unter Sammlungen ›
+    /// Alben."), in Albumist's folder when it has one. Nil unless the run made new albums.
+    static func whereNewAlbums(_ headline: ResultHeadline, root: String) -> String? {
+        guard headline.showsWhereNewAlbumsAre, case .newAlbums(let count) = headline.lead else { return nil }
+        let folder = root.trimmingCharacters(in: .whitespaces)
+        switch (count == 1, folder.isEmpty) {
+        case (true, true): return String(localized: "Du findest es in Fotos unter Sammlungen › Alben.")
+        case (true, false): return String(localized: "Du findest es in Fotos unter Sammlungen › Alben, im Ordner „\(folder)“.")
+        case (false, true): return String(localized: "Du findest sie in Fotos unter Sammlungen › Alben.")
+        case (false, false): return String(localized: "Du findest sie in Fotos unter Sammlungen › Alben, im Ordner „\(folder)“.")
+        }
+    }
+
+    /// What "Rückgängig machen" on the result does, below the button (draft E3).
+    static func undoNote(_ note: ResultHeadline.UndoNote) -> String {
+        switch note {
+        case .removesNewAlbums(let count):
+            String(localized: "Entfernt die \(count) neuen Alben. Deine Fotos bleiben.")
+        case .takesOutAddedPhotos(let albums):
+            String(localized: "Nimmt die hinzugefügten Fotos wieder aus deinen \(albums) Alben. Deine Fotos bleiben.")
+        case .removesNewAlbumsAndAddedPhotos:
+            String(localized: "Entfernt die neuen Alben und nimmt die hinzugefügten Fotos wieder aus deinen Alben. Deine Fotos bleiben.")
+        case .bringsBackAlbums(let count):
+            String(localized: "Legt die \(count) Alben mit denselben Fotos wieder an.")
+        case .putsBackPhotos:
+            String(localized: "Legt die herausgenommenen Fotos wieder zurück.")
+        case .general:
+            String(localized: "Entfernt nur die neuen Alben und Zuordnungen dieser Änderungen. Deine Fotos bleiben.")
+        }
+    }
+
+    /// The question before the undo; `DeleteQuestionNote` adds that the photos stay, or that iOS asks.
+    static func undoQuestion(_ kind: PlanReceipt.Kind) -> String {
+        kind == .removed ? String(localized: "Albumist bringt zurück, was es entfernt hat.")
+            : String(localized: "Albumist entfernt die angelegten Alben und Zuordnungen wieder.")
+    }
+
+    /// Steps that did not happen, with what that means for the kind of plan.
+    static func failed(_ count: Int, kind: PlanReceipt.Kind) -> String {
+        switch kind {
+        case .created:
+            String(localized: "\(count) Schritte konnten nicht ausgeführt werden. Die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
+        case .removed:
+            String(localized: "\(count) Schritte konnten nicht ausgeführt werden.")
+        case .undone:
+            String(localized: "\(count) Schritte konnten nicht ausgeführt werden. Was Albumist nicht rückgängig machen konnte, bleibt, wie es ist.")
         }
     }
 }
@@ -662,7 +1114,7 @@ enum ConflictText {
         case .albumChangedSincePreview(let id):
             return String(localized: "„\(title(id))“ wurde inzwischen geändert. Bitte prüfe den Vorschlag erneut.")
         case .assetsUnavailable(let count):
-            return String(localized: "\(count) Fotos sind nicht mehr in der Mediathek.")
+            return String(localized: "\(count) \(count.formatted()) Fotos sind nicht mehr in der Mediathek.")
         case .writeAccessMissing:
             return String(localized: "Albumist hat keinen vollen Zugriff auf deine Fotos.")
         }
@@ -677,8 +1129,10 @@ struct FullAccessCard: View {
     var body: some View {
         Card {
             Label("Voller Zugriff nötig", systemImage: "photo.on.rectangle.angled").font(.headline)
-            Text("Albumist kann Alben nur anlegen, wenn du alle Fotos freigibst. Gerade sind nur ausgewählte Fotos freigegeben.")
+            // Two lines (decision 8A); the title says that full access is missing.
+            Text("Albumist kann Alben nur anlegen, wenn du alle Fotos freigibst.")
                 .font(.subheadline).foregroundStyle(.noteText)
+                .fixedSize(horizontal: false, vertical: true)
             Text("Einstellungen › Apps › Albumist › Fotos › Voller Zugriff")
                 .font(.footnote).foregroundStyle(.noteText)
             if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -689,36 +1143,28 @@ struct FullAccessCard: View {
     }
 }
 
-/// Shown when a plan needs more albums than are still free.
+/// Shown when a plan needs more albums than are still free: how many, and "Freischalten …",
+/// which opens the purchase sheet (design E6: the sheet "Anlegen" on a card opens too, with the
+/// price, "Kauf wiederherstellen" and "Code einlösen"). Or the free albums first.
 struct UnlockCard: View {
     @Environment(Purchases.self) private var purchases
     var albumsInPlan: Int
-    /// Shrinks the plan to the albums that are still free ("Die ersten N jetzt anlegen").
-    var onLimit: (() -> Void)? = nil
-    @State private var redeeming = false
+    /// Shrinks the plan to the albums that are still free ("Die ersten N jetzt kostenlos anlegen").
+    var onLimit: (() -> Void)?
+    @State private var buying = false
 
     var body: some View {
         Card {
             Label("Albumist freischalten", systemImage: "lock.open").font(.headline)
-            Text("Für diese Auswahl brauchst du \(albumsInPlan) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums). Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.")
+            // Two lines (decision 8A); what the purchase gives is said on the sheet.
+            Text("Für diese Auswahl brauchst du \(albumsInPlan) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums).")
                 .font(.subheadline).foregroundStyle(.noteText)
-            // Without a price: "Preis wird geladen …", not tappable (plugin review W7).
-            UnlockButton(prominent: true)
-            // Text buttons with a 44 pt tap area (design review W9: the bare text was ~20 pt).
-            HStack {
-                Button { Task { await purchases.restore() } } label: {
-                    Text("Kauf wiederherstellen").minimumHitTarget()
-                }
-                .disabled(purchases.isPurchasing)
-                Spacer()
-                Button { redeeming = true } label: {
-                    Text("Code einlösen").minimumHitTarget()
-                }
-            }
-            .font(.subheadline)
-            .offerCodeRedemption(isPresented: $redeeming) { _ in
-                Task { await purchases.refreshEntitlements(mayLock: false) }
-            }
+                .fixedSize(horizontal: false, vertical: true)
+            // "…": the purchase sheet opens first. The one filled button here: the bar with
+            // "Jetzt anlegen" is not shown while the plan needs more albums than are free.
+            Button("Freischalten …") { buying = true }
+                .buttonStyle(PrimaryButtonStyle())
+                .accessibilityIdentifier("unlock.open")
             if let onLimit {
                 Button("Die ersten \(purchases.remainingFreeAlbums) jetzt kostenlos anlegen", action: onLimit)
                     .buttonStyle(SecondaryButtonStyle())
@@ -728,19 +1174,25 @@ struct UnlockCard: View {
                 Text("Tipp: Du kannst auch weniger Vorschläge auf einmal auswählen.")
                     .font(.footnote).foregroundStyle(.noteText)
             }
-            if let error = purchases.lastError {
-                ErrorNote(text: error)
-            }
         }
-        // The price comes from StoreKit; a start without network is made up for here.
+        .sheet(isPresented: $buying) {
+            // Closes by itself once Albumist is unlocked; the preview then offers its button.
+            UnlockSheet(reason: .preview(needed: albumsInPlan))
+                .sheetSize(.short)
+        }
+        // The price comes from StoreKit: loaded before the sheet asks for it.
         .task { await purchases.loadProductIfNeeded() }
     }
 }
 
 /// Every album of the plan with its folder and photo count, so it is clear what
-/// Albumist will make before anything happens (Fuchs, 14.11.).
+/// Albumist will make before anything happens (Fuchs, 14.11.). Each with the cover its receipt
+/// will show (design wave 3, DS-15 part 2).
 struct PlanAlbumList: View {
     let albums: [PlannedAlbumPreview]
+    /// The photos each album's cover tries, by the receipt's name of the album
+    /// (`AppModel.previewCovers`); nil while they are worked out.
+    let covers: [String: PlanCovers.Cover]?
     @State private var showAll = false
     private let collapsedCount = 6
 
@@ -757,7 +1209,7 @@ struct PlanAlbumList: View {
             .font(.headline)
             .accessibilityAddTraits(.isHeader)
             ForEach(visible) { album in
-                PlanAlbumRow(album: album)
+                PlanAlbumRow(album: album, cover: cover(album))
                 if album.id != visible.last?.id { Divider() }
             }
             if albums.count > collapsedCount {
@@ -778,43 +1230,69 @@ struct PlanAlbumList: View {
             }
         }
     }
+
+    /// The album's cover (`PlanCovers`, named as the receipt names it): nil while the covers are
+    /// worked out; none to try for an album the plan adds no photo to.
+    private func cover(_ album: PlannedAlbumPreview) -> PlanCovers.Cover? {
+        covers.map { $0[PlanCovers.key(of: album.id)] ?? PlanCovers.Cover(ids: [], hidden: false) }
+    }
 }
 
+/// One album of the preview, as its receipt will show it (design wave 3, DS-15 part 2): its cover
+/// (the photos the plan sets out to add, as the tab "Alben" will show the album, 72 pt instead of
+/// the 44 pt picture of its first photo), its name and folder, and what the plan does ("Neu" or
+/// "Ergänzt" with "N Fotos") under the folder, so the larger cover leaves the name its width on
+/// the smallest iPhone. One element for VoiceOver, the words in the order of before; the cover is
+/// decoration.
 private struct PlanAlbumRow: View {
     let album: PlannedAlbumPreview
-    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 44
+    /// The photos its cover tries (`PlanCovers.albums`, `applied: false`); nil while they are
+    /// worked out.
+    let cover: PlanCovers.Cover?
 
     var body: some View {
         AdaptiveStack(spacing: Theme.Spacing.m) {
-            cover
-                .frame(width: side, height: side)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .accessibilityHidden(true)
+            coverView
             VStack(alignment: .leading, spacing: 2) {
                 Text(album.title).font(.body.weight(.medium)).compactLineLimit(2)
                 if !album.folderPath.isEmpty {
                     Text(album.folderPath.joined(separator: " › "))
                         .font(.footnote).foregroundStyle(.noteText).compactLineLimit(2)
                 }
+                // Side by side where they fit ("Neu" with "16 Fotos"), else one below the other,
+                // as in the receipt.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+                        badge
+                        count
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        badge
+                        count
+                    }
+                }
             }
-            Spacer(minLength: Theme.Spacing.s)
-            VStack(alignment: .trailing, spacing: 2) {
-                badge
-                Text("\(album.addedCount) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.vertical, Theme.Spacing.xs)
         .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
-    private var cover: some View {
-        if album.coverAssetID != nil || album.addedCount > 0 {
-            // No cover although photos are added: every one is a sensitive document, and the
-            // tile says the preview is hidden, as in the lists (`CoverThumbnail`).
-            CoverThumbnail(id: album.coverAssetID, side: side)
+    private var coverView: some View {
+        if album.addedCount > 0 {
+            // The photos the plan adds; "Vorschau ausgeblendet" when every one is a sensitive
+            // document, the symbol once it is clear there is no photo to try (only screenshots).
+            AlbumRowCover(ids: cover?.ids ?? [], hidesPreview: cover?.hidden ?? false,
+                          placeholderSymbol: cover == nil ? nil : "rectangle.stack")
         } else {
-            Theme.accent.opacity(0.15)
+            // No photo added: the album's symbol, as in the receipt.
+            AlbumRowCover(ids: [], placeholderSymbol: "rectangle.stack")
         }
+    }
+
+    private var count: some View {
+        Text("\(album.addedCount) \(album.addedCount.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
     }
 
     @ViewBuilder

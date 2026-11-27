@@ -120,16 +120,16 @@ class RealCatalogTests(unittest.TestCase):
 
     def test_the_buttons_the_review_named_are_title_case(self):
         expected = {"Album anlegen": "Create Album", "Nicht jetzt": "Not Now", "Neu prüfen": "Check Again",
-                    "Kauf wiederherstellen": "Restore Purchase", "Vorschläge prüfen": "Review Suggestions",
-                    "Analyse starten": "Start Analysis", "Zu Album hinzufügen": "Add to Album",
-                    "Code einlösen": "Redeem Code", "Alles zurücknehmen": "Undo Everything"}
+                    "Kauf wiederherstellen": "Restore Purchase", "Analyse starten": "Start Analysis", "Zu Album hinzufügen": "Add to Album",
+                    "Code einlösen": "Redeem Code", "Alles rückgängig machen": "Undo Everything"}
         for key, english in expected.items():
             self.assertEqual(self.english(key), [english], key)
 
     def test_the_review_buttons_are_found_in_the_code(self):
         keys = english_rule.button_keys(REPO)
-        for key in ["Nicht jetzt", "Neu prüfen", "Kauf wiederherstellen", "Vorschläge prüfen", "Analyse starten",
-                    "Zu Album hinzufügen", "Code einlösen", "Alles zurücknehmen", "Album anlegen"]:
+        # "Vorschläge prüfen" is gone since design wave 1: the start page shows the suggestions itself.
+        for key in ["Nicht jetzt", "Neu prüfen", "Kauf wiederherstellen", "Analyse starten",
+                    "Zu Album hinzufügen", "Code einlösen", "Alles rückgängig machen", "Album anlegen"]:
             self.assertIn(key, keys)
 
 

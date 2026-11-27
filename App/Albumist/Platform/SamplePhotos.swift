@@ -146,7 +146,7 @@ final class SamplePhotos {
             return
         case .planInProgress:
             model.message = AppMessage(title: String(localized: "Gerade nicht möglich"),
-                                       text: String(localized: "Albumist ändert gerade Alben oder ein Umsetzen wurde unterbrochen. Schließe das zuerst ab, dann kannst du die Beispielfotos entfernen."))
+                                       text: String(localized: "Albumist ändert gerade Alben, oder ein Vorgang wurde unterbrochen. Schließe das zuerst ab, dann kannst du die Beispielfotos entfernen."))
             return
         case nil:
             break

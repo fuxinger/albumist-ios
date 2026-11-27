@@ -73,6 +73,7 @@ struct GlobePinView: View {
     @ViewBuilder private var cover: some View {
         if let cover = pin.cover {
             AssetThumbnail(id: cover, side: Self.side)
+                .environment(\.thumbnailShowsVideoLength, false)
                 .frame(width: Self.side, height: Self.side)
                 .clipShape(Circle())
         } else {

@@ -2,7 +2,8 @@ import SwiftUI
 import AlbumistCore
 import AlbumistEngine
 
-/// Settings (prompt §17): areas, naming, privacy, history and undo, about.
+/// Settings (prompt §17): the library, areas, naming, privacy, about. "Verlauf und Rückgängig"
+/// and Albumist's albums are in the tab "Alben" (design 5C).
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
@@ -17,23 +18,6 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var model = model
         Form {
-            // Undo first and on its own screen (design review W16: the history sat between
-            // privacy and the purchase, the seventh of twelve sections).
-            Section {
-                // Pushed by value (`AppScreen`), like the screens behind it: a receipt pushes
-                // "Fehlendes erneut versuchen".
-                PushLink(.history) {
-                    LabeledContent {
-                        if model.interruptedPlan != nil { Text("Unterbrochen") }
-                    } label: {
-                        Label("Verlauf und Rückgängig", systemImage: "clock.arrow.circlepath")
-                    }
-                }
-                .accessibilityIdentifier("settings.history")
-            } footer: {
-                Text("Alles, was Albumist in Fotos geändert hat, und der Weg zurück.")
-            }
-
             Section {
                 Picker("Albumist arbeitet mit", selection: scopeYear) {
                     Text("Ganze Mediathek").tag(Int?.none)
@@ -89,7 +73,11 @@ struct SettingsView: View {
                     TextField("Kein Ordner", text: $model.settings.rootFolderTitle)
                         .multilineTextAlignment(typeSize.isAccessibilitySize ? .leading : .trailing)
                 } label: {
+                    // Wraps at the largest text sizes, whatever the row proposes: it was cut to
+                    // one line there ("Ordner für ne…", UI run 44862187776).
                     Text("Ordner für neue Alben")
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("settings.rootFolder.label")
                 }
                 .labeledContentStyle(FieldRowStyle())
@@ -106,10 +94,6 @@ struct SettingsView: View {
                     }
                 }
                 Toggle("Foto in mehreren Alben erlauben", isOn: $model.settings.allowMultipleAssignments)
-                // Pushed by value: it pushes the preview of a removal (`AppScreen`).
-                PushLink(.managedAlbums) {
-                    LabeledContent("Alben von Albumist", value: model.managedAlbums.count.formatted())
-                }
             }
 
             Section {
@@ -122,7 +106,7 @@ struct SettingsView: View {
             } header: {
                 Text("Datenschutz")
             } footer: {
-                Text("Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst, nie ein Foto. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst.")
+                Text("Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen), an Apples Kartendienst, nie ein Foto. Aus iCloud lädt Albumist nur Screenshots und Dokumente, nie Videos, und nur, wenn du es einschaltest (dann standardmäßig nur im WLAN).")
             }
 
             if rejectedCount > 0 {
@@ -206,6 +190,16 @@ struct SettingsView: View {
             #endif
 
             Section {
+                // Where the app speaks of itself: its own sign (the Glass Stack, as on the
+                // welcome page and in the purchase sheet; DS-11), never on content.
+                HStack(spacing: Theme.Spacing.m) { // Design W3 H13: app icon
+                    AppIconImage(side: typeSize.isAccessibilitySize ? 64 : 48)
+                    Text(verbatim: AppInfo.name)
+                        .font(.headline)
+                }
+                .padding(.vertical, Theme.Spacing.xs)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("settings.about.app") // Design W3 H13: UI test 4 finds the row by it
                 NavigationLink("Datenschutz") { PrivacyView() }
                 LabeledContent("Version", value: AppInfo.version)
                 DiagnosticShareRow()
@@ -297,21 +291,26 @@ private struct FieldRowStyle: LabeledContentStyle {
     }
 }
 
-/// Every change Albumist made, newest first, each with its way back (design review W16).
+/// Every change Albumist made, newest first, each with its way back (design review W16). Opened
+/// from the row "Verlauf und Rückgängig" in the tab "Alben" (design 5C). Each change shows the
+/// covers of the albums of that run (design wave 3, DS-15).
 struct HistoryView: View {
     @Environment(AppModel.self) private var model
+    /// The cover of each change listed (`PlanCovers.mosaic`), worked out off the main thread;
+    /// empty until then (the rows show the calm ground meanwhile).
+    @State private var covers: [AlbumistID: PlanCovers.Mosaic] = [:]
 
     var body: some View {
         List {
             Section {
                 if let interrupted = model.interruptedPlan {
-                    InterruptedHistoryRow(plan: interrupted)
+                    InterruptedHistoryRow(plan: interrupted, cover: covers[interrupted.id])
                 }
                 if model.history.isEmpty && model.interruptedPlan == nil {
                     Text("Noch keine Änderungen").foregroundStyle(.secondary)
                 }
                 ForEach(model.history) { plan in
-                    HistoryRow(plan: plan)
+                    HistoryRow(plan: plan, cover: covers[plan.id])
                 }
                 if model.historyHasMore {
                     Button("Ältere anzeigen") { Task { await model.loadMoreHistory() } }
@@ -326,40 +325,58 @@ struct HistoryView: View {
         }
         .navigationTitle("Verlauf und Rückgängig")
         .navigationBarTitleDisplayMode(.inline)
+        // The covers of the changes listed, again when the facts change (the photos' dates and
+        // ranks with them): a photo the analysis finds to be a sensitive document leaves its
+        // cover at once.
+        .task(id: model.changeCoverInputs(model.history, interrupted: model.interruptedPlan)) {
+            let made = await model.historyCovers(model.history, interrupted: model.interruptedPlan)
+            guard !Task.isCancelled else { return }
+            covers = made
+        }
     }
 }
 
-/// One executed plan; opens its change receipt (with "Rückgängig machen" there).
+/// One executed plan; opens its change receipt (with "Rückgängig machen" there). Its cover shows
+/// the albums of that run (DS-15, `ChangeCover`), the words beside it when and what. For VoiceOver
+/// one element, the button: date, what it did and whether it was taken back.
 struct HistoryRow: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
+    /// The change's cover (`PlanCovers.mosaic`); nil while the history works it out.
+    var cover: PlanCovers.Mosaic?
 
     var body: some View {
         PushLink(.receipt(PlanToken(plan))) {
-            HStack {
+            AdaptiveStack(spacing: Theme.Spacing.m) {
+                ChangeCover(mosaic: cover, symbol: PlanReceipt.Kind(plan).coverSymbol)
                 VStack(alignment: .leading, spacing: 2) {
                     Text((plan.confirmedAt ?? plan.createdAt).formatted(date: .abbreviated, time: .shortened))
-                    Text(Counted.historyLine(plan.appliedSummary))
+                    Text(Counted.historyLine(plan))
                         .font(.footnote).foregroundStyle(.noteText)
+                    // Below the words, no longer beside them: the cover takes that room.
+                    if model.undonePlans.contains(plan.id) {
+                        Label("Rückgängig gemacht", systemImage: "arrow.uturn.backward")
+                            .font(.footnote).foregroundStyle(.noteText)
+                    }
                 }
-                Spacer()
-                if model.undonePlans.contains(plan.id) {
-                    Text("Rückgängig gemacht")
-                        .font(.subheadline).foregroundStyle(.noteText)
-                }
+                .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.vertical, Theme.Spacing.xs)
         }
         .accessibilityIdentifier("history.row")
     }
 }
 
 /// An apply that was cut off (app closed). It can be finished or taken back here as well
-/// as on the overview.
+/// as on the overview. Its cover shows what it sets out to do (DS-15).
 struct InterruptedHistoryRow: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
+    /// The cover of the albums it sets out to make or fill (`PlanCovers.mosaic`); nil while the
+    /// history works it out.
+    var cover: PlanCovers.Mosaic?
     @State private var confirmUndo = false
-    /// "Alles zurücknehmen" deletes albums or folders: the confirmation says that iOS asks
+    /// "Alles rückgängig machen" deletes albums or folders: the confirmation says that iOS asks
     /// next (P3-07). Worked out once on the tap, not while the dialog is drawn.
     @State private var undoDeletes = false
     /// Albumist reads the albums to see whether the undo deletes any: a spinner beside the
@@ -369,10 +386,16 @@ struct InterruptedHistoryRow: View {
     var body: some View {
         let done = plan.steps.filter { if case .succeeded = $0.state { true } else { false } }.count
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text((plan.confirmedAt ?? plan.createdAt).formatted(date: .abbreviated, time: .shortened))
-                Text("Unterbrochen: \(done) von \(plan.steps.count) Schritten erledigt")
-                    .font(.footnote).foregroundStyle(.noteText)
+            AdaptiveStack(spacing: Theme.Spacing.m) {
+                ChangeCover(mosaic: cover, symbol: PlanReceipt.Kind(plan).coverSymbol)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text((plan.confirmedAt ?? plan.createdAt).formatted(date: .abbreviated, time: .shortened))
+                    Text("Unterbrochen: \(done) von \(plan.steps.count) Schritten erledigt")
+                        .font(.footnote).foregroundStyle(.noteText)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                // When and how far, read as one; the buttons below are its ways on.
+                .accessibilityElement(children: .combine)
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: Theme.Spacing.l) { buttons }
@@ -389,8 +412,8 @@ struct InterruptedHistoryRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .confirmationDialog("Alles zurücknehmen?", isPresented: $confirmUndo, titleVisibility: .visible) {
-            Button("Alles zurücknehmen", role: .destructive) {
+        .confirmationDialog("Alles rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
+            Button("Alles rückgängig machen", role: .destructive) {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
@@ -412,7 +435,7 @@ struct InterruptedHistoryRow: View {
                 await model.refreshDerived()
             }
         } label: {
-            Text(isUndo ? LocalizedStringKey("Rest zurücknehmen") : isRemoval ? LocalizedStringKey("Rest entfernen") : LocalizedStringKey("Rest anlegen")).minimumHitTarget()
+            Text(isUndo ? LocalizedStringKey("Rest rückgängig machen") : isRemoval ? LocalizedStringKey("Rest entfernen") : LocalizedStringKey("Rest anlegen")).minimumHitTarget()
         }
         // An interrupted undo cannot itself be taken back; it goes on or stays as it is.
         if !isUndo {
@@ -426,7 +449,7 @@ struct InterruptedHistoryRow: View {
                     askingUndo = false
                     confirmUndo = true
                 }
-            } label: { Text("Alles zurücknehmen").checkingBeside(askingUndo).minimumHitTarget() }
+            } label: { Text("Alles rückgängig machen").checkingBeside(askingUndo).minimumHitTarget() }
             .disabled(askingUndo)
         }
         Button { Task { await model.keepInterruptedPlanAsIs() } } label: {
@@ -448,7 +471,7 @@ struct PrivacyView: View {
                 Text("Ausweise und medizinische Dokumente werden nicht als Text gespeichert. IBANs und Kartennummern werden unkenntlich gemacht.")
             }
             Section("Was dein Gerät verlässt") {
-                Text("Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Fotos verlassen dein Gerät nie.")
+                Text("Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen), an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Albumist lädt keine Fotos hoch.")
                 Text("Käufe laufen über Apple. Albumist sieht keine Zahlungsdaten.")
                 Text("Die Diagnose nur, wenn du sie selbst teilst: Zustände und Zahlen, keine Fotos, Namen oder Orte.")
             }

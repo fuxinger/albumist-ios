@@ -14,7 +14,7 @@ struct SuggestionEntity: AppEntity, IndexedEntity {
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
             title: "\(title)",
-            subtitle: "\(photoCount) Fotos",
+            subtitle: "\(photoCount) \(photoCount.formatted()) Fotos",
             image: DisplayRepresentation.Image(systemName: "rectangle.stack.badge.plus")
         )
     }
@@ -60,7 +60,7 @@ struct CountryEntity: AppEntity, IndexedEntity {
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
             title: "\(TravelAtlas.flag(id)) \(name)",
-            subtitle: "\(photoCount) Fotos"
+            subtitle: "\(photoCount) \(photoCount.formatted()) Fotos"
         )
     }
 

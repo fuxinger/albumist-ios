@@ -120,7 +120,7 @@ struct MemoryPressureTests {
     @Test func theAppEmptiesItsCachesOnAWarningAndNeverItsState() throws {
         let app = try AppSource.read("App/Albumist/App/AlbumistApp.swift")
         let model = try AppSource.read("App/Albumist/Model/AppModel.swift")
-        let thumbnails = try AppSource.read("App/Albumist/Views/AssetThumbnail.swift")
+        let thumbnails = try ThumbnailSource.read()
 
         let appCode = AppSource.code(app)
         let observed = appCode.contains("UIApplication.didReceiveMemoryWarningNotification")
@@ -161,7 +161,7 @@ struct MemoryPressureTests {
     /// image manager let go of their images; the report says this launch's warnings.
     @Test func theAppLetsGoOfLoadedImagesAndSaysThisLaunchsWarnings() throws {
         let model = try AppSource.read("App/Albumist/Model/AppModel.swift")
-        let thumbnails = AppSource.code(try AppSource.read("App/Albumist/Views/AssetThumbnail.swift"))
+        let thumbnails = AppSource.code(try ThumbnailSource.read())
         let analyzer = try AppSource.read("App/Albumist/Platform/VisionAnalyzer.swift")
         let log = try AppSource.read("App/Albumist/Platform/BackgroundRunLog.swift")
 

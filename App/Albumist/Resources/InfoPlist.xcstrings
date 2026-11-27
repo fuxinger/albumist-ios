@@ -26,7 +26,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist reads your photos only on this device to suggest albums. Only when you confirm does it create albums and folders in Photos and add photos to albums or take them out. No photo is ever uploaded, and originals are never changed."
+            "value" : "Albumist analyzes your photos only on this device to suggest albums. It creates albums and folders in Photos, and adds or removes photos in them, only after you confirm. No photo is ever uploaded, and your originals are never changed."
           }
         }
       }

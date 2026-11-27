@@ -52,17 +52,9 @@ final class MapPrototypeUITests: XCTestCase {
         app.segmentedControls.buttons[title]
     }
 
-    /// A tab bar button; the iOS 26 tab bar shrinks while scrolling, so it is expanded first.
+    /// A tab bar button: the one shared helper brings a bar that scrolled away back.
     private func tabButton(_ name: String) -> XCUIElement {
-        let button = app.tabBars.buttons[name]
-        var tries = 0
-        while !(button.exists && button.isHittable) && tries < 3 {
-            if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            // The bar expands after the swipe: on as soon as the button can be tapped.
-            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
-            tries += 1
-        }
-        return button
+        UITestScreens.tabButton(app, name)
     }
 
     @discardableResult
@@ -182,7 +174,7 @@ final class MapPrototypeUITests: XCTestCase {
             _ = UITestWait.holds(timeout: 15) { app.tabBars.firstMatch.exists || button("Los geht").exists }
         }
         if !button("Los geht").exists {
-            if app.tabBars.buttons["Übersicht"].exists { tabButton("Übersicht").tap() }
+            if app.tabBars.buttons[UITestScreens.Tabs.german.suggestions].exists { tabButton(UITestScreens.Tabs.german.suggestions).tap() }
             analysisSettled()
         }
         UITestOnboarding.completeIfNeeded(app, in: "map prototype")
@@ -218,7 +210,7 @@ final class MapPrototypeUITests: XCTestCase {
         prepareLibrary()
 
         // The atlas shows the entry: debug and TestFlight builds, UI runs only when they ask.
-        if app.tabBars.buttons["Übersicht"].exists { tabButton("Übersicht").tap() }
+        if app.tabBars.buttons[UITestScreens.Tabs.german.suggestions].exists { tabButton(UITestScreens.Tabs.german.suggestions).tap() }
         guard tap(button("Reise-Atlas"), "open atlas", timeout: 30) else { return }
         UITestWait.appears(app.navigationBars["Reise-Atlas"], "atlas screen", timeout: 30)
         guard tap(page("atlas.map"), "open map") else { return }

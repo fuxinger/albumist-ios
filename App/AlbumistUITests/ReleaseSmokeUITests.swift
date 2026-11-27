@@ -8,8 +8,8 @@ import XCTest
 /// beside the UI flow and the stress pass; the upload needs it green.
 ///
 /// It does what a new user does, with no `-AlbumistUITest…` switch (a Release build ignores
-/// them): onboarding, the demo library and its analysis, the recommended suggestions, a plan
-/// within the free albums, applied in Photos. It skips itself unless the runner sets
+/// them): onboarding, the demo library and its analysis, "Dein Startpaket" (or an area's ticked
+/// suggestions), a plan within the free albums, applied in Photos. It skips itself unless the runner sets
 /// ALBUMIST_RELEASE_SMOKE=1 (testflight.yml hands TEST_RUNNER_ALBUMIST_RELEASE_SMOKE on), so in
 /// ui.yml's group "flow-other" (everything else) it is a skip of a second. In testflight.yml a
 /// skip is no pass: its "Run UI tests" step fails unless the log says this test passed.
@@ -37,11 +37,6 @@ final class ReleaseSmokeUITests: XCTestCase {
         return true
     }
 
-    private func back() {
-        let bar = app.navigationBars.firstMatch
-        if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
-    }
-
     func test1_ReleaseBuildOnboardsAnalysesAndApplies() throws {
         guard ProcessInfo.processInfo.environment["ALBUMIST_RELEASE_SMOKE"] == "1" else {
             throw XCTSkip("Release smoke test only (ALBUMIST_RELEASE_SMOKE, testflight.yml)")
@@ -58,15 +53,15 @@ final class ReleaseSmokeUITests: XCTestCase {
         print("UI_FACT release smoke: onboarding and demo library done here: \(onboarded)")
         guard UITestWait.until("release smoke analysis finished", timeout: 1200, { UITestOnboarding.analysisIdle(app) }) else { return }
 
-        // The recommended suggestions, as a plan.
-        let review = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9.]+ Vorschl(ag|äge) prüfen.*")).firstMatch
-        guard tap(review, "release smoke suggestions offered", timeout: 60) else { return }
-        guard tap(button("empfohlene auswählen"), "release smoke recommended ones", timeout: 20) else { return }
-        // The list takes the choice before going back (the flow tests give it a second too).
-        UITestWait.atLeast(1, since: Date())
-        back()
-        guard tap(button("ausgewählte Alben anlegen"), "release smoke open the plan", timeout: 20),
-              UITestWait.appears(app.navigationBars["Vorschau"], "release smoke plan screen", timeout: 30) else { return }
+        // Several suggestions as one plan, as a new user makes it: "Dein Startpaket" (a new
+        // install has made nothing yet), else the ticks of an area's list ("Alle auswählen",
+        // "N Alben anlegen").
+        let planned = UITestScreens.StartPage.openPlan(app, "release smoke open the plan", timeout: 60)
+        print(planned ? "UI_STEP_OK release smoke plan screen" : "UI_STEP_MISSING release smoke plan screen")
+        guard planned else {
+            XCTFail("The Release build offers no plan of several suggestions (no \"Dein Startpaket\", no \"Alle N\")")
+            return
+        }
 
         // A new install has free albums; a plan with more of them shows the unlock card, and
         // "Die ersten N jetzt kostenlos anlegen" keeps the plan within them (no purchase here:

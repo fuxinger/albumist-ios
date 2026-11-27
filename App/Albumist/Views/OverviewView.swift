@@ -4,14 +4,28 @@ import SwiftUI
 import AlbumistCore
 import AlbumistEngine
 
-/// Overview (direction A): organized share, analysis state, open proposals, areas.
+/// The start page "Vorschläge" (design wave 1, drafts E1, E6, E7; overview draft B of 19.11.):
+/// what needs the user first (an interrupted plan, a restore, limited access …), then the ring
+/// card (how much is sorted, the analysis, "Bescheid sagen, wenn fertig"), then the suggestions
+/// as photo cards (`StartSections`, decided in `StartPage`).
+///
+/// The ring card shows what matters at a glance; the numbers behind the ring are in the sheet
+/// "Sortiert", what the analysis did in the sheet "Analyse": nothing of P3-03 or P3-08 is gone,
+/// it is one tap further.
 struct OverviewView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The ring grows with the text size, so "100 %" still fits inside at the largest sizes.
-    @ScaledMetric(relativeTo: .title3) private var ringSide: CGFloat = 84
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showSettings = false
+    /// The sheet "Sortiert" behind the ring.
+    @State private var showSorted = false
+    /// The sheet "Analyse" behind the analysis' line.
+    @State private var showAnalysis = false
+    @State private var notifications = FinishNotificationAsk.shared
+    /// Design W2 H7: what a suggestion card's long press opens, kept by the page, made when the
+    /// page is made, not at each of its drawings (`suggestionMenuFlows(_:)`; review C2, N2).
+    @State private var menuFlows = SuggestionMenuFlowAction() // Design W2 H7
     /// The overview tab's stack (`MainTabs`). The suggestions, the plan, the starter plan and
     /// the atlas are pushed onto it, not from a NavigationLink inside the condition that shows
     /// its button: a run that starts while one is open (a check for new photos after the
@@ -21,68 +35,63 @@ struct OverviewView: View {
     /// this stack, the atlas in landscape was presented again and again for 352 s (UI run
     /// 44055738268). See `AppScreen`.
     @Environment(Navigator.self) private var navigator: Navigator?
-    /// The starter set is selected only while its preview is open.
-    @State private var starterSelection: AppModel.PreviewSelection?
 
     var body: some View {
         let _ = MainThreadWatch.shared.count("overview body")
+        // Nothing to sort or suggest: say why and how to go on instead of "0 von 0" (K6).
+        let empty = EmptyLibraryCard.state(for: model)
         ScrollView {
-            VStack(spacing: Theme.Spacing.m) {
-                if let interrupted = model.interruptedPlan {
-                    InterruptedPlanCard(plan: interrupted)
-                }
-                if let restore = model.restoredFromBackup {
-                    RestoredFromBackupCard(restore: restore)
-                }
-                if model.recheckedSuggestions > 0 {
-                    RecheckedSuggestionsCard(count: model.recheckedSuggestions)
-                }
-                if let notice = model.homeChangeNotice {
-                    HomeChangeCard(notice: notice)
-                }
-                if model.access == .limited { LimitedAccessCard() }
-                // Nothing to sort or suggest: say why and how to go on instead of "0 von 0" (K6).
-                if let empty = EmptyLibraryCard.state(for: model) {
-                    EmptyLibraryCard(state: empty)
-                } else {
-                    statusCard
-                }
-                analysisCard
-                if model.history.isEmpty && model.acceptedProposals.isEmpty {
-                    StarterSetCard { set in
-                        starterSelection = model.selectForPreview(set.map { ($0, model.recommendedDecision(for: $0)) })
-                        Navigator.push(.starterPlan, on: navigator)
+            VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                VStack(spacing: Theme.Spacing.m) {
+                    if let interrupted = model.interruptedPlan {
+                        InterruptedPlanCard(plan: interrupted)
+                    }
+                    if let restore = model.restoredFromBackup {
+                        RestoredFromBackupCard(restore: restore)
+                    }
+                    if model.recheckedSuggestions > 0 {
+                        RecheckedSuggestionsCard(count: model.recheckedSuggestions)
+                    }
+                    if let notice = model.homeChangeNotice {
+                        HomeChangeCard(notice: notice)
+                    }
+                    if model.access == .limited { LimitedAccessCard() }
+                    if let empty {
+                        EmptyLibraryCard(state: empty)
+                        RingCardFrame { analysisRows(empty: empty) }
+                    } else {
+                        RingCardFrame {
+                            statusCard
+                            RingCardSeparator()
+                            analysisRows(empty: empty)
+                        }
                     }
                 }
-                // While the analysis runs, "Schon fertig … Ansehen" on its card leads there; when it
-                // has just finished, its card has "Vorschläge prüfen" (point 3, 4: not twice).
-                if !model.openProposals.isEmpty, !model.analysis.isRunning, model.analysisFinished == nil {
-                    Button {
-                        Navigator.push(.proposals, on: navigator)
-                    } label: {
-                        Text("\(model.openProposals.count) Vorschläge prüfen")
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                }
-                if !model.proposalsToApply.isEmpty {
-                    Button {
-                        Navigator.push(.plan, on: navigator)
-                    } label: {
-                        Text("\(model.proposalsToApply.count) ausgewählte Alben anlegen")
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                }
+                .padding(.horizontal, Theme.Spacing.l)
+                // The cards read plain values from here: the analysis' many changes redraw the
+                // ring card, not every suggestion.
+                StartSections(libraryHint: empty != nil, analysedOnce: model.analysedOnce, showsMosaic: model.showsScanShow,
+                              rebuilding: model.suggestionsRebuilding, analysing: model.analysisMayBringSuggestions)
                 #if targetEnvironment(simulator)
-                if !DemoLibrary.shared.isDone { DemoLibraryCard() }
+                if !DemoLibrary.shared.isDone {
+                    DemoLibraryCard()
+                        .padding(.horizontal, Theme.Spacing.l)
+                }
                 #endif
-                AtlasTeaser(onOpen: { Navigator.push(.atlas, on: navigator) })
-                areasSection
             }
-            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.s)
             .padding(.bottom, Theme.Spacing.xl)
         }
+        // On the scroll view itself, before the sheets of a card's long press below: no scroll in
+        // "Anpassen" or the trip workshop can reach it.
+        .quickCreateMomentScrollTrail() // Design W2 H6: scroll trail
+        // Design W2 H7: what a suggestion card's long press opens ("Anpassen", the trip workshop,
+        // "Keine Reise?"), on the scroll view, so the question comes from the screen, not from the
+        // middle of all the cards (review C of design wave 2, M1).
+        .suggestionMenuFlows(menuFlows)
         .background(Theme.background)
-        .navigationTitle("Übersicht")
+        .navigationTitle("Vorschläge")
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showSettings = true } label: {
@@ -93,13 +102,22 @@ struct OverviewView: View {
         }
         .sheet(isPresented: $showSettings) {
             NavigationRoot { SettingsView() }
+                .sheetSize(.page)
         }
-        .onChange(of: navigator?.path.contains(.starterPlan) ?? false) { _, showing in
-            // Back without creating: the starter set is not selected any more.
-            if !showing, let selection = starterSelection {
-                model.endPreview(selection)
-                starterSelection = nil
-            }
+        .sheet(isPresented: $showSorted) {
+            SortedSheet(ring: shownRing, subject: subjectText, explanation: whatSortedMeans,
+                        areas: primaryAreasText, notCounted: shownRing.flatMap { notCountedText($0.notCounted, besidesRing: true) })
+                .sheetSize(.short)
+        }
+        .sheet(isPresented: $showAnalysis) {
+            AnalysisSummarySheet()
+                .sheetSize(.short)
+        }
+        // What iOS knows about the notifications, for "Bescheid sagen, wenn fertig" (3B); again
+        // when Albumist comes back from the Settings app.
+        .task { await notifications.refresh() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await notifications.refresh() } }
         }
         .refreshable { await model.refreshDerived() }
     }
@@ -119,176 +137,138 @@ struct OverviewView: View {
             analysisCard: model.analysisCard))
     }
 
+    /// The ring's numbers while there are any (the sheet "Sortiert" shows them).
+    private var shownRing: SortedCountCard.Ring? {
+        if case .ring(let ring) = sortedCount { ring } else { nil }
+    }
+
+    /// The ring's row (draft B): the ring, "495 von 3.114" and what it counts; the other states
+    /// in the same place, each with its words. Every number agrees with "Alle 246 Fotos
+    /// analysiert" in the sheet "Analyse": the ring's total and what it leaves out add up to
+    /// those photos (P3-03).
     private var statusCard: some View {
-        // Largest text sizes stack the ring above the text instead of squeezing it.
-        let layout = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Spacing.m))
-            : AnyLayout(HStackLayout(spacing: Theme.Spacing.l))
-        let side = min(ringSide, 150)
-        return Card {
-            // Every number here agrees with "Alle 246 Fotos analysiert" below: the ring's total
-            // and what it leaves out add up to those photos (P3-03).
+        Group {
             switch sortedCount {
             case .counting:
                 // No suggestion yet, so no photo can count as sorted: no "0 von 0" or "0 von 246"
-                // (first start, after the decisions came back from the backup).
-                layout {
-                    ProgressView()
-                        .controlSize(.large)
-                        .frame(width: side, height: side)
-                        .accessibilityHidden(true) // "Wird gezählt" beside it says it
-                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        Text("Wird gezählt")
-                            .font(.headline)
-                        Text("Die Zahl kommt mit den ersten Vorschlägen.")
-                            .font(.subheadline)
-                            .foregroundStyle(.noteText)
+                // (first start, after the decisions came back from the backup). The empty ring
+                // turns while the analysis works.
+                RingCardRow(title: Text("Noch nichts sortiert"), titleFont: Self.ringTitleFont) {
+                    SortedRing(fraction: nil) {
+                        ProgressView()
+                            .accessibilityHidden(true) // "Noch nichts sortiert" beside it says it
                     }
-                    .accessibilityElement(children: .combine)
+                } detail: {
+                    Text("Albumist sieht sich deine Fotos an")
                 }
             case .notCountedYet:
                 // The same before the first suggestions, while the analysis does not run (paused,
-                // waiting for the device or for Photos, ended early): nothing turns, the card
+                // waiting for the device or for Photos, ended early): nothing turns, the analysis
                 // below says why (second review of P3-03).
-                layout {
+                RingCardRow(title: Text("Noch nicht gezählt"), titleFont: Self.ringTitleFont) {
                     Image(systemName: "hourglass")
-                        .font(.largeTitle)
+                        .font(.title2)
                         .foregroundStyle(.noteText)
-                        .frame(width: side, height: side)
                         .accessibilityHidden(true) // "Noch nicht gezählt" beside it says it
-                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        Text("Noch nicht gezählt")
-                            .font(.headline)
-                        Text("Die Zahl kommt, sobald die Analyse weiterläuft.")
-                            .font(.subheadline)
-                            .foregroundStyle(.noteText)
-                    }
-                    .accessibilityElement(children: .combine)
+                } detail: {
+                    Text("Die Zahl kommt, sobald die Analyse weiterläuft.")
                 }
             case .recounting(let recount):
-                layout {
-                    // Rebuilding: no false 0 %, the last count marked as being recounted.
-                    ProgressView()
-                        .controlSize(.large)
-                        .frame(width: side, height: side)
-                        .accessibilityHidden(true) // "Wird neu gezählt" beside it says it
-                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        Text("Wird neu gezählt")
-                            .font(.headline)
-                        Group {
-                            if recount.isForLabels {
-                                // Photos analysed before "Themen" or "Dokumente" became a main area
-                                // get their labels: the count would fall photo by photo meanwhile
-                                // (`RecountState`).
-                                Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt, sobald die Fotos für die neuen Bereiche angesehen sind.")
-                            } else {
-                                Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt mit den ersten Vorschlägen.")
-                            }
-                        }
-                        .font(.subheadline)
-                        .foregroundStyle(.noteText)
-                        .monospacedDigit()
+                // Rebuilding: no false 0 %, the last count marked as being recounted.
+                RingCardRow(title: Text("Wird neu gezählt"), titleFont: Self.ringTitleFont) {
+                    SortedRing(fraction: nil) {
+                        ProgressView()
+                            .accessibilityHidden(true) // "Wird neu gezählt" beside it says it
                     }
-                    .accessibilityElement(children: .combine)
+                } detail: {
+                    if recount.isForLabels {
+                        // Photos analysed before "Themen" or "Dokumente" became a main area get
+                        // their labels: the count would fall photo by photo meanwhile
+                        // (`RecountState`).
+                        Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt, sobald die Fotos für die neuen Bereiche angesehen sind.")
+                    } else {
+                        Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt mit den ersten Vorschlägen.")
+                    }
                 }
             case .recountWaiting(let recount):
                 // The same held count while the analysis does not work (paused, waiting for the
-                // device or for Photos, ended early): it stands still, nothing turns, the card
+                // device or for Photos, ended early): it stands still, nothing turns, the analysis
                 // below says why (third look at P3-03).
-                layout {
+                RingCardRow(title: Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert"),
+                            titleFont: Self.ringTitleFont) {
                     Image(systemName: "hourglass")
-                        .font(.largeTitle)
+                        .font(.title2)
                         .foregroundStyle(.noteText)
-                        .frame(width: side, height: side)
                         .accessibilityHidden(true) // the held count beside it says it
-                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert")
-                            .font(.headline)
-                            .monospacedDigit()
-                        Text("Wird weitergezählt, sobald die Analyse weiterläuft.")
-                            .font(.subheadline)
-                            .foregroundStyle(.noteText)
-                    }
-                    .accessibilityElement(children: .combine)
+                } detail: {
+                    Text("Wird weitergezählt, sobald die Analyse weiterläuft.")
                 }
             case .noMainAreaChosen:
                 // No main area counts (none chosen, or the chosen ones turned off): the ring
                 // stayed at "0 von 300 sortiert" for good.
-                Label("Kein Bereich zählt als sortiert", systemImage: "circle.dashed")
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen.")
-                    .font(.subheadline)
-                    .foregroundStyle(.noteText)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button { showSettings = true } label: { TapTarget("Einstellungen öffnen") }
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Label("Kein Bereich zählt als sortiert", systemImage: "circle.dashed")
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen.")
+                        .font(.subheadline)
+                        .foregroundStyle(.noteText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button { showSettings = true } label: { TapTarget("Einstellungen öffnen") }
+                }
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.vertical, Theme.Spacing.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
             case .nothingToSort(let notCounted):
                 // Counted, and every photo is left out (all of them ignored, for example):
                 // said in words, not as "0 von 0 sortiert" (question to Fuchs, 18.11.).
-                Label("Nichts zu sortieren", systemImage: "checkmark.circle")
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text(primaryAreasText)
-                    if let text = notCountedText(notCounted, besidesRing: false) {
-                        Text(text)
-                    }
-                }
-                .font(.subheadline)
-                .foregroundStyle(.noteText)
-                .monospacedDigit()
-                .fixedSize(horizontal: false, vertical: true)
-            case .ring(let ring):
-                layout {
-                    ProgressRing(fraction: ring.fraction)
-                        .frame(width: side, height: side)
+                RingCardRow(title: Text("Nichts zu sortieren"), titleFont: Self.ringTitleFont) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.title2)
+                        .foregroundStyle(Theme.accent)
+                        .accessibilityHidden(true)
+                } detail: {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        Text("\(ring.fully.formatted()) von \(ring.total.formatted()) sortiert")
-                            .font(.headline)
-                            .monospacedDigit()
-                        if ring.partially > 0 {
-                            // Photos already in a matching album for one main area but not yet for the
-                            // other count as partly sorted; without this line the ring looked too low
-                            // (device test 15.11.: 157 sorted, 1,199 partly).
-                            Text("Dazu \(ring.partially) teilweise sortiert")
-                                .font(.subheadline)
-                                .monospacedDigit()
-                        }
-                        if let note = model.recountNote {
-                            // The hold for the labels ended lower than it held
-                            // (`RecountState.LowerNote`): said once, so the lower number is not
-                            // read as one going back.
-                            Text("Neu gezählt: Zuvor waren es \(note.held.formatted()) sortiert. Die neue Zahl zählt alles, was sich seitdem geändert hat, etwa Fotos mit Themen oder Dokumenten, die jetzt auch ein passendes Album brauchen.")
-                                .font(.subheadline)
-                                .foregroundStyle(.noteText)
-                                .monospacedDigit()
-                                .fixedSize(horizontal: false, vertical: true)
-                                .accessibilityIdentifier("overview.recountNote")
-                            Button("OK") { model.dismissRecountNote() }
-                                .font(.subheadline)
-                                .accessibilityLabel("Hinweis zur neuen Zahl ausblenden")
-                                .accessibilityIdentifier("overview.recountNote.ok")
-                        }
                         Text(primaryAreasText)
-                            .font(.subheadline)
-                            .foregroundStyle(.noteText)
-                        if let text = notCountedText(ring.notCounted, besidesRing: true) {
+                        if let text = notCountedText(notCounted, besidesRing: false) {
                             Text(text)
-                                .font(.subheadline)
-                                .foregroundStyle(.noteText)
-                                .monospacedDigit()
-                        }
-                        if model.interruptedPlan != nil {
-                            // The unfinished run counts only once the user has decided above
-                            // (unknown is not done), so "0 sortiert" next to "39 of 61 steps" is explained.
-                            Text("Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.")
-                                .font(.subheadline)
-                                .foregroundStyle(.noteText)
                         }
                     }
+                    .monospacedDigit()
+                }
+            case .ring(let ring):
+                SortedRingRow(ring: ring, subject: subjectText, explanation: whatSortedMeans,
+                              recounted: model.recountNote != nil) {
+                    showSorted = true
                 }
             }
         }
+    }
+
+    /// The ring row's first line: the draft's 19 pt semibold.
+    private static var ringTitleFont: Font { .title3.weight(.semibold) }
+
+    /// What the ring counts (`SortedCountCard.subject`): "Reisefotos sortiert" while only
+    /// "Reisen" and "Länder und Orte" count, else "Fotos sortiert"; with the trial year
+    /// "Reisefotos aus 2026 sortiert".
+    private var subjectText: Text {
+        switch SortedCountCard.subject(settings: model.settings, scope: model.analysisScope) {
+        case .travelPhotos(let year):
+            if let year { return Text("Reisefotos aus \(String(year)) sortiert") }
+            return Text("Reisefotos sortiert")
+        case .photos(let year):
+            if let year { return Text("Fotos aus \(String(year)) sortiert") }
+            return Text("Fotos sortiert")
+        }
+    }
+
+    /// "Was heißt sortiert?" at the ring (decision 8A): two lines, the rest behind "Mehr erfahren".
+    private var whatSortedMeans: WhatSorted {
+        let travel = SortedCountCard.subject(settings: model.settings, scope: model.analysisScope).isTravel
+        return WhatSorted(
+            short: travel ? Text("Sortiert heißt: in einem Album für Reise oder Land.")
+                : Text("Sortiert heißt: in einem passenden Album für jeden Bereich, der zählt."),
+            full: Text("Ein Foto gilt als sortiert, wenn es in einem passenden Album liegt, zum Beispiel ein Reisefoto im Album seiner Reise oder ein Foto aus Italien im Album „Italien“. Welche Bereiche zählen, wählst du in den Einstellungen unter „Zählt als sortiert“. Fotos, die zu keinem dieser Bereiche passen, zählen nicht mit."))
     }
 
     private var primaryAreasText: String {
@@ -301,28 +281,29 @@ struct OverviewView: View {
             .map { open + String(localized: $0.titleResource) + close }
         // Only photos the main areas apply to count, so the total is smaller than the library
         // (device test 15.11.: "141 von 5.737 sortiert" next to "14.351 von 14.352 Fotos analysiert").
-        return String(localized: "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: \(names.formatted(.list(type: .and))).")
+        // The areas by name, no word of their own: the setting is "Zählt als sortiert" (P3-09).
+        return String(localized: "Gezählt werden nur Fotos, die zu \(names.formatted(.list(type: .and))) passen.")
     }
 
     /// Every photo the ring leaves out, each in one group (`SortedCountCard.NotCounted`): with
-    /// the ring's total they are the photos of "Alle 246 Fotos analysiert" below. Before, home
-    /// and "kein eigenes Album" were said, and the photos without a place nowhere, so "82 von 176
-    /// sortiert" and "57 Fotos von zu Hause" did not add up to 246 (P3-03). Since home no longer
-    /// counts for "Länder und Orte", the total shrank without a word (review of the sorted count,
-    /// 16.11.). In the core's order (`NotCounted.groups`): the one group said with a relative
-    /// clause comes last, where the period closes it.
+    /// the ring's total they are the photos of "Alle 246 Fotos analysiert" in the sheet
+    /// "Analyse". Before, home and "kein eigenes Album" were said, and the photos without a place
+    /// nowhere, so "82 von 176 sortiert" and "57 Fotos von zu Hause" did not add up to 246
+    /// (P3-03). Since home no longer counts for "Länder und Orte", the total shrank without a
+    /// word (review of the sorted count, 16.11.). In the core's order (`NotCounted.groups`): the
+    /// one group said with a relative clause comes last, where the period closes it.
     private func notCountedText(_ notCounted: SortedCountCard.NotCounted, besidesRing: Bool) -> String? {
         var parts: [String] = []
         for group in notCounted.groups {
             switch group {
             case .home(let n):
-                parts.append(String(localized: "\(n) Fotos von zu Hause"))
+                parts.append(String(localized: "\(n) \(n.formatted()) Fotos von zu Hause"))
             case .noMainArea(let n, let isNoPlace):
                 // No place, a screenshot; with "Reisen" as the only main area also photos from home.
                 if isNoPlace {
-                    parts.append(String(localized: "\(n) Fotos ohne Ort"))
+                    parts.append(String(localized: "\(n) \(n.formatted()) Fotos ohne Ort"))
                 } else {
-                    parts.append(String(localized: "\(n) Fotos außerhalb deiner Hauptbereiche"))
+                    parts.append(String(localized: "\(n) \(n.formatted()) Fotos außerhalb dieser Bereiche"))
                 }
             case .ignored(let n):
                 // Ignored photos are neither sorted nor open, so they leave the ring (Fuchs 18.11.):
@@ -330,15 +311,15 @@ struct OverviewView: View {
                 // With "Nur 2026" the ring counts the ignored photos of that year only ("Ignoriert"
                 // in the library holds all of them).
                 if case .year(let year) = model.analysisScope {
-                    parts.append(String(localized: "\(n) ignorierte Fotos aus \(String(year))"))
+                    parts.append(String(localized: "\(n) \(n.formatted()) ignorierte Fotos aus \(String(year))"))
                 } else {
-                    parts.append(String(localized: "\(n) ignorierte Fotos"))
+                    parts.append(String(localized: "\(n) \(n.formatted()) ignorierte Fotos"))
                 }
             case .excluded(let n):
                 // Excluded from the analysis (no switch in the app today): only when there are some.
-                parts.append(String(localized: "\(n) ausgeschlossene Fotos"))
+                parts.append(String(localized: "\(n) \(n.formatted()) ausgeschlossene Fotos"))
             case .noAlbum(let n):
-                parts.append(String(localized: "\(n) Fotos, für die sich kein eigenes Album lohnt"))
+                parts.append(String(localized: "\(n) \(n.formatted()) Fotos, für die sich kein eigenes Album lohnt"))
             }
         }
         guard !parts.isEmpty else { return nil }
@@ -347,200 +328,149 @@ struct OverviewView: View {
             : String(localized: "Nicht mitgezählt: \(list).")
     }
 
+    /// The ring card's lower part: the analysis, then "Bescheid sagen, wenn fertig" while it may
+    /// be asked (3B), then the trial year, unless the card of an empty trial year above already
+    /// says it and offers the whole library (`EmptyLibraryState.offersAllYears`).
+    @ViewBuilder
+    private func analysisRows(empty: EmptyLibraryState?) -> some View {
+        analysisCard
+        // Known only once iOS answered (`FinishNotificationAsk.refresh`), a moment after the
+        // page appears: the row fades in and the card grows smoothly, not with a jump.
+        VStack(spacing: 0) {
+            if let notice = finishNotice {
+                RingCardSeparator()
+                FinishNotificationRow(notice: notice)
+                    .transition(.opacity)
+            }
+        }
+        .clipped()
+        .animation(reduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35), value: finishNotice)
+        if case .year(let year) = model.analysisScope, empty?.offersAllYears != true {
+            RingCardSeparator()
+            trialNote(year)
+        }
+    }
+
+    /// The analysis on the ring card: running, waiting, pausing, paused by the user and the
+    /// quick check as the analysis card shows them (P3-08: five parts and "Details"); just
+    /// finished as one line with its check mark, the first time on screen with the moment of
+    /// 100 % above it (DS-08); ended by the device or iOS with the reason and
+    /// "Fortsetzen"; otherwise one line with a check mark (draft B). The lines open the sheet
+    /// "Analyse".
     @ViewBuilder
     private var analysisCard: some View {
-        Card {
+        Group {
             if let state = model.analysisCard {
                 // Running, waiting, pausing, paused by the user, just finished, quick check.
-                AnalysisProgressCard(state: state)
-                // The finish moment sits on top of the plain card, which still says what is
-                // analysed and offers "Neu prüfen" (UI run 43796538247, test6: after a long run
-                // the card had neither "Alle 246 Fotos analysiert" nor "Neu prüfen").
-                if case .finished = state { finishedAnalysis }
-                // The photo mosaic: first analysis only (Fuchs 16.11., `ScanShowRule`).
-                if model.showsScanShow { ScanShow() }
+                VStack(alignment: .leading, spacing: 0) {
+                    // The first full analysis reached 100 % on screen: once per installation, above
+                    // "Analyse fertig" (DS-08, `FirstAnalysisMomentHeader`).
+                    if case .finished = state { FirstAnalysisMomentHeader() } // Design W3 H13: the first 100 %
+                    AnalysisProgressCard(state: state) { showAnalysis = true }
+                }
             } else if let reason = model.analysis.lastReport?.pausedBecause {
                 // Ended by the device, iOS or the photo access: the reason and the way on.
-                Text(reason.label).font(.headline)
-                Text("Die Analyse setzt genau dort fort, wo sie aufgehört hat.").font(.subheadline).foregroundStyle(.noteText)
-                Button("Fortsetzen") { model.startAnalysis(cause: .tap) }.buttonStyle(SecondaryButtonStyle())
+                VStack(alignment: .leading, spacing: 0) {
+                    RingCardRow(title: Text(reason.label)) {
+                        Image(systemName: "pause.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.noteText)
+                            .accessibilityHidden(true)
+                    } detail: {
+                        Text("Die Analyse setzt genau dort fort, wo sie aufgehört hat.")
+                    }
+                    Button("Fortsetzen") { model.startAnalysis(cause: .tap) }
+                        .buttonStyle(CardActionButtonStyle())
+                        .accessibilityIdentifier("analysis.resume")
+                        .padding(.horizontal, Theme.Spacing.l)
+                        .padding(.bottom, Theme.Spacing.m)
+                }
             } else {
-                finishedAnalysis
-            }
-            if case .year(let year) = model.analysisScope {
-                trialNote(year)
+                VStack(alignment: .leading, spacing: 0) {
+                    // The first 100 % cut short by a run that replaced "Analyse fertig" (V12).
+                    FirstAnalysisMomentHeader(again: true) // Design W3 H13: the first 100 %
+                    doneRow
+                }
             }
         }
         // A crossfade between states (running, paused, finished …), not with every count.
         .animation(reduceMotion ? nil : .smooth, value: model.analysisCard?.phase)
     }
 
-    @ViewBuilder
-    private var finishedAnalysis: some View {
+    /// Nothing runs: the analysis in one line with a check mark (draft B), its numbers in the
+    /// sheet "Analyse".
+    private var doneRow: some View {
         let counts = model.analysisCounts
-        let stack = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Spacing.s))
-            : AnyLayout(HStackLayout())
-        stack {
-            VStack(alignment: .leading, spacing: 2) {
-                // Says what is done, so "aktuell" is not read as "stopped" (first device test 15.11.).
-                Group {
-                    if counts.photos == 0 {
-                        Text("Analyse aktuell")
-                    } else if counts.analyzed >= counts.photos {
-                        Text("Alle \(counts.photos.formatted()) Fotos analysiert")
-                    } else {
-                        Text("\(counts.analyzed.formatted()) von \(counts.photos.formatted()) Fotos analysiert")
-                    }
-                }
-                .font(.headline)
-                // UI runs read how the image requests ended (all demo photos were unreadable there).
-                .accessibilityValue(UITestSupport.isRunning ? "image loads: \(ImageLoadStats.summary)" : "")
-                if let date = model.analysis.lastRun {
-                    Text("Zuletzt geprüft \(date.formatted(.relative(presentation: .named)))").font(.subheadline).foregroundStyle(.noteText)
+        let report = model.analysis.lastReport
+        // Each of these has its count in the sheet.
+        let later = counts.unreadable + counts.labelsMissing + (report?.placesPendingOnline ?? 0)
+            + (report?.textWaitingForOriginal ?? 0)
+        let line = AnalysisDoneLine.make(photos: counts.photos, analyzed: counts.analyzed, later: later)
+        return Button { showAnalysis = true } label: {
+            RingCardRow(title: doneTitle(line), chevron: true) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
+            } detail: {
+                if line.restFollows {
+                    Text("Den Rest holt Albumist später nach")
+                } else if let date = model.analysis.lastRun {
+                    LastCheckLine(date: date)
                 } else {
-                    Text("Neue Fotos erkennt Albumist von selbst.").font(.subheadline).foregroundStyle(.noteText)
+                    Text("Neue Fotos erkennt Albumist von selbst.")
                 }
             }
-            if !typeSize.isAccessibilitySize { Spacer() }
-            Button { model.startAnalysis() } label: { TapTarget("Neu prüfen") }
         }
-        if let report = model.analysis.lastReport, model.analysis.lastRun != nil, model.analysis.kind == .check {
-            // What "Neu prüfen" found, so a check that ends after a few seconds is clearly done.
-            // Photos that only got their labels ("Themen" or "Dokumente" turned on) are no new
-            // photos (review of the labels fix, M2); both in one line (second review, nit).
-            Group {
-                if report.newPhotosAnalyzed > 0 && report.labelsAdded > 0 {
-                    Text("Beim Prüfen \(report.newPhotosAnalyzed) neue Fotos analysiert und \(report.labelsAdded) weitere für die neuen Bereiche angesehen.")
-                } else if report.newPhotosAnalyzed > 0 {
-                    Text("Beim Prüfen \(report.newPhotosAnalyzed) neue Fotos analysiert.")
-                } else if report.labelsAdded > 0 {
-                    Text("Beim Prüfen \(report.labelsAdded) Fotos für die neuen Bereiche angesehen.")
-                } else if report.newOrChanged == 0 && report.removed == 0 {
-                    Text("Beim Prüfen keine neuen Fotos gefunden.")
-                }
-            }
-            .font(.footnote).foregroundStyle(.noteText)
-        }
-        if counts.labelsMissing > 0 {
-            // Analysed before "Themen" or "Dokumente" was turned on and still without their image
-            // labels (no run yet, or a read that failed waits for its retry): said apart, the
-            // count above stays (second review of the labels fix, finding 6).
-            Label("Für die neuen Bereiche fehlen noch \(counts.labelsMissing) Fotos.", systemImage: "hourglass")
-                .font(.footnote).foregroundStyle(.noteText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        if counts.unreadable > 0 {
-            Label("\(counts.unreadable) Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal.", systemImage: "exclamationmark.icloud")
-                .font(.footnote).foregroundStyle(.noteText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        if let pending = model.analysis.lastReport?.placesPendingOnline, pending > 0 {
-            Label("\(pending) Orte werden später genauer bestimmt.", systemImage: "moon.zzz")
-                .font(.footnote).foregroundStyle(.noteText)
-        }
-        if let waiting = model.analysis.lastReport?.textWaitingForOriginal, waiting > 0 {
-            Label("\(waiting) Dokumente liegen nur in iCloud und werden später gelesen.", systemImage: "icloud")
-                .font(.footnote).foregroundStyle(.noteText)
+        .buttonStyle(RingCardRowButtonStyle())
+        // UI runs read how the image requests ended (all demo photos were unreadable there).
+        .accessibilityValue(UITestSupport.isRunning ? "image loads: \(ImageLoadStats.summary)" : "")
+        .accessibilityIdentifier("analysis.summary")
+    }
+
+    private func doneTitle(_ line: AnalysisDoneLine) -> Text {
+        switch line {
+        case .upToDate: Text("Analyse aktuell")
+        case .all(let photos): Text("Alle \(photos.formatted()) Fotos analysiert")
+        // Cut off part way: how far it got, never "Analyse fertig" (second review).
+        case .partly(let analyzed, let photos): Text("\(analyzed.formatted()) von \(photos.formatted()) Fotos analysiert")
+        case .restLater: Text("Analyse fertig")
         }
     }
 
+    /// "Bescheid sagen, wenn fertig" (3B): while the analysis goes on by itself and takes a
+    /// while (`FinishNotice`); never before iOS said what it knows.
+    private var finishNotice: FinishNotice? {
+        guard let permission = notifications.permission else { return nil }
+        let goesOn: Bool = switch model.analysisCard {
+        case .running?, .waiting?: !model.analysis.refining
+        default: false
+        }
+        let finish: Date? = switch model.analysisFinish {
+        case .at(let date)?: date
+        case .soon?: .now
+        case .none: nil
+        }
+        return FinishNotice.make(runGoesOn: goesOn, finish: finish, now: .now, firstAnalysis: !model.analysedOnce,
+                                 permission: permission, allowedHere: notifications.allowedHere)
+    }
+
     /// The trial year chosen at the start stays until the user takes in the whole library.
-    @ViewBuilder
     private func trialNote(_ year: Int) -> some View {
-        Divider()
         ViewThatFits(in: .horizontal) {
             HStack {
-                Label("Probelauf: nur Fotos aus \(String(year))", systemImage: "calendar").font(.subheadline)
+                Label("Albumist arbeitet nur mit Fotos aus \(String(year))", systemImage: "calendar").font(.subheadline)
                 Spacer()
                 Button { model.changeScope(.all) } label: { TapTarget("Alle Jahre") }
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                Label("Probelauf: nur Fotos aus \(String(year))", systemImage: "calendar").font(.subheadline)
+                Label("Albumist arbeitet nur mit Fotos aus \(String(year))", systemImage: "calendar").font(.subheadline)
                 Button { model.changeScope(.all) } label: { TapTarget("Ganze Mediathek dazunehmen") }
             }
         }
-        .accessibilityIdentifier("analysis.trial")
-    }
-
-    private var areasSection: some View {
-        let byArea = Dictionary(grouping: model.proposals, by: \.kind.area)
-        return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            // Caps by style, not in the text (EN reads "Areas"), and a heading for VoiceOver
-            // (design review W10).
-            Text("Bereiche")
-                .textCase(.uppercase)
-                .accessibilityAddTraits(.isHeader)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.noteText)
-                .padding(.top, Theme.Spacing.s)
-                .padding(.leading, Theme.Spacing.xs)
-            VStack(spacing: 0) {
-                let areas = OrganizationArea.available.filter { model.settings.enabledAreas.contains($0) }
-                ForEach(Array(areas.enumerated()), id: \.element) { index, area in
-                    PushLink(.areaProposals(area), chevron: false) {
-                        areaRow(area, proposals: byArea[area] ?? [])
-                    }
-                    .buttonStyle(.plain)
-                    if index < areas.count - 1 { Divider().padding(.leading, 66) }
-                }
-            }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        }
-    }
-
-    private func areaRow(_ area: OrganizationArea, proposals: [AlbumProposal]) -> some View {
-        let open = proposals.filter { model.decisions[$0.id] == nil && model.match(for: $0)?.status != .alreadyComplete }.count
-        let existing = proposals.filter { p in
-            // The same albums as the ring (`AlbumMatcher.sortingAlbums`): a possible match gets
-            // an album of its own, several matching albums count only when mostly this suggestion.
-            !AlbumMatcher().sortingAlbums(model.match(for: p), kind: p.kind, title: p.title).isEmpty
-        }.count
-        // "0 Alben gefunden" read like an error: only mention albums that exist.
-        var parts = [String(localized: "\(proposals.count) Vorschläge")]
-        if existing > 0 { parts.append(String(localized: "\(existing) davon in deinen Alben")) }
-        let summary = Counted.join(parts)
-        let text = VStack(alignment: .leading, spacing: 2) {
-            Text(area.title).font(.body.weight(.medium))
-            Group {
-                // While the labels come in, only the new areas wait for suggestions.
-                if proposals.isEmpty, let recount = model.recount,
-                   !recount.isForLabels || area == .imageCategories || area == .documents {
-                    Text("Wird neu berechnet")
-                } else if proposals.isEmpty {
-                    Text("Noch keine Vorschläge")
-                } else {
-                    Text(summary)
-                }
-            }
-            .font(.footnote).foregroundStyle(.noteText)
-        }
-        let chevron = Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-        return Group {
-            if typeSize.isAccessibilitySize {
-                // Largest text sizes: icon and badge on top, the text gets the full width.
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    HStack {
-                        IconTile(systemName: area.symbol, tint: area.tint)
-                        Spacer()
-                        if open > 0 { StatusBadge(text: "\(open) offen") }
-                        chevron
-                    }
-                    text
-                }
-            } else {
-                HStack(spacing: Theme.Spacing.m) {
-                    IconTile(systemName: area.symbol, tint: area.tint)
-                    text
-                    Spacer()
-                    if open > 0 { StatusBadge(text: "\(open) offen") }
-                    chevron
-                }
-            }
-        }
         .padding(.horizontal, Theme.Spacing.l)
-        .padding(.vertical, Theme.Spacing.m)
-        .contentShape(Rectangle())
+        .padding(.vertical, Theme.Spacing.xs)
+        .accessibilityIdentifier("analysis.trial")
     }
 }
 
@@ -619,7 +549,10 @@ struct RecheckedSuggestionsCard: View {
             Text("\(count) Vorschläge neu geprüft: bitte noch einmal ansehen.")
                 .font(.subheadline).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert.")
+            Text("""
+                Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. \
+                Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert.
+                """)
                 .font(.subheadline).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
             Button("OK") { model.dismissRecheckNotice() }
@@ -636,7 +569,7 @@ struct InterruptedPlanCard: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
     @State private var confirmUndo = false
-    /// "Alles zurücknehmen" deletes albums or folders: the confirmation says that iOS asks
+    /// "Alles rückgängig machen" deletes albums or folders: the confirmation says that iOS asks
     /// next (P3-07). Worked out once on the tap, not while the dialog is drawn.
     @State private var undoDeletes = false
     /// Albumist reads the albums to see whether the undo deletes any: a spinner beside the
@@ -669,7 +602,7 @@ struct InterruptedPlanCard: View {
             } else {
                 // The ways out (I16). An interrupted undo cannot itself be taken back (Photos
                 // cannot bring deleted albums back): it can only go on or stay as it is.
-                Button(isUndo ? LocalizedStringKey("Rest zurücknehmen") : isRemoval ? LocalizedStringKey("Rest entfernen") : LocalizedStringKey("Rest anlegen")) { Task { await model.resumeInterruptedPlan() } }
+                Button(isUndo ? LocalizedStringKey("Rest rückgängig machen") : isRemoval ? LocalizedStringKey("Rest entfernen") : LocalizedStringKey("Rest anlegen")) { Task { await model.resumeInterruptedPlan() } }
                     .buttonStyle(PrimaryButtonStyle())
                     .accessibilityIdentifier("interrupted.resume")
                 if !isUndo {
@@ -684,7 +617,7 @@ struct InterruptedPlanCard: View {
                             confirmUndo = true
                         }
                     } label: {
-                        Text("Alles zurücknehmen").checkingBeside(askingUndo)
+                        Text("Alles rückgängig machen").checkingBeside(askingUndo)
                     }
                         .buttonStyle(SecondaryButtonStyle())
                         .disabled(askingUndo)
@@ -715,56 +648,13 @@ struct InterruptedPlanCard: View {
                 ErrorNote(text: failure)
             }
         }
-        .confirmationDialog("Alles zurücknehmen?", isPresented: $confirmUndo, titleVisibility: .visible) {
-            Button("Alles zurücknehmen", role: .destructive) {
+        .confirmationDialog("Alles rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
+            Button("Alles rückgängig machen", role: .destructive) {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
             DeleteQuestionNote.message(Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt."),
                                        deletes: undoDeletes)
-        }
-    }
-}
-
-/// First use: the best albums of the library, ready to be created with one tap.
-struct StarterSetCard: View {
-    @Environment(AppModel.self) private var model
-    @Environment(Purchases.self) private var purchases
-    var onStart: ([AlbumProposal]) -> Void
-
-    var body: some View {
-        let limit = purchases.isUnlocked || Purchases.unlockedForUITests ? 10 : min(10, purchases.remainingFreeAlbums)
-        let set = model.starterSet(limit: limit)
-        if set.count >= 3 {
-            Card {
-                Text("Dein Startpaket").font(.headline).accessibilityAddTraits(.isHeader)
-                Text("Die \(set.count) besten Alben aus deiner Mediathek, fertig zum Anlegen. Du siehst vorher genau, was passiert.")
-                    .font(.subheadline).foregroundStyle(.noteText)
-                HStack(spacing: -14) {
-                    ForEach(Array(set.prefix(5).enumerated()), id: \.element.id) { index, proposal in
-                        CoverThumbnail(id: model.coverID(for: proposal), side: 64)
-                            .frame(width: 56, height: 56)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.background, lineWidth: 2))
-                            .zIndex(Double(5 - index))
-                    }
-                }
-                .accessibilityHidden(true)
-                Text(ListFormatter.localizedString(byJoining: set.prefix(3).map { model.userTitles[$0.id] ?? $0.title })
-                     + (set.count > 3 ? " …" : ""))
-                    .font(.footnote).foregroundStyle(.noteText)
-                    .compactLineLimit(2)
-                Button {
-                    onStart(set)
-                } label: {
-                    if purchases.isUnlocked {
-                        Text("\(set.count) Alben anlegen")
-                    } else {
-                        Text("\(set.count) Alben kostenlos anlegen")
-                    }
-                }
-                .buttonStyle(PrimaryButtonStyle())
-            }
         }
     }
 }
@@ -781,7 +671,7 @@ struct LimitedAccessCard: View {
             Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline).accessibilityAddTraits(.isHeader)
             // Every photo Albumist reads, not the ring's: with "Nur 2026" those are only the
             // photos of 2026, and the card said "sieht nur die 12 Fotos" of 40 shared (P3-03).
-            Text("Albumist sieht nur die \(model.facts.count) Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff.")
+            Text("Albumist sieht nur die \(model.facts.count) \(model.facts.count.formatted()) Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff.")
                 .font(.subheadline).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
             #if targetEnvironment(simulator)
@@ -831,6 +721,355 @@ struct LimitedAccessCard: View {
                 // A Pause stays: "Fortsetzen" is the only way on (review of the Pause fix, b).
                 guard !model.analysis.pausedByUser, !model.analysis.pausing else { return }
                 model.startAnalysis(cause: .tap)
+            }
+        }
+    }
+}
+
+// MARK: - The ring card's sheets
+
+/// What "sortiert" means, in two lines and in full (decision 8A).
+struct WhatSorted {
+    var short: Text
+    var full: Text
+}
+
+/// The ring's row (draft B): the ring with its percent and a small "i" that says what
+/// "sortiert" means (`LearnMore`), then "495 von 3.114" with what it counts and a chevron to the
+/// sheet "Sortiert". Two buttons side by side, never one inside the other; at the accessibility
+/// text sizes the ring sits above the words.
+private struct SortedRingRow: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .title3) private var column: CGFloat = 54
+    @ScaledMetric(relativeTo: .caption) private var infoSide: CGFloat = 17
+    @State private var showsWhat = false
+    var ring: SortedCountCard.Ring
+    var subject: Text
+    var explanation: WhatSorted
+    /// The count was made anew lower than before (`RecountState.LowerNote`): the sheet says why.
+    var recounted: Bool
+    var onOpen: () -> Void
+
+    var body: some View {
+        let side = min(column, 108)
+        let shown = OrganizationStatusResolver.Progress.shownShare(ring.fraction)
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 0))
+        layout {
+            Button { showsWhat = true } label: {
+                SortedRing(fraction: ring.fraction)
+                    .frame(width: side, height: side)
+                    .overlay(alignment: .bottomTrailing) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: min(infoSide, 28), weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                            .background(Circle().fill(Theme.card))
+                            .offset(x: 3, y: 3)
+                    }
+                    .padding(.leading, Theme.Spacing.l)
+                    .padding(.trailing, 14)
+                    .padding(.vertical, Theme.Spacing.m)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Was heißt sortiert?"))
+            .accessibilityValue(Text(shown, format: .percent.precision(.fractionLength(0))))
+            .accessibilityIdentifier("overview.sortedInfo")
+            .popover(isPresented: $showsWhat) {
+                // At the largest text sizes on a small iPhone the two lines and "Mehr erfahren"
+                // can be taller than the room beside the ring: they scroll then (review A of
+                // design wave 1).
+                ViewThatFits(in: .vertical) {
+                    whatSorted
+                    ScrollView { whatSorted }
+                }
+                .frame(idealWidth: 320)
+                .presentationCompactAdaptation(.popover)
+            }
+            Button(action: onOpen) {
+                HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(ring.fully.formatted()) von \(ring.total.formatted())")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Color.primary)
+                            .monospacedDigit()
+                        subject
+                            .font(.subheadline)
+                            .foregroundStyle(.noteText)
+                        if recounted {
+                            Text("Neu gezählt · Mehr dazu")
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.accent)
+                        }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
+                .padding(.leading, typeSize.isAccessibilitySize ? Theme.Spacing.l : 0)
+                .padding(.trailing, 14)
+                .padding(.vertical, Theme.Spacing.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(RingCardRowButtonStyle())
+            .accessibilityIdentifier("overview.sorted")
+        }
+    }
+
+    /// What "sortiert" means: two lines and "Mehr erfahren" (decision 8A).
+    private var whatSorted: some View {
+        LearnMore(short: explanation.short, full: explanation.full, title: Text("Was heißt sortiert?"))
+            .padding(Theme.Spacing.l)
+    }
+}
+
+/// "Sortiert" (the ring's row opens it): the numbers behind the ring and every photo it leaves
+/// out (P3-03), what "sortiert" means, the note on a count made anew, and the way to change
+/// what counts. All of it stood on the first card before design wave 1.
+private struct SortedSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @ScaledMetric(relativeTo: .title) private var ringSide: CGFloat = 84
+    @State private var showSettings = false
+    /// Nil while the number is being counted again (the sheet stays open meanwhile).
+    var ring: SortedCountCard.Ring?
+    var subject: Text
+    var explanation: WhatSorted
+    var areas: String
+    var notCounted: String?
+
+    var body: some View {
+        NavigationRoot {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                    numbers
+                    if let note = model.recountNote {
+                        // The hold for the labels ended lower than it held
+                        // (`RecountState.LowerNote`): said once, so the lower number is not
+                        // read as one going back.
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                            Text("Neu gezählt: Zuvor waren es \(note.held.formatted()) sortiert. Die neue Zahl zählt alles, was sich seitdem geändert hat, etwa Fotos mit Themen oder Dokumenten, die jetzt auch ein passendes Album brauchen.")
+                                .font(.subheadline)
+                                .foregroundStyle(.noteText)
+                                .monospacedDigit()
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("overview.recountNote")
+                            Button {
+                                model.dismissRecountNote()
+                            } label: {
+                                // 44 pt to tap on the label, where the button takes the tap;
+                                // leading as the note, so nothing moves (review S3 of H14).
+                                Text("OK")
+                                    .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .font(.subheadline)
+                            .accessibilityLabel("Hinweis zur neuen Zahl ausblenden")
+                            .accessibilityIdentifier("overview.recountNote.ok")
+                        }
+                    }
+                    explanation.full
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text(areas)
+                        if let notCounted {
+                            Text(notCounted)
+                        }
+                        if let interrupted = model.interruptedPlan {
+                            // The unfinished run counts only once the user has decided on the
+                            // page (unknown is not done), so "0 sortiert" next to "39 of 61 steps"
+                            // is explained. Named with the card's own words ("Anlegen wurde
+                            // unterbrochen", P3-09): in a sheet nothing is "oben" (second review).
+                            if interrupted.reverts != nil {
+                                Text("Das unterbrochene Rückgängigmachen zählt, sobald du auf der Karte „Rückgängig wurde unterbrochen“ entschieden hast.")
+                            } else if !interrupted.removalSources.isEmpty {
+                                Text("Das unterbrochene Entfernen zählt, sobald du auf der Karte „Entfernen wurde unterbrochen“ entschieden hast.")
+                            } else {
+                                Text("Das unterbrochene Anlegen zählt, sobald du auf der Karte „Anlegen wurde unterbrochen“ entschieden hast.")
+                            }
+                        }
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.noteText)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+                    Button("Was zählt, ändern") { showSettings = true }
+                        .buttonStyle(CardActionButtonStyle())
+                        .accessibilityIdentifier("sorted.settings")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.xl)
+            }
+            .navigationTitle("Sortiert")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Fertig") { dismiss() }
+                        .accessibilityIdentifier("sorted.done")
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                NavigationRoot { SettingsView() }
+                    .sheetSize(.page)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var numbers: some View {
+        if let ring {
+            AdaptiveStack(verticalAlignment: .center, spacing: Theme.Spacing.l) {
+                ProgressRing(fraction: ring.fraction)
+                    .frame(width: min(ringSide, 150), height: min(ringSide, 150))
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    Text("\(ring.fully.formatted()) von \(ring.total.formatted())")
+                        .font(.title2.weight(.bold))
+                        .monospacedDigit()
+                    subject
+                        .font(.subheadline)
+                        .foregroundStyle(.noteText)
+                    if ring.partially > 0 {
+                        // Photos already in a matching album for one main area but not yet for
+                        // the other count as partly sorted; without this line the ring looked
+                        // too low (device test 15.11.: 157 sorted, 1,199 partly).
+                        Text("Dazu \(ring.partially.formatted()) teilweise sortiert")
+                            .font(.subheadline)
+                            .foregroundStyle(.noteText)
+                            .monospacedDigit()
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            Text("Wird neu gezählt")
+                .font(.headline)
+        }
+    }
+}
+
+/// "Analyse" (the analysis' line opens it): how many photos are analysed and when Albumist last
+/// looked, what a check found, what it does later, and "Neu prüfen". All of it stood on the
+/// analysis card before design wave 1.
+private struct AnalysisSummarySheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        NavigationRoot {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                    summary
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.xl)
+            }
+            .navigationTitle("Analyse")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Fertig") { dismiss() }
+                        .accessibilityIdentifier("analysis.summary.done")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var summary: some View {
+        let counts = model.analysisCounts
+        let stack = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Spacing.s))
+            : AnyLayout(HStackLayout())
+        stack {
+            VStack(alignment: .leading, spacing: 2) {
+                // Says what is done, so "aktuell" is not read as "stopped" (first device test 15.11.).
+                Group {
+                    if counts.photos == 0 {
+                        Text("Analyse aktuell")
+                    } else if counts.analyzed >= counts.photos {
+                        Text("Alle \(counts.photos.formatted()) Fotos analysiert")
+                    } else {
+                        Text("\(counts.analyzed.formatted()) von \(counts.photos.formatted()) Fotos analysiert")
+                    }
+                }
+                .font(.headline)
+                // UI runs read how the image requests ended (all demo photos were unreadable there).
+                .accessibilityValue(UITestSupport.isRunning ? "image loads: \(ImageLoadStats.summary)" : "")
+                if let date = model.analysis.lastRun {
+                    LastCheckLine(date: date)
+                        .font(.subheadline).foregroundStyle(.noteText)
+                } else {
+                    Text("Neue Fotos erkennt Albumist von selbst.").font(.subheadline).foregroundStyle(.noteText)
+                }
+            }
+            if !typeSize.isAccessibilitySize { Spacer() }
+            // The card shows the check at once: the sheet goes.
+            Button {
+                model.startAnalysis()
+                dismiss()
+            } label: { TapTarget("Neu prüfen") }
+        }
+        if let report = model.analysis.lastReport, model.analysis.lastRun != nil, model.analysis.kind == .check {
+            // What "Neu prüfen" found, so a check that ends after a few seconds is clearly done.
+            // Photos that only got their labels ("Themen" or "Dokumente" turned on) are no new
+            // photos (review of the labels fix, M2); both in one line (second review, nit).
+            Group {
+                if report.newPhotosAnalyzed > 0 && report.labelsAdded > 0 {
+                    Text("Beim Prüfen \(report.newPhotosAnalyzed) \(report.newPhotosAnalyzed.formatted()) neue Fotos analysiert und \(report.labelsAdded) \(report.labelsAdded.formatted()) weitere für die neuen Bereiche angesehen.")
+                } else if report.newPhotosAnalyzed > 0 {
+                    Text("Beim Prüfen \(report.newPhotosAnalyzed) \(report.newPhotosAnalyzed.formatted()) neue Fotos analysiert.")
+                } else if report.labelsAdded > 0 {
+                    Text("Beim Prüfen \(report.labelsAdded) \(report.labelsAdded.formatted()) Fotos für die neuen Bereiche angesehen.")
+                } else if report.newOrChanged == 0 && report.removed == 0 {
+                    Text("Beim Prüfen keine neuen Fotos gefunden.")
+                }
+            }
+            .font(.footnote).foregroundStyle(.noteText)
+        }
+        if counts.labelsMissing > 0 {
+            // Analysed before "Themen" or "Dokumente" was turned on and still without their image
+            // labels (no run yet, or a read that failed waits for its retry): said apart, the
+            // count above stays (second review of the labels fix, finding 6).
+            Label("Für die neuen Bereiche fehlen noch \(counts.labelsMissing) \(counts.labelsMissing.formatted()) Fotos.", systemImage: "hourglass")
+                .font(.footnote).foregroundStyle(.noteText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if counts.unreadable > 0 {
+            Label("\(counts.unreadable) \(counts.unreadable.formatted()) Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal.", systemImage: "exclamationmark.icloud")
+                .font(.footnote).foregroundStyle(.noteText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let pending = model.analysis.lastReport?.placesPendingOnline, pending > 0 {
+            Label("\(pending) \(pending.formatted()) Orte werden später genauer bestimmt.", systemImage: "moon.zzz")
+                .font(.footnote).foregroundStyle(.noteText)
+        }
+        if let waiting = model.analysis.lastReport?.textWaitingForOriginal, waiting > 0 {
+            Label("\(waiting) \(waiting.formatted()) Dokumente liegen nur in iCloud und werden später gelesen.", systemImage: "icloud")
+                .font(.footnote).foregroundStyle(.noteText)
+        }
+    }
+}
+
+/// „Gerade eben geprüft“ in the first minute, not „Zuletzt geprüft jetzt“ (P3-18). Drawn again a
+/// minute after the check and every minute from there, so neither stays after its minute has
+/// passed (a timeline by the clock's minute kept „Gerade eben“ up to two minutes).
+private struct LastCheckLine: View {
+    var date: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: date, by: LastCheck.justNowSpan)) { context in
+            switch LastCheck(date, now: context.date) {
+            case .justNow: Text("Gerade eben geprüft")
+            case .earlier(let checked): Text("Zuletzt geprüft \(checked.formatted(.relative(presentation: .named)))")
             }
         }
     }

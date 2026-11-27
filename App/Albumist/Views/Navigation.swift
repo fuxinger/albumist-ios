@@ -28,10 +28,12 @@ enum AppScreen: Hashable {
     case proposals
     case areaProposals(OrganizationArea)
     case proposal(ProposalRef)
-    /// The preview of the selected suggestions.
-    case plan
-    /// The preview of the starter set; leaving it ends the preview selection (`OverviewView`).
-    case starterPlan
+    /// The preview of suggestions picked for it ("N Alben anlegen" in a list, "Ergänzen …" on a
+    /// card there): it plans exactly these picks (`AppModel.buildPlan(for:)`), and leaving it
+    /// gives them back.
+    case plan(AppModel.PreviewSelection)
+    /// The preview of the starter set, with the set's picks; leaving it gives them back.
+    case starterPlan(AppModel.PreviewSelection)
     /// The preview of a plan made elsewhere: an album merge, a removal, one suggestion right
     /// away, "Fehlendes erneut versuchen", "Zu Album hinzufügen".
     case prebuiltPlan(PlanToken)
@@ -42,11 +44,21 @@ enum AppScreen: Hashable {
     case route(AppModel.Route)
     case managedAlbums
     case history
+    /// An album or folder of the "Alben" tab, by id: shown as it is now; pushes the removal preview itself.
+    case album(CollectionID) // Design W1 H5
+    case folder(CollectionID) // Design W1 H5
+    /// The suggestions to merge albums that hold mostly the same photos (row "Ähnliche Alben").
+    case similarAlbums // Design W1 H5
 
-    /// The same screen as `other`: equal, or the same suggestion opened from a list and from
-    /// Siri, Shortcuts or Spotlight.
+    /// The same screen as `other`: equal, the same suggestion opened from a list and from
+    /// Siri, Shortcuts or Spotlight, or a second preview of picks over one (each tap picks
+    /// anew, so a second tap on "N Alben anlegen" would otherwise push a second preview).
     func isSame(as other: AppScreen) -> Bool {
         if self == other { return true }
+        switch (self, other) {
+        case (.plan, .plan), (.starterPlan, .starterPlan): return true
+        default: break
+        }
         guard let id = suggestionID else { return false }
         return id == other.suggestionID
     }
@@ -65,7 +77,7 @@ enum AppScreen: Hashable {
         case .proposals: ProposalListView(area: nil)
         case .areaProposals(let area): ProposalListView(area: area)
         case .proposal(let ref): ProposalScreen(ref: ref)
-        case .plan, .starterPlan: PlanReviewView()
+        case .plan(let selection), .starterPlan(let selection): PlanReviewView(selection: selection)
         case .prebuiltPlan(let token): PlanReviewView(prebuilt: token.plan)
         case .receipt(let token): PlanReceiptView(plan: token.plan)
         case .atlas: AtlasView()
@@ -73,6 +85,9 @@ enum AppScreen: Hashable {
         case .route(let route): RouteDestination(route: route)
         case .managedAlbums: ManagedAlbumsView()
         case .history: HistoryView()
+        case .album(let id): AlbumScreen(id: id) // Design W1 H5
+        case .folder(let id): FolderScreen(id: id) // Design W1 H5
+        case .similarAlbums: SimilarAlbumsView() // Design W1 H5
         }
     }
 }
@@ -91,8 +106,10 @@ struct PlanToken: Hashable {
 /// A suggestion on a path, compared by its id.
 struct ProposalRef: Hashable {
     let proposal: AlbumProposal
+    /// The card the page zooms out of and back into; not part of which screen it is. // Design W1 H4
+    let zoom: Namespace.ID? // Design W1 H4
 
-    init(_ proposal: AlbumProposal) { self.proposal = proposal }
+    init(_ proposal: AlbumProposal, zoom: Namespace.ID? = nil) { self.proposal = proposal; self.zoom = zoom } // Design W1 H4
 
     static func == (a: ProposalRef, b: ProposalRef) -> Bool { a.proposal.id == b.proposal.id }
     func hash(into hasher: inout Hasher) { hasher.combine(proposal.id) }
@@ -106,7 +123,7 @@ struct ProposalScreen: View {
     var ref: ProposalRef
 
     var body: some View {
-        ProposalDetailView(proposal: model.proposals.first(where: { $0.id == ref.proposal.id }) ?? ref.proposal)
+        ProposalDetailView(proposal: model.proposals.first(where: { $0.id == ref.proposal.id }) ?? ref.proposal, zoom: ref.zoom) // Design W1 H4
     }
 }
 
@@ -273,12 +290,18 @@ struct PlanRequest {
 /// A navigation stack with a path of `AppScreen`s, their destinations and its `Navigator` in
 /// the environment. Each stack owns its navigator (a sheet starts empty every time it opens);
 /// the overview tab passes its own, which Siri, Shortcuts and Spotlight push onto.
+///
+/// `quickCreate`: "Anlegen" makes the album at once on this stack (`quickCreateAtOnce`). Only
+/// the tabs pass true, which show the banner with "Widerrufen"; every other stack (a sheet's, a
+/// cover's) says false for itself instead of inheriting the yes of the tab under it.
 struct NavigationRoot<Root: View>: View {
     @State private var navigator: Navigator
+    private let quickCreate: Bool
     private let root: Root
 
-    init(_ navigator: Navigator? = nil, @ViewBuilder root: () -> Root) {
+    init(_ navigator: Navigator? = nil, quickCreate: Bool = false, @ViewBuilder root: () -> Root) {
         _navigator = State(initialValue: navigator ?? Navigator())
+        self.quickCreate = quickCreate
         self.root = root()
     }
 
@@ -287,6 +310,7 @@ struct NavigationRoot<Root: View>: View {
             root.navigationDestination(for: AppScreen.self) { $0.destination }
         }
         .environment(navigator)
+        .environment(\.quickCreateAtOnce, quickCreate)
         // The stack as a whole: another tab chosen, the sheet closed (`Navigator.showing`).
         .onAppear { navigator.appeared() }
         .onDisappear { navigator.disappeared() }

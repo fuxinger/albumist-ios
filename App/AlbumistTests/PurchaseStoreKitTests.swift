@@ -422,7 +422,7 @@ struct PurchaseStoreKitTests {
         let restored = restoreInBackground(purchases)
         _ = await waitUntil("restore finished") { restored.done }
         #expect(!purchases.isUnlocked)
-        #expect(purchases.lastError == String(localized: "Kein Kauf gefunden. Wenn du Albumist mit einem anderen Apple Account gekauft hast, melde dich damit im App Store an."),
+        #expect(purchases.lastError == String(localized: "Kein Kauf gefunden. Wenn du die Vollversion mit einem anderen Apple Account gekauft hast, melde dich damit im App Store an."),
                 "message: \(purchases.lastError ?? "none")")
     }
 
@@ -477,7 +477,7 @@ struct PurchaseStoreKitTests {
 
         seen.answer = { .pending }
         try await purchaseStep(purchases, "purchase, waiting")
-        #expect(purchases.lastError == String(localized: "Der Kauf wartet noch auf eine Bestätigung, zum Beispiel durch die Familienfreigabe. Albumist schaltet sich danach von selbst frei."))
+        #expect(purchases.lastError == String(localized: "Der Kauf muss noch bestätigt werden, zum Beispiel über eine Kaufanfrage in der Familienfreigabe. Danach schaltet sich Albumist von selbst frei."))
 
         seen.answer = { throw StoreKitError.networkError(URLError(.notConnectedToInternet)) }
         try await purchaseStep(purchases, "purchase, offline")
@@ -509,7 +509,7 @@ struct PurchaseStoreKitTests {
         // Restore is not refused as "already running".
         let restored = restoreInBackground(purchases)
         _ = await waitUntil("restore finished") { restored.done }
-        #expect(purchases.lastError == String(localized: "Kein Kauf gefunden. Wenn du Albumist mit einem anderen Apple Account gekauft hast, melde dich damit im App Store an."),
+        #expect(purchases.lastError == String(localized: "Kein Kauf gefunden. Wenn du die Vollversion mit einem anderen Apple Account gekauft hast, melde dich damit im App Store an."),
                 "message: \(purchases.lastError ?? "none")")
         // The hung sheet ends at last: nothing stays disabled.
         hung.cancel()
@@ -624,7 +624,7 @@ struct PurchaseStoreKitTests {
         try await purchaseStep(purchases, "purchase with Ask to Buy")
         #expect(seen.products == [Purchases.unlockProductID])
         #expect(!purchases.isUnlocked)
-        #expect(purchases.lastError == String(localized: "Der Kauf wartet noch auf eine Bestätigung, zum Beispiel durch die Familienfreigabe. Albumist schaltet sich danach von selbst frei."))
+        #expect(purchases.lastError == String(localized: "Der Kauf muss noch bestätigt werden, zum Beispiel über eine Kaufanfrage in der Familienfreigabe. Danach schaltet sich Albumist von selbst frei."))
 
         let unlock = Purchases.unlockProductID
         try await onSessionQueue("approval: the purchase completes in the session") { try store.session.buyProduct(productIdentifier: unlock) }

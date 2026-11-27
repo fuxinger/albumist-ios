@@ -534,7 +534,7 @@ public struct ProposalEngine: Sendable {
     /// frequent place that stays, and an unnamed frequent place only for a recurring place that
     /// stays. Trade-off (decision of the coordinator, re-review 18.11.): the photos only the
     /// recurring place had (Fuchs: 87 of 509) are in no frequent or recurring place when it goes;
-    /// unless another suggestion holds them (a town's place album), they stay "Nicht sortiert"
+    /// unless another suggestion holds them (a town's place album), they stay "Unsortiert"
     /// (`theRecurringPlacesOwnPhotosHaveNoPlaceSuggestionWhenItGoes`, docs/KNOWN_LIMITATIONS.md). A suggestion the user said
     /// "Nicht jetzt" to (`rejected`) neither goes nor makes another one go. Each place that goes
     /// leaves a stand-in: the album of the other one stands for its photos.

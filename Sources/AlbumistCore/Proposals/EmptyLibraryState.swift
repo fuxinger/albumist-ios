@@ -74,6 +74,15 @@ public enum EmptyLibraryState: Hashable, Sendable {
         return .nothingFound(input.photos)
     }
 
+    /// The card says itself that only the trial year is looked at and offers the whole library
+    /// ("Keine Fotos aus 2026 … Ganze Mediathek dazunehmen"): the overview's note under the
+    /// analysis, which says and offers the same, stays away while it shows (screenshots of UI
+    /// run 44852630315: both, one under the other). Every other card keeps the note.
+    public var offersAllYears: Bool {
+        if case .emptyTrialYear = self { return true }
+        return false
+    }
+
     /// Whether the photo count is needed: only when no suggestion exists. Counting the
     /// photos with a place goes through every photo, so the overview skips it otherwise.
     public static func needsPlaceCount(proposals: Int) -> Bool { proposals == 0 }

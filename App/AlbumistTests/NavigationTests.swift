@@ -71,9 +71,10 @@ struct NavigatorTests {
         let navigator = Navigator()
         navigator.appeared()
         let left = Counter()
+        let preview = AppScreen.plan(AppModel().selectForPreview([]))
         navigator.push(.proposals)
-        navigator.push(.plan)
-        navigator.onLeave(.plan) { left.count += 1 }
+        navigator.push(preview)
+        navigator.onLeave(preview) { left.count += 1 }
         navigator.push(.history)
         navigator.disappeared()
         navigator.appeared()
@@ -81,14 +82,32 @@ struct NavigatorTests {
         #expect(left.count == 0)
         navigator.path.removeLast()
         #expect(left.count == 1)
-        navigator.push(.plan)
+        navigator.push(preview)
         navigator.path.removeLast()
         #expect(left.count == 1)
     }
 
+    /// A second tap on "N Alben anlegen" or "Dein Startpaket" picks anew, but opens no second
+    /// preview over the first: two previews of picks are the same screen (each carries its own
+    /// picks, so they are not equal).
+    @Test func aSecondPreviewOfPicksIsNotPushed() {
+        let model = AppModel()
+        let navigator = Navigator()
+        navigator.appeared()
+        let first = AppScreen.plan(model.selectForPreview([]))
+        let second = AppScreen.plan(model.selectForPreview([]))
+        #expect(first != second)
+        #expect(navigator.push(first))
+        #expect(!navigator.push(second))
+        navigator.path = []
+        #expect(navigator.push(.starterPlan(model.selectForPreview([]))))
+        #expect(!navigator.push(.starterPlan(model.selectForPreview([]))))
+        #expect(navigator.path.count == 1)
+    }
+
     /// "Album anlegen", then the suggestion and its preview popped together (the tab tapped
     /// again, a long press on Back): the suggestion's screen never sees its preview leave, and
-    /// the pick goes back all the same. `.plan` stands in for the preview: `.prebuiltPlan`
+    /// the pick goes back all the same. `.plan(_)` stands in for the preview: `.prebuiltPlan`
     /// needs a `ChangePlan`, whose initializer the app tests cannot reach.
     @Test func aPopToTheRootGivesThePreviewsPickBack() {
         let model = AppModel()
@@ -97,8 +116,8 @@ struct NavigatorTests {
         navigator.appeared()
         navigator.push(.proposal(ProposalRef(a)))
         let selection = model.selectForPreview([(a, .createNew(title: nil, folderPath: nil))])
-        navigator.push(.plan)
-        navigator.onLeave(.plan) { model.endPreview(selection) }
+        navigator.push(.plan(selection))
+        navigator.onLeave(.plan(selection)) { model.endPreview(selection) }
         navigator.path = []
         #expect(model.decisions[a.id] == nil)
     }
@@ -107,10 +126,11 @@ struct NavigatorTests {
     /// main actor right after.
     @Test func whatWaitsRunsWhenTheStackGoes() async {
         let left = Counter()
+        let preview = AppScreen.plan(AppModel().selectForPreview([]))
         do {
             let navigator = Navigator()
-            navigator.push(.plan)
-            navigator.onLeave(.plan) { left.count += 1 }
+            navigator.push(preview)
+            navigator.onLeave(preview) { left.count += 1 }
         }
         for _ in 0..<100 where left.count == 0 { await Task.yield() }
         #expect(left.count == 1)

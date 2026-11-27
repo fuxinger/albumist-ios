@@ -25,7 +25,7 @@ COLUMN = textwrap.dedent('''\
                     Card { matchContent }
                     actions
                     Button { showWorkshop = true } label: {
-                        Label("Reise teilen oder zusammenlegen", systemImage: "scissors")
+                        Label("Reise aufteilen oder zusammenlegen", systemImage: "scissors")
                     }
                     Button { confirmOftenHere = true } label: {
                         Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
@@ -82,7 +82,7 @@ MENU = textwrap.dedent('''\
         var body: some View {
             ScrollView {
                 VStack {
-                    // A comment may name "Anpassen" and "Reise teilen oder zusammenlegen".
+                    // A comment may name "Anpassen" and "Reise aufteilen oder zusammenlegen".
                     Card { Text("Neues Album") }
                     Card { matchContent }
                     actions
@@ -94,10 +94,9 @@ MENU = textwrap.dedent('''\
                     Menu {
                         Section {
                             Button { showAdjust = true } label: { Label("Anpassen", systemImage: "slider.horizontal.3") }
-                            Button { accept() } label: { Label("Auswählen und später anlegen", systemImage: "checkmark.circle") }
                         }
                         Section {
-                            Button { showWorkshop = true } label: { Label("Reise teilen oder zusammenlegen", systemImage: "scissors") }
+                            Button { showWorkshop = true } label: { Label("Reise aufteilen oder zusammenlegen", systemImage: "scissors") }
                             Button { confirmOftenHere = true } label: {
                                 Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
                                 if let reason { Text(reason) }
@@ -137,8 +136,7 @@ NAMED = textwrap.dedent('''\
         private var moreActions: some View {
             Menu("Weitere Aktionen", systemImage: "ellipsis") {
                 Button("Anpassen") { adjust() }
-                Button("Auswählen und später anlegen") { accept() }
-                Button("Reise teilen oder zusammenlegen") { reshape() }
+                Button("Reise aufteilen oder zusammenlegen") { reshape() }
                 Button("Keine Reise, hier bin ich öfter") { oftenHere() }
             }
         }
@@ -154,8 +152,7 @@ class SuggestionActionsRuleTests(unittest.TestCase):
             rule.TOO_MANY,
             rule.NO_MENU,
             rule.OUTSIDE.format("Anpassen"),
-            rule.OUTSIDE.format("Auswählen und später anlegen"),
-            rule.OUTSIDE.format("Reise teilen oder zusammenlegen"),
+            rule.OUTSIDE.format("Reise aufteilen oder zusammenlegen"),
             # The button on the page; the one in its dialog confirms and is no action of its own.
             rule.OUTSIDE.format("Keine Reise, hier bin ich öfter"),
             # "Anpassen" on the page is no way from the album card.
@@ -168,6 +165,14 @@ class SuggestionActionsRuleTests(unittest.TestCase):
 
     def test_two_buttons_and_the_rest_in_the_menu_pass(self):
         self.assertEqual(rule.offenders_in(MENU), [])
+
+    def test_the_basket_is_no_action_of_a_suggestion_any_more(self):
+        # Decision 9: suggestions are chosen with "Auswählen" in their list, as in Photos; the
+        # old item may neither be asked for in the menu nor counted as outside it.
+        self.assertNotIn("Auswählen und später anlegen", rule.MENU_ACTIONS)
+        basket = 'Button { accept() } label: { Text("Auswählen und später anlegen") }'
+        self.assertIn(basket, COLUMN)
+        self.assertNotIn(rule.OUTSIDE.format("Auswählen und später anlegen"), self.advice(COLUMN))
 
     def test_a_menu_in_a_property_the_toolbar_item_names_counts(self):
         self.assertEqual(rule.offenders_in(NAMED), [])

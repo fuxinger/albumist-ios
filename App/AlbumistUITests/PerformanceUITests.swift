@@ -40,16 +40,10 @@ final class PerformanceUITests: XCTestCase {
         UITestOnboarding.waitStable(timeout: timeout) { UITestOnboarding.analysisIdle(app) }
     }
 
-    /// A tab bar button; the iOS 26 tab bar shrinks while scrolling, so it is expanded first.
+    /// A tab bar button, as every UI test class takes it (`UITestScreens.tabButton`: it leaves an
+    /// open search, brings back a bar that scrolled away and never taps into the bar).
     private func tabButton(_ name: String) -> XCUIElement {
-        let button = app.tabBars.buttons[name]
-        var tries = 0
-        while !(button.exists && button.isHittable) && tries < 3 {
-            if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
-            tries += 1
-        }
-        return button
+        UITestScreens.tabButton(app, name)
     }
 
     // MARK: 1 Start
@@ -74,7 +68,7 @@ final class PerformanceUITests: XCTestCase {
     /// frame time while the grid glides out), five times, each from the top.
     func test2_LibraryScroll() {
         prepare("perf scroll")
-        let library = tabButton("Mediathek")
+        let library = tabButton(UITestScreens.Tabs.german.unsorted)
         guard library.waitForExistence(timeout: 15) else {
             print("UI_STEP_MISSING perf scroll library tab")
             XCTFail("No library tab")

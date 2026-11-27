@@ -195,8 +195,9 @@ public actor AnalysisPipeline {
         /// Said once, with the end of the trips step: how much work the run has (the bar's
         /// widths and the finish time come from it).
         public var workload: AnalysisWorkload? = nil
-        /// The image step: the last photos looked at (never screenshots: B4), for the card's
-        /// "Gerade angesehen".
+        /// The image step: the last photos looked at (never screenshots: B4), for "Gerade
+        /// angesehen" beside that step in the analysis card's "Details" sheet
+        /// (`AnalysisDetailsSheet`); the card itself no longer shows them (P3-08).
         public var recent: [AssetID] = []
         /// Said once, right after the first run saved its early suggestions (trips, places):
         /// the overview reads them now for "Schon fertig". The report that starts the image

@@ -65,10 +65,6 @@ struct WorldMapView: View {
                 .fullScreenCover(isPresented: $measuring) {
                     MapPrototypeView().environment(model)
                 }
-                .presentationDetents([.fraction(0.42), .large])
-                .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.42)))
-                .presentationDragIndicator(.visible)
-                .interactiveDismissDisabled()
                 .environment(model)
         }
         .task {
@@ -301,7 +297,8 @@ struct WorldMapPin: View {
 
     @ViewBuilder private func cover(side: CGFloat) -> some View {
         if let cover = group.pin.cover {
-            AssetThumbnail(id: cover, side: side * 2).frame(width: side, height: side).clipShape(Circle())
+            AssetThumbnail(id: cover, side: side * 2).environment(\.thumbnailShowsVideoLength, false)
+                .frame(width: side, height: side).clipShape(Circle())
         } else {
             Image(systemName: group.pin.level == .country ? "flag.fill" : "camera.fill")
                 .font(.footnote)

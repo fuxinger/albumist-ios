@@ -125,7 +125,8 @@ struct SearchLexicon: Sendable {
         media("ohne Standort", "without location", "ohne ort|ohne standort|ohne gps|ohne position|kein ort|kein standort|ohne geodaten|ohne ortsangabe|ohne koordinaten",
               "without location|no location|without gps|no gps|unlocated|not geotagged|without place", .hasLocation(false), kind: .location, dimension: "location", importance: 6)
         media("mit Standort", "with location", "mit ort|mit standort|mit gps|mit position|mit geodaten", "with location|with gps|geotagged", .hasLocation(true), kind: .location, dimension: "location", importance: 6)
-        media("nicht sortiert", "not sorted", "nicht sortiert|unsortiert|nicht organisiert|unorganisiert|noch nicht sortiert|noch nicht organisiert|ungeordnet|nicht einsortiert",
+        // "Unsortiert" everywhere (Fuchs 17.11.): the chip says it too; "nicht sortiert" is still understood.
+        media("unsortiert", "unsorted", "nicht sortiert|unsortiert|nicht organisiert|unorganisiert|noch nicht sortiert|noch nicht organisiert|ungeordnet|nicht einsortiert",
               "unsorted|not sorted|unorganized|not organized|unorganised|not organised", .status([.unorganized, .partiallyOrganized, .pending]), kind: .status, dimension: "status", importance: 6)
         media("mit Bestellnummer", "with order number", "bestellnummer|bestellnummern|bestellnr|auftragsnummer", "order number|order numbers|order no", .orderNumber, kind: .field, importance: 4)
         media("mit Rechnungsnummer", "with invoice number", "rechnungsnummer|rechnungsnummern|rechnungsnr", "invoice number|invoice numbers|invoice no", .invoiceNumber, kind: .field, importance: 4)

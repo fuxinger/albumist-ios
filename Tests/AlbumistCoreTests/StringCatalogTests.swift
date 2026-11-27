@@ -45,26 +45,28 @@ struct StringCatalogTests {
 
     /// Counts that can be 1 and were singled out by the design review.
     static let countStrings = [
-        "%lld Fotos und Videos",
-        "%lld Vorschläge für %lld Fotos und Videos",
+        "%lld %@ Fotos und Videos",
         "Erledigt: %lld von %lld Schritten",
         "Unterbrochen: %lld von %lld Schritten erledigt",
         "%lld von %lld Schritten",
         "von %lld Alben fertig",
-        "%lld von %lld Alben fertig, %lld Fotos einsortiert",
+        "%lld von %lld Alben fertig, %lld %@ Fotos einsortiert",
         "%lld Fotos ignoriert",
-        "Vorschlag mit %lld Fotos",
-        "%lld gemeinsame Fotos",
+        "%lld %@ Fotos ignoriert",
+        "Vorschlag mit %lld %@ Fotos",
+        "%lld %@ gemeinsame Fotos",
         "Für diese Auswahl brauchst du %lld Alben. Kostenlos sind noch %lld. Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.",
+        // "Dein Startpaket" keeps what is left of it for the visit, down to one album.
+        "Die %lld besten Alben aus deiner Mediathek. Du siehst vorher genau, was passiert.",
         // "Dein Zuhause".
         "%lld Vorschläge passen nicht mehr und sind weggefallen.",
         "%lld neue Vorschläge.",
         "%lld ausgewählte Vorschläge bleiben, wie du sie gewählt hast.",
         "%lld Tage mit Fotos",
         // A check that gave photos analysed before their labels ("Themen" or "Dokumente" on).
-        "Beim Prüfen %lld Fotos für die neuen Bereiche angesehen.",
-        "Beim Prüfen %lld neue Fotos analysiert und %lld weitere für die neuen Bereiche angesehen.",
-        "Für die neuen Bereiche fehlen noch %lld Fotos.",
+        "Beim Prüfen %lld %@ Fotos für die neuen Bereiche angesehen.",
+        "Beim Prüfen %lld %@ neue Fotos analysiert und %lld %@ weitere für die neuen Bereiche angesehen.",
+        "Für die neuen Bereiche fehlen noch %lld %@ Fotos.",
     ]
 
     @Test(arguments: countStrings)
@@ -81,7 +83,7 @@ struct StringCatalogTests {
     /// Design review W4: one word for photos. "Aufnahmen", "Bilder" and "Medien" are gone from
     /// the catalog, except in the analysis show that is rebuilt elsewhere (ScanShow).
     @Test func photosAreCalledFotos() throws {
-        let allowed: Set<String> = ["%lld Aufnahmen"]
+        let allowed: Set<String> = ["%lld %@ Aufnahmen"]
         let words = try Regex("\\b(Aufnahmen|Bilder|Medien)\\b")
         let left = try Self.catalog().keys.filter { $0.contains(words) && !allowed.contains($0) }
         #expect(left.isEmpty, "\(left.sorted())")

@@ -1,13 +1,14 @@
 import SwiftUI
 import AlbumistCore
 
-/// The one-time purchase button, in the plan preview and in the settings (plugin review W7).
+/// The one-time purchase button, on the purchase sheet (`UnlockSheet`) and in the settings (plugin
+/// review W7).
 /// Without a price from the App Store it says "Preis wird geladen …" and cannot be tapped, and
 /// the price is loaded again with growing pauses while the button is on screen (a start
 /// without network). Rules: `PurchaseRules.unlockButton`.
 struct UnlockButton: View {
     @Environment(Purchases.self) private var purchases
-    /// The big accent button of the plan preview; plain in the settings list.
+    /// The big accent button of the purchase sheet; plain in the settings list.
     var prominent = false
 
     var body: some View {
@@ -30,7 +31,7 @@ struct UnlockButton: View {
                     .accessibilityLabel(Text("Kauf läuft"))
             case .buy:
                 if let product = purchases.product {
-                    Text("Freischalten für \(product.displayPrice)")
+                    Text("Für \(product.displayPrice) freischalten")
                 }
             case .loadingPrice:
                 HStack(spacing: Theme.Spacing.s) {

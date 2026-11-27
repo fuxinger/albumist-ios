@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import AlbumistCore
 
 /// "Fotos fliegen in Alben": while a plan runs, photos lift off a loose pile and fly in one
@@ -8,7 +9,19 @@ import AlbumistCore
 /// step has really finished. With fast work it lasts about 2 s for one album and about 5–7 s
 /// for many; when the work is slower, it waits on the next album and photos fly for nearly
 /// every one. A backlog of finished albums is riffled through. "Animation überspringen" ends the show
-/// at once. With Reduce Motion only the current album is shown and cross-fades; nothing flies.
+/// at once and stays on screen at every text size: the scene gives way to it (`sceneScale`).
+/// With Reduce Motion only the current album is shown and cross-fades; nothing flies.
+///
+/// Design wave 3 (DS-17, "Show und Handschrift"): the photos are bigger (in the scene 101 pt on
+/// the 4.7" iPhone, up to 125 pt; before 76) and the album is its real cover, grey while it waits
+/// and in its colours once filled, no longer a pale box (`SortingShowLayout`, `ShowAlbumCover`).
+/// On a low screen the pile gives way first and the rest of the scene is scaled (`sceneScale`):
+/// on the 4.7" iPhone the photos show at about 82 pt (before about 66). Only photos that are
+/// sharp on the device fly or lie on the pile (`ShowPhotos`), never a sensitive document, never
+/// a personal suggestion's photo; a personal album shows "Vorschau ausgeblendet"
+/// (`SortingShowAlbum`). The count is in Apple's wide figures in the accent, as the result's count
+/// that follows it. In Low Power Mode the albums fill as before, with their tap, but no photo
+/// flies; the pile shows its photos in every mode.
 struct SortingShow: View {
     struct Album: Identifiable, Equatable {
         /// Index of the album's last "add photos" step in the plan.
@@ -16,19 +29,28 @@ struct SortingShow: View {
         let title: String
         /// Every photo the plan adds: what the counter counts.
         let assets: [AssetID]
-        /// What flies and shows on the album's cover: ordinary photos first, never a sensitive
-        /// document (`FilledAlbum.shown`). Can be shorter than `assets`, or empty.
+        /// What flies and lies on the pile: ordinary photos first, never a sensitive document,
+        /// never a personal suggestion's photo (`SortingShowAlbum.flying`). Can be shorter than
+        /// `assets`, or empty.
         let shown: [AssetID]
+        /// What its cover tries, best first (`SortingShowAlbum.cover`); empty for a personal album.
+        let cover: [AssetID]
+        /// A personal album: "Vorschau ausgeblendet" on its cover, nothing of it flies.
+        let hidesPreview: Bool
     }
 
     let albums: [Album]
+    /// The padding the screen puts around the show (above and below it); kept free when the
+    /// show fits itself to the screen (`sceneScale`).
+    let screenPadding: CGFloat
     var onFinish: () -> Void
     /// Distinct photos of all albums, counted once here: the pile asked for it in every
     /// redraw, and the show redraws many times a second (a set over every photo of the plan).
     private let totalPhotos: Int
 
-    init(albums: [Album], onFinish: @escaping () -> Void) {
+    init(albums: [Album], screenPadding: CGFloat, onFinish: @escaping () -> Void) {
         self.albums = albums
+        self.screenPadding = screenPadding
         self.onFinish = onFinish
         totalPhotos = Set(albums.flatMap(\.assets)).count
     }
@@ -36,51 +58,100 @@ struct SortingShow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    /// Compact on an iPhone turned sideways: the counts stand beside the scene and the button.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    /// From xxLarge on, the album's name gets more room under its cover (`SortingShowLayout`).
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.displayScale) private var displayScale
+    /// The photos' number is grouped as the screen's language writes it ("1.234", "1,234").
+    @Environment(\.locale) private var locale
     @State private var current = 0
     @State private var landed: Set<Int> = []
     /// Distinct photos sorted so far (a photo in two albums counts once, like the result card).
     @State private var sorted: Set<AssetID> = []
-    @State private var flights: [Flight] = []
+    @State private var flights: [ShowFlight] = []
     @State private var pop = false
     @State private var landings = 0
-    @State private var width: CGFloat = 360
+    /// The width the scene has on screen.
+    @State private var available: CGFloat = 360
+    /// The height the screen shows of the scroll view the show stands in: between the
+    /// navigation bar and the tab bar (`containerRelativeFrame`). Nil until measured.
+    @State private var room: CGFloat?
+    @State private var headerHeight: CGFloat = 0
+    @State private var skipHeight: CGFloat = 0
+    /// The photos that are sharp on the device at the size they are drawn: only these lie on
+    /// the pile and fly (`ShowPhotos`). Held while they are drawn: an album's go once it landed.
+    @State private var photos = ShowPhotos()
+    /// Low Power Mode as the show starts: the albums fill one after the other as before, with
+    /// their tap, but no photo flies (the calm version; with Reduce Motion or VoiceOver the
+    /// albums are riffled through quietly, as before).
+    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
 
-    private let sceneHeight: CGFloat = 360
-    private var pileCenter: CGPoint { CGPoint(x: width / 2, y: 78) }
-    private var albumCenter: CGPoint { CGPoint(x: width / 2, y: 252) }
-    private var spacing: CGFloat { min(176, width * 0.44) }
+    /// The scene's sizes for the width on screen (DS-17): photos, cover, pile and strip; on a low
+    /// screen with its pile giving way first (`sceneRoom`).
+    private var stage: SortingShowLayout {
+        SortingShowLayout(width: Double(available), largeText: typeSize >= .xxLarge, room: sceneRoom.map { Double($0) })
+    }
+    /// The scene's own height, from its sizes: 431 pt on the 4.7" iPhone with room enough (360 pt
+    /// before DS-17), 387 pt with its pile given way.
+    private var sceneHeight: CGFloat { CGFloat(stage.height) }
+    /// The show's own padding above its counts.
+    private static let topPadding = Theme.Spacing.m
+    private var sideBySide: Bool { verticalSizeClass == .compact }
+    /// What the screen leaves for the scene: its visible height without the padding, the counts
+    /// and the button, which keep their text size, so "Animation überspringen" stays on screen at
+    /// every size (review P3-18: at the largest text it lay below the tab bar on the small
+    /// iPhone, and there even at the default size). Nil until measured.
+    private var sceneRoom: CGFloat? {
+        guard let room else { return nil }
+        var free = room - 2 * screenPadding - Self.topPadding - skipHeight - Theme.Spacing.l
+        if !sideBySide { free -= headerHeight + Theme.Spacing.l }
+        return free
+    }
+    /// The scene's own size, 1 where the screen has room for it. Where it has not, the pile gave
+    /// way first (`stage`), and the rest is scaled: drawn at its full size and scaled, so the
+    /// flights keep their paths. On the 4.7" iPhone about 0.81 (313 pt for 387), 0.73 before the
+    /// pile gave way (second review, K6).
+    private var sceneScale: CGFloat {
+        guard let free = sceneRoom else { return 1 }
+        return min(1, max(0.1, free / sceneHeight))
+    }
+    /// The scene's width before scaling: scaled, it fills the width on screen.
+    private var width: CGFloat { available / sceneScale }
+    private var pileCenter: CGPoint { CGPoint(x: width / 2, y: CGFloat(stage.pileCenterY)) }
+    private var coverCenter: CGPoint { CGPoint(x: width / 2, y: CGFloat(stage.coverCenterY)) }
+    private var spacing: CGFloat { CGFloat(stage.spacing) }
+    /// A photo's size in pixels: what a photo on the pile or in flight must bring to be sharp.
+    private var photoPixels: CGSize {
+        let side = CGFloat(stage.photo) * displayScale
+        return CGSize(width: side, height: side)
+    }
     private var counted: Int { sorted.count }
 
-    /// Loose photos on the pile: offset x, offset y, rotation in degrees.
-    private static let scatter: [(CGFloat, CGFloat, Double)] = [
-        (-54, -4, -11), (46, -12, 8), (-14, 12, -3), (60, 16, 13), (-66, 24, -16), (8, -22, 5),
-    ]
-
     var body: some View {
-        VStack(spacing: Theme.Spacing.l) {
+        // Turned sideways the screen is too low for counts, scene and button one below the
+        // other: the counts stand beside the scene and its button. One layout that changes its
+        // direction, so turning the iPhone mid-show keeps the scene and its flying photos.
+        let layout = sideBySide
+            ? AnyLayout(HStackLayout(alignment: .top, spacing: Theme.Spacing.l))
+            : AnyLayout(VStackLayout(spacing: Theme.Spacing.l))
+        layout {
             header
-            ZStack {
-                pile
-                carousel
-                ForEach(flights) { FlyingPhoto(flight: $0) }
+            VStack(spacing: Theme.Spacing.l) {
+                scene
+                skip
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: sceneHeight)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-            // Decorative and hidden from VoiceOver: the labels must not grow out of the scene.
-            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-            .accessibilityHidden(true)
-
-            // Ends only the animation; the albums keep being created in the background.
-            // A plain secondary button: glass belongs to the bars above the content
-            // (Theme.swift, design review N3).
-            Button("Animation überspringen", action: onFinish)
-                .buttonStyle(SecondaryButtonStyle())
         }
         // iPad: a focused column instead of a small cluster in a wide band.
-        .frame(maxWidth: 520)
+        .frame(maxWidth: sideBySide ? .infinity : 520)
         .frame(maxWidth: .infinity)
-        .padding(.top, Theme.Spacing.m)
+        .padding(.top, Self.topPadding)
+        // How high the screen is: the scroll view's visible height, without its bars.
+        .background {
+            Color.clear
+                .containerRelativeFrame(.vertical)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room = $0 }
+        }
         .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.6), trigger: landings)
         .task {
             if voiceOver {
@@ -88,26 +159,89 @@ struct SortingShow: View {
             }
             await run()
         }
+        // The pile's photos, sharp at the size they are drawn, in every mode (only the flights
+        // wait for `flies`; second review, K1); again when the size changes, and after a memory
+        // warning took them (`ShowPhotos.letGo`).
+        .task(id: PileLoad(side: stage.photo, generation: photos.generation)) {
+            await photos.load(pilePhotos, side: CGFloat(stage.photo), scale: displayScale)
+        }
     }
 
+    /// When the pile's photos are loaded: for their size, and again after a memory warning.
+    private struct PileLoad: Equatable {
+        var side: Double
+        var generation: Int
+    }
+
+    /// Photos fly: not with Reduce Motion or VoiceOver (the albums are riffled through quietly),
+    /// not in Low Power Mode (the albums fill with their tap, nothing flies). The pile shows its
+    /// photos either way.
+    private var flies: Bool { !reduceMotion && !voiceOver && !lowPower }
+
     // MARK: Parts
+
+    /// Pile, albums and flying photos, drawn at the scene's own height (`SortingShowLayout`) and
+    /// scaled to what the screen has left (`sceneScale`); in the layout it takes only its scaled
+    /// height.
+    private var scene: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: sceneHeight * sceneScale)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
+            .overlay(alignment: .top) {
+                ZStack {
+                    pile
+                    carousel
+                    ForEach(flights) {
+                        ShowFlyingPhoto(flight: $0, side: CGFloat(stage.photo), radius: CGFloat(stage.photoRadius))
+                    }
+                }
+                .frame(width: width, height: sceneHeight)
+                .scaleEffect(sceneScale, anchor: .top)
+            }
+            // Nothing to tap: the scene drawn at full size reaches below its scaled frame.
+            .allowsHitTesting(false)
+            // Decorative and hidden from VoiceOver: the labels must not grow out of the scene.
+            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+            .accessibilityHidden(true)
+    }
+
+    /// Ends only the animation; the albums keep being created in the background. A plain
+    /// secondary button: glass belongs to the bars above the content (Theme.swift, design
+    /// review N3). Its text stops growing at AX2, where "überspringen" still fits one line on
+    /// the small iPhone (at AX5 the word broke in the middle); the scene makes room for it.
+    private var skip: some View {
+        Button("Animation überspringen", action: onFinish)
+            .buttonStyle(SecondaryButtonStyle())
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            .accessibilityIdentifier("show.skip")
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { skipHeight = $0 }
+    }
 
     private var header: some View {
         VStack(spacing: Theme.Spacing.xs) {
             // Albums count up steadily; the photo count would stand still while photos that
-            // are already sorted get a second album (a country holds its trips).
+            // are already sorted get a second album (a country holds its trips). In Apple's wide
+            // figures and the accent (DS-17), as the result's count that follows the show.
             Text(landed.count, format: .number)
-                .font(.system(size: 56, weight: .bold, design: .rounded))
-                .monospacedDigit()
+                .font(.wideNumber(size: 56))
+                .foregroundStyle(Theme.accent)
                 .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(landed.count)))
             Text("von \(albums.count) Alben fertig")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("\(counted) Fotos einsortiert")
-                .font(.subheadline)
-                .foregroundStyle(.noteText)
-                .monospacedDigit()
-                .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(counted)))
+            ZStack {
+                // The widest the line gets, kept hidden: the header keeps its height while the
+                // count runs up (a line that wrapped mid-show would shrink the scene at once).
+                Text("\(totalPhotos) \(SortingShowWords.number(totalPhotos, locale: locale)) Fotos einsortiert")
+                    .hidden()
+                    .accessibilityHidden(true)
+                Text("\(counted) \(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert")
+                    .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(counted)))
+            }
+            .font(.subheadline)
+            .foregroundStyle(.noteText)
+            .monospacedDigit()
         }
         // Wrapped lines stay centred under the count. The show lasts a few seconds and its
         // progress is spoken in full below, so the captions stop growing at AX1: beyond that
@@ -117,22 +251,34 @@ struct SortingShow: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Fotos werden einsortiert"))
-        .accessibilityValue(Text("\(landed.count) von \(albums.count) Alben fertig, \(counted) Fotos einsortiert"))
+        .accessibilityValue(spokenProgress)
         .accessibilityAddTraits(.updatesFrequently)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
     }
 
-    /// The pile thins out as photos find their albums.
+    /// What VoiceOver says of the header: the albums done and the photos sorted, the number
+    /// grouped as the screen's language writes it.
+    private var spokenProgress: Text {
+        Text("\(landed.count) von \(albums.count) Alben fertig, \(counted) \(SortingShowWords.number(counted, locale: locale)) Fotos einsortiert")
+    }
+
+    /// The pile thins out as photos find their albums. Only photos that are sharp on the device
+    /// lie on it; each one fades in once it is loaded.
     private var pile: some View {
-        let photos = pilePhotos
+        let stage = self.stage
+        let pixels = photoPixels
+        let shown = pilePhotos.filter { photos.image($0, sharpAt: pixels) != nil }
         let remaining = 1 - Double(counted) / Double(max(1, totalPhotos))
-        let visible = max(0, min(photos.count, Int((remaining * Double(photos.count)).rounded(.up))))
+        let visible = max(0, min(shown.count, Int((remaining * Double(shown.count)).rounded(.up))))
         return ZStack {
-            ForEach(Array(photos.prefix(visible).enumerated()), id: \.element) { index, id in
-                let s = Self.scatter[index % Self.scatter.count]
-                PhotoChip(id: id, side: 76)
-                    .rotationEffect(.degrees(s.2 * 0.6))
-                    .offset(x: s.0, y: s.1)
-                    .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.scale(scale: 0.5).combined(with: .opacity))
+            ForEach(Array(shown.prefix(visible).enumerated()), id: \.element) { index, id in
+                if let image = photos.image(id, sharpAt: pixels) {
+                    let loose = stage.loose(index)
+                    ShowPhotoChip(image: image, side: CGFloat(stage.photo), radius: CGFloat(stage.photoRadius))
+                        .rotationEffect(.degrees(loose.angle))
+                        .offset(x: CGFloat(loose.x), y: CGFloat(loose.y))
+                        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.scale(scale: 0.5).combined(with: .opacity))
+                }
             }
         }
         .position(pileCenter)
@@ -141,15 +287,16 @@ struct SortingShow: View {
 
     /// The albums move as one strip; with Reduce Motion only the current one, cross-fading.
     private var carousel: some View {
-        ZStack {
+        let stage = self.stage
+        return ZStack {
             ForEach(albums.indices.filter { reduceMotion ? $0 == current : abs($0 - current) <= 1 }, id: \.self) { index in
                 let offset = CGFloat(index - current)
-                AlbumStack(album: albums[index], filled: landed.contains(index), focused: index == current)
-                    // Fade the album as one picture; otherwise the placeholder shines through the cover.
+                ShowAlbumCover(album: albums[index], filled: landed.contains(index), focused: index == current, layout: stage)
+                    // Fade the album as one picture, its layers and cover together.
                     .compositingGroup()
-                    .scaleEffect(index == current ? (pop && !reduceMotion ? 1.04 : 1) : 0.76)
+                    .scaleEffect(index == current ? (pop && !reduceMotion ? 1.04 : 1) : SortingShowLayout.neighbourScale)
                     .opacity(index == current ? 1 : (index < current ? 0.5 : 0.35))
-                    .position(x: albumCenter.x + offset * spacing, y: albumCenter.y)
+                    .position(x: coverCenter.x + offset * spacing, y: coverCenter.y)
                     .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.asymmetric(
                         insertion: AnyTransition.offset(x: spacing).combined(with: .opacity),
                         removal: AnyTransition.offset(x: -spacing).combined(with: .opacity)))
@@ -171,8 +318,23 @@ struct SortingShow: View {
         return result
     }
 
-    // MARK: Choreography
+    /// How many photos fly into one album.
+    private var flightCount: Int { albums.count == 1 ? 5 : 3 }
 
+    // MARK: Plan → albums
+
+    /// The albums of the show, in plan order (`SortingShowAlbum.cast`, `AppModel.sortingShowAlbums`).
+    static func albums(from cast: [SortingShowAlbum]) -> [Album] {
+        cast.map {
+            Album(id: $0.lastStep, title: $0.title ?? String(localized: "Album"), assets: $0.assets,
+                  shown: $0.flying, cover: $0.cover, hidesPreview: $0.hidesPreview)
+        }
+    }
+}
+
+// MARK: Choreography
+
+extension SortingShow {
     private func run() async {
         let started = Date()
         // When the strip may move again: a move never starts while the last one is still
@@ -210,6 +372,7 @@ struct SortingShow: View {
                 let step = reduceMotion ? max(0.08, min(0.5, 2.0 / Double(albums.count))) : 0.06
                 try? await Task.sleep(for: .seconds(step))
             } else {
+                // In Low Power Mode nothing flies: the album fills after the same short wait.
                 let arrival = launch(index, duration: albums.count == 1 ? 0.7 : 0.58, lead: 0.15)
                 try? await Task.sleep(for: .seconds(arrival))
                 await land(index, quietly: false)
@@ -223,42 +386,59 @@ struct SortingShow: View {
         }
         await waitForEnd(started: started)
         guard !Task.isCancelled else { return }
-        // The counter ends on what really arrived (photos no longer in the library are not counted).
+        // The counter ends on what really arrived, counted as the receipt and the result count
+        // ("mit 342 Fotos"): photos no longer in the library, or in a step whose outcome is
+        // unclear, are not counted. Skipped or watched to its end, the show hands over to the
+        // same result (`onFinish`).
         if let finished = model.execution.finished {
-            let applied = finished.appliedAssets
+            let applied = finished.confirmedAddedMedia
             if applied != sorted { withAnimation(.snappy(duration: 0.3)) { sorted = applied } }
         }
-        try? await Task.sleep(for: .seconds(0.5))
+        // A UI test may hold the end to read it (`-AlbumistUITestShowHold`, verification review V8).
+        try? await Task.sleep(for: .seconds(UITestSupport.holdsShowEnd ? 15 : 0.5))
         guard !Task.isCancelled else { return }
         onFinish()
     }
 
-    /// Sends the first photos of an album on their way; returns when the last one arrives.
+    /// Sends the first sharp photos of an album on their way (none in Low Power Mode); returns
+    /// when the last one arrives, or after the same time when none flies.
     @discardableResult
     private func launch(_ index: Int, duration: Double, lead: Double = 0) -> Double {
         let album = albums[index]
-        let count = min(album.shown.count, albums.count == 1 ? 5 : 3)
+        let stage = self.stage
+        let pixels = photoPixels
+        var ready: [(AssetID, UIImage)] = []
+        if flies {
+            for id in album.shown where ready.count < flightCount {
+                if let image = photos.image(id, sharpAt: pixels) { ready.append((id, image)) }
+            }
+        }
+        let count = ready.count
         let flight = max(0.5, duration)
         let stagger = 0.08
-        let target = CGPoint(x: albumCenter.x, y: albumCenter.y - 30)
+        let photo = CGFloat(stage.photo)
+        // Into the cover's upper middle, where the photos sink into the album.
+        let target = CGPoint(x: coverCenter.x, y: coverCenter.y - CGFloat(stage.cover) * 0.12)
         // One calm gesture per album: all photos bow to the same side, alternating per album.
-        let bow: CGFloat = (index.isMultiple(of: 2) ? 1 : -1) * min(64, width * 0.16)
-        var launched: [Flight] = []
-        for k in 0..<count {
-            let s = Self.scatter[k % Self.scatter.count]
-            // Dealt from the top of the pile; ArcFlight fades them in while they lift.
-            let from = CGPoint(x: pileCenter.x + s.0 * 0.25, y: pileCenter.y + s.1 * 0.25 - 6)
+        let bow: CGFloat = (index.isMultiple(of: 2) ? 1 : -1) * min(photo * 0.84, width * 0.16)
+        var launched: [ShowFlight] = []
+        for (k, item) in ready.enumerated() {
+            let loose = stage.loose(k)
+            // Dealt from the top of the pile; the flight fades them in while they lift.
+            let from = CGPoint(x: pileCenter.x + CGFloat(loose.x) * 0.25, y: pileCenter.y + CGFloat(loose.y) * 0.25 - 6)
             let to = CGPoint(x: target.x + CGFloat(k % 3 - 1) * 5, y: target.y + CGFloat(k % 2) * 3)
-            let control = CGPoint(x: (from.x + to.x) / 2 + bow * (1 + 0.2 * CGFloat(k)), y: from.y - 56)
-            launched.append(Flight(asset: album.shown[k], from: from, control: control, to: to,
-                                   angle: s.2 * 0.6, delay: lead + Double(k) * stagger, duration: flight))
+            let control = CGPoint(x: (from.x + to.x) / 2 + bow * (1 + 0.2 * CGFloat(k)), y: from.y - photo * 0.55)
+            launched.append(ShowFlight(asset: item.0, image: item.1, from: from, control: control, to: to,
+                                       angle: loose.angle, delay: lead + Double(k) * stagger, duration: flight))
         }
         flights.append(contentsOf: launched)
         let arrival = lead + Double(max(0, count - 1)) * stagger + flight
         let ids = Set(launched.map(\.id))
-        Task {
-            try? await Task.sleep(for: .seconds(arrival + 0.3))
-            flights.removeAll { ids.contains($0.id) }
+        if !ids.isEmpty {
+            Task {
+                try? await Task.sleep(for: .seconds(arrival + 0.3))
+                flights.removeAll { ids.contains($0.id) }
+            }
         }
         return arrival
     }
@@ -269,6 +449,9 @@ struct SortingShow: View {
             _ = landed.insert(index)
         }
         withAnimation(.snappy(duration: quietly ? 0.15 : 0.35)) { sorted.formUnion(albums[index].assets) }
+        // Its photos are drawn no more (the flights hold theirs until they end): the show keeps
+        // only what it shows (second review, K2), the pile's photos.
+        photos.release(albums[index].shown, keeping: Set(pilePhotos))
         if quietly { return }
         if index < 3 || index == albums.count - 1 { landings += 1 } // a few soft taps, not one per album
         withAnimation(.spring(response: 0.22, dampingFraction: 0.6)) { pop = true }
@@ -307,187 +490,18 @@ struct SortingShow: View {
         return albums.filter { completed > $0.id }.count
     }
 
-    /// Loads the photos about to fly now, not mid-flight.
+    /// Loads what the album shows next, not mid-flight: the photos about to fly (sharp only, not
+    /// when nothing flies) and its cover at the size it is drawn, which `CoverLoader` keeps for
+    /// the album's `CoverPhoto` (the same pixels: whole points times the screen's scale).
     private func prefetch(_ index: Int) async {
-        for id in albums[index].shown.prefix(albums.count == 1 ? 5 : 3) {
-            _ = await ThumbnailCache.shared.image(for: id, side: 76)
+        let album = albums[index]
+        let stage = self.stage
+        if flies {
+            await photos.load(album.shown.prefix(flightCount), side: CGFloat(stage.photo), scale: displayScale)
         }
-    }
-
-    // MARK: Plan → albums
-
-    /// The albums a plan fills, in plan order. Chunked "add photos" steps of one album are
-    /// merged; the album counts as done when its last chunk is done.
-    static func albums(from plan: ChangePlan, inventory: CollectionInventory, ranks: [AssetID: PreviewRank] = [:]) -> [Album] {
-        albums(from: plan.filledAlbums(inventory: inventory, ranks: ranks))
-    }
-
-    /// The albums of `PlanReviewFacts.filledAlbums` (worked out off the main thread).
-    static func albums(from filled: [FilledAlbum]) -> [Album] {
-        filled.map { Album(id: $0.lastStep, title: $0.title ?? String(localized: "Album"), assets: $0.assets, shown: $0.shown) }
-    }
-}
-
-// MARK: - Pieces
-
-/// A photo as a small print: rounded edge in the card colour (white in light mode, a quiet
-/// rim in dark mode), soft shadow.
-private struct PhotoChip: View {
-    var id: AssetID
-    var side: CGFloat
-
-    var body: some View {
-        AssetThumbnail(id: id, side: side)
-            .frame(width: side, height: side)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Theme.card, lineWidth: 3)
-            }
-            .shadow(color: .black.opacity(0.14), radius: 6, y: 3)
-    }
-}
-
-/// The target album: a small stack with its cover, title and count.
-private struct AlbumStack: View {
-    var album: SortingShow.Album
-    var filled: Bool
-    /// The album in the centre; neighbours hide their labels (the screen edges would cut them).
-    var focused = true
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let side: CGFloat = 124
-
-    var body: some View {
-        VStack(spacing: Theme.Spacing.s) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Theme.card)
-                    .frame(width: side - 16, height: side - 16)
-                    .offset(y: -14)
-                    .opacity(0.7)
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Theme.card)
-                    .frame(width: side - 8, height: side - 8)
-                    .offset(y: -7)
-                cover
-                    .frame(width: side, height: side)
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .overlay(alignment: .bottomTrailing) {
-                        if filled {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.title2)
-                                .symbolRenderingMode(.palette)
-                                .foregroundStyle(Theme.onAccent, Theme.accent)
-                                .padding(8)
-                                .transition(reduceMotion ? AnyTransition.opacity
-                                            : AnyTransition.scale(scale: 0.4).combined(with: .opacity))
-                        }
-                    }
-            }
-            .shadow(color: .black.opacity(0.12), radius: 14, y: 8)
-            // Up to two lines, so trip names with dates stay whole. The hidden copy keeps room
-            // for two lines; the count follows the name directly and nothing below jumps.
-            ZStack(alignment: .top) {
-                label(title: "A\nA", count: 0).hidden()
-                label(title: album.title, count: album.assets.count)
-            }
-            .opacity(focused ? 1 : 0)
-        }
-    }
-
-    private func label(title: String, count: Int) -> some View {
-        VStack(spacing: 2) {
-            Text(verbatim: title)
-                .font(.subheadline.weight(.semibold))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .frame(maxWidth: 200)
-            Text("\(count) Fotos")
-                .font(.caption)
-                .foregroundStyle(.noteText)
-                .monospacedDigit()
-        }
-    }
-
-    /// Opaque placeholder that pulses calmly while the album waits for its step; the cover
-    /// is always mounted so it is loaded in time and fades in without a grey frame.
-    private var cover: some View {
-        ZStack {
-            Theme.card
-            Theme.accent.opacity(0.12)
-            Image(systemName: "rectangle.stack")
-                .font(.system(size: 34, weight: .medium))
-                .foregroundStyle(Theme.accent.opacity(0.6))
-                .symbolEffect(.pulse, isActive: focused && !filled && !reduceMotion)
-                .opacity(filled && album.shown.first != nil ? 0 : 1)
-            if let first = album.shown.first {
-                AssetThumbnail(id: first, side: side)
-                    .opacity(filled ? 1 : 0)
-            }
-        }
-    }
-}
-
-private struct Flight: Identifiable {
-    let id = UUID()
-    let asset: AssetID
-    let from: CGPoint
-    let control: CGPoint
-    let to: CGPoint
-    let angle: Double
-    let delay: Double
-    let duration: Double
-}
-
-/// One photo on its way: it lifts (grows, deeper shadow), swings along a curve and shrinks
-/// into the album.
-private struct FlyingPhoto: View {
-    let flight: Flight
-    @State private var progress: CGFloat = 0
-
-    var body: some View {
-        PhotoChip(id: flight.asset, side: 76)
-            .modifier(ArcFlight(progress: progress, from: flight.from, control: flight.control,
-                                to: flight.to, angle: flight.angle))
-            .allowsHitTesting(false)
-            .onAppear {
-                withAnimation(.timingCurve(0.42, 0, 0.18, 1, duration: flight.duration).delay(flight.delay)) {
-                    progress = 1
-                }
-            }
-    }
-}
-
-/// Position on a quadratic Bézier curve plus lift, turn and fade, driven by one number so
-/// SwiftUI can animate it frame by frame.
-private struct ArcFlight: ViewModifier, Animatable {
-    var progress: CGFloat
-    let from: CGPoint
-    let control: CGPoint
-    let to: CGPoint
-    let angle: Double
-
-    nonisolated var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    func body(content: Content) -> some View {
-        let t = progress
-        let u = 1 - t
-        let x = u * u * from.x + 2 * u * t * control.x + t * t * to.x
-        let y = u * u * from.y + 2 * u * t * control.y + t * t * to.y
-        // Lift first (+8 %, deeper shadow, squares up), then sink and shrink into the album.
-        let lift = sin(CGFloat.pi * min(1, t / 0.6))
-        let settle = max(0, (t - 0.5) / 0.5)
-        let scale = (1 + 0.08 * lift) * (1 - 0.38 * settle * settle)
-        let appear = Double(min(1, t / 0.08))
-        let fade: Double = t > 0.9 ? Double((1 - t) / 0.1) : 1
-        return content
-            .scaleEffect(scale)
-            .rotationEffect(.degrees(angle * Double(u * u)))
-            .shadow(color: .black.opacity(0.18 * Double(lift)), radius: 12 * lift, y: 8 * lift)
-            .opacity(appear * fade)
-            .position(x: x, y: y)
+        guard !album.hidesPreview, !album.cover.isEmpty, !Task.isCancelled else { return }
+        let side = CGFloat(stage.cover) * displayScale
+        _ = await CoverLoader.load(CoverLoader.Request(ids: Array(album.cover.prefix(CoverLoader.attempts)),
+                                                       pixels: CGSize(width: side, height: side)))
     }
 }

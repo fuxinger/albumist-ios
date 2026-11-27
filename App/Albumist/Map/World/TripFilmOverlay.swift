@@ -159,12 +159,13 @@ struct TripFilmOverlay: View {
         let ids = Array(photos.photos(ofPlaces: station.placeIndices).prefix(3))
         return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text(verbatim: WorldMapText.placeName(trip, station.mainPlaceIndex)).font(.title3.weight(.bold))
-            Text(verbatim: [Self.others(trip, station), String(localized: "\(station.photoCount) Fotos")].compactMap { $0 }.joined(separator: " · "))
+            Text(verbatim: [Self.others(trip, station), String(localized: "\(station.photoCount) \(station.photoCount.formatted()) Fotos")]
+                .compactMap { $0 }.joined(separator: " · "))
                 .font(.subheadline).foregroundStyle(.noteText)
             if !ids.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(ids, id: \.self) { id in
-                        AssetThumbnail(id: id, side: 300)
+                        AssetThumbnail(id: id, side: 300).environment(\.thumbnailShowsVideoLength, false)
                             .frame(maxWidth: .infinity)
                             .frame(height: 110)
                             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))

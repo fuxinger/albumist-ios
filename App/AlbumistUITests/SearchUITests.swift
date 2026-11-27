@@ -27,26 +27,16 @@ final class AlbumistSearchUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
-    /// The search tab (`Tab(role: .search)`) carries the system's own label.
+    /// The search tab (`MainTabs.searchRole`): the round button at the bar's end
+    /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
-        for label in ["Suchen", "Suche", "Search"] where app.tabBars.buttons[label].exists {
-            return tabButton(label)
-        }
-        return app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
+        UITestScreens.Search.button(app)
     }
 
-    /// A tab bar button; the iOS 26 tab bar shrinks while scrolling, so it is expanded first.
+    /// A tab bar button (`UITestScreens.tabButton`: leaves an active search first, brings a bar
+    /// that scrolled away back).
     private func tabButton(_ name: String) -> XCUIElement {
-        let button = app.tabBars.buttons[name]
-        var tries = 0
-        while !(button.exists && button.isHittable) && tries < 3 {
-            if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            // The bar expands after the swipe: on as soon as the button can be tapped, else the
-            // next try after the old second.
-            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
-            tries += 1
-        }
-        return button
+        UITestScreens.tabButton(app, name)
     }
 
     private func anything(_ text: String) -> XCUIElement {
@@ -111,29 +101,6 @@ final class AlbumistSearchUITests: XCTestCase {
         }
     }
 
-    private func allowPhotosIfAsked() {
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let labels = ["Zugriff auf alle Fotos erlauben", "Allow Full Access", "Allow Access to All Photos", "Alle Fotos erlauben", "Vollzugriff erlauben"]
-        // Taps the alert's button when it is there; the trial step means it was not needed.
-        _ = UITestWait.holds(timeout: 25) {
-            for source in [springboard, app] {
-                for label in labels where source.buttons[label].exists {
-                    source.buttons[label].tap()
-                    return true
-                }
-            }
-            return button("Analyse starten").exists
-        }
-    }
-
-    private func allowNotificationsIfAsked() {
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for label in ["Erlauben", "Allow"] {
-            let allow = springboard.buttons[label]
-            if allow.waitForExistence(timeout: 4) { allow.tap(); return }
-        }
-    }
-
     @discardableResult
     private func waitStable(_ what: String, timeout: TimeInterval, stableChecks: Int = 3, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
@@ -149,9 +116,9 @@ final class AlbumistSearchUITests: XCTestCase {
         return false
     }
 
-    /// The Pause button first: one query while the analysis runs (see AlbumistFlowUITests).
+    /// The start page's line about the analysis, and no "Pause" (`UITestScreens.Analysis`).
     private var analysisIdle: Bool {
-        !app.buttons["Pause"].exists && (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
+        UITestScreens.Analysis.isIdle(app)
     }
 
     // MARK: Search helpers
@@ -209,34 +176,31 @@ final class AlbumistSearchUITests: XCTestCase {
         // Fresh simulator (run alone): onboarding and the demo library first. One wait for the
         // first screen (the app picks it once when it has loaded, `AppModel.phase`): waiting 15 s
         // for the welcome screen alone ran out on every simulator that was onboarded already.
-        let welcome = button("Los geht")
+        // After "Los geht’s" only the access page (design wave 1): the analysis starts by itself
+        // with access.
+        let welcome = app.buttons["onboarding.letsGo"]
         _ = UITestWait.holds(timeout: 15) {
             welcome.exists || app.tabBars.firstMatch.exists || app.buttons["access.continue"].exists
         }
         if welcome.exists {
-            tap(button("Los geht"), "welcome")
-            tap(button("Weiter"), "areas")
-            if app.buttons["access.continue"].waitForExistence(timeout: 5) {
-                app.buttons["access.continue"].tap()
-                allowPhotosIfAsked()
-            }
-            if button("Weiter").waitForExistence(timeout: 3) { button("Weiter").tap() }
-            tap(button("Analyse starten"), "start analysis", timeout: 20)
-            allowNotificationsIfAsked()
+            tap(welcome, "welcome")
+            let tabs = UITestOnboarding.passAccessPage(app)
+            print(tabs ? "UI_STEP_OK access page" : "UI_STEP_MISSING access page")
+            XCTAssertTrue(tabs, "The onboarding did not reach the tabs after the access page")
         }
         let demo = button("Beispiel-Mediathek anlegen")
-        // The demo card is drawn in the same body as the overview's title (OverviewView, a plain
-        // VStack), so once "Übersicht" is there the card is there too or does not come: the old
-        // 10 s only when neither shows.
-        let overview = app.navigationBars["Übersicht"]
-        _ = UITestWait.holds(timeout: 10) { demo.exists || overview.exists }
+        // The demo card is drawn in the same body as the start page's title (OverviewView, a
+        // plain VStack), so once "Vorschläge" is there the card is there too or does not come:
+        // the old 10 s only when neither shows.
+        let startPage = app.navigationBars["Vorschläge"]
+        _ = UITestWait.holds(timeout: 10) { demo.exists || startPage.exists }
         if demo.exists {
             tap(demo, "seed demo library")
             waitStable("demo library created", timeout: 600) {
                 !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists
             }
         }
-        if app.tabBars.buttons["Übersicht"].exists { tabButton("Übersicht").tap() }
+        if app.tabBars.buttons["Vorschläge"].exists { tabButton("Vorschläge").tap() }
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
 
         guard tap(searchTabButton(), "search tab") else { return }
@@ -245,14 +209,40 @@ final class AlbumistSearchUITests: XCTestCase {
             XCTFail("No search field")
             return
         }
+        // The owner's choice of 25.11.2026 ("Runder Knopf, Suche bleibt"): choosing the round
+        // button shows the page with its field and starting points; the keyboard comes only when
+        // the field is tapped (below). On iOS 27 the field sits on the page under its title
+        // (`MainTabs.searchField`; iOS 26 puts it in the tab bar's place).
+        print("UI_FACT search tab chosen: \(UITestScreens.Search.facts(app))")
+        UITestWait.never("no keyboard before the search field is tapped", for: 2) { app.keyboards.firstMatch.exists }
+        if #available(iOS 27, *) {
+            let place = field.frame
+            print("UI_FACT search field at \(Int(place.minX)),\(Int(place.minY)), \(Int(place.width)) x \(Int(place.height)) pt")
+            XCTAssertLessThan(place.midY, app.frame.midY, "The search field is not at the top of the search page")
+        }
         // Starting points come from the library (or examples before the analysis).
         let start = search("search.example")
         let started = start.waitForExistence(timeout: 10)
         print(started ? "UI_STEP_OK search starting points" : "UI_STEP_MISSING search starting points")
         XCTAssertTrue(started, "The empty search shows no starting points")
         print("UI_FACT search starting points \(app.descendants(matching: .any).matching(identifier: "search.example").allElementsBoundByIndex.map(\.label))")
+        // Design wave 3 (DS-13): after the analysis the starting points are photo tiles as in the
+        // tab "Alben": a name with "N Fotos" as its value, two side by side (well over 140 pt
+        // each; the word chips for papers are narrower), at most six, never "Live Photos" or
+        // "HDR". They are worked out after the page opens, so the first ones may be chips.
+        let counted = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ AND value MATCHES %@",
+                                                                             "search.example", "[0-9.]+ Fotos?"))
+        func tiles() -> [XCUIElement] { counted.allElementsBoundByIndex.filter { $0.frame.width >= 140 } }
+        let tiled = UITestWait.until("photo tiles among the search's starting points", timeout: 15) { !tiles().isEmpty }
+        let shown = tiles()
+        print("UI_FACT search tiles \(shown.map { "\($0.label) | \(($0.value as? String) ?? "")" })")
+        XCTAssertTrue(tiled, "The empty search shows no photo tiles after the analysis")
+        XCTAssertLessThanOrEqual(shown.count, 6, "More than six tiles in the empty search")
+        XCTAssertFalse(shown.contains { ["Live Photos", "HDR"].contains($0.label) }, "Live Photos or HDR offered as a starting point")
         shot("s0-search-start")
         field.tap()
+        _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+        print("UI_FACT search field tapped: \(UITestScreens.Search.facts(app))")
 
         // 1. Country and year: the Florence trip of 2022.
         check("Italien 2022", in: field, expect: ["Italien", "2022"], shotName: "s1-italien-2022")
@@ -308,7 +298,38 @@ final class AlbumistSearchUITests: XCTestCase {
         XCTAssertTrue(empty, "No helpful empty state for a query without results")
         shot("s6-not-understood")
 
-        // Close the keyboard.
+        // Close the keyboard, and let it go: a button iOS takes away as the field loses its focus
+        // is not tapped on its way out (review T5 of H14).
         field.typeText("\n")
+        _ = UITestWait.holds(timeout: 5) { !app.keyboards.firstMatch.exists }
+
+        // DS-12a: leave the search as a user looks at another tab, keeping it
+        // (`UITestScreens.Search.leave`): on iOS 26 iOS may fold the other tabs into one button
+        // beside the active field, and that button keeps the search, where the field's
+        // "Schließen" ends it and empties the field (review T4 of H14); on iOS 27 the field is the
+        // page's and the tabs come back by themselves as the keyboard goes. Which tab shows then
+        // is said, not asserted.
+        let left = UITestScreens.Search.leave(app, "search", keepingSearch: true)
+        XCTAssertTrue(left.back, "Leaving the search does not bring the other tabs back")
+        let before = app.tabBars.buttons["Vorschläge"]
+        let backOnIt = UITestWait.holds(timeout: 3) { before.exists && before.isSelected }
+        print("UI_FACT search left, back on \"Vorschläge\": \(backOnIt); \(UITestScreens.Search.facts(app))")
+        shot("s7-search-left")
+        // Another tab, then the search again: it kept the query and its answer, and the keyboard
+        // does not come back (the owner's choice of 25.11.2026, "Suche bleibt"; said only before
+        // it, review S5 of H14), with the way the search was left.
+        if tap(tabButton("Vorschläge"), "start page after the search"), tap(searchTabButton(), "search tab again") {
+            let again = app.searchFields.firstMatch
+            let shown = again.waitForExistence(timeout: 10)
+            let query = (again.value as? String) ?? ""
+            print("UI_FACT search chosen again: field \(shown), text \"\(query)\", left by \(left.ways), \(UITestScreens.Search.facts(app))")
+            XCTAssertTrue(shown, "No search field when the search is chosen again")
+            XCTAssertEqual(query, "xyzzy", "The search did not keep its query while another tab was looked at")
+            let kept = search("search.ignored", containing: "xyzzy").waitForExistence(timeout: 5)
+            print(kept ? "UI_STEP_OK search kept its answer" : "UI_STEP_MISSING search kept its answer")
+            XCTAssertTrue(kept, "The search did not keep its answer while another tab was looked at")
+            UITestWait.never("no keyboard when the search is chosen again", for: 2) { app.keyboards.firstMatch.exists }
+            shot("s8-search-again")
+        }
     }
 }

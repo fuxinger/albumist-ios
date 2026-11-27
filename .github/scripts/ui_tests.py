@@ -2209,6 +2209,15 @@ def swiftui_warnings(path: str) -> int:
     return 0
 
 
+# The largest copy of the video printed into a job log. The log is read through the GitHub
+# API, which hands out a job's log in one piece: with a 20 MB video in it (the sorting show
+# of design wave 3, UI run 44878163259) nothing before the video could be read, not even the
+# failing test. Under this size the log of the full flow stays readable with its screenshots.
+VIDEO_LOG_LIMIT = 3_000_000
+
+# Smaller copies first tried, largest first: the simulator records portrait, so each preset's
+# box gives a copy about half its height wide.
+VIDEO_LOG_PRESETS = ("Preset960x540", "Preset640x480")
 # "Test Case '-[AlbumistUITests.PerformanceUITests test1_LaunchTime]' measured [Duration (AppLaunch), s]
 # average: 1.234, relative standard deviation: 3.210%, values: [...]" (newer xcodebuild: "Test case
 # 'PerformanceUITests.test1_LaunchTime()' measured ...").
@@ -2290,23 +2299,31 @@ def quality_gates(name: str, system_log_path: str, console: str, gate: dict) -> 
 
 def video_to_log(video: str) -> None:
     """Artifact downloads are not reachable from every reviewer's machine, so a smaller copy
-    of the video is also printed into the log (base64 chunks, like the screenshots)."""
+    of the video is also printed into the log (base64 chunks, like the screenshots), when one
+    is small enough for the log to stay readable (`VIDEO_LOG_LIMIT`); else a line says why
+    not, and the artifact keeps the whole video."""
     if not os.path.exists(video):
         print("UI_VIDEO missing (the plan was not applied in this run)")
         return
     print(f"UI_VIDEO {os.path.basename(video)}")
     small = video[:-4] + "-small.mp4"
-    if sh(["avconvert", "--source", video, "--output", small, "--preset", "Preset1920x1080", "--replace"],
-          timeout=300, quiet=True)[0] != 0:
-        with open(video, "rb") as source, open(small, "wb") as target:
-            target.write(source.read())
-    size = os.path.getsize(small)
-    print(f"UI_VIDEO_SIZE {size}")
-    if size < 25_000_000:
-        import base64
-        data = base64.b64encode(open(small, "rb").read()).decode()
-        for index in range(0, len(data), 60000):
-            print(f"UI_VIDEO_B64 {index // 60000 + 1} {data[index:index + 60000]}")
+    size = None
+    for preset in VIDEO_LOG_PRESETS:
+        if sh(["avconvert", "--source", video, "--output", small, "--preset", preset, "--replace"],
+              timeout=300, quiet=True)[0] != 0 or not os.path.exists(small):
+            continue
+        size = os.path.getsize(small)
+        print(f"UI_VIDEO_SIZE {size} ({preset})")
+        if size <= VIDEO_LOG_LIMIT:
+            break
+    if size is None or size > VIDEO_LOG_LIMIT:
+        print(f"UI_VIDEO_NOT_PRINTED no copy of at most {VIDEO_LOG_LIMIT} bytes "
+              f"(smallest {size if size is not None else 'none'}): the artifact sorting-show-video has it")
+        return
+    import base64
+    data = base64.b64encode(open(small, "rb").read()).decode()
+    for index in range(0, len(data), 60000):
+        print(f"UI_VIDEO_B64 {index // 60000 + 1} {data[index:index + 60000]}")
 
 
 def boot_retries(out: str) -> list[str]:

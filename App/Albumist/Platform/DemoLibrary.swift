@@ -1,4 +1,5 @@
 #if targetEnvironment(simulator)
+import AVFoundation
 import CoreLocation
 import ImageIO
 import Photos
@@ -9,7 +10,8 @@ import UniformTypeIdentifiers
 /// Simulator only (browser testing on Appetize, App Store screenshots): fills the empty
 /// simulator library with a realistic example library. Travel photos are crops of the
 /// simulator's own sample photos with dates and GPS of real trips; screenshots and
-/// paper documents are rendered text. Never part of a device build.
+/// paper documents are rendered text; one short video at home (`clip`). Never part of a
+/// device build.
 @MainActor
 @Observable
 final class DemoLibrary {
@@ -60,7 +62,7 @@ final class DemoLibrary {
     ]
 
     var expectedCount: Int {
-        Self.trips.reduce(0) { $0 + $1.photos } + 45 + 12 + Self.screenshots.count + Self.documents.count
+        Self.trips.reduce(0) { $0 + $1.photos } + 45 + 12 + Self.screenshots.count + Self.documents.count + 1 // the video
     }
 
 
@@ -77,33 +79,9 @@ final class DemoLibrary {
         defer { isSeeding = false }
         created = 0
         var rng = SeededRandom(seed: 2026)
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
-        func date(_ y: Int, _ m: Int, _ d: Int, plusDays: Int = 0, hour: Int, minute: Int) -> Date {
-            let start = calendar.date(from: DateComponents(year: y, month: m, day: d, hour: hour, minute: minute))!
-            return calendar.date(byAdding: .day, value: plusDays, to: start)!
-        }
-
-        var specs: [Spec] = []
-        for trip in Self.trips {
-            for i in 0..<trip.photos {
-                specs.append(.photo(trip.spot, spread: 0.02, date: date(trip.year, trip.month, trip.day, plusDays: i % trip.days,
-                                                                         hour: 9 + Int(rng.next(in: 0...10)), minute: Int(rng.next(in: 0...59)))))
-            }
-        }
-        for i in 0..<45 {   // everyday life at home, spread over several years
-            specs.append(.photo(Self.home, spread: 0.03, date: date(2018 + i % 7, 1 + (i * 5) % 12, 1 + (i * 7) % 27, hour: 10 + i % 9, minute: (i * 13) % 60)))
-        }
-        for i in 0..<12 {   // regular visits to the same place
-            specs.append(.photo(Self.grandma, spread: 0.0005, date: date(2020 + i % 5, 1 + (i * 3) % 12, 5 + i, hour: 15, minute: 10 + i)))
-        }
-        for (i, lines) in Self.screenshots.enumerated() {
-            specs.append(.screenshot(lines, date: date(2024, 1 + i, 3 + i, hour: 18, minute: 2 * i)))
-        }
-        for (i, lines) in Self.documents.enumerated() {
-            specs.append(.document(lines, date: date(2024, 2 + 2 * i, 10, hour: 20, minute: 15)))
-        }
-        total = specs.count
+        let specs = Self.specs(&rng)
+        // The photos, then one video (`clip`).
+        total = specs.count + 1
 
         let sources = SourceImages(images: await Self.sampleImages())
         var number = 1000
@@ -132,9 +110,59 @@ final class DemoLibrary {
             }
             await Task.yield()
         }
+        // One short video at home on a day of its own (design wave 3, DS-16): the grids show its
+        // length, the photo view plays it, and the UI tests and screenshots have a video too.
+        // Written off the main actor. A simulator that cannot encode it leaves the library
+        // without it, as before.
+        if let clip = await Task.detached(operation: { await Self.clip(from: sources) }).value {
+            do {
+                try await Self.save(video: clip, date: Self.date(2021, 3, 14, hour: 16, minute: 20), at: Self.home)
+                created += 1
+            } catch {
+                try? FileManager.default.removeItem(at: clip)
+            }
+        }
         isDone = true
         UserDefaults.standard.set(true, forKey: "demo.seeded")
         model.startAnalysis(cause: .tap)
+    }
+
+    /// The photos of the example library, in order: the trips, everyday life at home, the visits
+    /// to the same place, the screenshots and the paper documents.
+    private static func specs(_ rng: inout SeededRandom) -> [Spec] {
+        var specs: [Spec] = []
+        for trip in trips {
+            for i in 0..<trip.photos {
+                specs.append(.photo(trip.spot, spread: 0.02, date: date(trip.year, trip.month, trip.day, plusDays: i % trip.days,
+                                                                         hour: 9 + Int(rng.next(in: 0...10)), minute: Int(rng.next(in: 0...59)))))
+            }
+        }
+        for i in 0..<45 {   // everyday life at home, spread over several years
+            specs.append(.photo(home, spread: 0.03, date: date(2018 + i % 7, 1 + (i * 5) % 12, 1 + (i * 7) % 27,
+                                                                hour: 10 + i % 9, minute: (i * 13) % 60)))
+        }
+        for i in 0..<12 {   // regular visits to the same place
+            specs.append(.photo(grandma, spread: 0.0005, date: date(2020 + i % 5, 1 + (i * 3) % 12, 5 + i, hour: 15, minute: 10 + i)))
+        }
+        for (i, lines) in screenshots.enumerated() {
+            specs.append(.screenshot(lines, date: date(2024, 1 + i, 3 + i, hour: 18, minute: 2 * i)))
+        }
+        for (i, lines) in documents.enumerated() {
+            specs.append(.document(lines, date: date(2024, 2 + 2 * i, 10, hour: 20, minute: 15)))
+        }
+        return specs
+    }
+
+    /// The example library's calendar: its photos were taken in Germany.
+    private static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        return calendar
+    }()
+
+    private static func date(_ y: Int, _ m: Int, _ d: Int, plusDays: Int = 0, hour: Int, minute: Int) -> Date {
+        let start = calendar.date(from: DateComponents(year: y, month: m, day: d, hour: hour, minute: minute))!
+        return calendar.date(byAdding: .day, value: plusDays, to: start)!
     }
 
     /// Nonisolated on purpose: PhotoKit runs the change block on its own queue, and a
@@ -150,6 +178,22 @@ final class DemoLibrary {
                 request.creationDate = item.date
                 request.location = item.location
             }
+        }
+    }
+
+    /// The video into the library as the camera saves one: its file moves into Photos.
+    /// Nonisolated for the same reason as `save(_:)`.
+    nonisolated static func save(video url: URL, date: Date, at spot: Spot) async throws {
+        let latitude = spot.lat, longitude = spot.lon
+        try await PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetCreationRequest.forAsset()
+            let options = PHAssetResourceCreationOptions()
+            options.originalFilename = "IMG_2000.MOV"
+            options.uniformTypeIdentifier = UTType.quickTimeMovie.identifier
+            options.shouldMoveFile = true
+            request.addResource(with: .video, fileURL: url, options: options)
+            request.creationDate = date
+            request.location = CLLocation(latitude: latitude, longitude: longitude)
         }
     }
 
@@ -173,157 +217,6 @@ final class DemoLibrary {
         var name: String
         var date: Date
         var location: CLLocation?
-    }
-
-    // MARK: Images
-
-    /// Off the main actor: the fetch is a synchronous call to the Photos service, which is
-    /// busy with the library being written.
-    nonisolated private static func sampleImages() async -> [UIImage] {
-        let options = PHFetchOptions()
-        options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
-        options.fetchLimit = 12
-        let assets = PHAsset.fetchAssets(with: options)
-        var images: [UIImage] = []
-        for index in 0..<assets.count {
-            if let image = await Self.requestImage(assets.object(at: index).localIdentifier, side: 2400) { images.append(image) }
-        }
-        return images
-    }
-
-    /// The images a batch of the demo library is drawn from (they are only read).
-    struct SourceImages: @unchecked Sendable { let images: [UIImage] }
-
-    /// Draws and encodes one batch. Runs off the main actor; returns the generator's state
-    /// so the next batch continues the same sequence.
-    nonisolated static func items(_ specs: [Spec], sources: SourceImages, firstNumber: Int,
-                                  rng start: SeededRandom) -> (items: [Item], rng: SeededRandom) {
-        var rng = start
-        var number = firstNumber
-        var chunk: [Item] = []
-        for spec in specs {
-            number += 1
-            // Each photo's bitmaps (a 1600 × 1200 rendering, its source crop) are freed before
-            // the next one; without a pool a batch kept all of them until the task ended.
-            autoreleasepool {
-                switch spec {
-                case let .photo(spot, spread, day):
-                    let location = CLLocation(
-                        coordinate: CLLocationCoordinate2D(latitude: spot.lat + rng.next(in: -spread...spread),
-                                                           longitude: spot.lon + rng.next(in: -spread...spread)),
-                        altitude: 0, horizontalAccuracy: 8, verticalAccuracy: 8, timestamp: day)
-                    let source = sources.images.isEmpty ? Self.fallbackImage() : sources.images[Int(rng.next(in: 0...999)) % sources.images.count]
-                    let image = Self.crop(source, rng: &rng)
-                    chunk.append(Item(data: image.jpegData(compressionQuality: 0.85)!, type: .jpeg, name: "IMG_\(number).JPG", date: day, location: location))
-                case let .screenshot(lines, day):
-                    chunk.append(Item(data: Self.screenshotPNG(lines), type: .png, name: "IMG_\(number).PNG", date: day, location: nil))
-                case let .document(lines, day):
-                    chunk.append(Item(data: Self.documentPhoto(lines).jpegData(compressionQuality: 0.85)!, type: .jpeg,
-                                      name: "IMG_\(number).JPG", date: day, location: nil))
-                }
-            }
-        }
-        return (chunk, rng)
-    }
-
-    /// A random 50–85 % crop, sometimes mirrored, as a 1600 × 1200 (or portrait) photo.
-    nonisolated static func crop(_ source: UIImage, rng: inout SeededRandom) -> UIImage {
-        let portrait = rng.next(in: 0...1) < 0.3
-        let output = portrait ? CGSize(width: 1200, height: 1600) : CGSize(width: 1600, height: 1200)
-        let scale = CGFloat(rng.next(in: 0.5...0.85))
-        let w = source.size.width * scale, h = w * output.height / output.width
-        let rectH = min(h, source.size.height), rectW = rectH * output.width / output.height
-        let x = CGFloat(rng.next(in: 0...Double(max(0, source.size.width - rectW))))
-        let y = CGFloat(rng.next(in: 0...Double(max(0, source.size.height - rectH))))
-        let mirrored = rng.next(in: 0...1) < 0.4
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        return UIGraphicsImageRenderer(size: output, format: format).image { ctx in
-            if mirrored { ctx.cgContext.translateBy(x: output.width, y: 0); ctx.cgContext.scaleBy(x: -1, y: 1) }
-            let factor = output.width / rectW
-            source.draw(in: CGRect(x: -x * factor, y: -y * factor, width: source.size.width * factor, height: source.size.height * factor))
-        }
-    }
-
-    nonisolated static func fallbackImage() -> UIImage {
-        UIGraphicsImageRenderer(size: CGSize(width: 1600, height: 1200)).image { ctx in
-            UIColor.systemTeal.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 1600, height: 1200))
-        }
-    }
-
-    /// iPhone-sized screenshot with an EXIF "Screenshot" comment, as iOS writes it.
-    nonisolated static func screenshotPNG(_ lines: [String]) -> Data {
-        // Looks like a real app screen: status bar, colored header with the title, the
-        // details in a list and a button, so previews are recognizable at any crop.
-        let size = CGSize(width: 1179, height: 2556)
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        let palette: [UIColor] = [.systemTeal, .systemIndigo, .systemOrange, .systemPink, .systemGreen, .systemBlue, .systemPurple, .systemRed]
-        let light = UITraitCollection(userInterfaceStyle: .light)
-        let seed: Int = (lines.first ?? "").unicodeScalars.reduce(0) { $0 + Int($1.value) }
-        let accent = palette[seed % palette.count].resolvedColor(with: light)
-        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
-            UIColor.systemGroupedBackground.resolvedColor(with: light).setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-            accent.setFill()
-            ctx.fill(CGRect(x: 0, y: 0, width: size.width, height: 760))
-            let white: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 50, weight: .semibold), .foregroundColor: UIColor.white]
-            ("9:41" as NSString).draw(at: CGPoint(x: 110, y: 52), withAttributes: white)
-            let title = lines.first ?? ""
-            (title as NSString).draw(in: CGRect(x: 72, y: 420, width: size.width - 144, height: 300),
-                                     withAttributes: [.font: UIFont.systemFont(ofSize: 104, weight: .bold), .foregroundColor: UIColor.white])
-            let details = Array(lines.dropFirst())
-            let card = CGRect(x: 48, y: 820, width: size.width - 96, height: CGFloat(details.count) * 170 + 40)
-            UIColor.white.setFill()
-            UIBezierPath(roundedRect: card, cornerRadius: 44).fill()
-            for (i, line) in details.enumerated() {
-                let y = card.minY + 20 + CGFloat(i) * 170
-                (line as NSString).draw(in: CGRect(x: card.minX + 52, y: y + 50, width: card.width - 104, height: 90),
-                                        withAttributes: [.font: UIFont.systemFont(ofSize: 62), .foregroundColor: UIColor.black])
-                if i < details.count - 1 {
-                    UIColor.separator.resolvedColor(with: light).setFill()
-                    ctx.fill(CGRect(x: card.minX + 52, y: y + 169, width: card.width - 52, height: 2))
-                }
-            }
-            let button = CGRect(x: 72, y: 2230, width: size.width - 144, height: 150)
-            accent.setFill()
-            UIBezierPath(roundedRect: button, cornerRadius: 75).fill()
-            let label = "Details anzeigen" as NSString
-            let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 60, weight: .semibold), .foregroundColor: UIColor.white]
-            let labelSize = label.size(withAttributes: attributes)
-            label.draw(at: CGPoint(x: button.midX - labelSize.width / 2, y: button.midY - labelSize.height / 2), withAttributes: attributes)
-        }
-        let data = NSMutableData()
-        guard let cg = image.cgImage,
-              let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
-            return image.pngData()!
-        }
-        let properties: [CFString: Any] = [kCGImagePropertyExifDictionary: [kCGImagePropertyExifUserComment: "Screenshot"]]
-        CGImageDestinationAddImage(destination, cg, properties as CFDictionary)
-        CGImageDestinationFinalize(destination)
-        return data as Data
-    }
-
-    /// A printed page photographed on a table.
-    nonisolated static func documentPhoto(_ lines: [String]) -> UIImage {
-        let size = CGSize(width: 1500, height: 2000)
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
-            UIColor(red: 0.55, green: 0.45, blue: 0.36, alpha: 1).setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-            let page = CGRect(x: 130, y: 150, width: 1240, height: 1700)
-            ctx.cgContext.setShadow(offset: CGSize(width: 0, height: 12), blur: 30, color: UIColor.black.withAlphaComponent(0.4).cgColor)
-            UIColor(white: 0.97, alpha: 1).setFill()
-            ctx.fill(page)
-            ctx.cgContext.setShadow(offset: .zero, blur: 0)
-            var y = page.minY + 120
-            for (i, line) in lines.enumerated() {
-                let font = i == 0 ? UIFont.systemFont(ofSize: 64, weight: .bold) : UIFont.systemFont(ofSize: 44)
-                (line as NSString).draw(at: CGPoint(x: page.minX + 100, y: y), withAttributes: [.font: font, .foregroundColor: UIColor.black])
-                y += i == 0 ? 160 : 90
-            }
-        }
     }
 }
 

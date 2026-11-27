@@ -248,7 +248,7 @@ struct PlanPreviewButtonTests {
                     "\(moved) at the end of the plan when \(atEnd)")
         }
         let notes = try #require(AppSource.body(of: "func applyNotes(", in: code))
-        #expect(!notes.contains("Gratis-Alben"), "the free albums left stay in the bar where room is short")
+        #expect(!notes.contains("kostenlosen Alben"), "the free albums left stay in the bar where room is short")
     }
 
     /// Rows passing under the opaque bar are cut by design, as under the tab bar: the accessibility

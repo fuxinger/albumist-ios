@@ -15,7 +15,7 @@ struct SearchExampleTests {
         ("Italien", "Italy"),
         ("Rechnungen", "Invoices"),
         ("Videos", "Videos"),
-        ("Nicht sortiert", "Not sorted"),
+        ("Unsortiert", "Unsorted"),
         ("Screenshots Bestellung", "Screenshots order"),
     ]
 

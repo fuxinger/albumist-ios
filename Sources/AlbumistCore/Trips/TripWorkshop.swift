@@ -4,7 +4,7 @@ extension TripCorrections {
     /// Splits and merges the user made (photos taken out of trips are counted elsewhere).
     public var changeCount: Int { forcedBreaks.count + forcedJoins.count }
 
-    /// "Reise teilen": a new trip starts at `date`. A split always wins over an earlier merge
+    /// "Reise aufteilen": a new trip starts at `date`. A split always wins over an earlier merge
     /// (`TripDetector` checks breaks first), so nothing else has to change.
     public func splitting(at date: Date) -> TripCorrections {
         var copy = self
@@ -35,7 +35,7 @@ extension TripCorrections {
         return (splits + merges).sorted { $0.date < $1.date }
     }
 
-    /// "Aufheben": one split or merge is forgotten, the trips around it are detected again.
+    /// "Rückgängig machen": one split or merge is forgotten, the trips around it are detected again.
     public func removing(_ change: TripChange) -> TripCorrections {
         var copy = self
         switch change {
@@ -147,7 +147,7 @@ public enum TripWorkshop {
         return (before, after)
     }
 
-    /// What a split, a merge, "Aufheben" and "Reisen wieder automatisch erkennen" wait for. A
+    /// What a split, a merge, "Rückgängig machen" and "Reisen wieder automatisch erkennen" wait for. A
     /// change is applied by an analysis, so none is taken while one runs (it read the changes
     /// before) or while albums are made (a check follows them); each change starts a check
     /// itself, so right after one the next waits. The screens grey these controls and say why
@@ -244,7 +244,7 @@ public struct TripChangeLedger: Sendable, Equatable {
 
     public init() {}
 
-    /// A split, a merge, "Aufheben" or the reset in the settings is stored (before its run starts).
+    /// A split, a merge, "Rückgängig machen" or the reset in the settings is stored (before its run starts).
     public mutating func changeStored() { stored += 1 }
 
     /// Run `run` starts: it reads the changes stored until now.

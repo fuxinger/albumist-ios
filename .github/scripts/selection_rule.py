@@ -16,7 +16,9 @@ contents (navigation_rule.code_only):
      selects: `.toolbarVisibility(…, for: .tabBar)` whose visibility is `.hidden` and, with a
      selection mode, depends on it (never hidden for good).
 A view whose bottom bar never stands under a tab bar (one shown only in a sheet) goes in
-`NO_TAB_BAR` with the reason.
+`NO_TAB_BAR` with the reason. A view that hides the tab bar for good by design, because its own
+buttons stand where the tab bar was, goes in `HIDDEN_FOR_GOOD` with the reason: for it,
+`.toolbarVisibility(.hidden, for: .tabBar)` counts as hiding the tab bar while it selects.
 
 Usage: selection_rule.py <repo root>; prints offenders and exits 1 if there are any.
 """
@@ -42,6 +44,11 @@ TAB_BAR_VISIBILITY = re.compile(
 TERNARY = re.compile(r"^(.*?)\?(.*?):(.*)$", re.DOTALL)
 # Views whose bottom bar is never under the tab bar, and why.
 NO_TAB_BAR: dict[str, str] = {}
+# Views that hide the tab bar for good, and why: a selection there needs no tab bar of its own.
+HIDDEN_FOR_GOOD: dict[str, str] = {
+    "ProposalDetailView": ("the open suggestion has its two buttons where the tab bar was "
+                           "(design E2, decision 6B); while it picks photos, the system bottom bar takes their place"),
+}
 
 ACTIONS_IN_BOTTOM_BAR = ("Put the actions of the selection in the system bottom bar "
                          "(ToolbarItem(placement: .bottomBar)), not in a bar of its own")
@@ -100,7 +107,8 @@ def offenders_in(text: str):
         line = code.count("\n", 0, (bar or state)[0]) + 1
         if state and not bar:
             found.append((line, name, ACTIONS_IN_BOTTOM_BAR))
-        selecting = state[1].group(1) if state else None
+        # A tab bar hidden for good by design (`HIDDEN_FOR_GOOD`) is hidden while selecting too.
+        selecting = state[1].group(1) if state and name not in HIDDEN_FOR_GOOD else None
         hides = any(".tabBar" in re.findall(r"\.\w+", visibility.group(2))
                     and hides_while(visibility.group(1), selecting)
                     for _, body in parts for visibility in TAB_BAR_VISIBILITY.finditer(body))

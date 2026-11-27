@@ -101,7 +101,7 @@ public struct InterruptedPlanUndo: Sendable {
         self.undo = undo
     }
 
-    /// Whether "Alles zurücknehmen" for `interrupted` would delete albums or folders in Photos,
+    /// Whether "Alles rückgängig machen" for `interrupted` would delete albums or folders in Photos,
     /// said before it runs (iOS asks once more, review 18.11., P3-07). Worked out from the
     /// album list `current` (`DeleteQuestion` reads it at the tap): a step the interruption
     /// left open counts as done when the album it made is there under the id written down for

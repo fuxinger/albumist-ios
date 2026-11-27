@@ -1538,7 +1538,15 @@ final class DeviceConditionUITests: XCTestCase {
         let found = atlas.waitForExistence(timeout: 30)
         if found { UITestScreens.Cards.reach(atlas, in: app) }
         print("UI_FACT large atlas entry found \(found), hittable \(found && atlas.isHittable), frame \(found ? atlas.frame : .zero)")
-        timed("atlas", limit: 15, { if found { atlas.tap() } }, until: { app.navigationBars["Reise-Atlas"].exists })
+        // Reached again right before the tap, and where it was then logged: UI run 45911944178
+        // logged the entry at y 9 after reaching it, yet the screenshot after the step showed the
+        // start page back at its top with the atlas under the tab bar, and nothing opened in 30 s.
+        timed("atlas", limit: 15, {
+            guard found else { return }
+            UITestScreens.Cards.reach(atlas, in: app)
+            print("UI_FACT large atlas entry at the tap: hittable \(atlas.isHittable), frame \(atlas.frame)")
+            atlas.tap()
+        }, until: { app.navigationBars["Reise-Atlas"].exists })
         // pacing: kept, the atlas map draws its tiles before the screenshot (no element shows it)
         sleep(2)
         shot("25-large-atlas")

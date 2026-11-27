@@ -782,6 +782,9 @@ class ReadyPullRequestTests(unittest.TestCase):
                     self.assertIn(command, full)
                     covered += 1
         self.assertGreaterEqual(covered, 4)  # app build, UI build, core tests, app tests
+        # A test action without "run:" would slip past the loop above: only checkout and uploads.
+        actions = set(re.findall(r"\n\s+(?:- )?uses: ([\w./-]+)@", job_blocks(self.ci)["ios"]))
+        self.assertEqual(actions, {"actions/checkout", "actions/upload-artifact"})
         # The app tests run exactly as in CI: the same erased and settled simulator (StoreKit,
         # CI 44383157858) and the same test command; only the step conditions differ.
         ci_runs = {name: run for name, _, run in steps}
@@ -794,6 +797,19 @@ class ReadyPullRequestTests(unittest.TestCase):
         self.assertEqual(left_out, {"Build UI tests", "Core tests (macOS)"})
         self.assertIn("Core tests (macOS), hard limits", core)
         self.assertIn("ALBUMIST_TIMING: hard", job_blocks(self.ui)["core-macos"])
+        # Second review 27.11.: a red load test does not hide the app tests (as in CI).
+        for name in ("Fresh simulator (erased and booted)", "Build and test app"):
+            with self.subTest(independent_of_load=name):
+                self.assertNotIn("load", core[name][0])
+
+    def test_a_red_core_or_app_test_is_never_re_run_to_green(self):
+        # Second review 27.11.: "Re-run failed jobs" of core-macos must not make the verdict green.
+        name = re.search(r"\n    name: (.*)\n", job_blocks(self.ui)["core-macos"]).group(1)
+        self.assertEqual(name, "Core and app tests hard (macOS)")
+        verdict = job_blocks(self.ui)["verdict"]
+        self.assertIn(f'earlier_attempts.py --attempt "$ATTEMPT" --job "{name}" "${{answers[@]}}"', verdict)
+        self.assertIn("ATTEMPT: ${{ github.run_attempt }}", verdict)
+        self.assertIn("/attempts/$n/jobs?per_page=100", verdict)
 
 
 class StressEveryNightTests(unittest.TestCase):

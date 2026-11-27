@@ -21,12 +21,13 @@ run-name: >-
 #      ("Messung"). "other flows" is defined as "everything the other groups do not run", so a
 #      new test class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests
 #      checks every UI test against the groups).
-#      Since 27.11. four groups in a pull request's run (large-library aside): with CI's one
-#      macOS job five macOS jobs, the account's five Macs, so every group starts at once
-#      (max-parallel 4). Before, six groups and CI's job asked for seven and two waited 10-30
+#      Since 27.11. four groups in a pull request's run (large-library aside): with core-macos
+#      five macOS jobs, the account's five Macs, so every group starts at once (max-parallel 4).
+#      Since 27.11. late, CI's macOS job does not run on a ready pull request (its tests are in
+#      core-macos and the UI build), so a ready push asks for these five and no sixth. Before, six groups and CI's job asked for seven and two waited 10-30
 #      min (tempo plan 20.11.: six groups; full UI runs 45939666948 and 45920259957). The small
-#      iPhone group contrast ("after_core") starts in the job ui-late once CI's macOS job
-#      (core-macos, 12-14 min) has ended, on the Mac that job frees: never more than five Macs,
+#      iPhone group contrast ("after_core") starts in the job ui-late once the macOS job
+#      core-macos (core, load and app tests, about 30 min) has ended, on the Mac that job frees: never more than five Macs,
 #      and no group waits for one (27.11. evening; for some hours that day it was a second
 #      phase of accessibility on an erased simulator, which cost that group 5 min).
 #      The stress pass is not part of this run: .github/workflows/ui-stress.yml (10,000 photos
@@ -393,7 +394,6 @@ jobs:
         # Here, not in core-linux: that job is skipped when every group's green is reused, and
         # this job runs in every full run (second review 26.11.). Limits as in the nightly run,
         # which runs the same load test on macOS.
-        id: load
         if: ${{ !cancelled() && steps.core.outcome == 'success' }}
         timeout-minutes: 9
         run: |
@@ -410,7 +410,7 @@ jobs:
         # As in CI's macOS job (ci.yml, the reasons there): erased, booted after the core tests,
         # settled, StoreKit log recorded live.
         id: fresh
-        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' && steps.core.outcome == 'success' && steps.load.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' && steps.core.outcome == 'success' }}
         timeout-minutes: 20
         run: |
           UDID="${{ steps.sim.outputs.udid }}"
@@ -432,7 +432,7 @@ jobs:
             > storekit-live.log 2>&1 &
           echo "simulator $UDID erased and booted; StoreKit log recorded live (pid $!)"
       - name: Build and test app
-        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' && steps.core.outcome == 'success' && steps.load.outcome == 'success' && steps.fresh.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' && steps.core.outcome == 'success' && steps.fresh.outcome == 'success' }}
         run: |
           echo "LOAD at start: $(sysctl -n vm.loadavg)"
           ps -Ao pcpu=,state=,comm= -r | head -8 | cut -c1-160 | sed 's/^/SIM_TOP at start /'
@@ -733,8 +733,10 @@ jobs:
     # The groups with "after_core" in .github/ui-groups.json (contrast) when core-macos runs in
     # this run (UI_LATE; 27.11.): they start once core-macos has ended, on the Mac it frees, so a
     # pull request's full run never asks for more than five Macs (four groups + core-macos, then
-    # this one) and no group waits for a free Mac. core-macos takes 12-14 min, contrast about
-    # 15, so it ends well before the four groups (about 37 min each). Also after a red or
+    # this one) and no group waits for a free Mac. Since 27.11. late core-macos also runs the
+    # app's unit tests (about 30 min instead of 12-14) and contrast takes about 20, so contrast
+    # ends some 10-15 min after the four groups (about 37 min each): the price of never asking
+    # for a sixth Mac (run 46048374332 waited 22 min for one). Also after a red or
     # failed core-macos (!cancelled()): the verdict fails on that by itself. Same name, env and
     # steps as ui (YAML aliases), so ui_evidence.py finds its result like any group's.
     name: UI ${{ matrix.title }} [${{ matrix.group }} app ${{ matrix.app }} tests ${{ matrix.tests }}]
@@ -779,13 +781,28 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: macOS core tests with hard time limits
-        # Rule of 26.11.: part of the merge gate in a full run (job core-macos).
+        # Rule of 26.11.: part of the merge gate in a full run (job core-macos), since 27.11. with
+        # the app's unit tests. "Re-run failed jobs" never turns a red test there green (second
+        # review 27.11.): from attempt 2 on, earlier_attempts.py reads that job in every earlier
+        # attempt and fails on anything but machinery (a simulator that did not boot, a download).
         if: ${{ !inputs.quick && github.event_name != 'schedule' && !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
         env:
           CORE_MACOS: ${{ needs.core-macos.result }}
+          GH_TOKEN: ${{ github.token }}
+          ATTEMPT: ${{ github.run_attempt }}
         run: |
           echo "core-macos: $CORE_MACOS"
           [ "$CORE_MACOS" = success ] || { echo "::error title=Merge gate::Core and app tests hard (macOS) is $CORE_MACOS, not green"; exit 1; }
+          [ "$ATTEMPT" = 1 ] && exit 0
+          answers=()
+          for n in $(seq 1 $((ATTEMPT - 1))); do
+            curl -fsS --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$n/jobs?per_page=100" \
+              -o "$RUNNER_TEMP/jobs-$n.json" \
+              || { echo "::error title=Earlier attempts::the jobs of attempt $n could not be read; re-run this job"; exit 1; }
+            answers+=("$RUNNER_TEMP/jobs-$n.json")
+          done
+          python3 .github/scripts/earlier_attempts.py --attempt "$ATTEMPT" --job "Core and app tests hard (macOS)" "${answers[@]}"
       - name: Core tests (Linux) green
         # The UI build no longer waits for them (27.11.); every verdict does, also when no group
         # had to run (greens of a commit with red core tests must not make a later run green).

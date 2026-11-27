@@ -11,6 +11,10 @@ by a cancel or a timeout, or one a lost runner left unfinished, counts like a fa
 that was stopped did not pass). A job that never ran a step (no runner) counts as machinery.
 
   python3 .github/scripts/earlier_attempts.py --attempt 3 jobs-1.json jobs-2.json
+  python3 .github/scripts/earlier_attempts.py --attempt 2 --job "Core and app tests hard (macOS)" jobs-1.json
+
+Also ui.yml's verdict (since 27.11.), for its job "Core and app tests hard (macOS)" only: a red
+app or core test there is never re-run to green either.
 
 Each file is the answer of GET /repos/{repo}/actions/runs/{run_id}/attempts/{n}/jobs for one
 earlier attempt, in order (testflight.yml fetches them with curl). Prints a warning for each
@@ -160,6 +164,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--attempt", type=int, required=True, help="this attempt (github.run_attempt)")
     parser.add_argument("answers", nargs="*", help="jobs of attempts 1 to N-1, in order")
+    # ui.yml's verdict (27.11.): only its macOS core and app tests; the UI groups have their own
+    # record by fingerprint (ui_evidence.py), where a red result never counts.
+    parser.add_argument("--job", action="append", default=[], help="only the jobs of this name (repeatable)")
     args = parser.parse_args(argv)
     if len(args.answers) != args.attempt - 1:
         print(f"::error title=Earlier attempts::expected the jobs of {args.attempt - 1} earlier attempt(s), "
@@ -175,6 +182,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("no job list")
             if answer.get("total_count", 0) > len(answer["jobs"]):
                 raise ValueError(f"{len(answer['jobs'])} of {answer['total_count']} jobs")
+            if args.job:
+                answer = dict(answer, jobs=[j for j in answer["jobs"] if j.get("name") in args.job])
             attempts.append((number, answer))
         except (OSError, ValueError, TypeError) as error:
             print(command("error", "Earlier attempts", f"the jobs of attempt {number} are not readable ({error}); "

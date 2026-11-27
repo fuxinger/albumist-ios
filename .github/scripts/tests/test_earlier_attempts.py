@@ -195,6 +195,23 @@ class MainTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("::warning title=Re-run after attempt 1::", log)
 
+    def test_job_filter_reads_only_the_named_job(self):
+        # ui.yml's verdict (27.11.): a red app test in core-macos blocks, a red UI group of an
+        # earlier attempt does not (ui_evidence.py keeps that record by fingerprint).
+        name = "Core and app tests hard (macOS)"
+        red_core = [{"jobs": [job(name, "failure", ["Build and test app"]),
+                              job("UI device", "failure", ["Run UI tests"])]}]
+        self.assertEqual(self.run_main(red_core, 2, "--job", name)[0], 1)
+        red_group = [{"jobs": [job(name, "success"), job("UI device", "failure", ["Run UI tests"])]}]
+        code, log, _, _ = self.run_main(red_group, 2, "--job", name)
+        self.assertEqual(code, 0)
+        self.assertNotIn("UI device", log)
+        machinery = [{"jobs": [job(name, "failure", ["Fresh simulator (erased and booted)"])]}]
+        self.assertEqual(self.run_main(machinery, 2, "--job", name)[0], 0)
+        # A partial answer still fails closed, before the filter.
+        partial = [{"total_count": 120, "jobs": [job(name, "success")]}]
+        self.assertEqual(self.run_main(partial, 2, "--job", name)[0], 1)
+
     def test_there_is_no_forced_mode(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as stop:
             self.run_main([{"jobs": [job("Tests / iOS build and tests (macOS)", "failure", ["Build and test app"])]}],

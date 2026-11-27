@@ -10,8 +10,9 @@ run-name: >-
 # waiting run goes next; a new push to a pull request cancels the UI runs of its older commits
 # (ui-supersede.yml).
 #
-#   1. Core tests (Linux): the core library's tests on a free Linux runner. No macOS runner
-#      starts for a commit whose core tests fail (fast first, then expensive).
+#   1. Core tests (Linux): the core library's tests on a free Linux runner, side by side with
+#      the UI build since 27.11. (waiting for them held the build 9.5 min); the verdict needs
+#      them green.
 #   2. UI build: builds the app and the UI tests once (build-for-testing) and hands them on.
 #   3. The test groups (.github/ui-groups.json), each on its own runner and freshly booted
 #      simulator (test-without-building), at most five at a time (max-parallel; three when
@@ -54,8 +55,10 @@ run-name: >-
 #   every TestFlight upload (testflight.yml) and every night on main (ui-stress.yml).
 #   The same holds for the group large-library (27.11., plan section 4 of that decision: test11
 #   "nur nachts und vor Upload", the tap-through sweep "nur nachts"): a pull request's run and
-#   verdict leave it out (UI_PR); every TestFlight gate needs it green, and it runs every night
-#   on main (schedule) and by hand.
+#   verdict leave it out (UI_PR); the big gate of every TestFlight run needs it green (the small
+#   and the fast gate check only their own groups, as before), a release (ci_gate.py) needs a full
+#   run by hand on the commit, and it runs every night on main (schedule, verdict "night") and by
+#   hand.
 #   Quick mode ("quick" by hand, and the smoke test; never in a TestFlight run): the tests get
 #   ALBUMIST_UI_QUICK=1 and DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips
 #   itself. Every group has another test fingerprint then, so a quick green never stands for a
@@ -326,7 +329,8 @@ jobs:
     # pull request (the merge check since stage 1) hard as well: its own ALBUMIST_TIMING.
     name: Core tests hard (macOS)
     needs: plan
-    if: ${{ needs.plan.result == 'success' && !inputs.release && !inputs.quick && !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
+    # Not at night (27.11.): the nightly run tests large-library only.
+    if: ${{ needs.plan.result == 'success' && !inputs.release && !inputs.quick && github.event_name != 'schedule' && !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
     runs-on: xcode-27
     env:
       ALBUMIST_TIMING: hard
@@ -360,10 +364,13 @@ jobs:
 
   build:
     name: UI build
-    needs: [plan, core-linux]
+    # Not after "Core tests (Linux)" any more (27.11., speed first): waiting for it held every
+    # build 9.5 min (runs 45865545486, 45907762058, 45881198440). Both now run side by side; the
+    # verdict needs the Linux tests green (step "Core tests (Linux) green"), so nothing merges
+    # without them. A red Linux run costs the Macs of that run only.
+    needs: [plan]
     if: >-
-      ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.count != '0'
-      && (needs.core-linux.result == 'success' || (inputs.release && needs.core-linux.result == 'skipped')) }}
+      ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.count != '0' }}
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
@@ -592,8 +599,10 @@ jobs:
     # unchanged (step "Merge content same as this commit"); the TestFlight run after the merge
     # then reuses those greens by content and runs only groups without one. Not in a TestFlight run: there the
     # "UI gate" of testflight.yml does this.
-    name: UI verdict (${{ (github.event_name == 'pull_request' && github.event.pull_request.draft) && 'smoke' || ((!inputs.release && github.event_name != 'pull_request' && inputs.quick) && 'quick' || 'full') }})
-    needs: [plan, ui, core-macos]
+    # "night" for the nightly run (it checks large-library only): never the release gate's
+    # "UI verdict (full)" (ci_gate.py skips it like quick and smoke; second review 27.11.).
+    name: UI verdict (${{ (github.event_name == 'pull_request' && github.event.pull_request.draft) && 'smoke' || ((!inputs.release && github.event_name != 'pull_request' && inputs.quick) && 'quick' || (github.event_name == 'schedule' && 'night' || 'full')) }})
+    needs: [plan, ui, core-macos, core-linux]
     if: ${{ !cancelled() && needs.plan.result == 'success' && !inputs.release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -610,12 +619,22 @@ jobs:
           persist-credentials: false
       - name: macOS core tests with hard time limits
         # Rule of 26.11.: part of the merge gate in a full run (job core-macos).
-        if: ${{ !inputs.quick && !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
+        if: ${{ !inputs.quick && github.event_name != 'schedule' && !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
         env:
           CORE_MACOS: ${{ needs.core-macos.result }}
         run: |
           echo "core-macos: $CORE_MACOS"
           [ "$CORE_MACOS" = success ] || { echo "::error title=Merge gate::Core tests hard (macOS) is $CORE_MACOS, not green"; exit 1; }
+      - name: Core tests (Linux) green
+        # The UI build no longer waits for them (27.11.); every verdict does. Skipped only when
+        # no group had to run (then the job does not start).
+        env:
+          CORE_LINUX: ${{ needs.core-linux.result }}
+          COUNT: ${{ needs.plan.outputs.count }}
+        run: |
+          echo "core-linux: $CORE_LINUX (groups planned: $COUNT)"
+          [ "$CORE_LINUX" = success ] || { [ "$CORE_LINUX" = skipped ] && [ "$COUNT" = 0 ]; } \
+            || { echo "::error title=Core tests (Linux)::$CORE_LINUX, not green"; exit 1; }
       - name: Smoke test green (draft)
         # Stage 1 (26.11.2026): a draft runs only the smoke test; the merge check is the full run
         # that starts when the pull request is marked ready for review.

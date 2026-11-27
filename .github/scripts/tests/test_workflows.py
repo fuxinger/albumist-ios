@@ -437,7 +437,9 @@ class TestFlightWiringTests(unittest.TestCase):
         draft = "(github.event_name == 'pull_request' && github.event.pull_request.draft)"
         # ci_gate.py and the merge look for "UI verdict (full)"; the gate runs also when no group
         # ran. Since stage 1 (26.11.2026) a ready pull request's run is full, a draft's the smoke test.
-        self.assertIn(f"name: UI verdict (${{{{ {draft} && 'smoke' || ({quick} && 'quick' || 'full') }}}})", verdict)
+        # Since 27.11. the nightly run's verdict is "night" (ci_gate.py never takes it).
+        self.assertIn(f"name: UI verdict (${{{{ {draft} && 'smoke' || ({quick} && 'quick' || "
+                      f"(github.event_name == 'schedule' && 'night' || 'full')) }}}})", verdict)
         self.assertIn("if: ${{ !cancelled() && needs.plan.result == 'success' && !inputs.release }}", verdict)
         self.assertIn("python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}", verdict)
         self.assertIn(f"UI_QUICK: ${{{{ {quick} && 'true' || '' }}}}", text)
@@ -449,7 +451,9 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertTrue(gate_step.startswith(f"        if: ${{{{ !{draft} }}}}\n"))
         # The hard macOS core tests belong to every full run, a ready pull request's too.
         core = text.split("\n  core-macos:\n", 1)[1].split("\n  build:\n", 1)[0]
-        self.assertIn(f"if: ${{{{ needs.plan.result == 'success' && !inputs.release && !inputs.quick && !{draft} }}}}", core)
+        # Not at night (27.11.): the nightly run tests large-library only.
+        self.assertIn(f"if: ${{{{ needs.plan.result == 'success' && !inputs.release && !inputs.quick && "
+                      f"github.event_name != 'schedule' && !{draft} }}}}", core)
         self.assertIn("      ALBUMIST_TIMING: hard\n", core)
         self.assertIn("    types: [opened, synchronize, reopened, ready_for_review]\n", text)
         self.assertIn("TEST_RUNNER_ALBUMIST_UI_QUICK: ${{ matrix.quick && '1' || '' }}", text)
@@ -817,7 +821,11 @@ class ReleaseSkipTests(unittest.TestCase):
                     self.assertRegex(build, rf"-scheme\s+{re.escape(scheme)}\b")
         # ui.yml's build runs in release mode (Linux core tests skipped there) and the TestFlight
         # run calls the UI flow after CI.
-        self.assertIn("(inputs.release && needs.core-linux.result == 'skipped')", job_field(ui, "build", "if"))
+        # Since 27.11. the build does not wait for the Linux core tests (9.5 min); the verdict
+        # needs them green instead.
+        self.assertNotIn("core-linux", job_field(ui, "build", "needs"))
+        self.assertIn("core-linux", job_field(ui, "verdict", "needs"))
+        self.assertIn('[ "$CORE_LINUX" = success ]', job_blocks(ui)["verdict"])
         tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         self.assertIn("tests", [need.strip() for need in job_field(tf, "ui", "needs").split(",")])
         self.assertIn("release: true", job_blocks(tf)["ui"])

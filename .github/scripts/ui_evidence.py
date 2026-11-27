@@ -759,7 +759,7 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
     checked = [] if stress_only or smoke_only else ([n for n in names if n in chosen] if chosen else names)
     if pr:
         # A pull request's verdict: the groups that run only before uploads, at night and by hand
-        # (large-library) are not checked; every TestFlight gate checks them (27.11.).
+        # (large-library) are not checked; the big TestFlight gate checks them (27.11.).
         checked = [n for n in checked if groups.on_pull_requests(n)]
     left_out = [] if stress_only or smoke_only else [n for n in names if n not in checked]
     verifier = verifier or Verifier()

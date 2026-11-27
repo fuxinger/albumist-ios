@@ -19,9 +19,11 @@ Used before a release tag (release.yml, without waiting). Green means:
      (ui_evidence.py gate) says every group is green, in full mode, for this app and its own
      test code and none is red for that pair. A run whose verdict is "quick" (by hand; the
      long device test skips itself) or "smoke" (a draft pull request since 26.11.2026) never
-     counts: the newest full run decides (a ready pull request's run is full since then),
-     and a commit with quick runs only needs a full "UI flow" run by hand (only the groups
-     whose quick and full test code differ run then).
+     counts: the newest full run decides, and a commit with quick runs only needs a full "UI
+     flow" run by hand (only the groups whose quick and full test code differ run then).
+     Since 27.11. a pull request's run and the nightly run never decide either: they leave out
+     a group (large-library, which pull requests do not run; the night runs only it). A
+     release needs a full run by hand on the commit (it reuses every green and runs the rest).
 
 TestFlight does not use this gate since 17.11.: testflight.yml runs CI, the UI flow and the
 stress pass itself, in the same run, before it uploads. Those called workflows are part of the
@@ -53,6 +55,11 @@ UI = "ui.yml"
 UI_VERDICT, UI_QUICK_VERDICT = "UI verdict (full)", "UI verdict (quick)"
 # A draft pull request's smoke run (rebuild stage 1, 26.11.2026): never counts, like a quick run.
 UI_SMOKE_VERDICT = "UI verdict (smoke)"
+# The nightly run checks only large-library (27.11.): never a release's evidence.
+UI_NIGHT_VERDICT = "UI verdict (night)"
+# Runs whose "UI verdict (full)" leaves a group out: a pull request's run (no large-library,
+# 27.11.) and the nightly run. A release needs a full run by hand (or TestFlight's) on the commit.
+NOT_ALL_GROUPS = ("pull_request", "schedule")
 NO_CI, NO_UI = "no CI run", "no UI flow run"
 RED = {"failure", "timed_out"}
 
@@ -145,7 +152,8 @@ def check():
     quick = 0
     for ui in sorted(ui_runs, key=lambda r: -r["run_number"]):
         jobs = api(f"actions/runs/{ui['id']}/jobs", per_page=100).get("jobs", [])  # its newest attempt
-        if any(j.get("name", "").endswith((UI_QUICK_VERDICT, UI_SMOKE_VERDICT)) for j in jobs):
+        if any(j.get("name", "").endswith((UI_QUICK_VERDICT, UI_SMOKE_VERDICT, UI_NIGHT_VERDICT)) for j in jobs) \
+                or ui.get("event") in NOT_ALL_GROUPS:
             quick += 1
             continue
         if ui["status"] != "completed":

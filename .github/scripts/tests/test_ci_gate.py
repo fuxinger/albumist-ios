@@ -145,6 +145,23 @@ class FullGateTests(unittest.TestCase):
                                 more=[(10, "completed", "success", ("full", "success"))])
         self.assertEqual(ci_gate.check()[:2], (True, True))
 
+    def test_pull_request_and_nightly_runs_never_decide_a_release(self):
+        # 27.11.: a pull request's "UI verdict (full)" leaves large-library out, the nightly
+        # "UI verdict (night)" checks only it; neither may open the release gate.
+        ci_gate.api = self.fake(ui=("completed", "success"), verdict=("night", "success"))
+        self.assertEqual(ci_gate.check()[:2], (False, False))
+        api = self.fake(ui=("completed", "success"), verdict=("full", "success"))
+        for event in ("pull_request", "schedule"):
+            with self.subTest(event=event):
+                ci_gate.api = lambda path, **params: (
+                    {"workflow_runs": [dict(r, event=event) for r in api(path)["workflow_runs"]]}
+                    if path == "actions/workflows/ui.yml/runs" else api(path, **params))
+                self.assertEqual(ci_gate.check()[:2], (False, False))
+        # A full run by hand on the commit decides as before.
+        ci_gate.api = self.fake(ui=("completed", "success"), verdict=("night", "success"),
+                                more=[(10, "completed", "success", ("full", "success"))])
+        self.assertEqual(ci_gate.check()[:2], (True, True))
+
     def test_a_ui_run_without_a_green_full_verdict_is_not_green(self):
         # A skipped or cancelled verdict job checked nothing (G5-08): never green either.
         for verdict in (("full", "failure"), ("full", "skipped"), ("full", "cancelled"), None):

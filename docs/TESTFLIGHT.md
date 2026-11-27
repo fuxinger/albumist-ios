@@ -236,8 +236,10 @@ Durchklick-Test (`large-library`, seit 27.11.: nicht in Pull Requests, sondern v
 nachts um 02:10 UTC auf main und von Hand), Rückgängig, unterbrochener Plan und Neuaufbau
 (`device-flows`), Gerätezustände, übrige Abläufe mit Kauf und Suche, Barrierefreiheit, voller
 Ablauf mit Video, Kontrast; bis zu fünf zugleich (im TestFlight-Lauf drei). Ein Pull Request
-läuft also mit sechs Gruppen, und sein „UI verdict (full)“ prüft `large-library` nicht; das Tor
-jedes TestFlight-Laufs prüft sie. Die Zählung großer Listen (0 bis 50.000 Fotos) prüfen die
+läuft also mit sechs Gruppen, und sein „UI verdict (full)“ prüft `large-library` nicht; das
+große Tor jedes TestFlight-Laufs prüft sie (das kleine und das schnelle Tor prüfen wie bisher nur
+ihre Gruppen). Ein Release (`ci_gate.py`) zählt Läufe von Pull Requests und den Nachtlauf
+(„UI verdict (night)“) nicht mehr und braucht einen vollen Lauf von Hand auf dem Commit. Die Zählung großer Listen (0 bis 50.000 Fotos) prüfen die
 Linux-Tests bei jeder Änderung (`ListBoundaryTests`). Seit 18.11. läuft
 eine Gruppe nur noch, wenn es für sie kein grünes Ergebnis für genau diese App und genau ihren
 Testcode gibt.

@@ -1246,11 +1246,16 @@ final class AccessibilityUITests: XCTestCase {
             element.exists && !element.frame.isEmpty && app.frame.contains(element.frame)
         }
         // No fixed sleep after a swipe (SleepRuleTests): XCTest waits for the app to be idle,
-        // and only the width and height of the label are measured, not its position.
+        // and only the width and height of the label are measured, not its position. Called
+        // below the label's section, so on down first, then back up. Down first went to the top
+        // and then up 6 times, which fell short once at the largest text size on a busy Mac
+        // (UI run 46049560731, xxxl settings; 5 runs before found it): now 10 each way, and how
+        // many swipes it took is logged, to see the margin.
         var swipes = 0
-        while !visible() && swipes < 4 { list.swipeDown(); swipes += 1; if !element.exists { element = app.staticTexts[identifier] } }
-        swipes = 0
-        while !visible() && swipes < 6 { list.swipeUp(); swipes += 1; if !element.exists { element = app.staticTexts[identifier] } }
+        while !visible() && swipes < 10 { list.swipeUp(); swipes += 1; if !element.exists { element = app.staticTexts[identifier] } }
+        var back = 0
+        while !visible() && back < 10 { list.swipeDown(); back += 1; if !element.exists { element = app.staticTexts[identifier] } }
+        print("UI_FACT \(screen) label '\(text)' after \(swipes) swipes on and \(back) back")
         guard visible() else {
             print("UI_STEP_MISSING \(screen) label '\(text)' on screen")
             XCTFail("\(screen): the label '\(text)' was not found on screen")

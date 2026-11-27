@@ -1574,6 +1574,10 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     else:
         command = ["xcodebuild", "test" if build else "test-without-building", "-project", args.project,
                    "-scheme", args.scheme, "CODE_SIGNING_ALLOWED=NO"]
+    # One simulator, one test at a time, said explicitly: a scheme or Xcode default that turned
+    # parallel testing on would clone the simulator on a 3-core, 7 GB runner (ChatGPT's pipeline
+    # review 27.11.); every timing and repeat rule here assumes a single test process.
+    command += ["-parallel-testing-enabled", "NO"]
     command += ["-destination", f"id={args.udid}", "-resultBundlePath", result] + chosen
     settled = time.monotonic()
     settle(lambda: simulator_probe(args.udid), limit=settle_limit(getattr(args, "deadline", 0) or 0, time.time()))

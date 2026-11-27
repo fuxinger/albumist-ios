@@ -9,22 +9,22 @@ enum Counted {
         parts.joined(separator: separator)
     }
 
-    /// "25 neue Alben, 236 Fotos einsortiert." Parts that are zero are left out
-    /// ("0 ergänzt" only raised the question what that means).
-    static func resultLine(_ summary: PlanSummary) -> String {
-        var parts: [String] = []
-        if summary.newAlbums > 0 { parts.append(String(localized: "\(summary.newAlbums) neue Alben")) }
-        if summary.extendedAlbums > 0 { parts.append(String(localized: "\(summary.extendedAlbums) ergänzt")) }
-        parts.append(String(localized: "\(summary.distinctAssets) Fotos einsortiert"))
-        return join(parts, separator: ", ") + "."
-    }
-
-    /// History row in Settings: "25 neu, 236 Fotos", zero parts left out.
-    static func historyLine(_ summary: PlanSummary) -> String {
-        var parts: [String] = []
-        if summary.newAlbums > 0 { parts.append(String(localized: "\(summary.newAlbums) neu")) }
-        if summary.extendedAlbums > 0 { parts.append(String(localized: "\(summary.extendedAlbums) ergänzt")) }
-        parts.append(String(localized: "\(summary.distinctAssets) Fotos"))
-        return join(parts, separator: ", ")
+    /// History row in Settings: what the change did, as the core decides it (`HistoryLine`), each
+    /// part a string of the catalog: "25 neu, 1 umbenannt, 236 Fotos"; "2 entfernt, 12 Fotos
+    /// herausgenommen" for a removal; "Nichts geändert" or "Nichts entfernt" for a change of nothing.
+    static func historyLine(_ plan: ChangePlan) -> String {
+        join(HistoryLine.parts(of: plan).map { part in
+            switch part {
+            case .created(let count): String(localized: "\(count) neu")
+            case .extended(let count): String(localized: "\(count) ergänzt")
+            case .renamed(let count): String(localized: "\(count) \(count.formatted()) umbenannt")
+            case .moved(let count): String(localized: "\(count) \(count.formatted()) verschoben")
+            case .photos(let count): String(localized: "\(count) \(count.formatted()) Fotos")
+            case .removed(let count): String(localized: "\(count) \(count.formatted()) entfernt")
+            case .takenOut(let count): String(localized: "\(count) \(count.formatted()) Fotos herausgenommen")
+            case .nothingChanged: String(localized: "Nichts geändert")
+            case .nothingRemoved: String(localized: "Nichts entfernt")
+            }
+        }, separator: ", ")
     }
 }

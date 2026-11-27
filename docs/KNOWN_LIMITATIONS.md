@@ -166,7 +166,7 @@
   Fotos des größeren): Bleibt der häufige Ort, weil er dir gehört (benannt, gewählt oder mit
   Album), fällt der Ort, an dem du öfter bist, weg. Fotos, die nur er hatte (bei Fuchs 87 von
   509 rund um Zwiesel), sind dann in keinem dieser beiden Vorschläge; ohne anderen Vorschlag
-  (etwa das Ortsalbum ihrer Stadt) bleiben sie „Nicht sortiert“, und ihre Reisen kommen nicht
+  (etwa das Ortsalbum ihrer Stadt) bleiben sie „Unsortiert“, und ihre Reisen kommen nicht
   zurück, weil du dort öfter bist. Mit Absicht so (Entscheidung vom
   18.11.2026), damit kein zweites Album für fast dieselben Fotos vorgeschlagen wird.
 
@@ -327,7 +327,7 @@ mit eingeschränkten Rechten: nur lesend.
 - Wird ein Hinzufügen in ein Album des Nutzers unterbrochen und ist der Ausgang unklar, nimmt
   Rückgängig ein dort doch angekommenes Foto nicht heraus (gewollt, zweite Gegenprüfung 1.1).
   Der Änderungsbeleg zeigt den Schritt als nicht bestätigt; nach dem Rückgängig (auch nach
-  „Alles zurücknehmen“) sagt Albumist, wie viele Fotos in welchem Album bleiben, und der Plan
+  „Alles rückgängig machen“) sagt Albumist, wie viele Fotos in welchem Album bleiben, und der Plan
   bleibt im Verlauf statt zu verschwinden (P2-01).
 - Zwei Pläne füllen dasselbe Album (Prüfer 2, P2-09, entschieden 26.11.2026): Rückgängig nimmt
   nur Fotos heraus, die kein anderer angenommener Vorschlag dort haben will (`ChangePlan.wanted`,

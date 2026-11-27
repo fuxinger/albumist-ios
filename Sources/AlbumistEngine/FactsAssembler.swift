@@ -40,8 +40,9 @@ public struct TextResult: Hashable, Sendable, Codable {
     }
 }
 
-/// Scope of a trial run ("Probelauf"): the first organization covers only one year or one
-/// album, so the user can check the result calmly before organizing everything.
+/// Scope of a trial run ("Albumist arbeitet mit", one year): the first organization covers
+/// only one year or one album, so the user can check the result calmly before organizing
+/// everything.
 public enum OrganizationScope: Hashable, Sendable, Codable {
     case all
     case year(Int)

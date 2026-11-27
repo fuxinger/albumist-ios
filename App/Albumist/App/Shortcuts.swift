@@ -19,7 +19,7 @@ struct SortNewPhotosIntent: AppIntent {
             return .result(dialog: "Die Analyse ist pausiert. Tippe in Albumist auf „Fortsetzen“, damit sie weitergeht.")
         }
         model.startAnalysis()
-        return .result(dialog: "Albumist sucht nach neuen Fotos. Die Vorschläge findest du in der Übersicht.")
+        return .result(dialog: "Albumist sucht nach neuen Fotos. Neue Vorschläge findest du dann auf der Seite „Vorschläge“.")
     }
 }
 

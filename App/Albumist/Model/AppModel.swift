@@ -272,7 +272,7 @@ final class AppModel {
     /// The photos the user ignored, and the state of each once it is no longer ignored, from
     /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
     /// "Nicht mehr ignorieren" are shown at once, before the recount.
-    @ObservationIgnored private var ignoredIDs: Set<AssetID> = []
+    private(set) var ignoredIDs: Set<AssetID> = [] // Design W2 H7: read by the long press (`isIgnored`), observed so its menu follows a tap
     @ObservationIgnored private var statesIfNotIgnored: [AssetID: AssetOrganizationState] = [:]
     @ObservationIgnored private var ignoreChanges = IgnoreChange()
     /// The store writes of ignore taps, one after the other in the order of the taps, and how
@@ -406,6 +406,24 @@ final class AppModel {
         return ranks
     }
 
+    /// "Anlegen" (the sorting show, the result's stack), the preview before it, the history and
+    /// the receipt (their covers): the capture dates and the preview ranks where they are not kept
+    /// (before the first refresh, the dates after a memory warning), made off the main thread
+    /// first, so none makes them here (verification review V13 of H13, and its remark on
+    /// `previewCovers`).
+    func makeDatesAndRanksOffMain() async { // Design W3 H13: "Anlegen" never makes the two tables on the main actor
+        guard datesCache == nil || previewRanksCache == nil else { return }
+        let facts = self.facts
+        let needsDates = datesCache == nil, needsRanks = previewRanksCache == nil
+        let made = await Task.detached(priority: .userInitiated) {
+            (dates: needsDates ? DerivedLibrary.creationDates(of: facts) : nil, ranks: needsRanks ? PreviewRank.ranks(of: facts) : nil)
+        }.value
+        // Refreshed meanwhile: the new facts came with their own.
+        guard DerivedLibrary.sameFacts(facts, self.facts) else { return }
+        if datesCache == nil, let dates = made.dates { datesCache = dates }
+        if previewRanksCache == nil, let ranks = made.ranks { previewRanksCache = ranks }
+    }
+
     /// iOS warned that memory runs low (review 18.11., P4-06): every registered cache is emptied
     /// (`MemoryPressure`), and the warning is written for the diagnostic report at once, so the
     /// report has it even when iOS ends the app right after.
@@ -481,6 +499,7 @@ final class AppModel {
         }
         saveSafetyBackup()
         if let rematched = try? await pipeline?.rematch() { snapshot = rematched }
+        choicesMade += 1
     }
 
     /// The photos of one atlas country (all years or one year), newest first.
@@ -545,7 +564,6 @@ final class AppModel {
     var historyHasMore = false
     /// Albums Albumist created or extended, with exactly the media it added.
     var managedAlbums: [ManagedAlbumState] = []
-    var plan: ChangePlan?
     /// A plan that stopped half way because the app was closed while it ran. Its free albums
     /// are held back until it is continued, kept or taken back (it continues without a new check).
     var interruptedPlan: ChangePlan? {
@@ -605,13 +623,24 @@ final class AppModel {
     /// Observed: the screen that asked draws again when they are made (`homeCandidates`).
     private var homeCandidatesCache: [HomeCandidate]?
     @ObservationIgnored private var homeCandidatesTask: Task<Void, Never>?
-    /// Counts the values of the facts (`makeHomeCandidates`).
-    @ObservationIgnored private var factsVersion = 0
+    /// Counts the values of the facts (`makeHomeCandidates`): their revision. The photos' ranks
+    /// and dates are made from the facts alone, so a screen that works something out of them keys
+    /// it on this cheap number (`.task(id:)`: search tiles, change covers). Observed.
+    private(set) var factsVersion = 0 // Design W3 H12 r2: observed and readable (review G2, G7)
     /// The detected home with its name, made when a screen asks (`detectedHomePlace`). Observed:
     /// the screen that asked draws again when it is named.
     private var detectedHomePlaceCache: HomePlace?
     @ObservationIgnored private var detectedHomeNameTask: Task<Void, Never>?
     var execution = ExecutionState()
+    /// The runs that ended since launch, of any plan, also an undo and a quick create: a
+    /// preview whose plan was made before the last of them makes it again (`PlanFreshness`).
+    private(set) var runsEnded = 0
+    /// The choices made since launch that change what a plan holds: a decision ("Nicht jetzt",
+    /// another album under "Anpassen"), a name, photos taken out of a suggestion, an album that
+    /// does not fit, decisions set back by a recheck. A preview open meanwhile makes its plan
+    /// again (`PlanFreshness`; review B of design wave 1, finding 2: a suggestion set aside on
+    /// another tab was made anyway by the preview left open).
+    private(set) var choicesMade = 0
     /// A constant: views observe its properties, not the model (see `ExecutionProgress`).
     let executionProgress = ExecutionProgress()
     var message: AppMessage?
@@ -666,9 +695,10 @@ final class AppModel {
     @ObservationIgnored private var executionClaimed = false
     /// A plan has its claim: it runs, or is about to (`execution.isRunning` follows after an await).
     var isExecutionClaimed: Bool { executionClaimed }
-    /// Decisions that exist only for an open preview: kept in memory, never written to disk.
-    /// Value: what was stored before the preview (nil = undecided).
-    @ObservationIgnored private var previewOnly: [AlbumistID: ProposalDecision?] = [:]
+    /// The picks of the previews opened straight from a button (`PreviewPicks`): decisions that
+    /// exist only while their preview is open, kept in memory, never written to disk; each
+    /// preview plans exactly its own (`buildPlan(for:)`).
+    @ObservationIgnored private var previewPicks = PreviewPicks()
 
     private enum Key {
         static let settings = "user.settings"
@@ -701,6 +731,8 @@ final class AppModel {
 
     private func load() async {
         guard phase == .loading else { return }
+        FirstAnalysisMomentStore.shared.launched() // Design W3 H13: the first 100 % (DS-08), read before the marker may be reset below
+        _ = FinishAnnouncementStore.shared // Design W3 H14: made at launch, iOS says long before a run ends if notifications are allowed (Q2)
         do {
             // The folder is made and marked off the main thread: in UI run 45589509156 its file
             // calls (setResourceValues) held the main thread at launch.
@@ -740,7 +772,10 @@ final class AppModel {
                 // Not readable even then: the app starts with the standard settings and says
                 // so, instead of not starting at all.
                 settings = OrganizationSettings()
-                message = .failure(String(localized: "Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. Bitte prüfe sie in den Einstellungen."))
+                message = .failure(String(localized: """
+                    Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. \
+                    Bitte prüfe sie in den Einstellungen.
+                    """))
             }
             await dropOldRootFolderDefault(store)
             decisions = try await store.value([AlbumistID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
@@ -1047,7 +1082,8 @@ final class AppModel {
         onboardingDone = true
         phase = .ready
         if access.canRead { LibraryChangeWatcher.shared.start() }
-        ContinuedAnalysis.requestNotificationPermission()
+        // Design W1 H5 (decision 3B): no notification question at the start; the analysis card
+        // asks with "Bescheid sagen, wenn fertig" once the analysis takes a while.
         startAnalysis(scope: scope, cause: .tap)
     }
 
@@ -1204,7 +1240,8 @@ final class AppModel {
             // it put "Albumist analysiert deine Fotos · Schritt 1 von 7" on the Lock Screen for
             // a few seconds after every check (device test 15.11. 23:16).
             if analysis.kind != .check {
-                ContinuedAnalysis.requestNotificationPermission()
+                // Design W1 H5 (decision 3B): iOS asks about notifications only from the
+                // analysis card ("Bescheid sagen, wenn fertig"), not at every start.
                 ContinuedAnalysis.begin()
             }
             retry.reset()
@@ -1277,12 +1314,15 @@ final class AppModel {
             let reason = end.report?.pausedBecause
             // The last reports of this run, before it is shown as ended.
             tick(run: generation)
+            let leg = firstAnalysisLeg(ended: end.isFinished, since: runClockStart, showedBar: runShowedBar) // Design W3 H13: the first 100 % (DS-08), X9
             let celebrate = AnalysisCardState.celebratesFinish(isComplete: end.isFinished,
-                                                               wasQuickCheck: !runShowedBar,
-                                                               ranFor: ContinuousClock.now - runClockStart)
+                                                               wasQuickCheck: !leg.showedBar, // Design W3 H13: the first 100 % (DS-08), X9
+                                                               ranFor: .seconds(leg.seconds)) // Design W3 H13: the first 100 % (DS-08), X9
             // Owed before the wait below: a run that starts meanwhile (a trip change, new photos,
             // "Neu prüfen") no longer drops "Analyse fertig" (`FinishMoment`).
             finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)
+            firstAnalysisRunEnded(finished: end.isFinished, celebrates: celebrate) // Design W3 H13: the first 100 % (DS-08), decided before the wait below
+            FinishAnnouncementStore.shared.runEnded(finished: end.isFinished, celebrates: celebrate) // Design W3 H14: "Analyse fertig" for VoiceOver
             // The trips it made are on screen only once its end has refreshed the overview.
             tripChangeLedger.runEnded(generation, madeSuggestions: finished.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true)
             analysis.stoppedAt = analysis.position
@@ -1329,6 +1369,7 @@ final class AppModel {
             if !Task.isCancelled {
                 let shown = finishMoment.afterWait(settled: settled.finishMoment,
                                                    appActive: UIApplication.shared.applicationState == .active)
+                FinishAnnouncementStore.shared.afterWait(shown) // Design W3 H14: said by the notification, or owed by the card
                 if shown.card {
                     analysisFinished = AnalysisFinished(photos: analysisCounts.analyzed, proposals: openProposals.count)
                     updateCard()
@@ -1483,6 +1524,7 @@ final class AppModel {
         lastStepRemainingCheck = nil
         lastEarlyLook = nil
         runShowedBar = false
+        firstAnalysisLegStarted() // Design W3 H13: the first 100 % (DS-08), a leg of the first analysis starts (X9)
         analysisBar = glide.value(at: .now, gliding: false)
         analysisFinish = nil
         analysisStepRemaining = nil
@@ -1579,6 +1621,7 @@ final class AppModel {
             }
         }
         if let progress = taken.progress { receive(progress, at: now) }
+        if taken.progress != nil { firstAnalysisLegRuns(since: runClockStart, showedBar: runShowedBar) } // Design W3 H13: the first 100 % (DS-08), X9
         // Hot iPhone, battery nearly empty: as the pipeline said last, after its reports.
         if taken.waiting != analysis.waiting { analysis.waiting = taken.waiting }
         // "Schon fertig": the early suggestions are read once they are saved (the report that
@@ -1724,6 +1767,7 @@ final class AppModel {
     /// The clock or the time zone was changed (`significantTimeChangeNotification`): the
     /// finish time is a clock time, so it is measured anew (review minor).
     func timeChanged() {
+        searchRevision &+= 1 // Design W3 H14: a search reads the day ("heute", "letzte Woche"; Q1)
         guard analysis.isRunning, let last = lastTickClock else { return }
         let now = (ContinuousClock.now, Date())
         lastTickClock = now
@@ -1909,6 +1953,7 @@ final class AppModel {
             if end.isFinished, analysis.outcome.refined(with: ended) {
                 // Complete now: nothing to go on with (review of c772325: the card read 100 %
                 // and then "Macht da weiter · 37 %" from the marker of the run before).
+                firstAnalysisCompletedAway() // Design W3 H13: the first 100 % (DS-08) happened unseen
                 AnalysisMarker.finished()
                 analysis.resumeFrom = nil
                 analysis.resumed = nil
@@ -2160,94 +2205,68 @@ final class AppModel {
             .prefix(limit)).inDisplayOrder()
     }
 
-    /// "Die ersten N jetzt anlegen": keeps the biggest accepted suggestions within the free
-    /// albums; the others go back to the open list (nothing is lost) and the plan is rebuilt.
-    func keepFirstAccepted(_ limit: Int) async {
-        let accepted = acceptedProposals.sorted { ($0.assetIDs.count, $1.title) > ($1.assetIDs.count, $0.title) }
-        for p in accepted.dropFirst(max(0, limit)) { decisions[p.id] = nil }
-        persistDecisions()
-        await buildPlan()
+    /// "Die ersten N jetzt anlegen": the preview keeps its biggest suggestions within the free
+    /// albums; the others are given back as if never picked (nothing is lost: they show what
+    /// they showed before) and its plan is made again.
+    func keepFirst(_ limit: Int, in selection: PreviewSelection) async -> ChangePlan? {
+        let planned = plannedProposals(in: selection).sorted { ($0.assetIDs.count, $1.title) > ($1.assetIDs.count, $0.title) }
+        let others = Set(planned.dropFirst(max(0, limit)).map(\.id))
+        show(previewPicks.giveBack(selection, only: others, shown: decisions))
+        return await buildPlan(for: selection)
     }
 
     func accept(_ proposals: [AlbumProposal]) {
         for p in proposals { setDecision(recommendedDecision(for: p), for: p) }
     }
 
-    /// Decisions set only for a preview opened straight from a button ("Dein Startpaket",
-    /// "Album anlegen"). Two previews can select the same suggestion, also with different
-    /// picks (one on each tab), and end in any order (`previewPicks`).
-    struct PreviewSelection {
-        fileprivate let id = UUID()
-        fileprivate let picks: [(proposal: AlbumistID, chosen: ProposalDecision)]
-    }
-
-    /// The picks of the open previews per suggestion, the latest last: the suggestion shows the
-    /// latest. They start anew with each preview-only mark (`previewOnly`): a preview that was
-    /// open when the user chose on purpose has nothing to give back any more.
-    @ObservationIgnored private var previewPicks: [AlbumistID: [(selection: UUID, chosen: ProposalDecision)]] = [:]
+    /// The picks of one preview opened straight from a button ("Dein Startpaket", "N Alben
+    /// anlegen", "Ergänzen …", "Anlegen", "Album anlegen"): its route carries it, and the
+    /// preview plans exactly these picks (`buildPlan(for:)`).
+    typealias PreviewSelection = PreviewPicks.Selection
 
     /// Selects suggestions for a preview. Leaving the preview without creating anything must
     /// undo this with `endPreview(_:)`: nothing may stay selected that the user never chose
-    /// (Fuchs, 14.11.: "Ich hatte aber noch nichts ausgewählt").
+    /// (Fuchs, 14.11.: "Ich hatte aber noch nichts ausgewählt"). In memory only: if the app is
+    /// closed during the preview, nothing stays selected.
     func selectForPreview(_ items: [(AlbumProposal, ProposalDecision)]) -> PreviewSelection {
-        let selection = PreviewSelection(picks: items.map { (proposal: $0.0.id, chosen: $0.1) })
-        // In memory only: if the app is closed during the preview, nothing stays selected.
-        for (id, chosen) in selection.picks {
-            if previewOnly[id] == nil {
-                previewOnly[id] = .some(decisions[id])
-                previewPicks[id] = []
-            }
-            previewPicks[id, default: []].append((selection: selection.id, chosen: chosen))
-            decisions[id] = chosen
-        }
+        let (selection, changes) = previewPicks.select(items.map { PreviewPicks.Pick($0.0.id, $0.1) }, shown: decisions)
+        show(changes)
         return selection
     }
 
     /// Back from a preview: a suggestion that still shows its pick shows the pick of the latest
-    /// preview still open for it, or, with none left, what was there before them all; the mark
-    /// goes with the last of them. In any order: back from "Album anlegen" inside the starter
-    /// set's preview, the suggestion is the starter set's pick again, and leaving the starter set
-    /// then gives it back (it stayed "Ausgewählt" and was saved); with the starter set left
-    /// first, "Album anlegen" keeps its own pick until it ends, then gives back what was there
-    /// before both. Chosen on purpose meanwhile (the mark is gone), applied (cleared by the
-    /// execution) or changed some other way ("passt nicht", "Die ersten N jetzt anlegen"):
-    /// stays as it is.
+    /// preview still open for it, or, with none left, what was there before them all
+    /// (`PreviewPicks.giveBack`). In any order: back from "Album anlegen" inside the starter
+    /// set's preview, the suggestion is the starter set's pick again, and leaving the starter
+    /// set then gives back what was there before both. Chosen on purpose meanwhile, applied
+    /// (cleared by the execution) or set back by a recheck: stays as it is.
     func endPreview(_ selection: PreviewSelection) {
-        for (id, chosen) in selection.picks.reversed() {
-            guard var picks = previewPicks[id],
-                  let index = picks.lastIndex(where: { $0.selection == selection.id }) else { continue }
-            picks.remove(at: index)
-            previewPicks[id] = picks.isEmpty ? nil : picks
-            guard let before = previewOnly[id] else { continue }
-            if decisions[id] == chosen { decisions[id] = picks.last?.chosen ?? before }
-            if picks.isEmpty { previewOnly[id] = nil }
-        }
+        show(previewPicks.giveBack(selection, shown: decisions))
     }
 
-    /// "Auswahl aufheben" on the preview: every selected suggestion goes back to the open list.
-    func clearSelection() {
-        for (id, decision) in decisions where decision.isAccepted { decisions[id] = nil }
-        previewOnly.removeAll()
-        persistDecisions()
+    /// The suggestions the preview of `selection` plans, in the app's order of suggestions:
+    /// exactly its picks that still stand. A suggestion chosen under "Anpassen", or left
+    /// selected by an older version's basket, joins no preview it was not picked for (second
+    /// review of design wave 1, 20.11.).
+    func plannedProposals(in selection: PreviewSelection) -> [AlbumProposal] {
+        let planned = previewPicks.planned(in: selection, shown: decisions)
+        return proposals.filter { planned[$0.id] != nil }.inDisplayOrder()
+    }
+
+    /// Shows what a call to `previewPicks` changed.
+    private func show(_ changes: [PreviewPicks.Change]) {
+        for change in changes { decisions[change.proposal] = change.decision }
     }
 
     var acceptedProposals: [AlbumProposal] {
         proposals.filter { decisions[$0.id]?.isAccepted == true }
     }
 
-    /// Selected suggestions that still change something in Photos: an album that is kept
-    /// as it is needs nothing, so it does not count on the "N ausgewählte Alben anlegen" button.
-    var proposalsToApply: [AlbumProposal] {
-        proposals.filter { p in
-            guard let decision = decisions[p.id] else { return false }
-            return decision.isAccepted && !decision.isKeepExisting
-        }
-    }
-
     func setDecision(_ decision: ProposalDecision, for proposal: AlbumProposal) {
         let wasRejected = decisions[proposal.id] == .reject
         decisions[proposal.id] = decision
-        previewOnly[proposal.id] = nil // chosen on purpose now
+        previewPicks.unmark(proposal.id) // chosen on purpose now
+        choicesMade += 1
         persistDecisions()
         if decision == .reject {
             let override = UserOverride(scope: .source(proposal.id), decision: .rejectProposal)
@@ -2262,7 +2281,7 @@ final class AppModel {
     }
 
     /// Removes stored "Nicht jetzt" rejections, so the suggestions can be offered and applied again.
-    private func removeRejection(of sources: Set<AlbumistID>?) async {
+    func removeRejection(of sources: Set<AlbumistID>?) async {
         guard let store, let all = try? await store.overrides() else { return }
         for o in all where o.decision == .rejectProposal {
             guard case .source(let s) = o.scope, sources?.contains(s) ?? true else { continue }
@@ -2306,7 +2325,7 @@ final class AppModel {
         return (around.before.map { trips[$0] }, around.after.map { trips[$0] })
     }
 
-    /// "Reise teilen": a new trip starts on `day`. The analysis runs again right away.
+    /// "Reise aufteilen": a new trip starts on `day`. The analysis runs again right away.
     func splitTrip(at day: TripWorkshop.Day) async -> Bool {
         await changeTrips { $0.splitting(at: TripWorkshop.splitInstant(before: day)) }
     }
@@ -2667,21 +2686,22 @@ final class AppModel {
     /// pointed at the album is dropped, and the matching runs again right away.
     func rejectMatch(_ album: CollectionID, for proposal: AlbumProposal) async {
         guard let store else { return }
+        // Counted once the matching ran again (or failed): a preview made again before would
+        // still plan with the album.
+        defer { choicesMade += 1 }
         do {
             try await store.addOverride(UserOverride(scope: .albumForSource(album, proposal.id), decision: .notMatchingAlbum))
             saveSafetyBackup()
-            switch decisions[proposal.id] {
-            case .extendExisting(album)?, .keepExisting(album)?:
+            let usesAlbum = switch decisions[proposal.id] {
+            case .extendExisting(album)?, .keepExisting(album)?: true
+            case .renameExisting(let id, _, _)?, .moveExisting(let id, _, _)?: id == album
+            default: false
+            }
+            if usesAlbum {
                 decisions[proposal.id] = nil
+                // Settled: a preview open for it neither plans that album nor gives it back.
+                previewPicks.unmark(proposal.id)
                 persistDecisions()
-            case .renameExisting(let id, _, _)? where id == album:
-                decisions[proposal.id] = nil
-                persistDecisions()
-            case .moveExisting(let id, _, _)? where id == album:
-                decisions[proposal.id] = nil
-                persistDecisions()
-            default:
-                break
             }
             if let rematched = try await pipeline?.rematch() { snapshot = rematched }
         } catch {
@@ -2695,14 +2715,16 @@ final class AppModel {
         guard !ids.isEmpty else { return }
         for id in ids {
             decisions[id] = nil
-            previewOnly[id] = nil
+            previewPicks.unmark(id)
         }
+        choicesMade += 1
         persistDecisions()
     }
 
     /// A blank title removes the name (the suggestion says "Name fehlt" again).
     func setUserTitle(_ title: String, for proposal: AlbumProposal) {
         userTitles[proposal.id] = UserTitle.stored(title)
+        choicesMade += 1
         Task { [userTitles] in
             try? await store?.setValue(userTitles, forKey: Key.titles)
             saveSafetyBackup()
@@ -2720,31 +2742,34 @@ final class AppModel {
 
     /// What may be written to disk: preview-only selections are replaced by what was there before.
     private func storedDecisions(_ current: [AlbumistID: ProposalDecision]) -> [AlbumistID: ProposalDecision] {
-        var result = current
-        for (id, previous) in previewOnly { result[id] = previous }
-        return result
+        previewPicks.stored(current)
     }
 
     // MARK: Plan and execution
 
-    func buildPlan() async {
-        guard let store else { return }
+    /// The plan of a preview of suggestions: exactly the picks of `selection` that still stand
+    /// (`PreviewPicks.planned`), each as the preview picked it. The preview keeps it itself
+    /// (`PlanReviewView`), so a preview on another tab never replaces it.
+    func buildPlan(for selection: PreviewSelection) async -> ChangePlan? {
+        guard let store else { return nil }
         // The user's latest changes in Photos count before anything is planned.
-        guard let current = await reconcileManagedAlbums() else { return }
+        guard let current = await reconcileManagedAlbums() else { return nil }
         do {
             let overrides = try await planningOverrides(store)
-            let confirmed = acceptedProposals.map { proposal in
-                var decision = decisions[proposal.id] ?? .undecided
+            let planned = previewPicks.planned(in: selection, shown: decisions)
+            let confirmed = proposals.compactMap { proposal -> ConfirmedProposal? in
+                guard var decision = planned[proposal.id] else { return nil }
                 if case .createNew(nil, let path) = decision, let title = userTitles[proposal.id], !title.isEmpty {
                     decision = .createNew(title: title, folderPath: path)
                 }
                 return ConfirmedProposal(proposal: proposal, decision: decision)
             }
-            plan = MainThreadWatch.shared.section("make plan") {
+            return MainThreadWatch.shared.section("make plan") {
                 OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle).makePlan(from: confirmed, inventory: current, overrides: overrides)
             }
         } catch {
             message = .failure(error.localizedDescription)
+            return nil
         }
     }
 
@@ -2768,12 +2793,16 @@ final class AppModel {
         }
     }
 
-    /// Applies a reviewed plan. Only one plan runs at a time.
-    func execute(_ plan: ChangePlan) async {
-        guard await changesHaveFullAccess() else { return }
-        guard claimExecution() else { return }
+    /// Applies a reviewed plan. Only one plan runs at a time. True when it ran (it started, and
+    /// may have ended with errors); false when it was refused or another plan had the turn.
+    @discardableResult
+    func execute(_ plan: ChangePlan) async -> Bool {
+        guard await changesHaveFullAccess() else { return false }
+        guard claimExecution() else { return false }
         defer { releaseExecution() }
         await run(plan)
+        // Still this run's: the claim is held until the end of this function.
+        return executionProgress.planID == plan.id
     }
 
     /// Undo, "Rest rückgängig machen" and finishing or taking back an interrupted plan change
@@ -2825,6 +2854,17 @@ final class AppModel {
 
     /// Runs a plan; the caller holds the execution claim. `resume`: an interrupted plan that
     /// was confirmed before (its free albums were checked then).
+    /// Why `plan` may not run on the free albums left (nil: it may): an undo and a continuation
+    /// always run. After a new install the count comes from the keychain, read off the main thread.
+    private func freeAlbumsRefusal(_ plan: ChangePlan, resume: Bool) async -> String? {
+        await Purchases.shared.keychainRead()
+        guard plan.reverts == nil, !resume else { return nil }
+        guard !Purchases.shared.allows(albums: plan.freeAlbumUse(applied: false)) else { return nil }
+        return String(localized: """
+            Die Gratis-Alben reichen für diese Änderungen nicht. Schalte Albumist frei, um weiterzumachen.
+            """)
+    }
+
     private func run(_ plan: ChangePlan, resume: Bool = false) async {
         guard let store else { return }
         // One plan at a time, also when one was cut off: that one is settled first (plugin
@@ -2834,11 +2874,8 @@ final class AppModel {
             return
         }
         // The free albums are checked here too, not only on the review screen.
-        let wanted = plan.freeAlbumUse(applied: false)
-        // After a new install the count comes from the keychain, read off the main thread.
-        await Purchases.shared.keychainRead()
-        if plan.reverts == nil, !resume, !Purchases.shared.allows(albums: wanted) {
-            execution = ExecutionState(planID: plan.id, failure: String(localized: "Die Gratis-Alben reichen für diese Änderungen nicht. Schalte Albumist frei, um weiterzumachen."))
+        if let refusal = await freeAlbumsRefusal(plan, resume: resume) {
+            execution = ExecutionState(planID: plan.id, failure: refusal)
             return
         }
         // Every plan runs only once the results of finished plans are stored (after a full disk
@@ -2894,7 +2931,7 @@ final class AppModel {
         await reloadInterruptedPlan()
         keepAwake.end()
         execution.isRunning = false
-        self.plan = nil
+        runsEnded += 1
         // A run that ended early by itself keeps its wait here too (like `releaseExecution`):
         // only a try that came due during the plan starts now (second review of the PhotoKit
         // limits, 5).
@@ -2918,8 +2955,14 @@ final class AppModel {
     /// branch: an interrupted undo was called "Anlegen" too).
     private var interruptedPlanFirst: String {
         interruptedPlan?.reverts != nil
-            ? String(localized: "Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
-            : String(localized: "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
+            ? String(localized: """
+                Ein früheres Rückgängigmachen wurde unterbrochen. \
+                Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach geht es hier weiter.
+                """)
+            : String(localized: """
+                Ein früheres Anlegen wurde unterbrochen. \
+                Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach geht es hier weiter.
+                """)
     }
 
     /// The plan offered to continue, take back or keep, read again from the store after every
@@ -2974,7 +3017,7 @@ final class AppModel {
                 // those of this plan whose steps never ran (review of 6c6ef79).
                 for id in result.appliedSources where newDecisions[id]?.isAccepted == true {
                     newDecisions[id] = nil
-                    previewOnly[id] = nil
+                    previewPicks.unmark(id)
                 }
             } else if let original = result.reverts, result.status == .completed, let executed = try await store.plan(original) {
                 // A completed undo (its free albums came back above, audit 2, 6.3).
@@ -2992,7 +3035,7 @@ final class AppModel {
             // by an album list that may lack albums (limited access, iCloud sync).
             for id in ProposalDecision.keepsOfAlbumsDeleted(by: result, in: newDecisions) {
                 newDecisions[id] = nil
-                previewOnly[id] = nil
+                previewPicks.unmark(id)
             }
             var done = result
             done.finalizedAt = Date()
@@ -3165,7 +3208,7 @@ final class AppModel {
             // put it into `message`), as the undo of an interrupted plan does (second review of
             // resume-fill, D2).
             let reasons = [execution.failure, message?.text].compactMap { $0 }
-            message = .failure(([String(localized: "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Einstellungen › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen.")]
+            message = .failure(([String(localized: "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Alben › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen.")]
                                 + reasons.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }).joined(separator: "\n\n"))
         }
         // Read again, not cleared: a plan that stopped once more stays offered, and so does
@@ -3222,7 +3265,7 @@ final class AppModel {
         // The selection before: a completed undo gives it back to the suggestions the plan
         // carried out (they leave it with the plan's results).
         let selection = decisions
-        let previews = previewOnly
+        let previews = previewPicks
         do {
             let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted)
             let way = InterruptedPlanUndo(settled: settled, current: try await library.currentInventory())
@@ -3242,20 +3285,19 @@ final class AppModel {
                 }
             case .undone:
                 for id in way.selectionToRestore(after: outcome) {
-                    decisions[id] = selection[id]
-                    previewOnly[id] = previews[id]
+                    decisions[id] = previewPicks.restore(id, shownBefore: selection[id], from: previews)
                 }
                 persistDecisions()
             case .partlyUndone:
                 // The receipt offers "Rest rückgängig machen".
-                message = .failure([String(localized: "Nicht alles ließ sich zurücknehmen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest zurücknehmen."),
+                message = .failure([String(localized: "Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen."),
                                     execution.failure].compactMap { $0 }.joined(separator: "\n\n"))
             case .notStarted:
                 // Nothing was taken back: the receipt offers "Rückgängig machen" (review of 6c6ef79).
                 // Keeps the reason storing earlier results failed (e.g. a full disk), which
                 // finalize put into `message` (review of 6b34b20).
                 let reasons = [execution.failure, message?.text].compactMap { $0 }
-                message = .failure(([String(localized: "Albumist konnte den unterbrochenen Vorgang gerade nicht zurücknehmen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn zurücknehmen.")]
+                message = .failure(([String(localized: "Albumist konnte den unterbrochenen Vorgang gerade nicht rückgängig machen. Er steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du ihn rückgängig machen.")]
                                     + reasons.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }).joined(separator: "\n\n"))
             case .undoInterrupted, .resultsNotStored:
                 // Offered on the overview again: the undo that was cut off, or the one that
@@ -3360,6 +3402,7 @@ final class AppModel {
         }
         lines.append("analysis scope \(scopeText), photos \(analysisCounts.photos), analysed \(analysisCounts.analyzed), unreadable \(analysisCounts.unreadable), running \(analysis.isRunning), waiting \(analysis.waiting?.rawValue ?? "no"), needs resume \(analysis.needsResume), background task \(ContinuedAnalysis.isActive)")
         lines.append("image loads \(ImageLoadStats.summary)")
+        lines += CoverStats.reportLines() // Design W1 H2: how many photo-card covers were sharp, without photo ids
         lines.append("decisions copy \(lastSafetyBackup.map { iso.string(from: $0) } ?? "none"), albums waiting for access \(pendingLibraryRestore != nil)")
         if let store {
             let overrides = (try? await store.overrides().count) ?? -1
@@ -3425,7 +3468,7 @@ final class AppModel {
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
             message = AppMessage(title: interruptedPlan?.reverts != nil
-                                 ? String(localized: "Erst das unterbrochene Zurücknehmen abschließen")
+                                 ? String(localized: "Erst das unterbrochene Rückgängigmachen abschließen")
                                  : String(localized: "Erst das unterbrochene Anlegen abschließen"),
                                  text: interruptedPlanFirst)
             return
@@ -3485,15 +3528,10 @@ final class AppModel {
                                                            keptForOthers: keep, cached: inventory)
     }
 
-    /// Whether "Alles zurücknehmen" for the interrupted plan deletes an album or folder.
+    /// Whether "Alles rückgängig machen" for the interrupted plan deletes an album or folder.
     func interruptedUndoDeletesCollections() async -> Bool {
         guard let interrupted = interruptedPlan, interrupted.reverts == nil else { return false }
         return await DeleteQuestion(library: library).interruptedUndo(interrupted, cached: inventory)
-    }
-
-    /// Whether taking Albumist's changes back out of one album deletes the album.
-    func removalDeletesAlbum(_ state: ManagedAlbumState) -> Bool {
-        ManagedAlbumTracker().removalPlan(for: state, current: inventory).deletesCollections
     }
 
     /// What an undo left in Photos because Albumist cannot prove it was its own doing
@@ -3502,7 +3540,7 @@ final class AppModel {
     static func remainderMessage(_ remainder: UndoRemainder, inHistory: Bool) -> AppMessage? {
         guard !remainder.isEmpty else { return nil }
         func name(_ path: [String], _ title: String) -> String { (path + [title]).joined(separator: " › ") }
-        var lines = [String(localized: "Albumist hat zurückgenommen, was sicher von Albumist war.")]
+        var lines = [String(localized: "Albumist hat rückgängig gemacht, was sicher von Albumist war.")]
         for c in remainder.collections {
             let n = name(c.folderPath, c.title)
             lines.append(c.isFolder ? String(localized: "Der Ordner „\(n)“ bleibt in Fotos.") : String(localized: "Das Album „\(n)“ bleibt in Fotos."))
@@ -3511,7 +3549,7 @@ final class AppModel {
             lines.append(String(localized: "\(p.assets.count) Fotos bleiben im Album „\(name(p.folderPath, p.title))“."))
         }
         lines.append(String(localized: "Albumist kann nicht sicher sagen, ob das von Albumist ist oder von dir, und lässt es deshalb, wie es ist. Sieh in Fotos nach, ob du es behalten möchtest."))
-        if inHistory { lines.append(String(localized: "Der Vorgang bleibt unter Einstellungen › Verlauf und Rückgängig.")) }
+        if inHistory { lines.append(String(localized: "Der Vorgang bleibt unter Alben › Verlauf und Rückgängig.")) }
         return AppMessage(title: String(localized: "Etwas bleibt in Fotos"), text: lines.joined(separator: "\n"))
     }
 
@@ -3547,6 +3585,7 @@ final class AppModel {
 
     private func libraryInputsChanged() {
         libraryInputs += 1
+        searchRevision &+= 1 // Design W3 H14: a search for "Unsortiert" reads these too (Q1)
         if libraryBucketsShown && !movingInLibrary { makeLibraryBuckets() }
     }
 
@@ -3743,10 +3782,22 @@ final class AppModel {
     private let searchIndexStore = SearchIndexStore()
     /// The names of places the index was made with.
     @ObservationIgnored private var searchIndexPlaceNames: [NamedPlace] = []
+    /// The revision of everything a search reads, which the search page's answer keys on
+    /// (`SearchAnswer`, review Q1 of H14's round 3): raised where the index is emptied (the facts,
+    /// the albums, the home, the names of places), where the library's inputs change (the facts,
+    /// the photos' states, the settings and the part of the library, which a search for
+    /// "Unsortiert" reads too), and at a new day or clock (`timeChanged`: "heute", "letzte
+    /// Woche"). Not observed: the page asks as its task starts, never while it stays open.
+    @ObservationIgnored private var searchRevision = 0 // Design W3 H14: the search page's answer keys on it (Q1)
 
     private func resetSearchIndex() {
         searchIndexStore.invalidate()
+        searchRevision &+= 1 // Design W3 H14: what the index is made from changed (Q1)
     }
+
+    /// The revision as a search reads now: the names of places are compared as the index is asked
+    /// for (`searchIndex()`), so a name typed since counts before the revision is read.
+    func searchRevisionNow() async -> Int { _ = await searchIndex(); return searchRevision } // Design W3 H14: asked by the search page (Q1)
 
     func searchIndex() async -> SearchIndex {
         // The names the user gave places, as their suggestions show them (`userTitles`): read

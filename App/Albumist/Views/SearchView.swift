@@ -6,15 +6,21 @@ import AlbumistCore
 /// typing; the chips show how the query was understood, with a photo count per term.
 struct SearchView: View {
     @Environment(AppModel.self) private var model
-    @State private var query = ""
+    /// What is typed, held by the tabs (design wave 3, DS-12a), wherever `MainTabs.searchField`
+    /// puts the field: on the tab view as Apple's search tab (iOS 26), or on this page (iOS 27).
+    let input: SearchInput
     @State private var result = SearchResult()
-    /// The text `result` belongs to; the field runs ahead while a search is pending.
-    @State private var resultQuery = ""
-    @State private var searching = false
+    /// The text `result` belongs to (the field runs ahead while a search is pending), the revision
+    /// of what a search reads it was made with, and whether a search runs: coming back to the tab
+    /// searches again only for a search that did not finish, a change of anything a search reads
+    /// or a new text (`SearchAnswer`, reviews T3 and Q1 of H14).
+    @State private var answer = SearchAnswer()
     /// Completions for the word being typed, from the user's own library.
     @State private var suggestions: [SearchSuggestion] = []
     /// Starting points for the empty field, from the user's own library.
     @State private var featured: [SearchSuggestion] = []
+    /// The same with a photo each (design wave 3, DS-13): shown as tiles once there are any.
+    @State private var starts: [SearchStartingPoint] = []
     /// A tap opens the photo large, its details behind "i" (design review W12).
     @State private var viewing: PhotoViewer.Start?
     /// The tapped thumbnail (a photo can be in the best hits and in the grid).
@@ -23,8 +29,8 @@ struct SearchView: View {
     /// Thumbnails shown so far; the count and "Als Album anlegen" always cover every hit.
     @State private var shown = Self.page
     private static let page = 2_000
-    /// The field is shown and focused when the tab opens; testers did not find a hidden one.
-    @State private var searchActive = false
+    /// The side a photo's thumbnail is asked for, and its long press lifts that image.
+    private static let photoSide: CGFloat = 110
     @Namespace private var zoom
     /// The column of a suggestion's symbol grows with the text size: a fixed 24 pt let the
     /// symbol run over the word at the largest size (review P3-12 / G3-07).
@@ -33,9 +39,21 @@ struct SearchView: View {
     /// Shown only before the library is analysed (afterwards the library's own starting points).
     /// Translated (design review W6: English devices saw "Strand 2024"); the search understands
     /// both languages, see `SearchExampleTests`.
-    private let examples: [LocalizedStringResource] = ["Strand 2024", "Italien", "Rechnungen", "Videos", "Nicht sortiert", "Screenshots Bestellung"]
+    private let examples: [LocalizedStringResource] = ["Strand 2024", "Italien", "Rechnungen", "Videos", "Unsortiert", "Screenshots Bestellung"]
+
+    /// The field's text: the starting points and the completions set it, the search follows it.
+    private var query: String {
+        get { input.text }
+        nonmutating set { input.text = newValue }
+    }
 
     private var isEmptyQuery: Bool { query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// The field's prompt, wherever the field sits: an example the search understands, a whole
+    /// sentence when Apple Intelligence can turn it into terms (`SmartAssistant`).
+    static var prompt: Text {
+        SmartAssistant.isAvailable ? Text("z. B. Grillen bei Oma letzten Sommer") : Text("z. B. Hunde Italien 2023")
+    }
 
     var body: some View {
         ScrollView {
@@ -44,7 +62,7 @@ struct SearchView: View {
                     startingPoints
                 } else {
                     if !suggestions.isEmpty { suggestionList }
-                    if let rewrite = model.lastSearchRewrite, !searching {
+                    if let rewrite = model.lastSearchRewrite, !answer.searching {
                         Label("Verstanden als: \(rewrite)", systemImage: "apple.intelligence")
                             .font(.footnote).foregroundStyle(.noteText)
                     }
@@ -58,8 +76,10 @@ struct SearchView: View {
                     if result.isRelaxed { relaxedNote }
                     if result.ids.isEmpty {
                         // The previous answer stays while the next one is computed (no flicker).
-                        if resultQuery.isEmpty {
-                            ProgressView().frame(maxWidth: .infinity)
+                        if answer.text.isEmpty {
+                            // The first answer is worked out: calm tiles where the hits will be
+                            // (design wave 3, DS-18: no spinner).
+                            waitingTiles(count: 6)
                                 .accessibilityLabel(Text("Suche läuft"))
                         } else {
                             emptyState
@@ -79,22 +99,41 @@ struct SearchView: View {
         }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {}
+                .sheetSize(.page)
         }
         // "Widerrufen" after ignoring a photo from its detail (design review D4).
         .safeAreaInset(edge: .bottom) { IgnoreUndoBar() }
         .animation(.snappy, value: model.lastIgnored)
-        .searchable(text: $query, isPresented: $searchActive,
-                    prompt: SmartAssistant.isAvailable ? Text("z. B. Grillen bei Oma letzten Sommer") : Text("z. B. Hunde Italien 2023"))
-        .onAppear { if query.isEmpty { searchActive = true } }
-        // Starting points follow the library (a finished analysis brings places and topics).
-        .task(id: model.facts.count) { featured = await model.featuredSearches() }
+        // The field here, under the page's title, on iOS 27 (`MainTabs.searchField`); on iOS 26
+        // it sits on the tab view and this page reads what is typed there.
+        .searchField(input, on: .page)
+        // Starting points follow every change of the facts (a finished analysis brings places and
+        // topics, the pictures of photos it has looked at since), also one of a photo's rank
+        // alone: the text step finds a sensitive document without changing a count, and its
+        // tile does not keep showing it (review G2). Both lists are shown together; a task
+        // cancelled meanwhile starts no more work and keeps nothing.
+        .task(id: model.factsVersion) {
+            let words = await model.featuredSearches()
+            guard !Task.isCancelled else { return }
+            let made = await model.searchStartingPoints()
+            guard !Task.isCancelled else { return }
+            featured = words
+            starts = made
+        }
         .task(id: query) {
             let text = query
             guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
-                result = SearchResult(); resultQuery = ""; suggestions = []; searching = false
+                result = SearchResult(); answer.emptied(); suggestions = []
                 return
             }
-            searching = true
+            // The task starts again each time the search tab comes back: the finished answer for
+            // this text stays, with the pages shown, and nothing is asked again, unless something a
+            // search reads changed since (`AppModel.searchRevisionNow`: new facts, an ignored
+            // photo, an album, a place's name, the home, the day). Asked only here, as the page
+            // comes back or the text changes: what is done on the page leaves its hits as they are.
+            let revision = await model.searchRevisionNow()
+            guard !Task.isCancelled else { return }
+            guard answer.starts(text, revision: revision) else { return }
             // Completions right away; the search itself waits until typing pauses.
             let completions = await model.searchSuggestions(for: text)
             suggestions = completions
@@ -104,34 +143,43 @@ struct SearchView: View {
             guard !Task.isCancelled else { return }
             // A word the completions continue is still being typed, never "nicht erkannt" (P3-13).
             result = found.beside(completions, for: text)
-            resultQuery = text
-            shown = Self.page
-            searching = false
+            // A new text shows its hits from the first page; the same one keeps the pages shown.
+            if answer.shows(text, revision: revision) { shown = Self.page }
         }
     }
 
     // MARK: Parts
 
+    /// What the empty field offers: the library's starting points as photo tiles (DS-13), a tap
+    /// searches a tile's words as its chip did; papers ("Rechnungen") stay words beside them, as
+    /// their pictures are personal. Before the analysis has found anything with a photo, the
+    /// words alone, as before: the library's chips, or the fixed examples.
     private var startingPoints: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             Text("Suche nach Orten, Jahren, Themen oder Text auf Screenshots.")
                 .foregroundStyle(.secondary)
-            FlowLayout(spacing: Theme.Spacing.s) {
-                if featured.isEmpty {
+            if !starts.isEmpty {
+                SearchStartingPointGrid(points: starts) { suggestion in query = suggestion.completion }
+            }
+            let words = starts.isEmpty ? featured : featured.filter { $0.kind == .document }
+            if starts.isEmpty && featured.isEmpty {
+                FlowLayout(spacing: Theme.Spacing.s) {
                     ForEach(examples.map { String(localized: $0) }, id: \.self) { example in
                         Button(example) { query = example }
                             .buttonStyle(.bordered)
                             .buttonBorderShape(.capsule)
                             .accessibilityIdentifier("search.example")
                     }
-                } else {
-                    ForEach(featured) { suggestion in
+                }
+            } else if !words.isEmpty {
+                FlowLayout(spacing: Theme.Spacing.s) {
+                    ForEach(words) { suggestion in
                         Button { query = suggestion.completion } label: {
                             Label(suggestion.label, systemImage: Self.symbol(suggestion.kind))
                         }
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
-                        .accessibilityValue(Text("\(suggestion.count) Fotos"))
+                        .accessibilityValue(Text("\(suggestion.count) \(suggestion.count.formatted()) Fotos"))
                         .accessibilityIdentifier("search.example")
                     }
                 }
@@ -163,13 +211,83 @@ struct SearchView: View {
                 .buttonStyle(.plain)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text(verbatim: suggestion.label))
-                .accessibilityValue(Text("\(suggestion.count) Fotos"))
+                .accessibilityValue(Text("\(suggestion.count) \(suggestion.count.formatted()) Fotos"))
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("search.suggestion")
             }
         }
     }
 
+    private func thumbnail(_ id: AssetID, source: String) -> some View {
+        let hit = model.factsByID[id]
+        let key = source + ":" + id.rawValue
+        return Button {
+            open(id, from: key)
+        } label: {
+            AssetThumbnail(id: id, side: Self.photoSide)
+                .aspectRatio(1, contentMode: .fill)
+                .matchedTransitionSource(id: key, in: zoom)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(hit == nil)
+        .accessibilityLabel(Text(AssetThumbnail.spokenDate(hit?.asset.creationDate, facts: hit)))
+        .accessibilityIdentifier("search.result")
+        // The long press (DS-06a): the photo larger, with what a hit offers.
+        .photoMenu(id, place: .search, side: Self.photoSide, available: hit != nil) { action in
+            perform(action, on: id, from: key)
+        }
+    }
+
+    /// The photo large, zooming out of the thumbnail `key` (a photo can be in the best hits and
+    /// in the grid).
+    private func open(_ id: AssetID, from key: String) {
+        zoomSource = key
+        // The best hits sit above the grid and may lie beyond the pages shown: the
+        // viewer always contains the photo that was tapped. Every hit, not only the pages of the
+        // grid shown (see `LibraryView.open`, 26.11.2026).
+        var ids = result.ids
+        if !ids.contains(id) { ids.insert(id, at: 0) }
+        viewing = PhotoViewer.Start(id: id, ids: ids)
+    }
+
+    /// An item of a hit's long press, the search's way: "Ansehen" as a tap, "Zu Album
+    /// hinzufügen …" the sheet "Als Album anlegen" opens (then the preview).
+    private func perform(_ action: PhotoMenu.Item, on id: AssetID, from key: String) {
+        switch action {
+        case .view: open(id, from: key)
+        case .addToAlbum: addingToAlbum = [id]
+        // Ignoring is the model's, the same everywhere (`PhotoMenuItems`); a suggestion's own.
+        case .ignore, .stopIgnoring, .removeFromSuggestion: break
+        }
+    }
+
+    static func symbol(_ kind: SearchToken.Kind) -> String {
+        switch kind {
+        case .country: "globe.europe.africa"
+        case .place: "mappin.and.ellipse"
+        case .year, .month, .date: "calendar"
+        case .mediaType: "photo.on.rectangle"
+        case .category: "tag"
+        case .document: "doc.text"
+        case .merchant: "bag"
+        case .field: "number"
+        case .group: "person.2"
+        case .album: "rectangle.stack"
+        case .location: "location"
+        case .status: "tray.full"
+        case .text: "text.magnifyingglass"
+        case .trip: "airplane"
+        case .favorite: "heart"
+        case .ignored: "questionmark.circle"
+        }
+    }
+}
+
+/// The hits and what stands in their place: the note when terms were left out, the empty
+/// states and the calm tiles while hits load (apart from the struct's body, SwiftLint's type
+/// body length).
+extension SearchView {
     /// Nothing matched every term: the search left the least important ones out and says so.
     private var relaxedNote: some View {
         Label {
@@ -197,7 +315,7 @@ struct SearchView: View {
                 ContentUnavailableView("Keine Fotos", systemImage: "magnifyingglass",
                                        description: Text("Zu „\(missing.label)“ gibt es keine Fotos in deiner Mediathek."))
             case .noMatch:
-                ContentUnavailableView.search(text: resultQuery)
+                ContentUnavailableView.search(text: answer.text)
             case nil:
                 EmptyView()
             }
@@ -222,7 +340,7 @@ struct SearchView: View {
             .scrollIndicators(.hidden)
         }
         HStack {
-            Text("\(result.ids.count.formatted()) Treffer").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+            Text("\(result.ids.count) \(result.ids.count.formatted()) Treffer").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
                 .accessibilityIdentifier("search.count")
             Spacer()
             // The search becomes an album in Photos (through the normal preview).
@@ -240,11 +358,9 @@ struct SearchView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
         if result.ids.count > shown {
-            // The next hits load by themselves at the end of the grid (design review N10).
-            ProgressView()
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Theme.Spacing.m)
-                .accessibilityLabel(Text("Weitere Treffer werden geladen"))
+            // The next hits load by themselves at the end of the grid (design review N10), on
+            // calm tiles where they will be (DS-18).
+            waitingTiles(count: 3)
                 .onScrollVisibilityChange(threshold: 0.1) { visible in
                     if visible { shown += Self.page }
                 }
@@ -253,47 +369,98 @@ struct SearchView: View {
         }
     }
 
-    private func thumbnail(_ id: AssetID, source: String) -> some View {
-        let hit = model.factsByID[id]
-        let key = source + ":" + id.rawValue
-        return Button {
-            zoomSource = key
-            // The best hits sit above the grid and may lie beyond the pages shown: the
-            // viewer always contains the photo that was tapped.
-            // Every hit, not only the pages of the grid shown (see LibraryView, 26.11.).
-            var ids = result.ids
-            if !ids.contains(id) { ids.insert(id, at: 0) }
-            viewing = PhotoViewer.Start(id: id, ids: ids)
-        } label: {
-            AssetThumbnail(id: id, side: 110)
-                .aspectRatio(1, contentMode: .fill)
-                .matchedTransitionSource(id: key, in: zoom)
-                .contentShape(Rectangle())
+    /// Tiles on the thumbnails' calm ground (`ThumbnailGround`) where hits will be, while they
+    /// are worked out: no spinner (design wave 3, DS-18). One element for VoiceOver, which the
+    /// caller names.
+    private func waitingTiles(count: Int) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
+            ForEach(0..<count, id: \.self) { _ in
+                ThumbnailGround()
+                    .aspectRatio(1, contentMode: .fill)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(hit == nil)
-        .accessibilityLabel(Text(hit?.asset.creationDate?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
-        .accessibilityIdentifier("search.result")
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
+        .accessibilityElement(children: .ignore)
+    }
+}
+
+/// What is typed in the search field and whether the field is active (design wave 3, DS-12a).
+/// The tabs hold it (`MainTabs`), so the field can sit on the tab view as Apple's search tab and
+/// the search outlives a look at another tab; the search page reads and sets the text. No other
+/// field binds it: "Album suchen" and "Ort suchen" search a text of their own view, so typing
+/// there never starts a search.
+@MainActor @Observable
+final class SearchInput {
+    var text = ""
+    var isPresented = false
+    /// Raised to take the keyboard away (`leftInCode`); the field's modifier answers each raise
+    /// by giving its focus up, and the search stays. A request, not a state (review Q3 of H14's
+    /// round 3): a focus mirrored from the field was false already if the binding had not seen
+    /// the field focused (iOS 26 draws it in the tab bar's place), so nothing changed and the
+    /// keyboard stayed. Asking a field without focus to give it up costs nothing.
+    private(set) var keyboardAway = 0
+
+    /// A route (Siri, Shortcuts, Spotlight, a notification) leaves the search tab in code
+    /// (`MainTabs`; review T2 of H14's round 2): only the keyboard goes; the query, the hits and
+    /// the scroll position stay, as after a look at another tab, as the owner chose (ending the
+    /// search would empty the field: Apple, dismissing a search clears its text).
+    func leftInCode() {
+        keyboardAway &+= 1
     }
 
-    static func symbol(_ kind: SearchToken.Kind) -> String {
-        switch kind {
-        case .country: "globe.europe.africa"
-        case .place: "mappin.and.ellipse"
-        case .year, .month, .date: "calendar"
-        case .mediaType: "photo.on.rectangle"
-        case .category: "tag"
-        case .document: "doc.text"
-        case .merchant: "bag"
-        case .field: "number"
-        case .group: "person.2"
-        case .album: "rectangle.stack"
-        case .location: "location"
-        case .status: "tray.full"
-        case .text: "text.magnifyingglass"
-        case .trip: "airplane"
-        case .favorite: "heart"
-        case .ignored: "questionmark.circle"
+    /// Where the field sits (`MainTabs.searchField`). In both places it keeps the search: the
+    /// keyboard comes when the field is tapped, and the query, the hits and the scroll position
+    /// stay while another tab is looked at.
+    enum Placement {
+        /// On the tab view, Apple's search tab of iOS 26: the field in the bar's place once the
+        /// round button is chosen.
+        case tabView
+        /// On the search page's own stack, under its title, always shown (iOS 27, where the
+        /// search tab is a prominent tab and an active search's field sits at the top).
+        case page
+
+        /// How the field is drawn on the view that gets it.
+        var field: SearchFieldPlacement {
+            switch self {
+            case .tabView: .automatic
+            case .page: .navigationBarDrawer(displayMode: .always)
+            }
+        }
+    }
+}
+
+extension View {
+    /// The search field of `input` on this view when `MainTabs.searchField` puts it on `host`,
+    /// otherwise the view as it is: the tab view and the search page both ask, one gets it.
+    func searchField(_ input: SearchInput, on host: SearchInput.Placement) -> some View {
+        modifier(SearchFieldModifier(input: input, host: host))
+    }
+}
+
+/// The field itself (`searchField(_:on:)`), with the prompt the page always had, on the view the
+/// system's place names (`MainTabs.searchField`).
+private struct SearchFieldModifier: ViewModifier {
+    @Bindable var input: SearchInput
+    var host: SearchInput.Placement
+    /// The field's focus: given up when a route asks (`SearchInput.keyboardAway`).
+    @FocusState private var focused: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if host != MainTabs.searchField {
+            content
+        } else {
+            // Only the field: it becomes active when it is tapped (Apple's default activation),
+            // never by the tab and never by hand, and the search stays as it is while another
+            // tab is chosen. Its focus is bound, so a route takes only the keyboard away when it
+            // asks (`leftInCode`), whatever the binding saw of the field's focus before; and the
+            // field gives its focus up when the page leaves the screen (iOS 27, where the field is
+            // the page's: another tab, chosen by the user or in code), so the keyboard never comes
+            // back with the page, only with a tap (second check of the search, 25.11.2026).
+            content
+                .searchable(text: $input.text, isPresented: $input.isPresented, placement: host.field, prompt: SearchView.prompt)
+                .searchFocused($focused)
+                .onChange(of: input.keyboardAway) { focused = false }
+                .onDisappear { focused = false }
         }
     }
 }
@@ -342,7 +509,7 @@ struct SearchTokenChip: View {
         .background(tint.opacity(0.12), in: Capsule())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: spoken))
-        .accessibilityValue(token.count.map { Text("\($0) Fotos") } ?? Text(verbatim: ""))
+        .accessibilityValue(token.count.map { Text("\($0) \($0.formatted()) Fotos") } ?? Text(verbatim: ""))
         .accessibilityIdentifier(ignored ? "search.ignored" : "search.token")
     }
 }

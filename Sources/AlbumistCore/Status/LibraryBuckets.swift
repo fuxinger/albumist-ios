@@ -1,7 +1,8 @@
 import Foundation
 
-/// The library tab's areas ("Nicht sortiert", "Vorschläge", "Unsicher", "Sortiert", "Ignoriert",
-/// "Alle"), each newest first, made in one pass off the main thread (app-speed, 18.11.2026).
+/// The library's areas ("Unsortiert", "Vorschläge", "Unsicher", "Sortiert", "Ignoriert",
+/// "Alle"), each newest first, made in one pass off the main thread (app-speed, 18.11.2026). The
+/// tab "Unsortiert" shows three of them (`unsortedTabFilters`).
 ///
 /// Stress run 44144011110 (50,000 photos): the first tap on "Mediathek" took 15.8 s, with a
 /// main-thread stall of 7.7 s. `AppModel.bucketMembers` filtered and sorted the facts of every
@@ -27,6 +28,11 @@ public struct LibraryBuckets: Sendable, Equatable {
             self.date = date
         }
     }
+
+    /// The filters of the tab "Unsortiert" (design W1, tabs 6B), the first one shown when the tab
+    /// opens. Suggestions have a tab of their own; "Sortiert" and "Alle" are no filters of it. A
+    /// photo with an open suggestion the ring counts is in "Unsortiert" as well (`buckets`).
+    public static let unsortedTabFilters: [InboxBucket] = [.unorganized, .uncertain, .ignored]
 
     private var members: [InboxBucket: [Item]] = [:]
     /// Each photo's place among all photos, newest first (`.all` in this order).

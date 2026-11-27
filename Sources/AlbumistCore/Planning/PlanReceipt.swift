@@ -18,6 +18,8 @@ public struct PlanReceipt: Hashable, Sendable {
             case deleted
         }
 
+        /// The album's name (`PlanCovers.key`): "planned:" and the key for a new album, the
+        /// collection id for one that was there; its cover is found under it.
         public var id: String
         public var title: String
         /// Folder titles from the top, as at the time of the plan.
@@ -149,7 +151,7 @@ public struct PlanReceipt: Hashable, Sendable {
                 guard succeeded || failed || unconfirmed else { continue }
                 let adopted = record?.adoptedKeys.contains(key) == true
                 if done && !adopted { albumsCreated += 1 }
-                var album = line("planned:" + key, title: title, folder: path(parent), change: adopted ? .adopted : .created)
+                var album = line(PlanCovers.key(of: .planned(key)), title: title, folder: path(parent), change: adopted ? .adopted : .created)
                 album.failed = album.failed || failed
                 album.unconfirmed = album.unconfirmed || unconfirmed
                 lines[album.id] = album
@@ -165,10 +167,10 @@ public struct PlanReceipt: Hashable, Sendable {
                 switch ref {
                 case .planned(let key):
                     let planned = albumKeys[key]
-                    album = line("planned:" + key, title: planned?.title ?? "", folder: planned.map { path($0.parent) } ?? [],
+                    album = line(PlanCovers.key(of: .planned(key)), title: planned?.title ?? "", folder: planned.map { path($0.parent) } ?? [],
                                  change: record?.adoptedKeys.contains(key) == true ? .adopted : .created)
                 case .existing(let id):
-                    album = line(id.rawValue, title: existingTitle(id), folder: existingFolder(id), change: .extended)
+                    album = line(PlanCovers.key(of: .existing(id)), title: existingTitle(id), folder: existingFolder(id), change: .extended)
                     if !added.isEmpty { extended.insert(id) }
                 }
                 album.added += Set(added).count
@@ -187,7 +189,7 @@ public struct PlanReceipt: Hashable, Sendable {
                 let removed = plan.confirmedMedia(of: step)
                 membershipsRemoved += removed.count
                 guard !removed.isEmpty || failed || unconfirmed else { continue }
-                var album = line(id.rawValue, title: existingTitle(id), folder: existingFolder(id), change: .reduced)
+                var album = line(PlanCovers.key(of: .existing(id)), title: existingTitle(id), folder: existingFolder(id), change: .reduced)
                 album.removed += removed.count
                 album.failed = album.failed || failed
                 album.unconfirmed = album.unconfirmed || unconfirmed
@@ -195,7 +197,7 @@ public struct PlanReceipt: Hashable, Sendable {
 
             case let .deleteCollection(id, title):
                 guard succeeded || failed || unconfirmed else { continue }
-                var album = line(id.rawValue, title: title, folder: [], change: .deleted)
+                var album = line(PlanCovers.key(of: .existing(id)), title: title, folder: [], change: .deleted)
                 if done {
                     album.change = .deleted
                     containersDeleted += 1
@@ -221,5 +223,29 @@ public struct PlanReceipt: Hashable, Sendable {
     /// longer in the library were not sorted in, so such a plan is not complete (audit 2, 7.1).
     public var isComplete: Bool {
         failedSteps == 0 && leftSteps == 0 && unconfirmedSteps == 0 && unavailablePhotos == 0 && problems.isEmpty
+    }
+}
+
+extension PlanReceipt {
+    /// What the plan did, which names its receipt: „Vollständig angelegt“, „Vollständig
+    /// entfernt“, „Vollständig rückgängig gemacht“ (second review of P3-09: an undo takes photos
+    /// out and deletes albums like a removal, and its receipt said „Vollständig angelegt“).
+    public enum Kind: Sendable, Equatable {
+        /// Created or extended albums („angelegt“).
+        case created
+        /// A removal from „Alben von Albumist“, or its retry („entfernt“).
+        case removed
+        /// Took back an earlier plan („rückgängig gemacht“).
+        case undone
+
+        public init(_ plan: ChangePlan) {
+            if plan.reverts != nil {
+                self = .undone
+            } else if !plan.removalSources.isEmpty {
+                self = .removed
+            } else {
+                self = .created
+            }
+        }
     }
 }

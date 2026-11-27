@@ -13,6 +13,190 @@
   angenommener Vorschlag im selben Album braucht, und sagt, was bleibt (P2-09). Die Foto-Ansicht
   zeigt alle Fotos einer Liste, nicht nur die ersten 3.000 (Suche: 2.000). Start ohne
   Schlüsselbund- und Datenbank-Hänger.
+- 26.11. Texte nach dem Lektorat (A26, noch in keinem Build): Die Frage nach dem Fotozugriff ist kürzer und sagt
+  „analysiert“ und „in der Fotos-App“. Die App sagt wie die Datenschutzseiten, dass iOS für Ortsnamen einzelne
+  Aufnahmeorte schickt, „etwa einen pro Gegend“ (Englisch „a sample of photo locations, roughly one per area“),
+  „Albumist lädt keine Fotos hoch“ statt „Fotos verlassen dein Gerät nie“, und dass iCloud-Downloads erst
+  eingeschaltet werden müssen. „Reise teilen“ heißt „Reise aufteilen“, „An einem Tag teilen“ „Ab einem Tag
+  aufteilen“; „Für … freischalten“, „kostenlose Alben“ statt „Gratis-Alben“, „Kaufanfrage“ in der
+  Familienfreigabe. Englisch: Zähler „N free albums left“, „backup“ statt „copy“, „Full Version“, „Ask to Buy“,
+  kein Leerzeichen vor „…“.
+- 25.11. Raster und Vorschlag nach dem vollen Mac-Lauf 262 (Design-Welle 3, noch in keinem Build): Beim Auswählen
+  auf der Seite eines Vorschlags hakt ein Finger, der seitlich über die Fotos zieht, sie wieder an; vorher hielt
+  iOS das für den Wisch zurück über den Inhalt und ging zurück. Der Wisch vom linken Rand geht weiter zurück. Nach
+  „Entfernen“ oder „Fertig“ lassen sich „Nicht jetzt“ und der gefüllte Knopf wieder antippen; vorher lag die leere
+  Leiste des Systems darüber.
+- 25.11. Zoom mit zwei Fingern im Raster (Design-Welle 3, DS-06b, noch in keinem Build): Zwei Finger auf einem Foto
+  in „Unsortiert“ oder in einem Vorschlag, die sich auseinander oder zueinander bewegen, sind ein Zoom: Das Foto
+  öffnet sich nicht, bleibt nicht gedrückt und hebt kein Menü an. Zwei Daumen, die nur tippen, bleiben zwei Tipps.
+  Beim Auswählen endet ein laufendes Ziehen, sobald der Zoom beginnt, seine Haken bleiben. Scrollen und der Wisch
+  vom Rand zurück bleiben wie bisher.
+- 25.11. App-Symbol (Design-Welle 3, noch in keinem Build): Die Hügel enden jetzt an den runden Ecken der vorderen
+  Karte. Vorher ragten sie unten rechts etwa 12 und unten links 4 von 1024 Pixeln darüber hinaus, auch im großen
+  Symbol im App Store.
+- 25.11. Fotos aus einem Vorschlag entfernen (Design-Welle 3, noch in keinem Build): Nach „Entfernen“ endet das
+  Auswählen sofort, mit dem Foto, das die Seite verlässt; vorher blieb die Leiste „1 aus Vorschlag entfernen“
+  stehen, bis Albumist den Vorschlag neu abgeglichen hatte, auf dem Mac-Simulator über 5 Sekunden.
+- 25.11. Suche nach der Wahl von Fuchs „Runder Knopf, Suche bleibt“ (Design-Welle 3, DS-12a, noch in keinem
+  Build): Die Suche ist ein eigener runder Knopf am Ende der Tab-Leiste. Ihre Wahl zeigt die Startpunkte und das
+  Suchfeld, die Tastatur kommt erst beim Tippen ins Feld, und Suchtext und Treffer bleiben beim Blick in einen
+  anderen Tab. Unter iOS 27 sitzt das Feld oben auf der Suchseite; iOS 27.2 hatte die Suche sonst als vierten Tab
+  ohne Feld gezeigt. Kommt man auf die Suche zurück, kommt die Tastatur nicht von selbst wieder. VoiceOver nennt
+  die Treffer und die Fotos eines Albums mit der Uhrzeit am Aufnahmeort, wie das Raster und der Titel des Fotos.
+- 25.11. Suche und „Analyse fertig“ nach der zweiten Prüfung (Design-Welle 3, H14, noch in keinem Build): Zurück
+  auf dem Such-Tab sucht Albumist neu, wenn sich seitdem etwas geändert hat, das die Suche liest (ein ignoriertes
+  Foto, ein Album, der Name eines Orts, das Zuhause, neue Ergebnisse der Analyse oder ein neuer Tag), sonst bleibt
+  alles stehen wie zuletzt; solange die Suche offen bleibt, ändern sich ihre Treffer nie von selbst. VoiceOver sagt
+  „Analyse fertig“ auch dann, wenn die Mitteilungen ausgeschaltet wurden, während Albumist im Hintergrund war, und
+  nie zweimal, wenn sie inzwischen erlaubt sind. Öffnet eine Mitteilung oder Siri einen anderen Tab, nimmt Albumist
+  die Tastatur der Suche jedes Mal weg.
+- 25.11. Raster nach der zweiten Nachprüfung (Design-Welle 3, H10, noch in keinem Build): Beim Auswählen am Rand
+  lernt die Seite auch dann nicht falsch herum, wie sie von selbst weiterläuft, wenn die Scroll-Ansicht ihre
+  Schritte bis zu drei Bilder spät meldet (kein Sprung um die Leistenhöhe mehr); dafür hält sie je Weiterlaufen
+  höchstens sechs Bilder an. Verschwindet das Raster dabei, endet das Weiterlaufen wie beim Loslassen.
+- 25.11. Suche, Blätter und „Analyse fertig“ nach der Prüfung der Welle-3-Arbeit (Design-Welle 3, H14, noch in
+  keinem Build): Öffnet eine Mitteilung oder Siri einen anderen Tab, verschwindet nur die Tastatur — Suchtext,
+  Treffer und die Stelle in der Liste bleiben. Zurück auf dem Such-Tab sucht Albumist nicht noch einmal,
+  solange sich nichts geändert hat:
+  „Verstanden als“ bleibt stehen, die geladenen Treffer bleiben, und eine ganze Frage geht nicht zweimal an Apple
+  Intelligence. VoiceOver sagt „Analyse fertig“ jetzt auch dann, wenn die Analyse endete, während das
+  Kontrollzentrum offen war oder Siri gefragt wurde, und wenn Mitteilungen ausgeschaltet sind: gesagt wird es
+  genau einmal.
+- 25.11. Raster in „Unsortiert“ und in Vorschlägen nach der Nachprüfung (Design-Welle 3, H10, noch in keinem
+  Build): Das Weiterlaufen am Rand lernt, wie die Seite scrollt, auch wenn sie ihre Schritte ein oder zwei Bilder
+  später meldet (dafür hält sie je Weiterlaufen höchstens vier Bilder an); endet beim Ziehen der Bereich, während
+  der Finger noch liegt, hakt das Loslassen nichts ab, auch Sekunden später.
+- 25.11. Vierte Nachprüfung der ersten 100 % (Design-Welle 3, H13, noch in keinem Build): Läuft nach wenigen
+  freigegebenen Fotos der Rest der Mediathek zu Ende, während eine Reise geteilt oder zusammengelegt oder eine
+  Einstellung geändert wurde, zählt der kurze Lauf danach mit ihm zusammen: er endet mit „Analyse fertig“ und den
+  100 %, wie bei einer ersten Analyse.
+- 25.11. Dritte Nachprüfung der ersten 100 % (Design-Welle 3, H13, noch in keinem Build): Auch nach einer schnellen
+  ersten Analyse zählen die Etappen des Laufs zusammen, der die 100 % noch bringen kann (alle Jahre nach
+  „Nur 2026“, der Rest nach wenigen freigegebenen Fotos): ein kurzer letzter Rest endet mit „Analyse fertig“ und
+  den 100 %. Der erste fertige Lauf mit allen Fotos verbraucht die Chance der freigegebenen Fotos, gefeiert oder
+  nicht; die Suche nach neuen Fotos bringt die 100 % nie. Verlauf und Beleg rechnen für ihre Titelbilder nichts
+  Großes mehr auf dem Hauptthread.
+- 25.11. Zweite Nachprüfung der ruhigen Farben und der ersten 100 % (Design-Welle 3, H13, noch in keinem Build):
+  Lief die erste Analyse in Etappen (pausiert, von iOS beendet, später weiter), zählen ihre Etappen zusammen:
+  dauert die letzte nur Sekunden, endet sie trotzdem mit „Analyse fertig“ und den 100 %. Spielen die 100 % ein
+  zweites Mal, schließt sich ihr Balken wieder sichtbar. Eine wieder geöffnete Vorschlagsseite blendet ihre Farbe
+  mit dem Titelbild ein, auch wenn es nicht mehr im Speicher war, und vorher nur die Farbe des Fotos, das sie
+  gleich zeigt. Die Vorschau vor „Anlegen“ rechnet nichts Großes mehr auf dem Hauptthread.
+- 25.11. Raster in „Unsortiert“ und in Vorschlägen nach der Prüfung der zweiten Runde (Design-Welle 3, noch in
+  keinem Build): Ziehen zum Auswählen findet die Fotos auch gleich nach „Auswählen“ und „Fertig“ und hakt über einer
+  angehefteten Tagesüberschrift weiter ab; VoiceOvers Doppeltippen nach Ziehen oder Zoom zählt wieder; das
+  Weiterlaufen am Rand prüft bei jedem Mal, wie die Seite scrollt; in einer neuen Zeitzone entstehen die Tage neu.
+- 25.11. Fotos und Videos nach der zweiten Prüfung (Design-Welle 3, noch in keinem Build): Die Dauer eines in
+  Fotos gekürzten Videos folgt in den sichtbaren Zellen auch dann, wenn das Video nicht mehr im Speicher war oder
+  eine Speicherwarnung kam: die Zellen fragen Fotos gemeinsam neu, und keine Zelle verliert ihre Dauer, nur weil
+  gerade nichts bekannt ist. Ein Video startet nicht mehr von selbst, wenn man es schon angehalten oder geschlossen
+  hat, während Fotos es noch lieferte. Eine Nachbarseite, deren Art noch unbekannt ist, wartet ruhig, statt
+  „Dieses Foto ist gerade nicht verfügbar“ zu zeigen.
+- 21.11. Feinschliff für iOS 26 (Design-Welle 3, DS-12 und H14, noch in keinem Build): Die Suche ist ein eigener
+  runder Knopf am Ende der Tab-Leiste wie in Apples Apps (Entwurf E1), und sie bleibt, wie sie war: Ein Tipp zeigt
+  die Startpunkte und das Suchfeld, die Tastatur kommt beim Tippen ins Feld, und Suchtext, Treffer und die Stelle
+  in der Liste bleiben, während man in einen anderen Tab schaut. Öffnet Siri, Spotlight oder eine Mitteilung einen
+  anderen Tab, endet eine offene Suche. Blätter öffnen in passender Größe: kurze Erklärungen und kleine Formulare
+  halb hoch, ganze Seiten ganz, bei sehr großer Schrift jedes Blatt ganz. „Widerrufen“, „Alle Fotos erlauben“, „OK“
+  unter „Neu gezählt“ und „Namen vorschlagen“ lassen sich auf 44 pt treffen. VoiceOver sagt „Analyse fertig“ jetzt
+  bei jeder Analyse, die man in der App zu Ende verfolgt, nicht nur bei der ersten, und einmal: Hat die Mitteilung
+  es schon gesagt, schweigt die Karte.
+- 21.11. Raster in „Unsortiert“ und in Vorschlägen nach der zweiten Prüfung (Design-Welle 3, noch in keinem
+  Build): Ziehen zum Auswählen findet die Fotos auch nach einem Tab-Wechsel, hakt unter einer angehefteten
+  Tagesüberschrift nichts ab, zieht über nachgeladene Fotos weiter und lässt den Wisch vom linken Rand
+  zurückgehen; ein Tippen gleich nach dem Ziehen oder Zoomen zählt; ein sehr großer Tag kommt seitenweise;
+  „Heute“ wechselt um Mitternacht; langes Drücken hebt das Foto auch bei sieben pro Reihe groß an; die Seite
+  läuft beim Auswählen mit bis zu 120 Hz weiter.
+- 21.11. Videos ohne Flackern und gekürzte Videos sofort richtig (Design-Welle 3, Prüfung von Review F, noch in
+  keinem Build): Ein Video mit kleinem Standbild zeigt beim Öffnen nicht mehr kurz „nicht verfügbar“, sondern
+  wartet mit der Miniatur, bis es spielt. Ein Video startet nicht mehr von selbst, wenn man es vorher angehalten,
+  gespult, weitergewischt oder die Ansicht geschlossen hat. Ein Video in Schleife mit Ton hält den Bildschirm an.
+  Im Stromsparmodus liest die Foto-Ansicht die Stelle eines Videos höchstens zehnmal je Sekunde. Ein Video, das
+  sich nicht abspielen lässt, sagt es sofort, auch bevor es je lief. Ein in Fotos gekürztes Video zeigt seine
+  neue Dauer sofort auch in den sichtbaren Zellen; viele Änderungen in Fotos (iCloud) werden gesammelt und in
+  einem Durchgang nachgezogen.
+- 21.11. Vorschau mit Titelbildern und ein klarer Verlauf (Design-Welle 3, DS-15 Teil 2 und Zweitprüfung G, noch
+  in keinem Build): In der Vorschau vor dem Umsetzen hat jedes Album schon das Titelbild, das später sein Beleg und
+  der Tab „Alben“ zeigen (72 statt 44 Punkte, aus den Fotos, die der Plan hinzufügen will; heikle Fotos,
+  Screenshots und Papiere nie); „Neu“ oder „Ergänzt“ und die Zahl der Fotos stehen unter dem Ordner, ein Album ohne
+  neue Fotos zeigt das Stapel-Symbol; während der Plan läuft, rechnet die Vorschau nichts neu. Der Verlauf sagt jede
+  Änderung in Worten, nie „0 Fotos“: „1 entfernt“, „12 Fotos herausgenommen“ (auch wenn Albumist ein Album behält,
+  weil gerade ein Foto hineinkam), „1 umbenannt“, „1 verschoben“, „Nichts entfernt“ für eine abgelehnte oder
+  gescheiterte Entfernung, „Nichts geändert“, wenn nichts ankam, und ein neues Album ohne Fotos als „1 neu“. Jede
+  Such-Kachel zeigt ein eigenes Foto, „Screenshots“ ihr Symbol, und die Kacheln folgen jeder neuen Analyse. Die
+  Reise-Werkstatt liest sich in der Zeit: „Reise davor“, die Tage, „Reise danach“; der Hinweis zum Warten steht
+  einmal und gleich beim Öffnen, die Tage zu einer Nachbarreise erst, wenn sie zu genau dieser gehören.
+- 21.11. Sortier-Show, ruhige Farben und die ersten 100 % (Design-Welle 3, DS-17, DS-11 und DS-08, mit der
+  Zweitprüfung K, noch in keinem Build): In der Sortier-Show fliegen größere Fotos vom Stapel in ihr Album,
+  das als sein echtes Titelbild wartet (grau, bis es gefüllt ist, dann farbig, der Haken auf einem Ring); der
+  Stapel zeigt seine Fotos auch mit „Bewegung reduzieren“, VoiceOver und im Stromsparmodus, auf niedrigen
+  iPhones rückt zuerst der Stapel zusammen, die Show hält nur die Fotos, die sie zeigt, und ein zweiter Tipp
+  auf „Anlegen“ startet nichts. Die Seite eines Vorschlags nimmt die ruhige Farbe ihres Titelbilds als Grund
+  (hell blass, dunkel tief, wie Musik mit dem Albumcover, Texte gut lesbar); eine bekannte Farbe steht sofort
+  da, und sie geht mit dem Titelbild. Wird die erste ganze Analyse fertig, während Albumist offen ist, zeigt
+  der Ring einmal „100 %“; war die erste Analyse zu schnell dafür, kommt der Moment noch sieben Tage lang mit
+  einer Analyse der ganzen Mediathek. In Einstellungen › Über steht das Glass-Stack-Symbol mit dem Namen der
+  App. Neue Mac-Tests für alle vier.
+- 21.11. Nachprüfung der Sortier-Show, der ruhigen Farben und der ersten 100 % (Design-Welle 3, H13, noch in
+  keinem Build): Eine wieder geöffnete Vorschlagsseite steht vom ersten Bild an in ihrer Farbe. War die erste
+  Analyse zu schnell für „Analyse fertig“, kommen die ersten 100 % noch sieben Tage lang mit einer Analyse der
+  ganzen Mediathek (auch mit einem Lauf nach „Zugriff auf alle Fotos“, der lange genug für „Analyse fertig“
+  läuft), nie mit der Suche nach neuen
+  Fotos. Ersetzt ein neuer Lauf die Karte, während die 100 % noch spielen, kommen sie danach noch einmal.
+  „Anlegen“ rechnet nichts Großes mehr auf dem Hauptthread. Die Mac-Tests sind strenger: die zweite volle
+  Analyse wird gefeiert, die Show sagt genau „0“ und „2 Fotos einsortiert“, die Seite ist hell blass und
+  dunkel tief, und die Zeile in Einstellungen › Über hat ihr Symbol.
+- 21.11. Videos nach der Zweitprüfung (Design-Welle 3, Review F, noch in keinem Build): „Ton aus“ hält ein Video
+  nicht mehr an; die Musik darf beim Schließen der Foto-Ansicht weiterlaufen. Ein Video startet von selbst erst, wenn
+  der App-Ton mit der Musik mischt, und hält sie so nie an. Die Knöpfe unter dem Video lassen sich auf 44 pt treffen,
+  ein Video zeigt sich auch ohne scharfes Standbild, und ein Video, das sich nicht abspielen lässt, sagt es ruhig.
+  Zeitlupen-Videos lassen sich bis zum Ende spulen, der Regler gleitet bei kurzen Clips und flackert nach dem
+  Loslassen nicht mehr. Im Stromsparmodus spielt ein Video einmal; in Schleife darf das iPhone nach dem ersten
+  Durchlauf sperren. Bei großer Schrift stehen die Zeiten untereinander statt abgeschnitten. Schließen hält ein Video
+  sofort an. Die Dauer auf Miniaturen bleibt beim schnellen Scrollen erhalten und folgt einem in Fotos gekürzten Video.
+- 21.11. „Unsortiert“ nach Tagen wie in Fotos (Design-Welle 3, DS-21 und DS-06b, noch in keinem Build): in allen
+  drei Filtern je Tag eine Überschrift mit der Zahl der Fotos, der neueste Tag oben, Fotos ohne Datum zuletzt; jedes
+  Foto an dem Tag, den seine Foto-Ansicht nennt. „Unsortiert“ und die Fotos eines Vorschlags teilen sich ein Raster:
+  beim Auswählen hakt ein seitlich über die Fotos gezogener Finger alle dazwischen ab (über Reihen und Tage, am Rand
+  läuft die Seite weiter), zwei Finger zeigen drei, fünf oder sieben Fotos pro Reihe, das Foto unter den Fingern
+  bleibt, die Größe bleibt gemerkt; für VoiceOver, Schalter- und Sprachsteuerung „Vergrößern“ und „Verkleinern“.
+  Beim Laden eine ruhige Zeile statt Kreisel.
+- 21.11. Suche, Reise-Werkstatt, Verlauf und Beleg mit Fotos (Design-Welle 3, DS-13 bis DS-15, noch in keinem
+  Build): Die leere Suche zeigt bis zu sechs Vorschläge als Foto-Kacheln wie im Tab „Alben“ (die zwei Städte mit
+  den meisten Fotos, eine Reise, das neueste Jahr, ein Thema, eine Art), jede mit einem eigenen Foto vom iPhone;
+  ein Tippen sucht wie vorher der Wortknopf, die Suche selbst ist unverändert. „Reise anpassen“ zeigt die Reise
+  als Zeitleiste: jeder Tag mit Ort und bis zu drei größeren Fotos, Tage ohne Fotos gepunktet, die Nachbarreisen
+  zum Zusammenlegen an den Enden; Teilen und Zusammenlegen wie bisher. Im Verlauf hat jede Änderung ein
+  Titelbild aus ihren Alben, im Beleg jedes Album ein größeres (72 statt 44 Punkte); heikle Fotos nie,
+  „Vorschau ausgeblendet“, wo alle heikel sind.
+- 21.11. Videos und ruhige Platzhalter (Design-Welle 3, DS-16 und DS-18, noch in keinem Build): Videos spielen in
+  der Foto-Ansicht wie in Fotos: von selbst und in Schleife, wo Bewegung erwünscht ist (nicht mit „Bewegung
+  reduzieren“ oder ohne automatische Videovorschau), stumm, bis „Ton an“ die Musik anhält; darunter „Abspielen“,
+  ein Regler mit Zeiten und der Ton, die mit den Leisten gehen. Videos kommen nur vom iPhone; liegt eines nur in
+  iCloud, sagt die Foto-Ansicht ruhig, warum es nicht spielt. Miniaturen von Videos zeigen ihre Dauer („0:15“),
+  VoiceOver sagt „Video, 15 Sekunden“; wo ein Foto nur schmückt (Cover, Mosaike, die Schau der ersten Analyse),
+  steht keine Dauer. Beim Laden stehen ruhige, getönte Flächen statt grauer Kacheln und Kreisel; die Foto-Ansicht
+  zeigt bis zum scharfen Bild die Miniatur aus dem Raster und nie ein großes unscharfes Bild.
+  Die Beispiel-Mediathek im Simulator hat jetzt ein kurzes Video; der Mac-Test spielt es ab, hält es an, schiebt
+  den Regler und schaltet den Ton an und aus.
+- 21.11. App-Icon im Ebenen-Format von iOS 26 (DS-20, noch in keinem Build): „Glass Stack“ als
+  Icon-Composer-Datei, Milchglas auf der vorderen Karte, hell, dunkel, klar und getönt aus einer Datei;
+  das alte Bild-Icon ist entfernt. Neue Prüfung in CI: höchstens ein farbiger Hauptknopf pro Seite
+  (DS-04b). Sie fand einen Fall: Die Startseite bot „Mit Beispielfotos ausprobieren“ unter „Rest
+  anlegen“ eines unterbrochenen Vorgangs an; das Angebot wartet jetzt, bis der Vorgang erledigt ist.
+- 21.11. Zwei Momente (Design-Welle 2, Entwürfe E3 und E6, noch in keinem Build): Nach dem Umsetzen legen sich die
+  Cover der neuen Alben gefächert über die Zahl, das Hauptcover zuletzt und mit dem einen Erfolgs-Tap (spätestens
+  1,5 s nach dem Ergebnis; ohne geladenes Cover sofort das Symbol); nur ergänzte Alben des Nutzers heißen „12 Fotos
+  in 3 deiner Alben ergänzt“, Alben von Albumist und „Fehlendes erneut versuchen“ „1 Album ergänzt · mit 5 Fotos“.
+  Nach „Anlegen“ auf einer Karte fliegt ihr Cover Richtung Tab „Alben“ und verblasst an der Leiste, nur bei offener
+  Tab-Leiste; der Erfolgs-Tap kommt wie bisher mit dem Banner. Mit „Bewegung reduzieren“ blenden die Cover des
+  Ergebnisses nur ein, nach „Anlegen“ fliegt nichts.
+  Nach der zweiten Prüfung: Die Cover des Ergebnisses laden zu dritt nebeneinander; eine Karte, für die Fotos
+  gerade nicht antwortet, kommt später noch einmal dran, und was ankommt, bleibt beim Ergebnis. Der Fächer beginnt
+  klein und wächst nur, die Zahl darunter springt nicht mehr. Ob die Tab-Leiste offen ist, liest Albumist am
+  Scrollen der Liste: eine Karte, die darüber wächst, Zurückfedern, Ziehen zum Aktualisieren und der Weg zurück
+  von einem Vorschlag schließen sie nicht mehr. „Rückgängig machen“ spricht nach einem Lauf mit einem Album von
+  Albumist nicht mehr von „deinen Alben“.
 - Neue Fortschrittsanzeige der Analyse (Entwurf v3 mit den 5 Punkten vom 15.11.): ein Balken in
   6 Abschnitten nach Zeitanteil, „Fertig gegen 23:40“ für die ganze Analyse, gleitender Balken,
   „Schon fertig: 51 Reisen, 38 Orte · Ansehen“, Fertig-Moment mit Häkchen, Details-Blatt,
@@ -66,6 +250,75 @@
   (Flug in echter Zeit, feste Kameras, „Werte kopieren“ ohne Koordinaten). Die Testseite wird vor
   der ersten App-Store-Einreichung entfernt.
 ### Geändert
+- 21.11. Beleg „Änderungen“: ein neues Album zeigt neben „Neu“ „16 Fotos“, wie die Vorschau es sagt, statt
+  „+16 Fotos“; das „+“ bleibt für Fotos, die in ein schon vorhandenes Album kamen (Schliff nach den
+  Bildschirmfotos von UI-Lauf 44852630315).
+- 21.11. (Design-Welle 2, DS-10, noch in keinem Build): Foto-Ansicht wie in Fotos. Oben stehen Ort, Tag und Uhrzeit
+  in der Ortszeit („Heute“, „Gestern“, Wochentag; bei noch nicht analysierten Fotos das Datum aus Fotos, schon auf der
+  Uhr, die es nach der Analyse behält; auf schmalen iPhones kürzt jede Zeile für sich, die Uhrzeit bleibt) statt
+  „1 von 176“. „Teilen“ gibt das Foto vom iPhone weiter (nie aus iCloud; liegt nur eine Vorschau da, sagt der Knopf,
+  warum er aus ist; klappt das Vorbereiten nicht, sagt es die Foto-Ansicht selbst; die Datei wird nach dem Teilen
+  gelöscht, spätestens beim nächsten Start). Tippen blendet Leisten, Statusleiste und Home-Balken aus und wieder ein,
+  Hineinzoomen ebenso, mit VoiceOver bleiben sie; unter dem Titel steht nie das Foto. Live Photos bewegen sich kurz
+  beim Ansehen und ganz bei langem Drücken, ohne die Musik anzuhalten; solange sie spielen, bleibt die Seite stehen.
+- 21.11. (Design-Welle 2, DS-06a, Entwurf E4, noch in keinem Build): Langes Drücken wie in Fotos. Eine Vorschlagskarte
+  hebt sich ab, wie sie ist (dasselbe Titelbild; bei persönlichem Inhalt „Vorschau ausgeblendet“), und bietet ihr
+  eigenes Wort („Anlegen“, „Ergänzen …“, „Benennen …“, „Ansehen …“), „Anpassen“, bei Reisen „Reise teilen oder
+  zusammenlegen“ und „Keine Reise, hier bin ich öfter“ und zuletzt „Nicht jetzt“: dieselben Wege wie ihr Knopf und
+  „…“ im Vorschlag, immer für den Vorschlag, wie er beim Tippen ist; ist er inzwischen weg, legt Albumist nichts an
+  und sagt „Der Vorschlag hat sich geändert“. Ein Foto in „Unsortiert“, in Alben, in der Suche und im Vorschlag hebt
+  sich mit dem Bild seiner Zelle ab, so groß, wie es scharf ist, mit „Ansehen“, „Zu Album hinzufügen …“ und
+  „Ignorieren“ (im Vorschlag „Aus Vorschlag entfernen“ mit Rückfrage, nicht mehr, wenn es den Vorschlag inzwischen
+  nicht mehr gibt). Beim Auswählen gibt es kein Menü und nichts hebt sich ab; ein langes Drücken auf ein Foto hakt es
+  ab wie Tippen. Die Punkte gibt es auch als VoiceOver-Aktionen; „Nicht jetzt“ aus dem Menü sagt VoiceOver an.
+- 20.11. (Design-Welle 1, Entwurf für Fuchs, noch in keinem Build): die Bildschirme im fotozentrierten Look.
+  - Tabs „Vorschläge · Unsortiert · Alben · Suche“; „Unsortiert“ mit drei Filtern.
+  - Startseite: während der ersten Analyse ein Mosaik und die schon gefundenen Reisen, danach „Dein
+    Startpaket“ (die besten Alben, vorher die Vorschau) und je Bereich eine Reihe Karten mit „Alle N“;
+    „Deine Welt“ unter den Reisen. „Anlegen“ auf einer Karte legt sofort an, mit Hinweis und „Widerrufen“;
+    die Karte zeigt „✓ Angelegt“, sobald das Album in Fotos ist. „Bescheid sagen, wenn fertig“ erst, wenn
+    die Analyse dauert; die Einführung fragt nicht mehr nach Mitteilungen.
+  - Vorschläge: Karten mit Titelbild, „Auswählen“ wie in Fotos statt eines Korbs; ein offener Vorschlag
+    zeigt ein großes Titelbild, die Fotos nach Tagen und unten zwei Knöpfe (bei den größten Schriften unten
+    nur der Hauptknopf, „Nicht jetzt“ dann unter den Angaben zum Album). Aus einem erledigten oder
+    persönlichen Vorschlag legt „Album anlegen“ nichts sofort an; ein nach „Anpassen“ getippter Name gilt;
+    Umbenennen und Verschieben eines eigenen Albums heißen so; „Alle auswählen“ lässt „Nicht jetzt“ aus;
+    VoiceOver nennt bei Häkchen und Knöpfen das Album.
+  - Vorschau: der Knopf sagt mit einem Wort nach „Jetzt“, was er tut. Das Ergebnis sagt groß, was geschah
+    („10 neue Alben“, darunter „mit 342 Fotos“; nach einer Entfernung „1 Album entfernt“), und unter
+    „Rückgängig machen“, was der Knopf tut.
+  - Kaufen: Sind die freien Alben verbraucht, öffnet „Anlegen“ auf einer Karte ein eigenes Kaufblatt mit dem
+    App-Symbol (hell und dunkel, wie auf der Willkommensseite), „Kauf wiederherstellen“ und „Code einlösen“.
+  - Fotokarten: Titelbilder nur scharf und nur vom iPhone, sonst eine ruhige Fläche in den Farben des Fotos;
+    antwortet Fotos gerade nicht, fragt die Karte kurz darauf noch einmal. Karten-Regal mit gleich hohen
+    Karten (bei großer Schrift weniger und breitere), Startpaket-Mosaik; Hilfetexte zwei Zeilen, der Rest
+    hinter „Mehr erfahren“. VoiceOver erreicht Karte und Knöpfe einzeln.
+  - Alben: Titelbilder statt kleiner Bildchen, „Von Albumist“ oben mit „Neu“ und „+N“, Zeilen für Ordner,
+    Verlauf und Ähnliche Alben; lang drücken oder „…“ im Album macht nur dieses Album rückgängig. „Verlauf
+    und Rückgängig“ ist von den Einstellungen in den Tab Alben gezogen.
+  - Einführung: das App-Symbol, die vier Versprechen, dann gleich die Analyse.
+  - Texte: Meldungen, die „in der Übersicht“ sagten, nennen jetzt die Seite „Vorschläge“ (auch Siri und
+    Kurzbefehle); unbenutzte Texte sind aus dem Katalog entfernt.
+  - Bedienungstests gehen über die neuen Bildschirme, dazu eigene für den Rahmen (Tabs in beiden Sprachen,
+    die Filter von „Unsortiert“, „Anlegen“ auf der Karte mit „Widerrufen“, das Kaufblatt).
+- 20.11. (P3-09, P3-18, Entscheidung Fuchs 17.11. „Unsortiert“): Ein Wort für eine Sache.
+  „Rückgängig machen“ für alles, was Albumist angelegt hat („Alles rückgängig machen“, „Rest
+  rückgängig machen“, in der Reise-Werkstatt statt „Aufheben“, auch die Meldungen nach einem
+  unterbrochenen Rückgängigmachen: „Dort kannst du den Rest rückgängig machen.“), „Widerrufen“ nur im kurzen
+  Hinweis direkt danach; Belege sagen „Vollständig angelegt“, „Angelegt am“ (beim Entfernen
+  „entfernt“, beim Rückgängigmachen „Vollständig rückgängig gemacht“, „Teilweise rückgängig
+  gemacht“, auch in Albumzeilen und im geteilten Text) statt „umgesetzt“; „Unsortiert“ statt „Nicht sortiert“ (Liste, Foto-Info, Suche);
+  die Einstellung heißt nur noch „Zählt als sortiert“, die Übersicht nennt die Bereiche selbst
+  („Gezählt werden nur Fotos, die zu „Länder und Orte“ und „Reisen“ passen.“); die Wahl des Jahres
+  heißt in Einführung und Einstellungen „Albumist arbeitet mit“. Die Einführung sagt richtig,
+  was die Schalter tun („Für die markierten Bereiche macht Albumist Vorschläge.“). Nach einer
+  Prüfung steht „Gerade eben geprüft“ statt „Zuletzt geprüft jetzt“. Die Foto-Info sagt bei
+  einem unsortierten Foto, warum („Noch in keinem Album für „Länder und Orte“ oder „Reisen““).
+  Englisch entsprechend („Undo Everything“, „Created on“, „Unsorted“, „Checked just now“).
+- 20.11. (P3-09): Große Zahlen mit Tausenderpunkt auch in Sätzen mit Pluralform: „1.354 Fotos
+  von zu Hause“ statt „1354“ neben „82 von 1.176“ (Übersicht, Prüfbericht, Vorschläge und ihre
+  Begründungen, Mediathek, Belege, Suche, Länder, Reise-Werkstatt, Siri). „1 Foto“ bleibt Einzahl;
+  die Suche sagt auf Englisch „1 result“ statt „1 results“.
 <!-- rename:keep-begin: the rename names the old spelling -->
 - 20.11.: Arbeitsname Sortly → Albumist auch im Code: Paket und Module (`AlbumistKit`, `AlbumistCore` …), Ordner
   `App/Albumist*`, Xcode-Ziele und Schemata, Typ- und Testnamen, Start-Schalter der UI-Tests, Skripte und
@@ -139,6 +392,67 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 21.11. (voller UI-Lauf 44862187776 der Design-Wellen 1 und 2): „Anlegen“ ohne freie Alben öffnete das Kaufblatt
+  nicht. Die Tabs lasen die Anfrage nur in der Bindung des Blatts; jetzt liest `body` sie, was SwiftUI verfolgt, so
+  zeichnet eine neue Anfrage die Tabs sicher neu (der nächste Lauf zeigt mit Bild, ob das die ganze Ursache war). Die Liste aller Vorschläge heißt „Alle Vorschläge“ wie ihre Zeile auf der
+  Startseite, nicht mehr „Vorschläge“ wie die Startseite selbst. „Ordner für neue Alben“ bricht bei der größten Schrift
+  um, statt abgeschnitten zu werden. Der UI-Test misst den Start direkt nach einem Plan (im Lauf zeigte die App nach
+  56 s noch „Albumist wird geladen“, Ursache offen) und nimmt danach trotzdem zurück, was er angelegt hat: die
+  Tests danach fanden sonst alle Reisen angelegt.
+- 21.11. (UI-Tests, erster voller UI-Lauf von Design-Welle 1, 44852630315): drei Fehler lagen in den Testhilfen,
+  nicht in der App. Ein Schritt las die Taste „Alle N“ erst nach dem Tippen, als die Liste sie schon verdeckt hatte
+  (fünf Abläufe brachen ab). test6 suchte nur „Alle Jahre“; seit Welle 1 steht auf dem iPhone 18 Pro „Ganze
+  Mediathek dazunehmen“, das Probejahr blieb an, und sechs Tests danach fanden keine Fotos (jetzt beide
+  Formulierungen, und jeder Ablauf beginnt mit der ganzen Mediathek). Die Barrierefreiheit zählte die dritte Karte,
+  die am Rand von „Von Albumist“ hereinschaut, als Text über dem Bildschirmrand; Karten in Regalen dürfen das jetzt,
+  jeder andere Text über den Rand fällt weiter durch.
+- 20.11.: Eine Vorschau zeigt und legt genau an, was für sie gewählt wurde (zweite Prüfung von Welle 1):
+  „N Alben anlegen“, „Dein Startpaket“ und „Ergänzen …“ planen nur ihre eigenen Vorschläge. Ein unter
+  „Anpassen“ gewählter Vorschlag, der noch nicht angelegt ist, kam vorher in jede solche Vorschau, auch
+  ohne Haken; er behält seine Wahl jetzt für seinen eigenen Knopf. „Die ersten N jetzt anlegen“ gibt die
+  übrigen so zurück, wie sie vorher waren. „Auswahl aufheben“ entfällt: Zurück gibt seit Welle 1 dasselbe zurück.
+- 20.11.: Jede Vorschau behält ihren eigenen Plan. Eine Entfernung, die man unter „Alben“ ansah, ersetzte vorher den
+  Plan einer Vorschau, die auf einem anderen Tab offen war; die zeigte dann die Entfernung. Ein Plan, der gelaufen ist,
+  wird nicht noch einmal angeboten.
+- 20.11.: Eine Vorschau, die offen blieb, während auf einem anderen Tab Alben angelegt wurden, bietet ihren alten
+  Plan nicht mehr an (zweite Prüfung der Vorschau-Auswahl): „Jetzt anlegen“ legte vorher ein Album ein zweites Mal an,
+  das „Album anlegen“ inzwischen angelegt hatte. Eine Vorschau gewählter Vorschläge macht ihren Plan neu, ohne das
+  schon Angelegte; eine Vorschau, deren Plan anderswo entstand, sagt „Inzwischen hat sich etwas geändert“. Wer einen
+  unterbrochenen Vorgang rückgängig macht, bekommt keine Auswahl einer Vorschau zurück, die inzwischen zu ist; „Passt
+  nicht zu diesem Album“ nimmt das Album auch aus einer offenen Vorschau.
+- 20.11.: Eine offene Vorschau folgt auch dem, was du anderswo entscheidest (Fable-Prüfung von Welle 1): Legst du
+  einen ihrer Vorschläge auf einem anderen Tab mit „Nicht jetzt“ beiseite, nimmst Fotos heraus, wählst unter
+  „Anpassen“ ein anderes Album oder gibst einen Namen, macht sie ihren Plan neu; vorher legte „Jetzt anlegen“ den
+  beiseitegelegten Vorschlag trotzdem an. Eine Vorschau, die geöffnet wurde, während ein „Anlegen“ oder sein
+  „Widerrufen“ noch lief, macht ihren Plan, sobald das fertig ist (sie blieb bei „Nichts zu tun“). Bleibt beim Neu-
+  Planen nichts übrig, sagt sie „Nichts zu tun“ und warum, statt Nullen und einen grauen Knopf zu zeigen.
+- 21.11.: Die Zeilen im Tab „Alben“ trennen bei großer Schrift kein Wort mehr (Fable-Prüfung von Welle 1): Die Zahl
+  steht neben dem Titel, solange beide in eine Zeile passen, sonst darunter, wie in den Einstellungen; vorher brach ab
+  der Textgröße xxLarge „Unterbrochen“ neben „Verlauf und Rückgängig“ mitten im Wort. Bei den Bedienungshilfe-Größen
+  stehen Symbol und Pfeil über den Wörtern, die dann die ganze Breite haben.
+- 21.11.: Vorschläge (Fable-Prüfung von Welle 1): Persönliche Karten zeigen „Persönlicher Inhalt“ auch unter langen
+  Namen, VoiceOver sagt es ohne Symbol. Die Knöpfe eines offenen Vorschlags nennen für VoiceOver das Album und sind
+  gleich hoch; nur die eigene Vorschau schließt einen Vorschlag, und der Knopf einer Karte wartet, solange die Liste
+  auswählt.
+- 21.11.: Startseite (Fable-Prüfung von Welle 1): Die Titelbilder der Karten werden nicht bei jedem Zeichnen neu
+  gesucht, das hält die Seite auch in großen Mediatheken flüssig. „Dein Startpaket“ bietet nie mehr Alben an, als
+  frei sind. Wer langsam aus einer Vorschau zurückwischt, sieht das Startpaket nicht mehr verschwinden und
+  wiederkommen; „Ergänzen …“ öffnet nichts mehr auf einem Stapel, den man verlassen hat. Eine Karte, die gerade
+  anlegt, sagt das VoiceOver; eine nach dem Kaufblatt angelegte zeigt „Angelegt“; „Was heißt sortiert?“ scrollt bei
+  sehr großer Schrift.
+- 21.11.: Schnell-Anlegen (Fable-Prüfung von Welle 1): „Anlegen“ legt ein Album nur noch dort sofort an, wo das
+  Banner mit „Widerrufen“ erscheint; in einem Blatt über den Tabs öffnet es den Vorschlag oder die Vorschau. Eine Karte
+  unter „Nicht jetzt“ bleibt beim Anlegen dort, und „Widerrufen“ legt den Vorschlag wieder zurück. Nach dem Kauf legt
+  Albumist nur einen Vorschlag an, den es noch gibt. „Widerrufen“ lässt sich nicht von einem neuen „Anlegen“
+  unterbrechen, und die Bewertungsfrage verdeckt das Banner nicht.
+- 20.11.: Größte Schrift (P3-18): Das Mosaik eines Vorschlags zeigt „+24“ statt „+…“; die Zahl wächst nur bis
+  zur ersten Bedienungshilfe-Größe, steht in einer Zeile und wird eher etwas
+  kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht
+  „Animation überspringen“ bei jeder Schriftgröße ohne Scrollen über der Tab-Leiste: Die Bilder der Show werden kleiner,
+  wo der Bildschirm nicht reicht, Zahlen und Knopf behalten ihre Größe (auf dem kleinen iPhone lag der Knopf auch bei
+  normaler Schrift unter der Tab-Leiste); quer auf dem iPhone stehen die Zahlen neben Bildern und Knopf, und Drehen
+  mitten in der Show lässt die Fotos weiterfliegen. Der Text des
+  Knopfs wächst bis AX2, so bricht „überspringen“ nicht mehr mitten im Wort.
 - 21.11.: Suche, Atlas und Vorschläge stocken beim ersten Öffnen nicht mehr bis zu einer Sekunde: ob Apple Intelligence verfügbar ist, fragt die App jetzt im Hintergrund (beim Start und bei jeder Rückkehr) statt beim Zeichnen des Bildschirms. Gefunden vom neuen Hänger-Wächter der UI-Tests.
 - 20.11.: Die Karte der laufenden Analyse zeigt auf einen Blick nur noch, was zählt: was gerade läuft (mit „Pause“),
   die Zahl, eine kurze Zeile („Fertig gegen 23:40“, warum es langsamer geht oder wartet, der Countdown für Apple),
@@ -167,6 +481,13 @@
   still: „Zuletzt 82 von 176 sortiert“, darunter „Wird weitergezählt, sobald die Analyse weiterläuft.“ „Gezählt
   werden nur …“ nennt nur eingeschaltete Hauptbereiche; „Nur ausgewählte Fotos“ nennt auch mit „Nur 2026“ alle
   freigegebenen Fotos (P3-03).
+- 20.11.: Zählt kein Hauptbereich als sortiert („Zählt als sortiert“ leer oder die gewählten Bereiche ausgeschaltet),
+  steht kein Foto mehr unter „Nicht sortiert“: vorher zeigten die Mediathek, die Suche „nicht sortiert“ und die
+  Foto-Infos jedes Foto als nicht sortiert, auch ignorierte, während die Übersicht „Kein Bereich zählt als sortiert“
+  sagte. Jetzt heißen solche Fotos in den Infos „Nicht mitgezählt“; ignorierte und ausgeschlossene Fotos bleiben unter
+  „Ignoriert“ und „Ausgeschlossen“ und lassen sich wieder „Nicht mehr ignorieren“, auch wenn jeder Bereich aus ist. Die
+  leeren Listen „Nicht sortiert“ und „Sortiert“ sagen dann „Kein Bereich zählt als sortiert“ mit dem Hinweis auf die
+  Einstellungen statt „Alles sortiert“, und die Foto-Infos nennen denselben Hinweis als Grund (N-01).
 - 20.11.: Kleine graue Texte (Fußnoten, Zahlen, Erklärungen auf Karten und in Listen) sind gut lesbar und bleiben doch heller als der Haupttext: das neue Grau `.noteText` (`Theme.noteText`, hell 5,9:1 auf weißen Karten statt 3,4:1, überall mindestens 4,6:1; dunkel 7,5:1 auf Karten, mindestens 4,7:1; mit erhöhtem Kontrast deutlich stärker) an 145 Stellen in 21 Dateien statt des System-Graus. Das dunklere `Theme.secondaryText` bleibt für Text auf dem Farbschein der Fotos. `secondary_text_rule.py` lehnt neues kleines System-Grau ab (P3-14).
 - 20.11.: Auswählen wie in Fotos: Solange Fotos ausgewählt werden, ist die Tab-Leiste ausgeblendet. „N aus Vorschlag
   entfernen“ lag hinter der Tab-Leiste und lässt sich jetzt antippen; in der Mediathek stehen „Zu Album hinzufügen“,

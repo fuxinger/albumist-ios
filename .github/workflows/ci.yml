@@ -68,6 +68,12 @@ jobs:
         # Small grey text (footnote, caption, subheadline) uses .noteText (Theme.noteText, 4.6:1
         # and more), not the system grey .secondary (3.4:1 on a white card; review P3-14).
         run: python3 .github/scripts/secondary_text_rule.py .
+      - name: One filled main button per page
+        # Design rule 3 (DS-04b): at most one filled main button (PrimaryButtonStyle,
+        # .borderedProminent, .glassProminent, a toolbar's confirmation action) can show on a page at
+        # a time; card actions are tinted. Reads what a page shows across files; sheets and pushed
+        # screens are pages of their own. Places the code cannot read: TAKE_TURNS in the script.
+        run: python3 .github/scripts/filled_button_rule.py .
       - name: Every UI string has English
         run: python3 .github/scripts/check_strings.py .
       - name: Code map lists every Swift file
@@ -269,6 +275,22 @@ jobs:
             CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1 \
             || { grep -E "error:" -A3 ../build-log.txt | grep -v "/SourcePackages/" | head -80; echo "--- last 30 lines of the build log"; tail -30 ../build-log.txt; exit 1; }
           tail -2 ../build-log.txt
+      - name: App icon compiled
+        # DS-20: the icon is one Icon Composer file (App/Albumist/Resources/AppIcon.icon), written by
+        # hand without a Mac. A file actool does not take leaves the app without an icon and only
+        # warns, and App Store Connect would refuse the upload later. The app just built must name
+        # its icon "AppIcon" and carry it in its asset catalog; warnings about the icon are shown.
+        if: steps.appbuild.outcome == 'success'
+        run: |
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 6 -type d -path "*/Build/Products/Debug-iphonesimulator/Albumist.app" | head -1)
+          test -n "$APP" || { echo "::error::No built Albumist.app in DerivedData"; exit 1; }
+          grep -iE "warning: .*(AppIcon|\.icon\b)" build-log.txt | head -20 || true
+          NAME=$(plutil -extract CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName raw "$APP/Info.plist" 2>/dev/null || true)
+          test "$NAME" = "AppIcon" || { echo "::error::The built app names no icon AppIcon (CFBundleIconName: '$NAME')"; exit 1; }
+          xcrun assetutil --info "$APP/Assets.car" > build-assets-info.json
+          COUNT=$(grep -cE '"Name" *: *"AppIcon"' build-assets-info.json || true)
+          test "${COUNT:-0}" -gt 0 || { echo "::error::Assets.car of the built app holds no AppIcon"; head -60 build-assets-info.json; exit 1; }
+          echo "App icon: CFBundleIconName $NAME, $COUNT AppIcon entries in Assets.car"
       - name: Build UI tests
         # The UI tests run in their own workflow (ui.yml); building them here finds a compile
         # error in them within minutes of this job instead of after the long simulator setup

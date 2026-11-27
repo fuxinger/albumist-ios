@@ -13,7 +13,7 @@ public enum PlanReviewPhase: Hashable, Sendable {
     case result
 
     /// `runningPlan`: the plan of the current or last run (`ExecutionState.planID`).
-    /// `previewedPlan`: the plan the preview shows (`AppModel.plan`; nil once a run ended).
+    /// `previewedPlan`: the plan the preview shows (its own, `PlanReviewView`).
     /// `hasResult`: a finished run's result is there (`ExecutionState.finished`).
     public init(running: Bool, runningPlan: AlbumistID?, previewedPlan: AlbumistID?, hasResult: Bool) {
         if running {

@@ -19,10 +19,16 @@ import UIKit
 ///   audit only real accessibility elements.
 /// - a visible format placeholder ("%lld", "%@") and, in the English run, German words
 ///   left in the interface (untranslated strings)
-/// - text that runs off the side of the screen
+/// - text that runs off the side of the screen, except in a card that peeks in from the side
+///   of a shelf (`SideShelfCheck`)
 /// - a country row of the atlas at the largest text size taller than its words need (a name
 ///   or year broken mid-word, review P3-11, `checkAtlasRows`), and the folder label in the
 ///   settings cut on one line at any size (P3-17, `checkFullyShown`)
+/// - "Animation überspringen" off screen or behind the tab bar while the sorting show runs
+///   (P3-18, `expectSkipInReach`), and the mosaic's "+N" cut even at half its size where the
+///   tree lists it (P3-18, `reportMoreCount`; inside its button it is most likely not listed,
+///   then it is only reported; since design wave 1 the suggestion's page shows its photos by
+///   day without a mosaic, and the walk only reports that it found none)
 ///
 /// Also failing: an audit that does not complete in two attempts ("Audit failed to complete in
 /// time", each attempt printed as `A11Y_AUDIT_ERROR`): the screen would otherwise pass unchecked.
@@ -35,13 +41,17 @@ import UIKit
 /// - findings on or under the system's Liquid Glass bars (navigation bar, tab bar, toolbar,
 ///   bottom search field): XCTest cannot measure text on glass (Apple's own "Fertig" button
 ///   fails there), and content scrolling under a bar is cut by design; so is content passing
-///   under the preview's own opaque bar with "Alben jetzt anlegen" ("plan.bar", review P3-05).
+///   under the preview's own opaque bar with "Jetzt anlegen" ("plan.bar", review P3-05) and
+///   under the suggestion's bar with "Nicht jetzt" ("proposal.bar", design wave 1).
 ///   The elements inside that bar (its promise, button and notes) are not exempt: they are
 ///   audited like any content and fail the test (`ownBarElements`)
 /// - contrast findings without an element on screens with such a bar: XCTest found text it
 ///   cannot attribute (text inside a combined row), which in the UI flow was always a row
 ///   passing under the tab bar
 /// - text cut at the top or bottom edge of the screen (scrolled, not clipped)
+/// - text in a card that peeks in from the side of a shelf (design wave 1: two cards and the
+///   edge of the third, `CardShelf`), and the audit's findings on it, which it measures on the
+///   few points on screen (`SideShelfCheck`, UI run 44852630315)
 /// - `.textClipped` at standard text sizes and on text that already wraps: the audit also
 ///   reports text that only clips once it grows, and wrapped text whose every line is shown
 ///   (checked in the screenshots); the run at the largest size is the real test
@@ -69,33 +79,37 @@ final class AccessibilityUITests: XCTestCase {
     private var framesBeforeAudit: [String: [CGRect]] = [:]
     /// Labelled pictures that contain text (share image preview).
     private var pictureFrames: [CGRect] = []
-    /// The elements inside the preview's own bar ("plan.bar": promise, "Alben jetzt anlegen",
-    /// notes) by label and frame, noted with the chrome frames: audited like any content, a
-    /// finding on them fails as before; only what passes under the bar counts as under a bar.
+    /// Cards that peek in from the side of a shelf, from the tree check, for the audit.
+    private var peekingCards: [CGRect] = []
+    /// The elements inside the preview's own bar ("plan.bar": promise, "Jetzt anlegen",
+    /// notes) and the suggestion's ("proposal.bar") by label and frame, noted with the chrome
+    /// frames: audited like any content, a finding on them fails as before; only what passes
+    /// under a bar counts as under a bar.
     private var ownBarElements: [(label: String, frame: CGRect)] = []
     /// "Contrast failed" findings waiting for the second contrast audit.
-    private var pendingContrast: [(label: String, line: String, detail: String)] = []
+    private var pendingContrast: [PendingContrast] = []
+    /// A "contrast failed" finding: the element's label, the report line and the audit's detail.
+    private struct PendingContrast {
+        let label: String
+        let line: String
+        let detail: String
+    }
 
     private static let largestText = "UICTContentSizeCategoryAccessibilityXXXL"
     private static let failingAuditTypes: XCUIAccessibilityAuditType = [.contrast, .textClipped, .hitRegion, .sufficientElementDescription]
 
-    /// Labels the walk taps, per language (from Localizable.xcstrings).
+    /// Labels the walk taps, per language (from Localizable.xcstrings). Since design wave 1 the
+    /// walk finds the start page's "Alle N", "Dein Startpaket", the suggestion cards and the
+    /// preview's button by their identifiers (`UITestScreens`), the same in both languages.
     private struct Words {
-        var overviewTab: String
-        var libraryTab: String
+        /// The tabs (decision 6B): "Vorschläge" is also the start page's title.
+        var startTab: String
+        var unsortedTab: String
         var albumsTab: String
+        /// The start page's gear, and the settings' title.
         var settings: String
         var done: String
-        /// A pattern: the count is singular or plural ("1 Vorschlag prüfen" once only one
-        /// suggestion is left open, UI run 43796844064).
-        var reviewSuggestions: String
-        var suggestionTitle: String
-        /// The list "… Vorschläge prüfen" opens (all areas, so the plain title).
-        var suggestionsTitle: String
-        var rowMarker: String
-        var starterPattern: String
         var planTitle: String
-        var applyNow: String
         var undo: String
         var atlas: String
         var shareAtlas: String
@@ -116,27 +130,27 @@ final class AccessibilityUITests: XCTestCase {
         var sortingShow: String
         /// The receipt's share button, there once the receipt is loaded (PlanReceiptView).
         var shareReceipt: String
+        /// A pattern: the button around a suggestion's mosaic, with the number of its photos.
+        /// The suggestion's page has no mosaic since wave 1 (photos by day): `reportMoreCount`
+        /// then says so and checks nothing.
+        var allPhotos: String
 
-        static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
-                                  settings: "Einstellungen", done: "Fertig", reviewSuggestions: ".*[0-9.]+ Vorschl(ag|äge) prüfen.*",
-                                  suggestionTitle: "Vorschlag", suggestionsTitle: "Vorschläge", rowMarker: "Fotos",
-                                  starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Vorschau",
-                                  applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
+        static let german = Words(startTab: "Vorschläge", unsortedTab: "Unsortiert", albumsTab: "Alben",
+                                  settings: "Einstellungen", done: "Fertig", planTitle: "Vorschau",
+                                  undo: "Rückgängig machen", atlas: "Reise-Atlas",
                                   shareAtlas: "Reise-Atlas teilen", sharePreview: "Vorschau des Teilen-Bilds", searchQuery: "Rom", country: "Italien",
                                   receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig",
                                   folderLabel: "Ordner für neue Alben", planLoading: "Plan wird erstellt",
                                   photoLoading: "Foto wird geladen", sortingShow: "Fotos werden einsortiert",
-                                  shareReceipt: "Liste teilen")
-        static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
-                                   settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ [Ss]uggestions?.*",
-                                   suggestionTitle: "Suggestion", suggestionsTitle: "Suggestions", rowMarker: "photo",
-                                   starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
-                                   applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
+                                  shareReceipt: "Liste teilen", allPhotos: "(Alle )?[0-9.]+ Fotos? ansehen")
+        static let english = Words(startTab: "Suggestions", unsortedTab: "Unsorted", albumsTab: "Albums",
+                                   settings: "Settings", done: "Done", planTitle: "Preview",
+                                   undo: "Undo", atlas: "Travel Atlas",
                                    shareAtlas: "Share Travel Atlas", sharePreview: "Preview of the share image", searchQuery: "Rome", country: "Italy",
                                    receiptTitle: "Changes", historyTitle: "History and Undo",
                                    folderLabel: "Folder for New Albums", planLoading: "Creating plan",
                                    photoLoading: "Loading photo", sortingShow: "Sorting photos",
-                                   shareReceipt: "Share List")
+                                   shareReceipt: "Share List", allPhotos: "See (All )?[0-9,]+ Photos?")
     }
 
     // MARK: Tests
@@ -161,7 +175,7 @@ final class AccessibilityUITests: XCTestCase {
             print("UI_STEP_MISSING onboarding")
             XCTFail("test1 must start on a fresh simulator: no welcome screen, so the onboarding was not checked")
         }
-        check("overview after first analysis")
+        check("start page after first analysis")
         UITestOnboarding.accessibilityOnboarding.ends()
         finish("onboarding")
     }
@@ -180,28 +194,25 @@ final class AccessibilityUITests: XCTestCase {
     /// Onboarding, demo library and its analysis, when the app is at its first start. Test 1
     /// does this with an audit of every step; a later test that finds the app new does it
     /// without (run 43796844064: the simulator service dropped the first pass before any test
-    /// ran, and the contrast pass met the welcome screen instead of the overview).
+    /// ran, and the contrast pass met the welcome screen instead of the start page).
+    /// Since decision 1A (17.11.) the onboarding is the welcome and the photo access, no areas
+    /// page and no trial step: with the access the analysis starts at once (2A), and iOS asks
+    /// about notifications only after "Bescheid sagen, wenn fertig" (3B).
     /// False when the app was past the onboarding already.
     @discardableResult
     private func onboardAndSeed(checking: Bool) -> Bool {
-        let welcome = button("Los geht").waitForExistence(timeout: checking ? 30 : 10)
+        let letsGo = app.buttons["onboarding.letsGo"]
+        let welcome = letsGo.waitForExistence(timeout: checking ? 30 : 10)
         if welcome {
             if !checking { print("UI_FACT app at its first start: onboarding and demo library first") }
             if checking { check("onboarding welcome") }
-            tap(button("Los geht"), "welcome")
-            if checking { check("onboarding areas") }
-            tap(button("Weiter"), "areas")
+            tap(letsGo, "welcome")
+            // The access page, pushed: its "Weiter" (or "Analyse starten" when the photos could
+            // be read before). Not asserted: passing it is, below.
+            _ = UITestWait.holds(timeout: 5) { app.buttons["access.continue"].exists || app.buttons["onboarding.start"].exists }
             if checking { check("onboarding access") }
-            if button("Zugriff erlauben").waitForExistence(timeout: 5) {
-                button("Zugriff erlauben").tap()
-                allowPhotosIfAsked()
-            }
-            if button("Weiter").waitForExistence(timeout: 3) { button("Weiter").tap() }
-            let trial = button("Analyse starten").waitForExistence(timeout: 20)
-            XCTAssertTrue(trial, "Onboarding did not reach the trial step")
-            if checking { check("onboarding trial") }
-            tap(button("Analyse starten"), "start analysis")
-            allowNotificationsIfAsked()
+            let reached = UITestOnboarding.passAccessPage(app)
+            XCTAssertTrue(reached, "Onboarding did not reach the main screen")
         }
         let demo = button("Beispiel-Mediathek anlegen")
         let seeds = demo.waitForExistence(timeout: welcome ? 30 : 5)
@@ -282,61 +293,79 @@ final class AccessibilityUITests: XCTestCase {
 
     // MARK: Walk
 
-    /// Overview, suggestions, one suggestion, the starter plan, atlas and share image, library,
-    /// albums, search and settings; `short` leaves out the lower halves and the side screens.
+    /// The start page "Vorschläge", an area's suggestions and one suggestion, the starter plan,
+    /// atlas and share image, "Unsortiert", "Alben" with the history, search and settings;
+    /// `short` leaves out the lower halves and the side screens.
     private func walk(_ tag: String, _ w: Words, english: Bool = false, applyStarter: Bool = false, short: Bool = false) {
-        let overview = tabButton(w.overviewTab)
-        if overview.waitForExistence(timeout: 20) { overview.tap() }
-        UITestWait.appears(app.navigationBars[w.overviewTab], "\(tag) overview shown", timeout: 20)
-        // Right after an analysis the "Analyse fertig" card carries "Vorschläge prüfen" without a
-        // number ("analysis.review") and the counted button waits until it is gone: in the
-        // contrast run of UI run 44880878362 the light walk found only the card's button.
-        let reviewSuggestions = app.buttons.matching(NSPredicate(format: "label MATCHES %@ OR identifier == %@",
-                                                                 w.reviewSuggestions, "analysis.review")).firstMatch
-        // Its content, not only its bar: the suggestions button the walk taps next. Not asserted
-        // here, the tap below says when it is missing.
-        _ = reviewSuggestions.waitForExistence(timeout: 20)
+        let startTab = tabButton(w.startTab)
+        if startTab.waitForExistence(timeout: 20) { startTab.tap() }
+        UITestWait.appears(startPageGear(w), "\(tag) start page shown", timeout: 20)
+        let allSuggestions = UITestScreens.StartPage.allSuggestions(app)
+        // Its content, not only its bar: the "Alle N" the walk taps next. Not asserted here, the
+        // tap below says when it is missing.
+        _ = allSuggestions.waitForExistence(timeout: 20)
         // check() waits for the screen to come to rest after every swipe before it.
-        check("\(tag) overview", english: english)
+        check("\(tag) start page", english: english)
         if !short {
-            app.swipeUp(); app.swipeUp()
-            check("\(tag) overview lower", english: english)
+            scrollUp("\(tag) start page lower", swipes: 2)
+            check("\(tag) start page lower", english: english)
             app.swipeDown(); app.swipeDown(); app.swipeDown(); app.swipeDown()
-            UITestWait.screenAtRest(app, "\(tag) overview back at the top")
+            UITestWait.screenAtRest(app, "\(tag) start page back at the top")
+        }
+        // Sheets in a fitting size (DS-12b): at the largest text size every sheet opens full
+        // height (half a screen would show two lines); "Analyse" from the start page's line.
+        if tag == "xxxl" {
+            if UITestScreens.Analysis.openSheet(app) {
+                let done = app.buttons["analysis.summary.done"]
+                let top = done.exists ? done.frame.minY : -1
+                print("UI_FACT \(tag) sheet Analyse: its done button at y \(Int(top)) of \(Int(app.frame.height))")
+                XCTAssertTrue(done.exists && top < app.frame.height * 0.2, "At the largest text size the sheet \"Analyse\" does not open full height")
+                shot("\(tag)-sheet-analysis")
+                UITestScreens.Analysis.closeSheet(app)
+                app.swipeDown(); app.swipeDown()
+                UITestWait.screenAtRest(app, "\(tag) start page back at the top after the sheet")
+            } else {
+                XCTFail("\(tag): the sheet \"Analyse\" did not open from the start page")
+            }
         }
 
-        // Suggestions and one suggestion
+        // An area's suggestions ("Alle N": photo cards since wave 1) and one suggestion
         // A tap that landed elsewhere (on a bar) fails here by its name, not steps later.
-        if tap(reviewSuggestions, "\(tag) open suggestions", timeout: 20),
-           opened(app.navigationBars[w.suggestionsTitle], "\(tag) suggestions") {
+        let cards = UITestScreens.SuggestionList.cards(app)
+        if tap(UITestScreens.StartPage.allSuggestions(app), "\(tag) open suggestions", timeout: 20),
+           opened(cards.firstMatch, "\(tag) suggestions") {
             check("\(tag) suggestions", english: english)
-            // A List only creates the rows on screen; at the largest text size the first row
-            // starts below the fold. After each swipe the row has up to the old second to show.
-            let row = suggestionRow(w.rowMarker)
+            // The grid builds its cards as they come near; at the largest text size one card
+            // fills the screen. After each swipe the card has up to the old second to show.
+            let card = cards.firstMatch
             var swipes = 0
-            while !row.exists && swipes < 6 { app.swipeUp(); swipes += 1; _ = row.waitForExistence(timeout: 1) }
-            if tap(row, "\(tag) open suggestion", timeout: 10) {
-                let detailShown = app.navigationBars[w.suggestionTitle].waitForExistence(timeout: 5)
+            while !card.exists && swipes < 6 { app.swipeUp(); swipes += 1; _ = card.waitForExistence(timeout: 1) }
+            // The card opens by its body (its photo and name, `photoCard.body`); its one action
+            // button beside would create or add instead.
+            let body = card.buttons["photoCard.body"]
+            if tap(body.exists ? body : card, "\(tag) open suggestion", timeout: 10) {
+                let detailShown = UITestWait.holds(timeout: 5) { UITestScreens.SuggestionPage.isShown(app) }
                 print(detailShown ? "UI_STEP_OK \(tag) suggestion opened" : "UI_STEP_MISSING \(tag) suggestion opened")
                 XCTAssertTrue(detailShown, "Not opened: \(tag) suggestion (the tap landed elsewhere)")
                 check("\(tag) suggestion detail", english: english)
+                reportMoreCount("\(tag) suggestion detail", w)
                 if !short {
-                    app.swipeUp()
+                    scrollUp("\(tag) suggestion detail lower", swipes: 1)
                     check("\(tag) suggestion detail lower", english: english)
                 }
                 back("\(tag) suggestion detail", confirmed: detailShown)
-                // Gone, not "the list is there": a detail that never opened is already gone.
-                UITestWait.disappears(app.navigationBars[w.suggestionTitle], "\(tag) suggestion detail closed", timeout: 10)
+                // Gone, not "the list is there": a page that never opened is already gone.
+                UITestWait.until("\(tag) suggestion detail closed", timeout: 10) { !UITestScreens.SuggestionPage.isShown(app) }
             }
             back("\(tag) suggestions", confirmed: false)
-            backOnOverview(w, "\(tag) suggestions")
+            backOnStartPage(w, "\(tag) suggestions")
         }
 
-        // The starter set opens the plan; going back selects nothing. Once it has been applied
-        // (test 3) the card is gone.
-        let starter = app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.starterPattern)).firstMatch
+        // "Dein Startpaket" opens the plan; going back gives its picks back. Once a starter set
+        // has been applied (test 3) the page no longer offers it.
+        let starter = UITestScreens.StartPage.starterSet(app)
         if !starter.waitForExistence(timeout: 8) {
-            print("UI_STEP_SKIPPED \(tag) starter plan (no starter set on the overview)")
+            print("UI_STEP_SKIPPED \(tag) starter plan (no starter set on the start page)")
         } else if tap(starter, "\(tag) open starter plan", timeout: 10) {
             let planShown = app.navigationBars[w.planTitle].waitForExistence(timeout: 20)
             // A tap on the clear part of a row (largest text) that missed would otherwise pass
@@ -349,15 +378,18 @@ final class AccessibilityUITests: XCTestCase {
                 check("\(tag) plan", english: english)
                 expectApplyInReach("\(tag) plan", required: applyStarter)
                 if !short {
-                    app.swipeUp(); app.swipeUp()
+                    scrollUp("\(tag) plan lower", swipes: 2)
                     check("\(tag) plan lower", english: english)
                 }
-                if applyStarter, tap(button(w.applyNow), "\(tag) apply plan", timeout: 30) {
+                if applyStarter, tap(app.buttons["plan.apply"], "\(tag) apply plan", timeout: 30) {
                     // The sorting show; with Reduce Motion one album at a time, cross-faded. The
                     // first picture once the show is on screen (not asserted: a short plan may
                     // be past it already), the second a set time later to catch a later album.
-                    _ = anything(exactly: w.sortingShow).waitForExistence(timeout: 5)
+                    let showOn = anything(exactly: w.sortingShow).waitForExistence(timeout: 5)
                     shot("a11y-\(slug(tag))-sorting-show-1")
+                    // Its button: on screen without scrolling (review P3-18). After the first
+                    // picture, so the picture still catches the show's first album.
+                    if showOn { expectSkipInReach("\(tag) sorting show", w) }
                     // pacing: the second picture of the show, 1.5 s after the first; the time
                     // between them is the point (another album on screen), there is no state.
                     usleep(1_500_000); shot("a11y-\(slug(tag))-sorting-show-2")
@@ -383,7 +415,7 @@ final class AccessibilityUITests: XCTestCase {
                 }
             }
             back("\(tag) starter plan", confirmed: planShown)
-            backOnOverview(w, "\(tag) starter plan")
+            backOnStartPage(w, "\(tag) starter plan")
         }
 
         // Travel atlas and the share image
@@ -392,7 +424,7 @@ final class AccessibilityUITests: XCTestCase {
             sleep(3)
             check("\(tag) atlas", english: english)
             if !short {
-                app.swipeUp(); app.swipeUp()
+                scrollUp("\(tag) atlas lower", swipes: 2)
                 check("\(tag) atlas lower", english: english)
                 if accessibilitySize { checkAtlasRows(tag) }
                 // A country: its photo colours sit behind the title and caption.
@@ -424,12 +456,12 @@ final class AccessibilityUITests: XCTestCase {
                 }
             }
             back("\(tag) atlas", confirmed: true)
-            backOnOverview(w, "\(tag) atlas")
+            backOnStartPage(w, "\(tag) atlas")
         }
 
         // Tabs
-        if tap(tabButton(w.libraryTab), "\(tag) library tab") {
-            UITestWait.appears(app.navigationBars[w.libraryTab], "\(tag) library shown", timeout: 10)
+        if tap(tabButton(w.unsortedTab), "\(tag) unsorted tab") {
+            UITestWait.appears(app.navigationBars[w.unsortedTab], "\(tag) unsorted shown", timeout: 10)
             // The first pass over the photos shows "Fotos werden zusammengestellt …" instead of them.
             UITestWait.disappears(app.descendants(matching: .any).matching(identifier: "library.preparing").firstMatch,
                                   "\(tag) library photos listed", timeout: 30)
@@ -465,21 +497,21 @@ final class AccessibilityUITests: XCTestCase {
         if tap(tabButton(w.albumsTab), "\(tag) albums tab") {
             UITestWait.appears(app.navigationBars[w.albumsTab], "\(tag) albums shown", timeout: 10)
             check("\(tag) albums", english: english)
-        }
-        // Settings
-        if tap(tabButton(w.overviewTab), "\(tag) back to overview"), tap(app.buttons[w.settings], "\(tag) settings") {
-            UITestWait.appears(app.navigationBars[w.settings], "\(tag) settings shown", timeout: 10)
-            check("\(tag) settings", english: english)
             if !short {
-                // Design review W16: history and undo on their own screen. Opened first, from
-                // the top of the list: after scrolling down and back the first row was not in
-                // the tree again (UI run 43773339053, "history" missing).
-                if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5),
-                   opened(app.navigationBars[w.historyTitle], "\(tag) history") {
+                // Design review W16: history and undo on their own screen, in the tab "Alben"
+                // since 5C (it left the settings).
+                if UITestScreens.Albums.openHistory(app, title: w.historyTitle, "\(tag) history", timeout: 5) {
                     check("\(tag) history", english: english)
                     back("\(tag) history", confirmed: true)
                     UITestWait.disappears(app.navigationBars[w.historyTitle], "\(tag) history closed", timeout: 10)
                 }
+            }
+        }
+        // Settings
+        if tap(tabButton(w.startTab), "\(tag) back to the start page"), tap(app.buttons[w.settings], "\(tag) settings") {
+            UITestWait.appears(app.navigationBars[w.settings], "\(tag) settings shown", timeout: 10)
+            check("\(tag) settings", english: english)
+            if !short {
                 let list = app.collectionViews.firstMatch
                 (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp()
                 check("\(tag) settings lower", english: english)
@@ -489,14 +521,14 @@ final class AccessibilityUITests: XCTestCase {
             UITestWait.disappears(app.navigationBars[w.settings], "\(tag) settings closed", timeout: 10)
         }
 
-        // Search last: the search tab focuses its field, and the keyboard covers the tab bar.
+        // Search last: once the keyboard is up it covers the tab bar. Leaving the search for a
+        // step after it is `tabButton`'s (`UITestScreens.tabButton`).
         if !short, tap(searchTabButton(), "\(tag) search tab") {
             UITestWait.appears(app.searchFields.firstMatch, "\(tag) search field shown", timeout: 10)
-            // The keyboard the focused field brings up, so the check sees it as it stays; not
-            // asserted (without it the check runs as before, on the whole screen).
-            _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
-            // iOS' one-time slide-to-type tip over the keyboard is not the app's (UITestKeyboardTip).
-            UITestKeyboardTip.dismissIfShown(app, step: "\(tag) search")
+            // No keyboard before the field is tapped (the owner's choice of 25.11.2026, "Runder
+            // Knopf, Suche bleibt"), watched for a second, as flow test 1 does (review T6 of
+            // H14): the check below sees the page as the round button shows it.
+            UITestWait.never("\(tag) no keyboard before the search field is tapped", for: 1) { app.keyboards.firstMatch.exists }
             check("\(tag) search", english: english)
             let field = app.searchFields.firstMatch
             if field.waitForExistence(timeout: 5) {
@@ -516,10 +548,17 @@ final class AccessibilityUITests: XCTestCase {
         }
     }
 
-    /// Back on the overview after leaving a screen opened from it: its bar is there again. A
-    /// screen that closed by itself (see `back`) finds it at once.
-    private func backOnOverview(_ w: Words, _ step: String) {
-        UITestWait.appears(app.navigationBars[w.overviewTab], "back on the overview from \(step)", timeout: 10)
+    /// Back on the start page after leaving a screen opened from it: its gear is there again
+    /// (the list of all suggestions can carry the same title). A screen that closed by itself
+    /// (see `back`) finds it at once.
+    private func backOnStartPage(_ w: Words, _ step: String) {
+        UITestWait.appears(startPageGear(w), "back on the start page from \(step)", timeout: 10)
+    }
+
+    /// The gear of the start page ("Einstellungen") in its bar "Vorschläge": no other screen has
+    /// both.
+    private func startPageGear(_ w: Words) -> XCUIElement {
+        app.navigationBars[w.startTab].buttons[w.settings]
     }
 
     // MARK: Checks
@@ -578,13 +617,15 @@ final class AccessibilityUITests: XCTestCase {
         for field in app.searchFields.allElementsBoundByIndex where field.exists {
             frames.append(field.frame.insetBy(dx: -8, dy: -8))
         }
-        // The preview's own bar with "Alben jetzt anlegen" (`PlanReviewView.applyBar`, review
-        // P3-05): opaque, so a row passing under it is cut by design, as under the tab bar. The
-        // elements inside it are noted (`ownBarElements`) and audited like any content: the
-        // screen's main action fails the test as before. Without them (no snapshot of the bar)
-        // the bar is not counted at all, so its button never passes as something under it.
+        // The preview's own bar with "Jetzt anlegen" (`PlanReviewView.applyBar`, review P3-05)
+        // and the suggestion's with "Nicht jetzt" and its filled button ("proposal.bar", design
+        // wave 1, decision 6B): opaque, so a row passing under them is cut by design, as under
+        // the tab bar. The elements inside are noted (`ownBarElements`) and audited like any
+        // content: the screen's main action fails the test as before. Without them (no snapshot
+        // of the bar) the bar is not counted at all, so its button never passes as under it.
         ownBarElements = []
-        for bar in app.descendants(matching: .any).matching(identifier: "plan.bar").allElementsBoundByIndex where bar.exists {
+        let ownBars = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["plan.bar", "proposal.bar"]))
+        for bar in ownBars.allElementsBoundByIndex where bar.exists {
             guard let snapshot = try? bar.snapshot() else { continue }
             frames.append(snapshot.frame)
             // The bar itself and everything inside it.
@@ -643,6 +684,7 @@ final class AccessibilityUITests: XCTestCase {
             // shows here before it times out on a busy one; a slow one gets the pixel probe.
             let took = Date().timeIntervalSince(started)
             print("A11Y_AUDIT_TIME \(screen) attempt \(attempt) \(String(format: "%.1f", took)) s \(finished ? "completed" : "timed out")")
+            if attempt == 1 { logTextsUnderBars(screen, chrome: chrome) }
             if finished {
                 if took > 5 { UITestScreenProbe.logPixels(app, screen: screen) }
                 confirmContrast(screen)
@@ -677,6 +719,9 @@ final class AccessibilityUITests: XCTestCase {
                 : "contrast audit hung twice and the screen changed in the background, no retry"
             print("A11Y_FAIL \(screen) | audit | \(why)")
             auditFailures.append(why)
+            // What the retry recorded before it hung is no finding of the next screen (review round 2).
+            pendingContrast = []
+            if retry == .hungAgain { contrastBisect(screen, options: options) }
             return
         case .otherTypesHung:
             break
@@ -688,6 +733,61 @@ final class AccessibilityUITests: XCTestCase {
         // checked must not pass (Prüfer B G5-06). The tree checks still ran; check() fails the test.
         print("A11Y_FAIL \(screen) | audit | did not complete in 2 attempts, screen not audited")
         auditFailures.append("audit did not complete in 2 attempts, screen not audited")
+    }
+
+    /// Evidence for A28 after a real hang, never a pass: which part of the screen the contrast
+    /// audit hangs on. "en plan lower" hung in four runs in a row, also at load 160, while every
+    /// other screen completed, and texts cut by a bar were not it (UI run 46012910058). Pulled
+    /// down 140 pt it completed in 4.8 s (UI run 46033354388): the cause is in the screen's
+    /// bottom 140 pt (the sixth album, "Show All", the undo note and "Learn More"). So the page
+    /// is pulled down five times by 35 pt, and the contrast audit runs alone after each pull,
+    /// with the texts on screen: the first pull that completes names what left the screen.
+    private func contrastBisect(_ screen: String, options: XCTExpectedFailure.Options) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+        for pull in 1...5 {
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 35)))
+            _ = UITestWait.until("\(screen): at rest for contrast experiment \(pull)", timeout: 5) { (try? self.app.snapshot()) != nil }
+            let started = Date()
+            var completed = false
+            XCTExpectFailure("The screen changed during the accessibility audit", options: options) {
+                completed = (try? app.performAccessibilityAudit(for: .contrast) { _ in true }) != nil
+            }
+            let took = String(format: "%.1f", Date().timeIntervalSince(started))
+            print("A11Y_CONTRAST_BISECT \(screen) pulled \(pull * 35) pt: \(completed ? "completed" : "hung") in \(took) s; "
+                  + "texts: \(textsOnScreen())")
+        }
+    }
+
+    /// The texts on screen, top to bottom, shortened: "'Lissabon, April 2022' 230; …".
+    private func textsOnScreen() -> String {
+        guard let root = try? app.snapshot() else { return "-" }
+        let screen = app.frame
+        var texts: [(Int, String)] = []
+        var stack: [any XCUIElementSnapshot] = [root]
+        while let node = stack.popLast() {
+            stack.append(contentsOf: node.children)
+            if node.elementType == .staticText, node.frame.intersects(screen) {
+                texts.append((Int(node.frame.minY), "'\(node.label.prefix(24))' \(Int(node.frame.minY))"))
+            }
+        }
+        return texts.sorted { $0.0 < $1.0 }.map(\.1).joined(separator: "; ")
+    }
+
+    /// How many texts a bar cuts (partly under it, partly not): evidence for A28, whether the
+    /// contrast audit is slow or hangs where text runs under a bar's blur ("en plan lower" in
+    /// UI run 45997759108, "xxxl suggestion detail lower" in 45971115191 both had such text).
+    private func logTextsUnderBars(_ screen: String, chrome: [CGRect]) {
+        guard let root = try? app.snapshot() else { return }
+        var cut: [String] = []
+        var stack: [any XCUIElementSnapshot] = [root]
+        while let node = stack.popLast() {
+            stack.append(contentsOf: node.children)
+            guard node.elementType == .staticText, !node.frame.isEmpty else { continue }
+            if chrome.contains(where: { $0.intersects(node.frame) && !$0.contains(node.frame) }) {
+                cut.append("'\(node.label.prefix(24))' \(Int(node.frame.minY))-\(Int(node.frame.maxY))")
+            }
+        }
+        print("A11Y_TEXTS_UNDER_BARS \(screen) \(cut.count): \(cut.joined(separator: "; "))")
     }
 
     /// The audit types other than contrast. Run on their own when the whole audit did not
@@ -841,9 +941,14 @@ final class AccessibilityUITests: XCTestCase {
         // moves no frame, so there is no state to wait for; text that lacks contrast fails both.
         sleep(2)
         var again = Set<String>()
+        // A peeking card's text of the same label ("Neu" on every new album) fails every audit; it
+        // must not confirm a finding on screen that did not repeat (`SideShelfCheck`).
+        let cards = peekingCards
+        let bounds = app.frame
         do {
             try app.performAccessibilityAudit(for: .contrast) { issue in
-                if !issue.compactDescription.localizedCaseInsensitiveContains("nearly") {
+                let peeking = issue.element.map { SideShelfCheck.inPeekingCard($0.frame, cards: cards, screen: bounds) } ?? false
+                if !issue.compactDescription.localizedCaseInsensitiveContains("nearly") && !peeking {
                     again.insert(issue.element?.label ?? "-")
                 }
                 return true
@@ -868,12 +973,13 @@ final class AccessibilityUITests: XCTestCase {
         let type = issue.auditType
         let summary = issue.compactDescription
         var reason: String?
-        var where_ = "-"
+        var place = "-"
         var label = "-"
         if let element = issue.element {
             let frame = element.frame
             label = element.label
-            where_ = "\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)) type \(element.elementType.rawValue) id '\(element.identifier)'"
+            place = "\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))"
+                + " type \(element.elementType.rawValue) id '\(element.identifier)'"
             // The same element before the audit: same label, column and size (a scroll only moves it up or down).
             let before = (framesBeforeAudit[label] ?? []).filter {
                 abs($0.minX - frame.minX) < 1 && abs($0.width - frame.width) < 1 && abs($0.height - frame.height) < 1
@@ -889,6 +995,8 @@ final class AccessibilityUITests: XCTestCase {
                 reason = "emoji only (a flag is a picture, not text)"
             } else if pictureFrames.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(frame) }) {
                 reason = "inside a labelled picture (share image preview)"
+            } else if (type == .contrast || type == .textClipped) && frames.contains(where: { SideShelfCheck.inPeekingCard($0, cards: peekingCards, screen: bounds) }) {
+                reason = "in a card peeking in from the side of a shelf (measured on the part on screen)"
             } else if type == .textClipped && !accessibilitySize {
                 reason = "text clipped at a standard size (the audit enlarges text; the largest-size run decides)"
             } else if type == .textClipped && frame.height > Self.wrappedHeight {
@@ -897,25 +1005,32 @@ final class AccessibilityUITests: XCTestCase {
                         && (frame.minY < bounds.minY || frame.maxY > bounds.maxY) {
                 reason = "cut by the top or bottom edge of the screen (scrolled)"
             }
-        } else if type == .textClipped {
-            reason = "text clipped, no element (text inside a combined row)"
-        } else if type == .contrast {
-            if summary.localizedCaseInsensitiveContains("nearly") {
-                reason = "contrast nearly passed (system secondary text), no element"
-            } else if barOverContent {
-                reason = "no element, screen has content passing under a system bar"
-            }
+        } else {
+            reason = Self.reasonWithoutElement(type, summary: summary, barOverContent: barOverContent)
         }
-        let line = "\(screen) | audit \(Self.name(of: type)) | \(summary) | label '\(label)' | \(where_)"
+        let line = "\(screen) | audit \(Self.name(of: type)) | \(summary) | label '\(label)' | \(place)"
         if let reason {
             print("A11Y_WARN \(line) | \(reason)")
         } else if type == .contrast {
-            pendingContrast.append((label, line, String(issue.detailedDescription.prefix(400))))
+            pendingContrast.append(PendingContrast(label: label, line: line, detail: String(issue.detailedDescription.prefix(400))))
         } else {
             print("A11Y_FAIL \(line)")
             print("A11Y_DETAIL \(screen) | \(String(issue.detailedDescription.prefix(400)))")
             auditFailures.append("\(Self.name(of: type)) '\(label.prefix(40))'")
         }
+    }
+
+    /// Why a finding without an element is only a warning, if it is.
+    private static func reasonWithoutElement(_ type: XCUIAccessibilityAuditType, summary: String,
+                                             barOverContent: Bool) -> String? {
+        if type == .textClipped {
+            return "text clipped, no element (text inside a combined row)"
+        }
+        guard type == .contrast else { return nil }
+        if summary.localizedCaseInsensitiveContains("nearly") {
+            return "contrast nearly passed (system secondary text), no element"
+        }
+        return barOverContent ? "no element, screen has content passing under a system bar" : nil
     }
 
     /// Taller than two lines of body text at the largest accessibility size: text that wraps.
@@ -924,7 +1039,10 @@ final class AccessibilityUITests: XCTestCase {
     /// Flags and other emoji, without letters or digits.
     private static func isEmojiOnly(_ label: String) -> Bool {
         let scalars = label.unicodeScalars.filter { !CharacterSet.whitespaces.contains($0) }
-        return !scalars.isEmpty && scalars.allSatisfy { $0.properties.isEmojiPresentation || (0x1F1E6...0x1F1FF).contains($0.value) || $0.properties.isEmojiModifier || $0.value == 0xFE0F || $0.value == 0x200D }
+        return !scalars.isEmpty && scalars.allSatisfy {
+            $0.properties.isEmojiPresentation || (0x1F1E6...0x1F1FF).contains($0.value) || $0.properties.isEmojiModifier
+                || $0.value == 0xFE0F || $0.value == 0x200D
+        }
     }
 
     private static func name(of type: XCUIAccessibilityAuditType) -> String {
@@ -948,7 +1066,7 @@ final class AccessibilityUITests: XCTestCase {
         "und", "oder", "nicht", "der", "die", "das", "Der", "Die", "Das", "dein", "deine", "deinen", "deiner", "deinem",
         "Dein", "Deine", "mit", "für", "Alle", "alle",
         "werden", "wird", "ist", "sind", "jetzt", "noch", "Fotos", "Alben", "Aufnahmen", "Vorschläge", "Vorschlag",
-        "Einstellungen", "Übersicht", "Mediathek", "Reisen", "Länder", "Orte", "Städte", "anlegen", "prüfen",
+        "Einstellungen", "Übersicht", "Mediathek", "Unsortiert", "Startpaket", "Reisen", "Länder", "Orte", "Städte", "anlegen", "prüfen",
         "Zurück", "Fertig", "Weiter", "Abbrechen", "Schließen", "Analyse", "sortiert", "Sortiert", "Jahre", "Tage",
     ]
 
@@ -972,13 +1090,19 @@ final class AccessibilityUITests: XCTestCase {
         var seen = 0
         framesBeforeAudit = [:]
         pictureFrames = []
+        peekingCards = []
+        // Texts off the side and the shelves' cards off the side, decided once the whole tree is
+        // read: the tree may list a card's texts beside the card (`SideShelfCheck`).
+        var offSide: [(label: String, frame: CGRect, ancestors: [SideShelfCheck.Ancestor])] = []
+        var shelfCards: [CGRect] = []
 
         func fail(_ kind: String, _ label: String, _ frame: CGRect) {
             print("A11Y_FAIL \(screen) | \(kind) | label '\(label)' | \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
             screenFailures.append("\(kind) '\(label.prefix(40))'")
         }
 
-        func visit(_ node: any XCUIElementSnapshot) {
+        // `ancestors`: the elements above the node, outermost first (for the side check).
+        func visit(_ node: any XCUIElementSnapshot, ancestors: [SideShelfCheck.Ancestor]) {
             seen += 1
             let frame = node.frame
             let visible = !frame.isEmpty && frame.intersects(bounds)
@@ -1017,17 +1141,34 @@ final class AccessibilityUITests: XCTestCase {
                     }
                 case .staticText:
                     texts.append((label, frame))
-                    // Wider than the screen or starting off its side: the layout does not fit.
-                    if frame.minX < bounds.minX - 1 || frame.maxX > bounds.maxX + 1 {
-                        fail("text runs off the side of the screen", label, frame)
-                    }
+                    // Wider than the screen or starting off its side: decided below.
+                    if SideShelfCheck.runsOffSide(frame, screen: bounds) { offSide.append((label, frame, ancestors)) }
                 default:
                     break
                 }
             }
-            for child in node.children { visit(child) }
+            if visible, type != .staticText, type != .scrollView, SideShelfCheck.runsOffSide(frame, screen: bounds),
+               SideShelfCheck.isShelfCard(frame, ancestors: ancestors, screen: bounds) {
+                shelfCards.append(frame)
+            }
+            let below = ancestors + [SideShelfCheck.Ancestor(frame: frame, isScrollView: type == .scrollView,
+                                                             name: "type \(type.rawValue) '\(node.identifier)'")]
+            for child in node.children { visit(child, ancestors: below) }
         }
-        visit(root)
+        visit(root, ancestors: [])
+
+        // Text off the side: the layout does not fit, unless the text is in a card that peeks in
+        // from the side of a shelf (design wave 1, `SideShelfCheck`).
+        for text in offSide {
+            if let card = SideShelfCheck.peekingCard(of: text.frame, ancestors: text.ancestors, cards: shelfCards, screen: bounds) {
+                peekingCards.append(card)
+                let f = text.frame
+                print("A11Y_WARN \(screen) | text in a card peeking in from the side of a shelf | label '\(text.label)' | \(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height))")
+            } else {
+                fail("text runs off the side of the screen", text.label, text.frame)
+                print("A11Y_DETAIL \(screen) | above '\(text.label.prefix(40))': \(SideShelfCheck.chain(text.ancestors))")
+            }
+        }
 
         // Overlapping texts (reported): two labels drawn over each other.
         for i in texts.indices {
@@ -1081,7 +1222,8 @@ final class AccessibilityUITests: XCTestCase {
             let allowed = flagLine + CGFloat(words + 2) * bodyLine + 2 * 10 + 2 * 4 + 8
             if frame.height > allowed {
                 print("A11Y_FAIL \(tag) atlas lower | country row broken mid-word | label '\(row.label)' | height \(Int(frame.height)) > \(Int(allowed)) for \(words) word(s)")
-                XCTFail("\(tag) atlas: the row '\(row.label)' is \(Int(frame.height)) pt tall, more than \(Int(allowed)) pt for \(words) word(s) and the year: the name or the year breaks mid-word")
+                XCTFail("\(tag) atlas: the row '\(row.label)' is \(Int(frame.height)) pt tall, more than \(Int(allowed)) pt for "
+                        + "\(words) word(s) and the year: the name or the year breaks mid-word")
             }
         }
         if measured > 0 {
@@ -1104,11 +1246,16 @@ final class AccessibilityUITests: XCTestCase {
             element.exists && !element.frame.isEmpty && app.frame.contains(element.frame)
         }
         // No fixed sleep after a swipe (SleepRuleTests): XCTest waits for the app to be idle,
-        // and only the width and height of the label are measured, not its position.
+        // and only the width and height of the label are measured, not its position. Called
+        // below the label's section, so on down first, then back up. Down first went to the top
+        // and then up 6 times, which fell short once at the largest text size on a busy Mac
+        // (UI run 46049560731, xxxl settings; 5 runs before found it): now 10 each way, and how
+        // many swipes it took is logged, to see the margin.
         var swipes = 0
-        while !visible() && swipes < 4 { list.swipeDown(); swipes += 1; if !element.exists { element = app.staticTexts[identifier] } }
-        swipes = 0
-        while !visible() && swipes < 6 { list.swipeUp(); swipes += 1; if !element.exists { element = app.staticTexts[identifier] } }
+        while !visible() && swipes < 10 { list.swipeUp(); swipes += 1; if !element.exists { element = app.staticTexts[identifier] } }
+        var back = 0
+        while !visible() && back < 10 { list.swipeDown(); back += 1; if !element.exists { element = app.staticTexts[identifier] } }
+        print("UI_FACT \(screen) label '\(text)' after \(swipes) swipes on and \(back) back")
         guard visible() else {
             print("UI_STEP_MISSING \(screen) label '\(text)' on screen")
             XCTFail("\(screen): the label '\(text)' was not found on screen")
@@ -1125,6 +1272,109 @@ final class AccessibilityUITests: XCTestCase {
         } else {
             print("A11Y_FAIL \(screen) | label cut | label '\(text)' | \(Int(frame.width))x\(Int(frame.height)), needs \(Int(needed)) pt on one line")
             XCTFail("\(screen): the label '\(text)' is cut: \(Int(frame.width)) pt wide on one line, it needs \(Int(needed)) pt")
+        }
+    }
+
+    /// What the walk can read of the mosaic's "+N" (review P3-18, `ui-a11y-xxxl-suggestion-
+    /// detail`: "+…" instead of "+24" at the largest text). The count sits inside the mosaic's
+    /// button, which VoiceOver reads by its own label ("Alle 31 Fotos ansehen") and which
+    /// XCUITest most likely shows as one element without the count: then this only reports the
+    /// button (`UI_FACT`); the fix is held by `LargestTextFitTests` and seen in the screenshot.
+    /// Where the tree does list the count among the button's texts (never the button itself,
+    /// whose own label a hoisted identifier could carry), it fails on conservative evidence
+    /// only: its width does not hold the whole count even at half the size its one line's height
+    /// shows, the smallest it may shrink to (`minimumScaleFactor(0.5)`).
+    private func reportMoreCount(_ screen: String, _ w: Words) {
+        let grid = app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.allPhotos)).firstMatch
+        guard let button = try? grid.snapshot() else {
+            print("UI_FACT \(screen) \"+N\": no mosaic button found")
+            return
+        }
+        // One snapshot of the button: the count, if the tree lists it as a text inside it.
+        var count: (label: String, frame: CGRect)?
+        var stack = Array(button.children.reversed())
+        while let node = stack.popLast() {
+            if node.elementType == .staticText, node.identifier == "thumbnails.more" || node.label.hasPrefix("+") {
+                count = (node.label, node.frame)
+                break
+            }
+            stack.append(contentsOf: node.children.reversed())
+        }
+        guard let count, count.frame.height >= 1 else {
+            print("UI_FACT \(screen) \"+N\": button '\(button.label)' \(button.frame), the count is not in the tree (see the screenshot)")
+            return
+        }
+        let unit = UIFont.systemFont(ofSize: 100, weight: .semibold)
+        let size = count.frame.height / unit.lineHeight * 100
+        let smallest = size * 0.5
+        let needed = (count.label as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: smallest, weight: .semibold)]).width
+        let facts = "button '\(button.label)', count '\(count.label)' \(Int(count.frame.width))x\(Int(count.frame.height)), "
+            + "needs \(Int(needed)) pt at \(Int(smallest)) pt (half of \(Int(size)) pt)"
+        if count.frame.width + 3 >= needed {
+            print("UI_FACT \(screen) \"+N\": \(facts): not cut")
+        } else {
+            print("A11Y_FAIL \(screen) | count cut | \(facts)")
+            XCTFail("\(screen): the mosaic's \"\(count.label)\" is cut: \(facts)")
+        }
+    }
+
+    /// "Animation überspringen" is on screen while the sorting show runs, without scrolling,
+    /// below the navigation bar and clear of the tab bar (review P3-18, `ui-a11y-xxxl-sorting-
+    /// show-1`: at the largest text it lay below the visible part of the screen). Content under
+    /// the tab bar counts as hittable for XCUITest, so frames are compared, as for the plan's
+    /// button (`expectApplyInReach`). Each poll reads one snapshot of the app and takes button,
+    /// bars (the first of each in the tree's order, as `firstMatch`) and show from it: the show
+    /// of a short plan may end at any moment, and a query on an element that has just gone
+    /// records "No matches found". The show ends by itself after a few seconds, so its end is
+    /// harmless only when no poll saw it (it had ended before the check began); a show seen with
+    /// its button out of reach that then ends fails, with the last frames seen.
+    private func expectSkipInReach(_ step: String, _ w: Words) {
+        var lastSkip: CGRect?
+        var lastBar: CGRect?
+        var lastTabs: CGRect?
+        var pollsWithShow = 0
+        var ended = false
+        let start = Date()
+        let settled = UITestWait.holds(timeout: 10) {
+            guard let root = try? app.snapshot() else { return false }
+            var show = false
+            var skip: CGRect?
+            var bar: CGRect?
+            var tabs: CGRect?
+            var stack: [any XCUIElementSnapshot] = [root]
+            while let node = stack.popLast() {
+                if node.identifier == "show.skip", skip == nil { skip = node.frame }
+                if node.elementType == .navigationBar, bar == nil { bar = node.frame }
+                if node.elementType == .tabBar, tabs == nil { tabs = node.frame }
+                if node.label == w.sortingShow { show = true }
+                stack.append(contentsOf: node.children.reversed())
+            }
+            if let frame = skip, !frame.isEmpty, root.frame.contains(frame),
+               bar.map({ frame.minY >= $0.maxY - 1 }) ?? true,
+               tabs.map({ frame.maxY <= $0.minY + 1 }) ?? true {
+                lastSkip = frame
+                return true
+            }
+            if show || skip != nil {
+                pollsWithShow += 1
+                lastSkip = skip; lastBar = bar; lastTabs = tabs
+                return false
+            }
+            ended = true
+            return true
+        }
+        print("UI_TIMING wait \(step): skip button in reach \(String(format: "%.1f", Date().timeIntervalSince(start))) s")
+        let place = lastSkip.map { "\($0)" } ?? "missing"
+        let barPlace = lastBar.map { "\($0)" } ?? "missing"
+        let tabPlace = lastTabs.map { "\($0)" } ?? "missing"
+        if settled && !ended {
+            print("UI_STEP_OK \(step): skip button in reach without scrolling (\(place))")
+        } else if ended && pollsWithShow == 0 {
+            print("UI_FACT \(step): the show had ended before its button was measured")
+        } else {
+            let how = ended ? "the show ended after \(pollsWithShow) look(s) with the button out of reach" : "timeout"
+            print("A11Y_FAIL \(step) | skip button out of reach (\(how)) | button \(place), navigation bar \(barPlace), tab bar \(tabPlace)")
+            XCTFail("\(step): \"Animation überspringen\" is not on screen without scrolling (\(how)): button \(place), tab bar \(tabPlace)")
         }
     }
 
@@ -1168,10 +1418,6 @@ final class AccessibilityUITests: XCTestCase {
         text.lowercased().replacingOccurrences(of: " ", with: "-")
     }
 
-    private func suggestionRow(_ marker: String) -> XCUIElement {
-        app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", marker)).element(boundBy: 0)
-    }
-
     private func button(_ text: String) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
@@ -1184,24 +1430,16 @@ final class AccessibilityUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
     }
 
+    /// The search tab (`MainTabs.searchRole`): the round button at the bar's end
+    /// (`UITestScreens.Search`), never another tab.
     private func searchTabButton() -> XCUIElement {
-        for label in ["Suchen", "Suche", "Search"] where app.tabBars.buttons[label].exists {
-            return tabButton(label)
-        }
-        return app.tabBars.buttons.element(boundBy: app.tabBars.buttons.count - 1)
+        UITestScreens.Search.button(app)
     }
 
+    /// A tab bar button (`UITestScreens.tabButton`: leaves an active search first, brings a bar
+    /// that scrolled away back).
     private func tabButton(_ name: String) -> XCUIElement {
-        let button = app.tabBars.buttons[name]
-        var tries = 0
-        while !(button.exists && button.isHittable) && tries < 3 {
-            if tries < 2 { app.swipeDown() } else if app.tabBars.firstMatch.exists { app.tabBars.firstMatch.tap() }
-            // The bar expands after the swipe: on as soon as the button can be tapped, else the
-            // next try after the old second.
-            _ = UITestWait.holds(timeout: 1) { button.exists && button.isHittable }
-            tries += 1
-        }
-        return button
+        UITestScreens.tabButton(app, name)
     }
 
     /// Taps "Beispiel-Mediathek anlegen" and checks that the seeding started: its progress text
@@ -1288,7 +1526,7 @@ final class AccessibilityUITests: XCTestCase {
         return true
     }
 
-    /// "Alben jetzt anlegen" is in reach as the plan opens, without scrolling and clear of the tab
+    /// "Jetzt anlegen" is in reach as the plan opens, without scrolling and clear of the tab
     /// bar, at this walk's text size and orientation (review P3-05 = G3-05: it stood at the end
     /// of the plan, below the fold). Content under the tab bar counts as hittable for XCUITest,
     /// so the frame is read too. `required`: the walk applies the plan next, so the button has to
@@ -1307,6 +1545,39 @@ final class AccessibilityUITests: XCTestCase {
         if !reached {
             print("UI_FACT \(step): button \(apply.exists ? "\(apply.frame)" : "missing"), tab bar \(tabs.exists ? "\(tabs.frame)" : "missing")")
         }
+    }
+
+    /// Brings the lower part of a page up for its "lower" check: `swipes` swipes, and when they
+    /// moved nothing on the screen, as many drags inside the part of the page that shows,
+    /// between the navigation bar and the page's own bar ("plan.bar", "proposal.bar") or the
+    /// tab bar. At the largest text size of UI run 44852630315 a swipe left the suggestion's page
+    /// and the preview where they were (their "lower" shots equal the first ones, their trees
+    /// too), so their lower parts went unchecked; both have a tall bar of their own at the
+    /// bottom. Not asserted: a page too short to scroll stays where it is, and says so.
+    private func scrollUp(_ step: String, swipes: Int) {
+        let before = XCUIScreen.main.screenshot().pngRepresentation
+        for _ in 0..<swipes { app.swipeUp() }
+        UITestWait.screenAtRest(app, "\(step): after the swipes")
+        guard XCUIScreen.main.screenshot().pngRepresentation == before else { return }
+        let window = app.windows.firstMatch.frame
+        let bar = app.navigationBars.firstMatch
+        let tabs = app.tabBars.firstMatch
+        let ownBar = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier IN %@", ["plan.bar", "proposal.bar"])).firstMatch
+        let top = (bar.exists ? bar.frame.maxY : window.minY + 60) + 24
+        var bottom = tabs.exists ? tabs.frame.minY : window.maxY
+        if ownBar.exists { bottom = min(bottom, ownBar.frame.minY) }
+        bottom -= 24
+        print("UI_FACT \(step): \(swipes) swipe(s) moved nothing; dragging from \(Int(bottom)) to \(Int(top))")
+        guard bottom - top > 40 else { return }
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        for _ in 0..<swipes {
+            origin.withOffset(CGVector(dx: window.midX, dy: bottom))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.midX, dy: top)))
+        }
+        UITestWait.screenAtRest(app, "\(step): after the drags")
+        let moved = XCUIScreen.main.screenshot().pngRepresentation != before
+        print("UI_FACT \(step): the drags \(moved ? "moved the page" : "moved nothing either")")
     }
 
     @discardableResult
@@ -1398,7 +1669,7 @@ final class AccessibilityUITests: XCTestCase {
     }
 
     /// A screen that was tapped open is there. Only such a screen is left with `back()`: on the
-    /// overview the first button of the navigation bar is the settings button, and `back()`
+    /// start page the first button of the navigation bar is the settings button, and `back()`
     /// there opened the settings in the middle of the walk (contrast run 43918684247).
     private func opened(_ screen: XCUIElement, _ step: String) -> Bool {
         guard screen.waitForExistence(timeout: 10) else {
@@ -1410,22 +1681,24 @@ final class AccessibilityUITests: XCTestCase {
         return true
     }
 
-    /// Taps the back button. Never on the overview, whose first bar button is the settings
+    /// Taps the back button. Never on the start page, whose first bar button is the settings
     /// button: after the suggestions list had closed by itself, `back()` opened the settings,
     /// and every later step of the contrast walk ran on the settings sheet until "settings"
     /// tapped its "Fertig" (contrast run 44038288087: "close settings" missing, the screenshots
     /// show the sheet). Told by the bar's title, not the button's label: the back button of a
     /// screen opened from the settings is called "Einstellungen" too (UI run 44055738268).
-    /// `confirmed`: the walk saw the screen open (its bar or `opened`); finding the overview
+    /// `confirmed`: the walk saw the screen open (its bar or `opened`); finding the start page
     /// instead means the screen closed by itself, which is a finding. Unconfirmed screens (only
-    /// the tap is known) are left alone there.
+    /// the tap is known) are left alone there. The start page is told by its title and its gear
+    /// together: the list of all suggestions can carry the same title "Vorschläge".
     private func back(_ step: String, confirmed: Bool) {
         let bar = app.navigationBars.firstMatch
         let first = bar.buttons.element(boundBy: 0)
         guard first.exists else { return }
-        if ["Übersicht", "Overview"].contains(bar.identifier) {
-            print("UI_FACT back: no back button, the overview is showing (\(step))")
-            shot("a11y-x-back-on-overview-" + slug(step))
+        let gear = bar.buttons.matching(NSPredicate(format: "label IN %@", ["Einstellungen", "Settings"])).firstMatch
+        if ["Vorschläge", "Suggestions"].contains(bar.identifier) && gear.exists {
+            print("UI_FACT back: no back button, the start page is showing (\(step))")
+            shot("a11y-x-back-on-start-page-" + slug(step))
             if confirmed { XCTFail("Closed by itself before going back: \(step)") }
             return
         }
@@ -1458,52 +1731,11 @@ final class AccessibilityUITests: XCTestCase {
         }
     }
 
-    private func allowPhotosIfAsked() {
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let labels = ["Zugriff auf alle Fotos erlauben", "Allow Full Access", "Allow Access to All Photos", "Alle Fotos erlauben", "Vollzugriff erlauben"]
-        var answered = false
-        // Taps the alert's button when it is there; the trial step means it was not needed.
-        let done = UITestWait.holds(timeout: 25) {
-            for source in [springboard, app] {
-                for label in labels where source.buttons[label].exists {
-                    source.buttons[label].tap()
-                    answered = true
-                    return true
-                }
-            }
-            return button("Analyse starten").exists
-        }
-        if answered {
-            print("UI_STEP_OK system photo alert")
-        } else if !done {
-            print("UI_STEP_MISSING system photo alert")
-        }
-    }
-
-    /// The notification question comes a while after "Analyse starten" (never within the 8 s
-    /// this waited before: no run printed "notification alert"), and until it is answered it
-    /// takes every touch: in UI runs 44032718289 and 44038288087 it still covered the overview
-    /// when "Beispiel-Mediathek anlegen" was tapped, and no demo library was made. Looked for in
-    /// the springboard and in the app for up to 20 s; when it never came, that is said.
-    private func allowNotificationsIfAsked() {
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let answered = UITestWait.holds(timeout: 20) {
-            for source in [springboard, app] {
-                for label in ["Erlauben", "Allow"] where source.buttons[label].exists {
-                    source.buttons[label].tap()
-                    return true
-                }
-            }
-            return false
-        }
-        print(answered ? "UI_STEP_OK notification alert" : "UI_FACT no notification alert within 20 s")
-    }
-
-    /// The notification question can come later than the 20 s `allowNotificationsIfAsked` waits:
-    /// on a busy Mac (load 669, UI run 44880878362) it came only after the demo library was made
-    /// and covered "overview after first analysis". The audit then could not reach the app
-    /// ("Invalid target app" twice) and the screen went unaudited. So every check first looks
-    /// once whether the system alert is in front and answers it as the onboarding does.
+    /// The notification question can come later than the onboarding waits for it: on a busy Mac
+    /// (load 669, UI run 44880878362) it came only after the demo library was made and covered
+    /// "overview after first analysis". The audit then could not reach the app ("Invalid target
+    /// app" twice) and the screen went unaudited. So every check first looks once whether the
+    /// system alert is in front and answers it as the onboarding does (from main, PR #16).
     private func answerLateNotificationAlert(before screen: String) {
         let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
         guard alert.exists else { return }
@@ -1535,10 +1767,10 @@ final class AccessibilityUITests: XCTestCase {
     }
 
     /// The Pause button first: while the analysis runs it is there, and one query answers.
-    /// Every other query reads the whole screen, and during the analysis such a read held the
-    /// app's main thread for 16 to 48 s (UI run 43979263666: each long stall began within half
-    /// a second of a check of this wait).
+    /// Then the start page's line by its identifier (`UITestScreens.Analysis.isIdle`): a query
+    /// over every element held the app's main thread for 16 to 48 s during the analysis (UI run
+    /// 43979263666: each long stall began within half a second of a check of this wait).
     private var analysisIdle: Bool {
-        !app.buttons["Pause"].exists && (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
+        UITestScreens.Analysis.isIdle(app)
     }
 }

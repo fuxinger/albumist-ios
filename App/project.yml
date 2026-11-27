@@ -57,7 +57,7 @@ targets:
         # Read and write (PHAccessLevel.readWrite): the app reads to suggest and, after the user
         # confirms a plan, creates albums and folders and adds or removes album memberships
         # (App Review 5.1.1(ii): the purpose string names both). English: InfoPlist.xcstrings.
-        NSPhotoLibraryUsageDescription: "Albumist liest deine Fotos nur auf diesem Gerät, um Alben vorzuschlagen. Erst wenn du bestätigst, legt es Alben und Ordner in Fotos an und fügt Fotos hinzu oder nimmt sie aus Alben heraus. Kein Foto wird hochgeladen, Originale werden nie verändert."
+        NSPhotoLibraryUsageDescription: "Albumist analysiert deine Fotos nur auf diesem Gerät, um Alben vorzuschlagen. Erst wenn du bestätigst, legt es Alben und Ordner in der Fotos-App an, fügt Fotos hinzu oder nimmt sie aus Alben heraus. Kein Foto wird hochgeladen, Originale bleiben unverändert."
         UIBackgroundModes:
           - processing
         BGTaskSchedulerPermittedIdentifiers:
@@ -68,6 +68,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.albumist.ios
         TARGETED_DEVICE_FAMILY: "1"
+        # Albumist/Resources/AppIcon.icon: the layered Icon Composer icon of iOS 26 (light, dark,
+        # clear and tinted from one file; design/icon/README.md). XcodeGen 2.45.1 and later adds a
+        # .icon folder as one resource; the asset catalog has no second "AppIcon".
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CURRENT_PROJECT_VERSION: 1

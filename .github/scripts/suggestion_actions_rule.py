@@ -2,7 +2,7 @@
 """A suggestion shows two large buttons; its other actions are in the "…" menu at the top right.
 
 Review P3-06 (18.11.): a suggestion showed up to six actions in a column ("Album anlegen",
-"Anpassen", "Nicht jetzt", "Auswählen und später anlegen", "Reise teilen oder zusammenlegen",
+"Anpassen", "Nicht jetzt", "Auswählen und später anlegen", "Reise aufteilen oder zusammenlegen",
 "Keine Reise, hier bin ich öfter"); the last lay half behind the tab bar (screenshot
 ui-08c-trip-detail), and a user read six choices to create one album. Apple's way, as in Photos
 and Files: one or two actions in view, the rest in a "…" menu in the toolbar (`Menu`). Decision 9
@@ -29,8 +29,9 @@ In every Swift file of the app (App/Albumist and Sources), read the same way:
   5. a text that names an action of the menu in German quotes („Anpassen“) says where it is, with
      „…“ as in „…“ › „Anpassen“ (second review of P3-06: the plan said "Ändere dazu den Vorschlag
      unter „Anpassen“." with no "Anpassen" to be seen).
-An action that leaves the suggestion for good leaves `MENU_ACTIONS` with it (decision 9:
-"Auswählen und später anlegen" goes once the list of suggestions selects as in Photos).
+An action that leaves the suggestion for good leaves `MENU_ACTIONS` with it: "Auswählen und später
+anlegen" went with the basket once the list of suggestions selected as in Photos (decision 9 of
+18.11., design wave 1).
 
 Not seen (known gaps): a button style set once on a container of several buttons (counts once);
 large buttons of a helper view in another type; a large `.bordered` button (`.controlSize(.large)`)
@@ -56,8 +57,7 @@ VIEW = "ProposalDetailView"
 # The actions of a suggestion besides its two buttons, by their German titles.
 MENU_ACTIONS = (
     "Anpassen",
-    "Auswählen und später anlegen",
-    "Reise teilen oder zusammenlegen",
+    "Reise aufteilen oder zusammenlegen",
     "Keine Reise, hier bin ich öfter",
 )
 MOST_LARGE_BUTTONS = 2

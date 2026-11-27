@@ -1252,6 +1252,23 @@ public final class ProgressMailbox: Sendable {
     }
 }
 
+// MARK: The last check
+
+/// Under the analysis card: „Zuletzt geprüft vor 5 Minuten“. Right after a check the relative
+/// date said „Zuletzt geprüft jetzt“ (review P3-18); within the first minute it is „Gerade eben
+/// geprüft“, "Checked just now". A check stamped after `now` (the clock was set back) is too.
+public enum LastCheck: Sendable, Equatable {
+    case justNow
+    case earlier(Date)
+
+    /// How long after a check it is „gerade eben“.
+    public static let justNowSpan: TimeInterval = 60
+
+    public init(_ checked: Date, now: Date) {
+        self = now.timeIntervalSince(checked) < Self.justNowSpan ? .justNow : .earlier(checked)
+    }
+}
+
 // MARK: The overnight refinement on the card
 
 /// The countdown of a wait for Apple's geocoder ("weiter in 25 s", "weiter in 2 Minuten"): whole

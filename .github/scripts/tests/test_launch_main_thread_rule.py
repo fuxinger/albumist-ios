@@ -35,9 +35,15 @@ class LaunchMainThreadRuleTests(unittest.TestCase):
 
     def test_a_plan_waits_for_the_keychain_before_it_checks_the_free_albums(self):
         model = code_only(read("App", "Albumist", "Model", "AppModel.swift"))
+        # run() asks freeAlbumsRefusal before anything else of the plan runs; it waits for the
+        # keychain before it checks.
         run = model[model.index("private func run(_ plan: ChangePlan"):]
-        wait = run.index("await Purchases.shared.keychainRead()")
-        check = run.index("Purchases.shared.allows(albums:")
+        run = run[:run.index("\n    }\n")]
+        self.assertIn("await freeAlbumsRefusal(plan, resume: resume)", run)
+        refusal = model[model.index("private func freeAlbumsRefusal("):]
+        refusal = refusal[:refusal.index("\n    }\n")]
+        wait = refusal.index("await Purchases.shared.keychainRead()")
+        check = refusal.index("Purchases.shared.allows(albums:")
         self.assertLess(wait, check)
 
     def test_the_database_folder_is_made_off_the_main_thread(self):

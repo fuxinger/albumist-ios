@@ -2,28 +2,48 @@ import SwiftUI
 import AlbumistCore
 import AlbumistEngine
 
-/// First start (prompt §7, Schritt 1–3): promise, areas, photo access, first analysis.
+/// First start (decision 1A of 17.11.2026, review P3-04; design DS-09, draft `E5-willkommen`):
+/// the welcome with the app's own icon and the four promises, then the photo access, and with
+/// the access the first analysis starts at once with the settings as they are (decision 2A:
+/// the areas as today, cities off, the whole library). The areas, "Städte als eigene Alben"
+/// and "nur ein Jahr" are in the settings only. iOS asks about notifications when the user
+/// taps "Bescheid sagen, wenn fertig" on the analysis card (decision 3B), never here.
+///
+/// Every way through: access not asked yet ("Weiter", then the iOS question: full or limited
+/// starts the analysis, denied shows the way to the Settings app); denied or restricted before
+/// ("Einstellungen öffnen"; back with access, "Analyse starten"); readable before, e.g. a
+/// relaunch after the iOS question ("Analyse starten"). Nothing of the onboarding is stored
+/// but its end (`onboardingDone`), so a relaunch half way starts at the welcome again;
+/// settings an earlier version stored on its areas page stay as they are, and a part of the
+/// library stored before is kept (`analysisScope`, `.all` on a first start).
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
-    /// The steps after the welcome screen are pushed (design review W13): the system back
-    /// button and the swipe from the edge lead back, e.g. to change the areas; the welcome
-    /// screen itself has no way back.
-    enum Step: Hashable { case areas, access, start }
+    @Environment(\.scenePhase) private var scenePhase
+    /// The access page is pushed (design review W13): the system back button and the swipe
+    /// from the edge lead back to the welcome; the welcome itself has no way back.
+    enum Step: Hashable { case access }
 
     @State private var path: [Step] = []
-    @State private var trialYear: Int?
+    /// The iOS question is open (a second tap on "Weiter" does not ask twice).
+    @State private var asking = false
+    /// The analysis is started (a second tap does not start it twice).
+    @State private var starting = false
 
     var body: some View {
         NavigationStack(path: $path) { // Own path: the onboarding pages only, no PushLink (navigation_rule.py OWN_STACKS).
-            screen(welcome)
+            screen(WelcomePage { go(.access) })
                 .navigationDestination(for: Step.self) { step in
                     switch step {
-                    case .areas: screen(areas)
                     case .access: screen(access)
-                    case .start: screen(start)
                     }
                 }
+        }
+        // Back from the Settings app (access denied before): the access page shows what iOS
+        // allows now ("Analyse starten" once the photos can be read). Not while the iOS
+        // question is open: its answer comes with `requestAccess`.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && !asking { Task { await model.refreshAccess() } }
         }
     }
 
@@ -39,137 +59,36 @@ struct OnboardingView: View {
         if path.last != step { path.append(step) }
     }
 
-    /// One onboarding step: the content scrolls when it does not fit (large text, small
-    /// iPhones) and is centered when it does; the button stays at the bottom.
-    private func page<Content: View, Footer: View>(
-        centered: Bool = true,
-        @ViewBuilder content: () -> Content,
-        @ViewBuilder footer: () -> Footer
-    ) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.l) { content() }
-                .frame(maxWidth: 560, alignment: .leading)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, Theme.Spacing.l)
-                .padding(.vertical, Theme.Spacing.l)
-        }
-        .scrollBounceBehavior(.basedOnSize)
-        .defaultScrollAnchor(centered ? .center : .top, for: .alignment)
-        .safeAreaInset(edge: .bottom) {
-            footer()
-                .frame(maxWidth: 560)
-                .padding(.horizontal, Theme.Spacing.l)
-                .padding(.vertical, Theme.Spacing.m)
-                .frame(maxWidth: .infinity)
-                .background(Theme.background)
+    /// The end of the onboarding: the analysis starts over the part of the library stored
+    /// before (the whole library on a first start), the main screen follows.
+    private func start() {
+        guard !starting else { return }
+        starting = true
+        model.finishOnboarding(scope: model.analysisScope)
+    }
+
+    /// "Weiter": the iOS question; with access (full or limited) the analysis starts at once.
+    private func askForAccess() {
+        guard !asking else { return }
+        asking = true
+        Task {
+            await model.requestAccess()
+            asking = false
+            if model.access.canRead { start() }
         }
     }
 
-    // MARK: Steps
-
-    private var welcome: some View {
-        page {
-            Text("Albumist").font(.subheadline.weight(.semibold)).foregroundStyle(.noteText)
-            Text("Deine Fotos, endlich sortiert.").font(.largeTitle.weight(.bold))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, Theme.Spacing.s)
-            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
-                promise("iphone", "Deine Fotos bleiben auf deinem Gerät. Kein Foto wird hochgeladen.")
-                promise("lock.shield", "Originale werden nie gelöscht, verändert oder kopiert.")
-                promise("checklist", "Du siehst jeden Vorschlag, bevor etwas passiert, und kannst alles rückgängig machen.")
-                promise("rectangle.stack", "Vorhandene Alben werden erkannt und ergänzt statt doppelt angelegt.")
-            }
-        } footer: {
-            Button("Los geht’s") { go(.areas) }.buttonStyle(PrimaryButtonStyle())
-        }
-    }
-
-    private func promise(_ symbol: String, _ text: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.m) {
-            IconTile(systemName: symbol, tint: Theme.accent)
-            Text(text).font(.body).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var areas: some View {
-        page(centered: false) {
-            Text("Was soll Albumist sortieren?").font(.title.weight(.bold))
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Die markierten Bereiche zählen als deine Hauptsortierung. Du kannst das später jederzeit ändern.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            VStack(spacing: Theme.Spacing.s) {
-                ForEach(OrganizationArea.available, id: \.self) { area in
-                    areaCard(area)
-                }
-            }
-        } footer: {
-            VStack(spacing: Theme.Spacing.s) {
-                Button("Weiter") {
-                    model.saveSettings()
-                    go(.access)
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                .disabled(model.settings.enabledAreas.isEmpty)
-                // Why the button is grey (design review N6).
-                if model.settings.enabledAreas.isEmpty {
-                    Text("Wähle mindestens einen Bereich.")
-                        .font(.footnote).foregroundStyle(.noteText)
-                        .multilineTextAlignment(.center)
-                        .accessibilityIdentifier("onboarding.areasHint")
-                }
-            }
-        }
-    }
-
-    private func areaCard(_ area: OrganizationArea) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Toggle(isOn: Binding(
-                get: { model.settings.enabledAreas.contains(area) },
-                set: { on in
-                    if on { model.settings.enabledAreas.insert(area) } else { model.settings.enabledAreas.remove(area) }
-                }
-            )) {
-                HStack(spacing: Theme.Spacing.m) {
-                    IconTile(systemName: area.symbol, tint: area.tint)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(area.title).font(.body.weight(.medium))
-                        Text(area.explanation).font(.footnote).foregroundStyle(.noteText)
-                    }
-                }
-            }
-            if area == .places && model.settings.enabledAreas.contains(.places) {
-                citiesToggle
-            }
-        }
-        .padding(Theme.Spacing.m)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card - 6, style: .continuous))
-        .animation(.default, value: model.settings.enabledAreas.contains(.places))
-    }
-
-    /// Right at the start (Fuchs, 14.11.): cities are off by default, but whoever wants
-    /// Rom and Florenz next to Italien can say so here, not only later in Settings.
-    @ViewBuilder
-    private var citiesToggle: some View {
-        @Bindable var model = model
-        Divider()
-        Toggle(isOn: $model.settings.places.includesCities) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Städte als eigene Alben").font(.subheadline.weight(.medium))
-                Text("Zum Beispiel Rom und Florenz zusätzlich zu Italien.")
-                    .font(.footnote).foregroundStyle(.noteText)
-            }
-        }
-    }
+    // MARK: Access
 
     private var access: some View {
-        page {
+        OnboardingPage {
             IconTile(systemName: "photo.on.rectangle", tint: Theme.accent).scaleEffect(1.4).padding(.bottom, Theme.Spacing.s)
             Text("Zugriff auf deine Fotos").font(.title.weight(.bold))
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
             // Said where the user agrees (decision Fuchs 18.11.2026, review P2-03): place names come
             // from Apple, on by default, switch in the settings.
-            Text("Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten.")
+            Text("Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen), an Apples Kartendienst – das kannst du in den Einstellungen ausschalten.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             // Testers asked exactly here whether "full access" means the app may delete.
@@ -193,7 +112,12 @@ struct OnboardingView: View {
             }
         } footer: {
             if model.access.canRead {
-                Button("Weiter") { go(.start) }.buttonStyle(PrimaryButtonStyle())
+                // The photos can be read already (a relaunch after the iOS question, or back
+                // from the Settings app): the button says what happens.
+                Button("Analyse starten") { start() }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(starting)
+                    .accessibilityIdentifier("onboarding.start")
             } else if model.access == .denied || model.access == .restricted {
                 // iOS does not ask a second time: the way on is the Settings app.
                 Button("Einstellungen öffnen") {
@@ -204,64 +128,107 @@ struct OnboardingView: View {
             } else {
                 // "Weiter", not "Zugriff erlauben": a screen before the system prompt must not
                 // read like the consent itself (App Review 5.1.1, plugin review K5).
-                Button("Weiter") {
-                    Task {
-                        await model.requestAccess()
-                        if model.access.canRead { go(.start) }
-                    }
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                .accessibilityIdentifier("access.continue")
+                Button("Weiter") { askForAccess() }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(asking || starting)
+                    .accessibilityIdentifier("access.continue")
             }
-        }
-    }
-
-    private var start: some View {
-        let currentYear = Calendar.current.component(.year, from: Date())
-        return page {
-            Text("Womit soll Albumist anfangen?").font(.title.weight(.bold))
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Mit einem Jahr anzufangen geht schneller: Albumist analysiert dann nur diese Fotos und macht nur dafür Vorschläge. So prüfst du das Ergebnis in Ruhe. Die ganze Mediathek kannst du jederzeit dazunehmen.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            // A settings-style row with a menu instead of a wheel (HIG: menus for short lists).
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    Text("Anfangen mit")
-                    Spacer(minLength: Theme.Spacing.m)
-                    trialPicker(currentYear)
-                }
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text("Anfangen mit")
-                    trialPicker(currentYear)
-                }
-            }
-            .padding(.horizontal, Theme.Spacing.l)
-            .padding(.vertical, Theme.Spacing.s)
-            .frame(minHeight: 52)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-            Text("Die erste Analyse kann bei großen Mediatheken eine Weile dauern. Du kannst die App dabei verlassen: Solange iOS es erlaubt, läuft sie weiter und zeigt den Fortschritt auf dem Sperrbildschirm, sonst geht sie beim nächsten Öffnen genau dort weiter. Wenn du magst, sagt Albumist dir Bescheid, sobald sie fertig ist.")
-                .font(.footnote).foregroundStyle(.noteText)
-                .fixedSize(horizontal: false, vertical: true)
-        } footer: {
-            Button("Analyse starten") {
-                model.finishOnboarding(scope: trialYear.map { .year($0) } ?? .all)
-            }
-            .buttonStyle(PrimaryButtonStyle())
         }
     }
 }
 
-extension OnboardingView {
-    fileprivate func trialPicker(_ currentYear: Int) -> some View {
-        Picker("Anfangen mit", selection: $trialYear) {
-            Text("Die ganze Mediathek").tag(Int?.none)
-            ForEach((0..<6).map { currentYear - $0 }, id: \.self) { year in
-                Text("Nur \(String(year))").tag(Int?.some(year))
+/// The welcome (draft `E5-willkommen`): the app's own icon, large, with a calm entrance, its
+/// name, the headline and the four promises, word for word as decided and tested
+/// (`PromiseWordingTests`). The icon comes in rising a little and settling, the texts follow
+/// one after the other; with Reduce Motion everything only fades in.
+private struct WelcomePage: View {
+    var letsGo: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var shown = false
+
+    var body: some View {
+        OnboardingPage {
+            VStack(spacing: 0) {
+                AppIconImage(side: typeSize.isAccessibilitySize ? 80 : 112)
+                    .scaleEffect(shown || reduceMotion ? 1 : 0.86)
+                    .entrance(shown, order: 0, calm: reduceMotion)
+                    .padding(.bottom, 22)
+                Text("Albumist").font(.subheadline.weight(.semibold)).foregroundStyle(.noteText)
+                    .entrance(shown, order: 1, calm: reduceMotion)
+                    .padding(.bottom, 6)
+                Text("Deine Fotos, endlich sortiert.").font(.largeTitle.weight(.bold))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                    .entrance(shown, order: 1, calm: reduceMotion)
             }
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, Theme.Spacing.m)
+            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                promise("iphone", "Deine Fotos bleiben auf deinem Gerät. Kein Foto wird hochgeladen.")
+                    .entrance(shown, order: 2, calm: reduceMotion)
+                promise("lock.shield", "Originale werden nie gelöscht, verändert oder kopiert.")
+                    .entrance(shown, order: 3, calm: reduceMotion)
+                promise("checklist", "Du siehst jeden Vorschlag, bevor etwas passiert, und kannst alles rückgängig machen.")
+                    .entrance(shown, order: 4, calm: reduceMotion)
+                promise("rectangle.stack", "Vorhandene Alben werden erkannt und ergänzt statt doppelt angelegt.")
+                    .entrance(shown, order: 5, calm: reduceMotion)
+            }
+        } footer: {
+            // The one filled button of the page; there from the start (not part of the entrance).
+            Button("Los geht’s", action: letsGo)
+                .buttonStyle(PrimaryButtonStyle())
+                .accessibilityIdentifier("onboarding.letsGo")
         }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .tint(Theme.accent)
+        .onAppear { shown = true }
+    }
+
+    private func promise(_ symbol: String, _ text: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.m) {
+            IconTile(systemName: symbol, tint: Theme.accent)
+            Text(text).font(.body).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// One onboarding page: the content scrolls when it does not fit (large text, small iPhones)
+/// and is centered when it does; the button stays at the bottom.
+private struct OnboardingPage<Content: View, Footer: View>: View {
+    @ViewBuilder var content: Content
+    @ViewBuilder var footer: Footer
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.l) { content }
+                .frame(maxWidth: 560, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.vertical, Theme.Spacing.l)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .defaultScrollAnchor(.center, for: .alignment)
+        .safeAreaInset(edge: .bottom) {
+            footer
+                .frame(maxWidth: 560)
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.vertical, Theme.Spacing.m)
+                .frame(maxWidth: .infinity)
+                .background(Theme.background)
+        }
+    }
+}
+
+extension View {
+    /// The welcome's entrance: rising a little and fading in, `order` steps after the start;
+    /// `calm` (Reduce Motion): only the fade, sooner and without movement.
+    fileprivate func entrance(_ shown: Bool, order: Int, calm: Bool) -> some View {
+        opacity(shown ? 1 : 0)
+            .offset(y: shown || calm ? 0 : 10)
+            .animation(calm ? Animation.easeOut(duration: 0.35).delay(0.04 * Double(order))
+                            : Animation.spring(duration: 0.7, bounce: 0.18).delay(0.1 + 0.08 * Double(order)),
+                       value: shown)
     }
 }

@@ -142,6 +142,7 @@ struct TripPlaybackPhotoTile: View {
     @ViewBuilder private var face: some View {
         if showsPhotos, let id {
             AssetThumbnail(id: id, side: side)
+                .environment(\.thumbnailShowsVideoLength, false)
         } else {
             TripPlaybackPlaceholder(index: index)
         }

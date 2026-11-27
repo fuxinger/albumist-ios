@@ -235,9 +235,12 @@ struct LocalizationTests {
         let bundle = try #require(english, "en.lproj missing; localizations: \(Bundle.main.localizations)")
         #expect(bundle.localizedString(forKey: "Abbrechen", value: nil, table: nil) == "Cancel")
         #expect(bundle.localizedString(forKey: "Deine Fotos, endlich sortiert.", value: nil, table: nil) == "Your photos, finally sorted.")
-        let format = bundle.localizedString(forKey: "%lld Fotos", value: nil, table: nil)
-        #expect(String.localizedStringWithFormat(format, 1) == "1 photo")
-        #expect(String.localizedStringWithFormat(format, 3) == "3 photos")
+        // The grouped count of photos (`"\(n) \(n.formatted()) Fotos"`): the integer picks the
+        // form, the text shows the number (the ungrouped "%lld Fotos" went with the sorting
+        // show's DS-17, its last user).
+        let format = bundle.localizedString(forKey: "%lld %@ Fotos", value: nil, table: nil)
+        #expect(String.localizedStringWithFormat(format, 1, "1") == "1 photo")
+        #expect(String.localizedStringWithFormat(format, 3, "3") == "3 photos")
         let twoArgs = bundle.localizedString(forKey: "%@ von %@", value: nil, table: nil)
         #expect(String(format: twoArgs, "3", "7") == "3 of 7")
     }
@@ -246,12 +249,37 @@ struct LocalizationTests {
     @Test func germanSingulars() throws {
         let path = try #require(Bundle.main.path(forResource: "de", ofType: "lproj"), "de.lproj missing")
         let bundle = try #require(Bundle(path: path))
-        for (key, one, many) in [("%lld Fotos", "1 Foto", "2 Fotos"), ("%lld Reisen", "1 Reise", "2 Reisen"),
+        for (key, one, many) in [("%lld Reisen", "1 Reise", "2 Reisen"),
                                  ("%lld Länder", "1 Land", "2 Länder"), ("%lld Vorschläge", "1 Vorschlag", "2 Vorschläge")] {
             let format = bundle.localizedString(forKey: key, value: nil, table: nil)
             #expect(String.localizedStringWithFormat(format, 1) == one)
             #expect(String.localizedStringWithFormat(format, 2) == many)
         }
+        // Photos are counted with their thousands separator (`"\(n) \(n.formatted()) Fotos"`):
+        // the integer picks the form (the ungrouped "%lld Fotos" went with DS-17).
+        let photos = bundle.localizedString(forKey: "%lld %@ Fotos", value: nil, table: nil)
+        #expect(String.localizedStringWithFormat(photos, 1, "1") == "1 Foto")
+        #expect(String.localizedStringWithFormat(photos, 2, "2") == "2 Fotos")
+    }
+
+    /// Counts that can pass 999 show the thousands separator (review P3-09): the integer picks
+    /// the plural form, its formatted text is what shows (`"\(n) \(n.formatted()) Fotos …"`, key
+    /// `"%lld %@ Fotos …"`). An argument after the pair keeps its place.
+    @Test func groupedCountsShowTheSeparatorAndPickTheForm() throws {
+        let path = try #require(Bundle.main.path(forResource: "de", ofType: "lproj"), "de.lproj missing")
+        let de = try #require(Bundle(path: path)), en = try #require(english)
+        let german = Locale(identifier: "de_DE"), american = Locale(identifier: "en_US")
+        let home = "%lld %@ Fotos von zu Hause", place = "%lld %@ Fotos in %@."
+        let deHome = de.localizedString(forKey: home, value: nil, table: nil)
+        let enHome = en.localizedString(forKey: home, value: nil, table: nil)
+        #expect(String(format: deHome, locale: german, 1354, 1354.formatted(.number.locale(german))) == "1.354 Fotos von zu Hause")
+        #expect(String(format: deHome, locale: german, 1, "1") == "1 Foto von zu Hause")
+        #expect(String(format: enHome, locale: american, 1354, 1354.formatted(.number.locale(american))) == "1,354 photos from home")
+        #expect(String(format: enHome, locale: american, 1, "1") == "1 photo from home")
+        let dePlace = de.localizedString(forKey: place, value: nil, table: nil)
+        let enPlace = en.localizedString(forKey: place, value: nil, table: nil)
+        #expect(String(format: dePlace, locale: german, 2500, "2.500", "Italien") == "2.500 Fotos in Italien.")
+        #expect(String(format: enPlace, locale: american, 1, "1", "Italy") == "1 photo in Italy.")
     }
 
     @Test func germanStaysSource() {
@@ -473,9 +501,9 @@ struct AnalysisTextTests {
     }
 
     @Test func unitsFollowTheStepWithSingular() {
-        #expect(AnalysisText.ofTotal(1, .photos) == String(localized: "von \(1) Fotos"))
-        #expect(AnalysisText.ofTotal(1_600, .places) == String(localized: "von \(1_600) Orten"))
-        #expect(AnalysisText.ofTotal(1_040, .screenshots) == String(localized: "von \(1_040) Screenshots"))
+        #expect(AnalysisText.ofTotal(1, .photos) == String(localized: "von \(1) \(1.formatted()) Fotos"))
+        #expect(AnalysisText.ofTotal(1_600, .places) == String(localized: "von \(1_600) \(1_600.formatted()) Orten"))
+        #expect(AnalysisText.ofTotal(1_040, .screenshots) == String(localized: "von \(1_040) \(1_040.formatted()) Screenshots"))
         #expect(AnalysisText.ofTotal(1, .photos) != AnalysisText.ofTotal(2, .photos).replacingOccurrences(of: "2", with: "1"))
     }
 
@@ -522,25 +550,29 @@ struct AnalysisTextTests {
 
     @Test func alreadyDoneLeavesZerosOut() {
         #expect(AnalysisText.alreadyDone(AlreadyDone(trips: 51, places: 38))
-                == String(localized: "\(51) Reisen") + ", " + String(localized: "\(38) Orte"))
-        #expect(AnalysisText.alreadyDone(AlreadyDone(trips: 0, places: 3)) == String(localized: "\(3) Orte"))
+                == String(localized: "\(51) Reisen") + ", " + String(localized: "\(38) \(38.formatted()) Orte"))
+        #expect(AnalysisText.alreadyDone(AlreadyDone(trips: 0, places: 3)) == String(localized: "\(3) \(3.formatted()) Orte"))
     }
 }
 
-/// Counts in catalog sentences stay plain integers (`%lld` keys with plural forms). A thousands
-/// separator needs its own catalog keys first (docs/IMPROVEMENTS.md).
+/// Counts that can pass 999 take their number twice (review P3-09): the integer picks the plural
+/// form, its formatted text is what shows (key `"%lld %@ Fotos von zu Hause"`, called as
+/// `"\(n) \(n.formatted()) Fotos von zu Hause"`). `check_strings.py` keeps the keys of this
+/// target in the catalog.
 struct CountFormattingTests {
     /// Run 43796534873: `format: .number` turned the key into one the catalog does not have, so
-    /// the English overview showed "57 Fotos von zu Hause". The plain count must find the key.
+    /// the English overview showed "57 Fotos von zu Hause". The count pair must find the key.
     @Test func countLinesFindTheirCatalogKeyAndPlurals() {
         let one = 1, many = 1354
-        let single = String(localized: "\(one) Fotos von zu Hause", locale: Locale(identifier: "de_DE"))
-        let plural = String(localized: "\(many) Fotos von zu Hause", locale: Locale(identifier: "de_DE"))
+        let single = String(localized: "\(one) \(one.formatted()) Fotos von zu Hause", locale: Locale(identifier: "de_DE"))
+        let plural = String(localized: "\(many) \(many.formatted()) Fotos von zu Hause", locale: Locale(identifier: "de_DE"))
         print("COUNT_FORMAT \(single) | \(plural)")
         // The test host may run in English or German: the singular form proves the key (and its
         // plural variations) was found; an untranslated key would keep "Fotos" for one photo.
         #expect(single.hasPrefix("1 ") && !single.contains("Fotos") && !single.contains("photos"))
         #expect(plural.contains("Fotos") || plural.contains("photos"))
+        // The shown number is the formatted one, with the separator of the host's locale.
+        #expect(plural.hasPrefix(many.formatted() + " "))
     }
 }
 

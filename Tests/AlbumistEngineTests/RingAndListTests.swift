@@ -152,7 +152,7 @@ struct RingAndListTests {
         #expect(Set(lists2025[.organized].map(\.id) + lists2025[.unorganized].map(\.id)).isDisjoint(with: of2026))
     }
 
-    /// The search "nicht sortiert" finds exactly the photos of the list "Nicht sortiert":
+    /// The search "nicht sortiert" finds exactly the photos of the list "Unsortiert":
     /// partly sorted, unsorted and not yet analysed photos the ring counts, in the chosen part
     /// of the library, ignored ones not.
     @Test func searchNotSortedFindsTheListsPhotos() async throws {

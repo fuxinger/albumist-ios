@@ -2,7 +2,13 @@ import SwiftUI
 import AlbumistCore
 import AlbumistEngine
 
-/// Inbox (prompt §6): the library split by organization state, with ignore.
+/// The tab "Unsortiert" (design W1, tabs 6B): what is not sorted yet, unsure or ignored
+/// (`LibraryBuckets.unsortedTabFilters`), with ignore. Suggestions have a tab of their own.
+///
+/// The photos by day, as Photos shows its days (design wave 3, DS-21, `InboxDays`): the newest
+/// day first, as an inbox of what is left to sort, each day's photos in the order they were
+/// taken, the photos without a date last; in the photo grid a suggestion's photos have too
+/// (`PhotoGrid`, DS-06b: drag to select, pinch to zoom).
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
     @State private var bucket: InboxBucket = .unorganized
@@ -13,14 +19,25 @@ struct LibraryView: View {
     /// The photo zooms out of its thumbnail and back into it.
     @Namespace private var zoom
     @State private var addingToAlbum: [AssetID]?
-    /// Thumbnails shown so far; more on request, so large libraries stay smooth and every
-    /// photo can still be reached.
+    /// "Einstellungen öffnen" in an empty list when no main area counts (as on the overview).
+    @State private var showSettings = false
+    /// Photos asked for so far: the grid shows this many from the top, more on request, so large
+    /// libraries stay smooth and every photo can still be reached; a day larger than that is cut
+    /// where the page ends (`InboxDays.shown`).
     @State private var shown = Self.page
+    /// The shown area's photos by day, made off the main thread (`AppModel.inboxDays`), and the
+    /// area they are of: while an area's days are made anew its days before stay.
+    @State private var days = InboxDays()
+    @State private var daysBucket: InboxBucket?
+    /// Today's number on the iPhone's clock, for "Heute" and "Gestern", and the clock's zone, on
+    /// which photos without a zone of their own are read: read anew at midnight and at a new time
+    /// zone (iOS says a significant time changed) and when the app is back on screen, so a tab
+    /// left open overnight or taken to another zone makes its days anew (review L11, W10).
+    @State private var today = Self.today()
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private static let page = 3_000
-
-    private static let buckets: [InboxBucket] = [.unorganized, .suggestions, .uncertain, .organized, .ignored, .all]
 
     var body: some View {
         let _ = MainThreadWatch.shared.count("library body")
@@ -29,38 +46,37 @@ struct LibraryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 bucketPicker
+                    .padding(.horizontal, Theme.Spacing.l)
                 if let members {
                     content(members)
                 } else {
-                    // The first pass over all photos (a moment in a very large library). Not
-                    // "Alles sortiert" or "0 Fotos": that would not be true yet.
-                    HStack(spacing: Theme.Spacing.s) {
-                        ProgressView()
-                            .accessibilityHidden(true)
-                        Text("Fotos werden zusammengestellt …")
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(.noteText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("library.preparing")
+                    preparing
                 }
             }
-            .padding(.horizontal, Theme.Spacing.l)
             .padding(.bottom, Theme.Spacing.xl)
         }
+        // The grid scrolls the page while a finger selects at an edge, and keeps its place
+        // when it zooms.
+        .photoGridScrolling()
         .background(Theme.background)
+        .task(id: DaysKey(bucket: bucket, members: members, words: model.proposalWords, today: today)) {
+            await makeDays(of: members, in: bucket)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            today = Self.today()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { today = Self.today() }
+        }
         .onAppear { model.showLibraryBuckets() }
         .onDisappear { model.hideLibraryBuckets() }
-        .navigationTitle("Mediathek")
+        .navigationTitle("Unsortiert")
         .toolbar {
-            if bucket != .suggestions {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(selecting ? "Fertig" : "Auswählen") {
-                        withAnimation {
-                            selecting.toggle()
-                            selection = []
-                        }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(selecting ? "Fertig" : "Auswählen") {
+                    withAnimation {
+                        selecting.toggle()
+                        selection = []
                     }
                 }
             }
@@ -77,6 +93,10 @@ struct LibraryView: View {
             PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
                 .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
+        .sheet(isPresented: $showSettings) {
+            NavigationRoot { SettingsView() }
+                .sheetSize(.page)
+        }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {
                 // Animated like the other ways out, so the tab bar does not snap back.
@@ -85,116 +105,175 @@ struct LibraryView: View {
                     selecting = false
                 }
             }
+            .sheetSize(.page)
         }
         .refreshable { await model.refreshDerived() }
     }
 
-    /// One area's count and its photos (or its suggestions).
+    /// One area's count and its photos by day.
     @ViewBuilder
     private func content(_ members: [LibraryBuckets.Item]) -> some View {
-        if bucket == .suggestions {
-            // Numbers as plural strings (design review W5: "1 Fotos und Videos").
-            Text("\(model.openProposals.count) Vorschläge für \(members.count) Fotos und Videos")
-                .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
-        } else {
-            Text("\(members.count) Fotos und Videos")
-                .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
-        }
+        // Numbers as plural strings (design review W5: "1 Fotos und Videos").
+        Text("\(members.count) \(members.count.formatted()) Fotos und Videos")
+            .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+            .padding(.horizontal, Theme.Spacing.l)
 
-        if bucket == .suggestions {
-            // Photos with a suggestion: show the suggestions themselves, ready to open.
-            proposalList
-        } else if members.isEmpty {
-            ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
-                                   description: Text(emptyDescription))
-        } else {
-            grid(members)
-            if members.count > shown {
-                // The next photos load by themselves when the end of the grid comes
-                // into view (design review N10: a button every 3,000 photos).
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Theme.Spacing.m)
-                    .accessibilityLabel(Text("Weitere Fotos werden geladen"))
-                    .onScrollVisibilityChange(threshold: 0.1) { visible in
-                        if visible { shown += Self.page }
+        if members.isEmpty {
+            Group {
+                if SortedCountCard.EmptyList.make(bucket, settings: model.settings) == .noMainAreaChosen {
+                    // Nothing counts as sorted: the way to change that, as on the overview's card.
+                    ContentUnavailableView {
+                        Label(emptyTitle, systemImage: "circle.dashed")
+                    } description: {
+                        Text(emptyDescription)
+                    } actions: {
+                        Button("Einstellungen öffnen") { showSettings = true }
+                            .accessibilityIdentifier("library.openSettings")
                     }
-                    .accessibilityLabel(Text("Weitere Fotos werden geladen"))
-                    .accessibilityIdentifier("library.loadingMore")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var proposalList: some View {
-        let open = model.openProposals.sorted { ($0.assetIDs.count, $1.title) > ($1.assetIDs.count, $0.title) }
-        if open.isEmpty {
-            ContentUnavailableView("Keine offenen Vorschläge", systemImage: "checkmark.circle",
-                                   description: Text("Alle Vorschläge sind entschieden."))
-        } else {
-            VStack(spacing: 0) {
-                ForEach(Array(open.enumerated()), id: \.element.id) { index, proposal in
-                    PushLink(.proposal(ProposalRef(proposal)), chevron: false) {
-                        HStack {
-                            ProposalRow(proposal: proposal)
-                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-                        }
-                        .padding(.horizontal, Theme.Spacing.l)
-                        .padding(.vertical, Theme.Spacing.s)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if index < open.count - 1 { Divider().padding(.leading, 84) }
+                } else {
+                    ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
+                                           description: Text(emptyDescription))
                 }
             }
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            .padding(.horizontal, Theme.Spacing.l)
+        } else if daysBucket == bucket, !days.sections.isEmpty {
+            // A page of photos from the top: the last day is cut where the page ends (its header
+            // still counts the whole day), so one page never holds more, whatever a day holds.
+            let page = days.shown(forPhotos: shown)
+            grid(days.sections.prefix(page.days), limit: page.photos)
+            if page.photos < days.photoCount {
+                moreComing(after: page.photos)
+            }
+        } else {
+            // Another area's days, or the days of the area while it was empty, are being made
+            // anew (a moment in a very large library).
+            preparing
         }
     }
 
-    private func grid(_ members: [LibraryBuckets.Item]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
-            ForEach(members.prefix(shown)) { item in
-                let id = item.id
-                // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
-                Button {
-                    guard selecting else {
-                        // Every photo of the list, not only the thumbnails built so far: the viewer
-                        // builds its pages in a window (PageWindow). With the grid's 3,000 it said
-                        // "11 von 3.000" in a larger library and stopped there (iPhone, Build 41, 26.11.).
-                        viewing = PhotoViewer.Start(id: id, ids: members.map(\.id))
-                        return
-                    }
-                    if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
-                } label: {
-                    AssetThumbnail(id: id, side: 110)
-                        .aspectRatio(1, contentMode: .fill)
-                        .matchedTransitionSource(id: id, in: zoom)
-                        .overlay(alignment: .bottomTrailing) {
-                            if selecting {
-                                Image(systemName: selection.contains(id) ? "checkmark.circle.fill" : "circle")
-                                    .font(.title3)
-                                    .foregroundStyle(.white, selection.contains(id) ? Theme.accent : Color.black.opacity(0.3))
-                                    .padding(6)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(item.date?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
-                .accessibilityAddTraits(selecting && selection.contains(id) ? .isSelected : [])
+    /// The days shown, their photos below position `limit` (the last day may be cut there).
+    private func grid(_ days: ArraySlice<PhotoGridSection>, limit: Int) -> some View {
+        PhotoGrid(sections: days, limit: limit, place: .unsorted, selecting: selecting, selection: $selection,
+                  pinsHeaders: true, zoom: zoom, identifier: "library.photo") { id in
+            open(id)
+        } perform: { item, id in
+            perform(item, on: id)
+        }
+    }
+
+    /// The first pass over all photos, and an area whose days are being made: a calm line, no
+    /// spinner (DS-18). Not "Alles sortiert" or "0 Fotos": that would not be true yet.
+    private var preparing: some View {
+        Text("Fotos werden zusammengestellt …")
+            .font(.footnote)
+            .foregroundStyle(.noteText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.Spacing.l)
+            .accessibilityIdentifier("library.preparing")
+    }
+
+    /// Below the photos shown so far (`photos`): the next page comes by itself when this line
+    /// comes into view (design review N10: a button every 3,000 photos), the rest of a cut day
+    /// first.
+    private func moreComing(after photos: Int) -> some View {
+        Text("Weitere Fotos werden geladen")
+            .font(.footnote)
+            .foregroundStyle(.noteText)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.m)
+            .onScrollVisibilityChange(threshold: 0.1) { visible in
+                if visible { shown = photos + Self.page }
+            }
+            .accessibilityIdentifier("library.loadingMore")
+    }
+
+    /// The photo large, every photo of the area in the grid's order to swipe through, not only
+    /// the pages shown so far: the viewer builds its pages in a window (`PageWindow`). With the
+    /// grid's first page it said "11 von 3.000" in a larger library and stopped there (iPhone,
+    /// Build 41, 26.11.2026).
+    private func open(_ id: AssetID) {
+        viewing = PhotoViewer.Start(id: id, ids: PhotoGridSection.ids(of: days.sections))
+    }
+
+    /// An item of the photo's long press, the way "Unsortiert" goes it: "Ansehen" as a tap,
+    /// "Zu Album hinzufügen …" the sheet the selection opens (then the preview).
+    private func perform(_ action: PhotoMenu.Item, on id: AssetID) {
+        switch action {
+        case .view: open(id)
+        case .addToAlbum: addingToAlbum = [id]
+        // Ignoring is the model's, the same everywhere (`PhotoMenuItems`); a suggestion's own.
+        case .ignore, .stopIgnoring, .removeFromSuggestion: break
+        }
+    }
+
+    // MARK: The days
+
+    /// What the shown area's days are made of: the area, its photos as the model handed them
+    /// over (the same array, not equal contents: comparing 100,000 photos at every draw would
+    /// cost what grouping them off the main thread saves), the app's language, and which day is
+    /// "Heute" on which clock.
+    private struct DaysKey: Equatable {
+        var bucket: InboxBucket
+        var members: [LibraryBuckets.Item]?
+        var words: ProposalWords
+        var today: Today
+
+        static func == (a: DaysKey, b: DaysKey) -> Bool {
+            guard a.bucket == b.bucket, a.words == b.words, a.today == b.today else { return false }
+            switch (a.members, b.members) {
+            case (nil, nil): return true
+            case let (x?, y?): return LibraryView.same(x, y)
+            default: return false
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
     }
 
-    /// Area chips; at the largest text sizes a menu, so every area stays reachable.
+    /// The same array (its storage), whatever its contents.
+    nonisolated private static func same<T>(_ a: [T], _ b: [T]) -> Bool {
+        guard a.count == b.count else { return false }
+        if a.isEmpty { return true }
+        return a.withUnsafeBufferPointer { pa in b.withUnsafeBufferPointer { pb in pa.baseAddress == pb.baseAddress } }
+    }
+
+    /// Which day is today on the iPhone's clock (`LocalTime.day`), and the clock's zone by its
+    /// identifier: the days say "Heute" and "Gestern", and a photo without a zone of its own is on
+    /// the day the iPhone's clock gives it (review W10: a new zone can keep the day's number).
+    private struct Today: Equatable {
+        var day: Int
+        var zone: String
+    }
+
+    private static func today() -> Today {
+        let zone = TimeZone.current
+        return Today(day: LocalTime.day(LocalTime.wallClock(Date(), in: zone)), zone: zone.identifier)
+    }
+
+    /// Groups the area's photos by day off the main thread. Given up when a newer area comes
+    /// (the task's id changes) or the tab goes; an empty area has no days to make.
+    private func makeDays(of members: [LibraryBuckets.Item]?, in bucket: InboxBucket) async {
+        guard let members else { return }
+        let made: InboxDays?
+        if members.isEmpty {
+            made = InboxDays()
+        } else {
+            made = await model.inboxDays(members)
+        }
+        guard let made, !Task.isCancelled else { return }
+        days = made
+        daysBucket = bucket
+    }
+
+    /// The tab's filters as chips; at the largest text sizes a menu, so every filter stays
+    /// reachable. UI tests find them by identifier: `library.filter` for the row or the menu,
+    /// `library.filter.<area>` for each chip (e.g. `library.filter.ignored`).
     @ViewBuilder
     private var bucketPicker: some View {
         if typeSize.isAccessibilitySize {
             // A menu with its own label: the system picker button cuts long names at this size.
             Menu {
                 Picker("Anzeigen", selection: Binding(get: { bucket }, set: { select($0) })) {
-                    ForEach(Self.buckets, id: \.self) { Text($0.label).tag($0) }
+                    ForEach(LibraryBuckets.unsortedTabFilters, id: \.self) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.inline)
             } label: {
@@ -202,10 +281,11 @@ struct LibraryView: View {
             }
             .accessibilityLabel(Text("Anzeigen"))
             .accessibilityValue(Text(bucket.label))
+            .accessibilityIdentifier("library.filter")
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Spacing.s) {
-                    ForEach(Self.buckets, id: \.self) { b in
+                    ForEach(LibraryBuckets.unsortedTabFilters, id: \.self) { b in
                         Button { select(b) } label: {
                             Text(b.label)
                                 .font(.subheadline.weight(.semibold))
@@ -217,12 +297,19 @@ struct LibraryView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(b == bucket ? .isSelected : [])
+                        .accessibilityIdentifier("library.filter.\(b.rawValue)")
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("library.filter")
         }
     }
+}
 
+// MARK: Selection and an empty area
+
+extension LibraryView {
     /// The actions for the selected photos, in the system bottom bar: add to an album on the
     /// left, how many are selected in the middle, ignore on the right, like the selection in
     /// Photos. Each button keeps its name for VoiceOver and the large content viewer.
@@ -240,7 +327,7 @@ struct LibraryView: View {
         ToolbarItem(placement: .bottomBar) {
             // The bar keeps its height, so the count stays on one line and stops growing at the
             // first accessibility size; the large content viewer shows it in full.
-            Text("\(selection.count) ausgewählt")
+            Text("\(selection.count.formatted()) ausgewählt")
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .lineLimit(1)
@@ -274,23 +361,31 @@ struct LibraryView: View {
         bucket = b
         selection = []
         shown = Self.page
-        if b == .suggestions { selecting = false }
     }
 
+    /// With no main area counted, "Unsortiert" says what the start page says, not "Alles
+    /// sortiert" (`SortedCountCard.EmptyList`, finding N-01).
     private var emptyTitle: LocalizedStringKey {
-        bucket == .unorganized ? "Alles sortiert" : "Keine Fotos"
+        switch SortedCountCard.EmptyList.make(bucket, settings: model.settings) {
+        case .noMainAreaChosen: "Kein Bereich zählt als sortiert"
+        case .allSorted: "Alles sortiert"
+        case .noPhotos: "Keine Fotos"
+        }
     }
 
     private var emptyDescription: LocalizedStringKey {
-        switch bucket {
-        case .unorganized:
+        switch SortedCountCard.EmptyList.make(bucket, settings: model.settings) {
+        case .noMainAreaChosen:
+            return "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen."
+        case .allSorted:
             // "Nur 2026": the list holds what the ring counts, the photos of that year.
             if case .year(let year) = model.analysisScope {
-                return "Alle Fotos aus \(String(year)) liegen in deinen Hauptbereichen."
+                return "Alle gezählten Fotos aus \(String(year)) liegen in passenden Alben."
             }
-            return "Alle Fotos liegen in deinen Hauptbereichen."
-        case .ignored: return "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen."
-        default: return "In diesem Bereich gibt es gerade nichts."
+            return "Alle gezählten Fotos liegen in passenden Alben."
+        case .noPhotos:
+            if bucket == .ignored { return "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen." }
+            return "In diesem Bereich gibt es gerade nichts."
         }
     }
 }
@@ -305,16 +400,18 @@ struct IgnoreUndoBar: View {
         if let undo = model.lastIgnored {
             HStack(spacing: Theme.Spacing.m) {
                 Label {
-                    Text("\(undo.assets.count) Fotos ignoriert")
+                    Text("\(undo.assets.count) \(undo.assets.count.formatted()) Fotos ignoriert")
                 } icon: {
                     Image(systemName: "eye.slash")
                 }
                 .font(.subheadline.weight(.medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Widerrufen") { model.unignore(undo.assets) }
-                    .font(.subheadline.weight(.semibold))
-                    .minimumHitTarget()
-                    .accessibilityIdentifier("ignore.undo")
+                // The 44 pt tap area on the label, where the button takes the tap.
+                Button { model.unignore(undo.assets) } label: {
+                    Text("Widerrufen").minimumHitTarget()
+                }
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("ignore.undo")
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.vertical, Theme.Spacing.xs)
@@ -339,8 +436,11 @@ struct AssetDetailView: View {
             List {
                 // The photo itself is behind this sheet, in the viewer (design review W12).
                 Section {
+                    // On the photo's clock, as the title above says it (design run of 25.11.).
                     if let date = facts.asset.creationDate {
-                        LabeledContent("Aufgenommen", value: date.formatted(date: .long, time: .shortened))
+                        let taken = PhotoTitle.takenAt(date, zone: facts.timeZone, currentZone: .current, words: model.proposalWords,
+                                                       clock: AppModel.deviceClock())
+                        LabeledContent("Aufgenommen", value: taken)
                     }
                     if let place = placeText {
                         LabeledContent("Ort", value: place)
@@ -373,7 +473,7 @@ struct AssetDetailView: View {
                         Text("Tippe auf einen Vorschlag, um ihn anzusehen und auszuwählen.")
                     }
                 } else if let reason = reasonText {
-                    Section("Warum nicht sortiert?") {
+                    Section("Warum unsortiert?") {
                         Text(reason).foregroundStyle(.secondary)
                     }
                 }
@@ -407,7 +507,8 @@ struct AssetDetailView: View {
                     if isIgnored {
                         Text("Albumist zählt das Foto dann wieder mit und kann es wieder vorschlagen.")
                     } else {
-                        Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit zurücknehmen.")
+                        // Two lines (decision 8A); the way back is "Nicht mehr ignorieren".
+                        Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts.")
                     }
                 }
             }
@@ -431,6 +532,14 @@ struct AssetDetailView: View {
         let inScope = model.analysisScope.includes(facts, calendar: .albumistDefault)
         switch model.resolver.ringPart(state, inScope: inScope) {
         case .outsideMainAreas, .outsideScope: return "Nicht mitgezählt"
+        case .unsorted:
+            // Not „Unsortiert“ right above the albums the photo is in: the areas it lacks an
+            // album of („Noch in keinem Album für „Reisen““), the rule of the status itself.
+            let missing = UnsortedReason.missingAreas(state, primaryAreas: model.resolver.primaryAreas)
+            guard !missing.isEmpty else { return model.resolver.overall(state).label }
+            let open = Locale.current.quotationBeginDelimiter ?? "\"", close = Locale.current.quotationEndDelimiter ?? "\""
+            let names = missing.map { open + String(localized: $0.titleResource) + close }
+            return "Noch in keinem Album für \(names.formatted(.list(type: .or)))"
         default: return model.resolver.overall(state).label
         }
     }
@@ -451,20 +560,25 @@ struct AssetDetailView: View {
 
     private var reasonText: LocalizedStringKey? {
         guard let state = model.states[facts.id] else { return "Die Analyse ist für dieses Foto noch nicht fertig." }
+        // No main area counts: the ring counts no photo ("Nicht mitgezählt" above), as the
+        // overview says (finding N-01). Ignored and excluded photos say so below.
+        if SortedCountCard.photoInfoNamesNoMainArea(state, settings: model.settings) {
+            return "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen."
+        }
         switch model.resolver.overall(state) {
         case .fullyOrganized: return nil
         case .ignored: return "Du hast dieses Foto ignoriert."
         case .excluded: return "Dieses Foto ist von der Analyse ausgeschlossen, zum Beispiel weil es ausgeblendet ist."
         default:
             // Outside the chosen year the ring does not count the photo ("Nicht mitgezählt" above).
-            // Only for photos that are not sorted: a sorted photo needs no "Warum nicht sortiert?" (review 18.11.).
+            // Only for photos that are not sorted: a sorted photo needs no "Warum unsortiert?" (review 18.11.).
             if case .year(let year) = model.analysisScope,
                model.resolver.ringPart(state, inScope: model.analysisScope.includes(facts, calendar: .albumistDefault)) == .outsideScope {
                 return "Albumist zählt gerade nur Fotos aus \(String(year))."
             }
             let statuses = Set(state.areas.values)
             if statuses.contains(.proposed) || statuses.contains(.pendingConfirmation) {
-                return "Es gibt schon einen Vorschlag dafür. Du findest ihn in der Übersicht."
+                return "Es gibt schon einen Vorschlag dafür. Du findest ihn unter „Vorschläge“."
             }
             if facts.place == nil && facts.asset.kind != .video && !facts.asset.isScreenshotLike {
                 return "Das Foto hat keinen Ort und passt zu keinem Thema. Du kannst es selbst in ein Album legen."
@@ -499,8 +613,10 @@ struct AddToAlbumSheet: View {
                             .focused($naming)
                             .submitLabel(.done)
                             .onSubmit { Task { await prepare(target: nil) } }
-                        Button("Anlegen") { Task { await prepare(target: nil) } }
+                        // "…": the preview opens first (design W1, Punkt 2).
+                        Button("Anlegen …") { Task { await prepare(target: nil) } }
                             .disabled(newTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .accessibilityIdentifier("addToAlbum.create")
                     }
                 } header: {
                     Text("Neues Album")
@@ -529,7 +645,7 @@ struct AddToAlbumSheet: View {
                 }
             }
             .searchable(text: $query, prompt: Text("Album suchen"))
-            .navigationTitle(Text("\(assets.count) Fotos hinzufügen"))
+            .navigationTitle(Text("\(assets.count) \(assets.count.formatted()) Fotos hinzufügen"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // A round close button: the wider "Abbrechen" pushed the title off centre.

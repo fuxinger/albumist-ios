@@ -162,7 +162,7 @@ struct TripWorkshopTests {
 
     // MARK: Waiting (UI run 44375768011)
 
-    /// A split, a merge or "Aufheben" starts a check; until it ends, and while albums are made,
+    /// A split, a merge or "Rückgängig machen" starts a check; until it ends, and while albums are made,
     /// the next change waits. Whenever it waits there is a reason to say, and only then.
     @Test func aChangeWaitsOnlyWithAReasonToSay() {
         #expect(TripWorkshop.wait(creatingAlbums: false, analysing: false, check: false) == nil)
@@ -248,10 +248,25 @@ struct TripWorkshopTests {
         let mergeLabel = code(try #require(AppSource.body(of: "struct MergeRowLabel", in: workshop)))
         let mergeLooksDisabled = mergeLabel.contains("@Environment(\\.isEnabled)") && mergeLabel.contains("isEnabled ?")
         #expect(mergeLooksDisabled, "the merge rows keep their accent colour while disabled")
-        let mergeSection = code(try #require(AppSource.body(of: "func mergeSection(", in: workshop)))
-        let mergeFooter = mergeSection.components(separatedBy: "footer:").dropFirst().joined()
-        let noteInTheMergeFooter = mergeFooter.contains("TripChangeWaitNote()")
-        #expect(noteInTheMergeFooter, "the merge rows wait without the note in their footer")
+        // The merge rows sit at the ends of the timeline (design wave 3, DS-14), each in a section
+        // of its own; why they wait is said once, one element with one identifier, under the first
+        // one shown (review G4: with a trip on both sides the note and VoiceOver said it twice),
+        // and under the changes when there is none. Every merge row is a neighbour's.
+        let neighbourSection = code(try #require(AppSource.body(of: "func neighbourSection(", in: workshop)))
+        let footer = neighbourSection.components(separatedBy: "footer:").dropFirst().joined()
+        let noteUnderTheMergeRows = footer.contains("if explains {") && footer.contains("TripChangeWaitNote()")
+        #expect(noteUnderTheMergeRows, "the merge rows wait without the note under them")
+        let body = code(try #require(AppSource.body(of: ["struct TripWorkshopView", "var body"], in: workshop)))
+        let firstExplains = body.contains("neighbourSection(before, side: .before, gap: gap(to: before, side: .before), explains: true)")
+            && body.contains("neighbourSection(after, side: .after, gap: gap(to: after, side: .after), explains: around.before == nil)")
+        #expect(firstExplains, "the note is said under both merge rows, or under none")
+        // Also until the timeline with the merge rows is made (review M5).
+        let underTheChanges = body.contains("changesSection(saysWhy: !mergeShown || timeline == nil)")
+        #expect(underTheChanges, "the changes say why they wait also when a merge row says it")
+        let notes = AppSource.callSites(of: "TripChangeWaitNote(", in: workshop).count
+        #expect(notes == 3, "the note under the changes, under the first merge row and in the split bar, nowhere else")
+        let mergeRows = AppSource.callSites(of: "mergeButton(", in: workshop).count
+        #expect(mergeRows == 1, "a merge row that is not a neighbour's, without the note under it")
         let catalog = try StringCatalogTests.catalog()
         for reason in ["Albumist rechnet die Reisen gerade neu. Gleich wieder möglich.",
                        "Albumist analysiert gerade deine Fotos. Danach wieder möglich.",
@@ -272,7 +287,7 @@ struct TripWorkshopTests {
     /// (decision 18.11.2026): the sheet waits only for a short check and otherwise says the
     /// change is saved; it can always be closed, also while it waits (the change is stored
     /// already); "gleich" only for a short check, the refinement too; VoiceOver says on each
-    /// greyed control why it waits; the confirmations and the split and "Aufheben" say that the
+    /// greyed control why it waits; the confirmations and the split and "Rückgängig machen" say that the
     /// paused analysis goes on (reviews of 163d656 and 7e8aba3). The App does not build on
     /// Linux, so its sources are read; each check goes red when its part is taken back.
     @Test func aChangeDuringAPauseLeavesTheSheetFreeAndSaysSo() throws {
@@ -339,10 +354,10 @@ struct TripWorkshopTests {
         let resetWithHint = try Regex(#"\.disabled\(model\.tripChangeWait != nil\)\s*\.tripChangeWaitHint\(model\.tripChangeWait\)"#)
         #expect(code(settings).matches(of: resetWithHint).count == 1, "SettingsView: the greyed trip reset does not say why to VoiceOver")
 
-        // The confirmations, the split and "Aufheben" say that the paused analysis goes on.
+        // The confirmations, the split and "Rückgängig machen" say that the paused analysis goes on.
         let merge = try body("func mergeButton(", in: workshop)
         let mergeSaysIt = after("if model.analysis.isPausedByUser {", in: merge)?
-            .hasPrefix("Text(\"„\\(title(first))“ und „\\(title(second))“ werden eine Reise mit \\(total) Fotos. Die pausierte Analyse läuft dann weiter.\")") == true
+            .hasPrefix("Text(\"„\\(title(first))“ und „\\(title(second))“ werden eine Reise mit \\(total) \\(total.formatted()) Fotos. Die pausierte Analyse läuft dann weiter.\")") == true
         #expect(mergeSaysIt, "the merge confirmation does not say that the paused analysis goes on")
         let resetSaysIt = after("if model.analysis.isPausedByUser {", in: settings)?
             .hasPrefix("Text(\"Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter.\")") == true
@@ -355,7 +370,7 @@ struct TripWorkshopTests {
         let catalog = try StringCatalogTests.catalog()
         for key in ["Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist.",
                     "Die pausierte Analyse läuft dann weiter.",
-                    "„%@“ und „%@“ werden eine Reise mit %lld Fotos. Die pausierte Analyse läuft dann weiter.",
+                    "„%@“ und „%@“ werden eine Reise mit %lld %@ Fotos. Die pausierte Analyse läuft dann weiter.",
                     "Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter."] {
             #expect(Self.english(key, in: catalog) != nil, "Not in the catalog with English: \(key)")
         }

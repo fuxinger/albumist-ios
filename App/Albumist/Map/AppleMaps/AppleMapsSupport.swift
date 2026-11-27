@@ -122,6 +122,7 @@ struct AppleMapsPinFace: View {
     @ViewBuilder private var face: some View {
         if let cover {
             AssetThumbnail(id: cover, side: AppleMapsStyle.pinSide)
+                .environment(\.thumbnailShowsVideoLength, false)
         } else {
             AppleMapsStyle.pinGradient
         }

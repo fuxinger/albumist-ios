@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 import AlbumistCore
 import AlbumistEngine
 
@@ -32,27 +33,35 @@ struct AnalysisProgressCard: View {
     /// view it was started from holds the card state of that moment).
     @State private var newest = NewestSpoken()
     var state: AnalysisCardState
+    /// "Analyse fertig" was tapped: the page shows the sheet "Analyse".
+    var onOpenFinished: () -> Void = {}
 
     var body: some View {
+        // On the ring card of "Vorschläge" (design wave 1): each part brings the card's margins.
         Group {
             switch state {
             case .quickCheck(let showsPause):
                 quickCheck(showsPause: showsPause)
+                    .padding(.horizontal, Theme.Spacing.l)
+                    .padding(.vertical, Theme.Spacing.s)
             case .finished(let photos, let proposals):
-                AnalysisFinishedView(photos: photos, proposals: proposals)
+                AnalysisFinishedView(photos: photos, proposals: proposals, onOpen: onOpenFinished)
             default:
                 full
+                    .padding(.horizontal, Theme.Spacing.l)
+                    .padding(.vertical, Theme.Spacing.m)
             }
         }
-        // B2: said when the step changes, on Pause, waiting and the end; quietly (low priority,
-        // so it does not cut into what VoiceOver is reading), and only while on screen.
+        // B2: said when the step changes, on Pause and waiting; quietly (low priority, so it
+        // does not cut into what VoiceOver is reading), and only while on screen. The end is
+        // said by the finished card, once per run (`FinishAnnouncementStore`).
         .onChange(of: announcement) { _, text in
             guard let text, scenePhase == .active else { return }
             var spoken = AttributedString(text)
             spoken.accessibilitySpeechAnnouncementPriority = .low
             AccessibilityNotification.Announcement(spoken).post()
         }
-        .sheet(isPresented: $showDetails) { AnalysisDetailsSheet() }
+        .sheet(isPresented: $showDetails) { AnalysisDetailsSheet().sheetSize(.short) }
     }
 
     // MARK: Parts
@@ -83,12 +92,15 @@ struct AnalysisProgressCard: View {
         }
     }
 
-    /// What VoiceOver announces when it changes (nil: nothing to say).
+    /// What VoiceOver announces when it changes (nil: nothing to say). Not "Analyse fertig": this
+    /// card is made anew between the end of a run and "fertig", so the change was rarely heard;
+    /// the finished card says it once per run (`FinishAnnouncementStore`).
     private var announcement: String? {
         switch state {
         case .running(let p, _, _, let catchingUp) where catchingUp == nil: p.map { $0.step.labelText }
         case .running: nil
         case .quickCheck: nil
+        case .finished: nil
         default: title
         }
     }
@@ -129,10 +141,10 @@ struct AnalysisProgressCard: View {
     }
 
     /// Heading and Pause (or Fortsetzen); the button moves under the heading when the text is
-    /// large or long (B5).
+    /// large or long (B5). Pause is the round button of draft B (E6), centred beside the heading.
     private var header: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .center) {
                 heading
                 Spacer(minLength: Theme.Spacing.s)
                 control
@@ -176,7 +188,9 @@ struct AnalysisProgressCard: View {
                 .accessibilityLabel("Analyse jetzt erneut versuchen")
                 .accessibilityIdentifier("analysis.retry")
         default:
-            Button { model.pauseAnalysis() } label: { CardTextButton("Pause") }
+            Button { model.pauseAnalysis() } label: { PauseSymbol() }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Pause")
                 .accessibilityIdentifier("analysis.pause")
         }
     }
@@ -418,7 +432,9 @@ struct AnalysisProgressCard: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Theme.Spacing.s)
             if showsPause {
-                Button { model.pauseAnalysis() } label: { CardTextButton("Pause") }
+                Button { model.pauseAnalysis() } label: { PauseSymbol() }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Pause")
                     .accessibilityIdentifier("analysis.pause")
             }
         }
@@ -535,6 +551,24 @@ struct LightSweep: View {
     }
 }
 
+/// Pause as draft B draws it (E6 "Analyse läuft"): the system's pause symbol on a round grey
+/// fill, 44 pt and growing with the text; VoiceOver says "Pause" (the button's label).
+private struct PauseSymbol: View {
+    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 44
+
+    var body: some View {
+        let side = min(self.side, 88)
+        Image(systemName: "pause.fill")
+            .font(.body.weight(.semibold))
+            .foregroundStyle(Color.primary)
+            .frame(width: side, height: side)
+            .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+            .contentShape(Circle())
+            .hoverEffect(.highlight)
+            .accessibilityHidden(true)
+    }
+}
+
 /// A short text action in the card with Apple's minimum tap area (44 pt).
 struct CardTextButton: View {
     var title: LocalizedStringKey
@@ -553,49 +587,121 @@ struct CardTextButton: View {
 
 /// Point 4: a long run finished while the card was on screen. A short check mark and a light
 /// haptic once (not on every return to the overview, not with Reduce Motion: then only the
-/// crossfade of the card).
+/// crossfade of the card). One line of the ring card (draft B): the suggestions wait right
+/// under it on the page, so no button of its own; the line opens the sheet "Analyse", with
+/// how many photos are analysed.
 struct AnalysisFinishedView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var bounce = 0
     var photos: Int
     var proposals: Int
+    var onOpen: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            HStack(spacing: Theme.Spacing.s) {
+        Button(action: onOpen) {
+            RingCardRow(title: Text("Analyse fertig"), chevron: true) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.title2)
                     .foregroundStyle(Theme.accent)
                     .symbolEffect(.bounce, value: bounce)
                     .accessibilityHidden(true)
-                Text("Analyse fertig").font(.headline)
-            }
-            // How many photos are analysed says the plain card under it ("Alle 246 Fotos analysiert").
-            Text(String(localized: "\(proposals) Vorschläge warten auf dich."))
-                .font(.subheadline).foregroundStyle(.noteText).monospacedDigit()
-                .fixedSize(horizontal: false, vertical: true)
-            if proposals > 0 {
-                // Opened from the overview's root, as "Ansehen" above: the finish moment goes
-                // away by itself.
-                Button { model.route = .proposals } label: {
-                    Text("Vorschläge prüfen")
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                .accessibilityIdentifier("analysis.review")
+            } detail: {
+                Text(String(localized: "\(proposals) Vorschläge warten auf dich."))
+                    .monospacedDigit()
             }
         }
+        .buttonStyle(RingCardRowButtonStyle())
         .sensoryFeedback(.success, trigger: bounce) { _, new in new > 0 && !reduceMotion }
         .onAppear(perform: play)
         // Finished while the app was in the background: played when it is on screen again.
         .onChange(of: model.isOnScreen) { _, onScreen in if onScreen { play() } }
-        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("analysis.finished")
     }
 
     private func play() {
-        guard model.claimFinishMoment(), !reduceMotion else { return }
+        guard model.claimFinishMoment() else { return }
+        // Heard once per finished run, also with Reduce Motion (design wave 3, H14).
+        FinishAnnouncementStore.shared.cardSeen()
+        guard !reduceMotion else { return }
         bounce += 1
+    }
+}
+
+/// "Analyse fertig" for VoiceOver, once per finished run (design wave 3, H14; the rule is
+/// `FinishAnnouncement`). One per app, outside the card, which is made anew between the end of a
+/// run and "Analyse fertig": made at launch (`AppModel.load`), the model tells it, with
+/// `FinishMoment`, when a run brings a new finish and what the end's wait showed (`AppModel`,
+/// where the notification is decided), the finished card when it is first seen
+/// (`AnalysisFinishedView.play`).
+@MainActor
+final class FinishAnnouncementStore {
+    static let shared = FinishAnnouncementStore()
+    private var rule = FinishAnnouncement()
+    /// The user allows Albumist's notifications, as iOS last said: read as the store is made (at
+    /// launch, so long before a run ends) and each time Albumist becomes active (back from the
+    /// Settings app, after iOS's question), so the decision after a run's wait does not wait for
+    /// iOS (review T1 of H14's round 2); asked once more right then, and that answer decides
+    /// (`afterWait`, review Q2 of round 3). Not allowed until iOS has answered.
+    private var notificationsAllowed = false
+    private var observers: [any NSObjectProtocol] = []
+
+    private init() {
+        readNotificationSettings()
+        observers = [
+            NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil,
+                                                   queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.readNotificationSettings() }
+            },
+        ]
+    }
+
+    /// The end of a run in the app, decided before it waits for the overview.
+    func runEnded(finished: Bool, celebrates: Bool) {
+        rule.runEnded(finished: finished, celebrates: celebrates)
+    }
+
+    /// What the finish moment showed after the wait: a notification said it, or the card owes it.
+    /// The notification says it only where iOS shows it: with Albumist in the background, read in
+    /// the same step as the model's `appActive` (in front, also while inactive, `willPresent`
+    /// shows nothing), and with its notifications allowed (review T1 of H14's round 2). Allowed as
+    /// iOS last said, and iOS is asked once more right here (review Q2 of round 3): turned off in
+    /// Settings while Albumist was in the background, the card owes the finish again; allowed
+    /// though the value here said no, the notification said it, and the card stays silent. The
+    /// answer comes within milliseconds, long before the card can be seen (only while Albumist is
+    /// active); the rule takes it only for a notification sent in the background.
+    func afterWait(_ shown: FinishMoment.Shown) {
+        rule.afterWait(card: shown.card, notification: shown.notification,
+                       inBackground: UIApplication.shared.applicationState == .background,
+                       notificationsAllowed: notificationsAllowed)
+        Task {
+            notificationsAllowed = await Self.notificationsAllowedNow()
+            rule.notificationsAnswered(allowed: notificationsAllowed)
+        }
+    }
+
+    /// The finished card is seen for the first time for its run (its check mark is claimed, only
+    /// while Albumist is on screen): "Analyse fertig", quietly (low priority, as the card's other
+    /// announcements), unless the first 100 % on the card says it itself ("Analyse fertig:
+    /// 100 %", DS-08).
+    func cardSeen() {
+        guard rule.cardSeen(voiceOver: UIAccessibility.isVoiceOverRunning,
+                            saidByFirstMoment: FirstAnalysisMomentStore.shared.moment.shows(at: Date())) else { return }
+        var spoken = AttributedString(String(localized: "Analyse fertig"))
+        spoken.accessibilitySpeechAnnouncementPriority = .low
+        AccessibilityNotification.Announcement(spoken).post()
+    }
+
+    /// Asks iOS whether Albumist's notifications are allowed; the answer comes a moment later.
+    private func readNotificationSettings() {
+        Task { notificationsAllowed = await Self.notificationsAllowedNow() }
+    }
+
+    /// Allowed as Albumist asks for them, with alerts and sound (`FinishNotificationAsk`): only
+    /// `.authorized` shows the notification at once; a quiet (provisional) one would land in
+    /// Notification Centre unheard, and Albumist never asks for one.
+    nonisolated private static func notificationsAllowedNow() async -> Bool {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .authorized
     }
 }
 
@@ -654,7 +760,6 @@ struct AnalysisDetailsSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
     }
 
     /// "Schritt 4 von 6 · Fertig gegen 23:40 · 46 % · bisher 18 Min."
@@ -771,6 +876,7 @@ struct AnalysisDetailsSheet: View {
                 HStack(spacing: 4) {
                     ForEach(model.analysisRecent, id: \.self) { id in
                         AssetThumbnail(id: id, side: 30)
+                            .environment(\.thumbnailShowsVideoLength, false) // only seen: no "0:15"
                             .frame(width: 30, height: 30)
                             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }

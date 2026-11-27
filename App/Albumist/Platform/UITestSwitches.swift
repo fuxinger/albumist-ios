@@ -32,6 +32,27 @@ extension UITestSupport {
     /// runs normally start it themselves), to test that a killed app goes on by itself.
     static let startsAnalysisAtLaunch = rebuildsDatabase || flag("-AlbumistUITestLaunchAnalysis")
 
+    // MARK: Moments
+
+    /// `-AlbumistUITestFirstFinishMoment`: the first 100 % (DS-08, `FirstAnalysisMomentStore`)
+    /// may show in this UI run, held `FirstAnalysisMoment.Timing.heldForUITest`, so a test finds
+    /// it (`ShowAndHandwritingUITests`). Other UI runs never show it: the start page would change
+    /// under the audits that follow the first analysis (UI run 43774578089 ended test 1 on a page
+    /// that changed during its audit).
+    static let showsFirstFinishMoment = flag("-AlbumistUITestFirstFinishMoment")
+
+    /// `-AlbumistUITestFirstFinishOwed`: this launch starts as a fresh installation does for the
+    /// first 100 %: owed, whatever an earlier test left in the defaults and whether an analysis
+    /// was completed before. The simulators of the UI groups are not fresh; with
+    /// `-AlbumistUITestRebuildDatabase` the analysis at launch is then the first full one.
+    static let startsFirstFinishOwed = flag("-AlbumistUITestFirstFinishOwed")
+
+    /// `-AlbumistUITestShowHold`: the sorting show (DS-17) stays 15 s on its end, its last album
+    /// landed, before it hands over to the result, so a test reads what it says then
+    /// (`ShowAndHandwritingUITests` test 2). Its own end lasts half a second, and XCTest's reads
+    /// took 5 to 7 s each in busy runs.
+    static let holdsShowEnd = flag("-AlbumistUITestShowHold")
+
     // MARK: Device
 
     /// `-AlbumistUITestPace normal:40,gentle:40,hot:6,normal`: the device's state as a script,

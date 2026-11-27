@@ -35,7 +35,11 @@ struct EmptyLibraryCard: View {
     }
 
     var body: some View {
+        // Not beside an interrupted plan: its way out ("Rest anlegen") is the page's one filled
+        // button then (design rule 3, filled_button_rule.py), and nothing new runs before it is
+        // settled (`PlanGate`).
         let offersSamples = SampleLibrary.isOffered(photos: model.facts.count, access: model.access, samplesPresent: samples.arePresent)
+            && model.interruptedPlan == nil
         ContentUnavailableView {
             Label(title, systemImage: symbol)
         } description: {
@@ -116,7 +120,7 @@ struct EmptyLibraryCard: View {
         case .nothingShared:
             "Du hast Albumist noch keine Fotos freigegeben. Gib oben Fotos frei."
         case .emptyTrialYear(let year):
-            "Im Probelauf sieht Albumist nur Fotos aus \(String(year)). Nimm die ganze Mediathek dazu."
+            "Albumist arbeitet nur mit Fotos aus \(String(year)). Nimm die ganze Mediathek dazu."
         case .fewPhotos(let count):
             "Albumist sieht erst \(count) Fotos. Für ein Album braucht es mehr Fotos von einem Ort oder einer Reise."
         case .noPlaces:

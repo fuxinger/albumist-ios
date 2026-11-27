@@ -1326,6 +1326,16 @@ final class DeviceConditionUITests: XCTestCase {
         let managedRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
         // The list "Alben von Albumist" with the album's row (the tap below asserts it).
         _ = UITestWait.holds(timeout: 10) { managedRow.exists }
+        // The list holds every album of the group's earlier tests (11 and more), and the row of a
+        // lazy list exists only on screen: UI run 45931544058 showed "Testalbum Wiederhergestellt"
+        // below the last visible row and the tap found nothing. Scrolled down to it, as the
+        // settings above are, up to ten swipes.
+        let albums = app.collectionViews.firstMatch
+        var albumSwipes = 0
+        while !(managedRow.exists && managedRow.isHittable) && albumSwipes < 10 {
+            (albums.exists ? albums : app).swipeUp()
+            albumSwipes += 1
+        }
         shot("14-managed-albums")
         guard tap(managedRow, "managed album row"),
               confirm("Album entfernen", "remove managed album") else { return }

@@ -129,7 +129,7 @@ class FullGateTests(unittest.TestCase):
         done, ok, reason = ci_gate.check()
         self.assertEqual((done, ok), (False, False))
         self.assertTrue(reason.startswith("no UI flow run in full mode"), reason)
-        self.assertIn("1 quick run(s)", reason)
+        self.assertIn("only 1 run(s) that never count", reason)
         # An older full run of the same commit decides.
         ci_gate.api = self.fake(ui=("completed", "success"), verdict=("quick", "success"),
                                 more=[(10, "completed", "success", ("full", "success"))])

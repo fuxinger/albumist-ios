@@ -167,7 +167,7 @@ def check():
                                  "by hand on this commit")
         return True, True, f"{describe(ci)} and {describe(ui)} ({UI_VERDICT}) passed"
     # Not green, ever: main() waits NO_RUN_MINUTES for one to appear, then gives up.
-    only_quick = f", only {quick} quick run(s) of pull requests, which never count" if quick else ""
+    only_quick = f", only {quick} run(s) that never count (quick, smoke, nightly or pull request runs)" if quick else ""
     return False, False, f"{NO_UI} in full mode for {SHA[:7]} yet ({describe(ci)} passed{only_quick})"
 
 

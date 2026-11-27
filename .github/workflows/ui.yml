@@ -290,7 +290,10 @@ jobs:
     # UI flow starts only after CI), so this would only add ~5 min before the UI build.
     name: Core tests (Linux)
     needs: plan
-    if: ${{ needs.plan.outputs.count != '0' && !inputs.release }}
+    # Also when no group has to run (27.11., second check): the UI build no longer waits for
+    # this job, so groups of a commit with red core tests can be green and reused later; the
+    # verdict of every run therefore needs this job green itself.
+    if: ${{ needs.plan.result == 'success' && !inputs.release }}
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
     # Hang limits as in CI's "Core tests (Linux)" (the watchdog names the tests still running,
@@ -626,15 +629,13 @@ jobs:
           echo "core-macos: $CORE_MACOS"
           [ "$CORE_MACOS" = success ] || { echo "::error title=Merge gate::Core tests hard (macOS) is $CORE_MACOS, not green"; exit 1; }
       - name: Core tests (Linux) green
-        # The UI build no longer waits for them (27.11.); every verdict does. Skipped only when
-        # no group had to run (then the job does not start).
+        # The UI build no longer waits for them (27.11.); every verdict does, also when no group
+        # had to run (greens of a commit with red core tests must not make a later run green).
         env:
           CORE_LINUX: ${{ needs.core-linux.result }}
-          COUNT: ${{ needs.plan.outputs.count }}
         run: |
-          echo "core-linux: $CORE_LINUX (groups planned: $COUNT)"
-          [ "$CORE_LINUX" = success ] || { [ "$CORE_LINUX" = skipped ] && [ "$COUNT" = 0 ]; } \
-            || { echo "::error title=Core tests (Linux)::$CORE_LINUX, not green"; exit 1; }
+          echo "core-linux: $CORE_LINUX"
+          [ "$CORE_LINUX" = success ] || { echo "::error title=Core tests (Linux)::$CORE_LINUX, not green"; exit 1; }
       - name: Smoke test green (draft)
         # Stage 1 (26.11.2026): a draft runs only the smoke test; the merge check is the full run
         # that starts when the pull request is marked ready for review.

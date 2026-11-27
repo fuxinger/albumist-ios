@@ -121,7 +121,10 @@ def text_lookups(source: str) -> int:
 
 # What a UI test looks for by its words: subscripts of the element kinds and the tests' helpers
 # button(...), anything(...), anything(exactly:), tabButton(...) (they match by "label CONTAINS").
-WORD_USE = re.compile(r'\b(?:(?:' + KINDS + r')\[|button\(|anything\(|tabButton\(|anything\(exactly:\s*)\s*"((?:[^"\\]|\\.)*)"')
+# Exact: a subscript of an element kind (app.buttons["X"]) and tabButton("X") (a subscript of the
+# tab bar's buttons). Part of a label: the helpers button(...), anything(...) ("label CONTAINS").
+EXACT_USE = re.compile(r'(?:\b(?:' + KINDS + r')\[|\btabButton\(|anything\(exactly:\s*)\s*"((?:[^"\\]|\\.)*)"')
+PART_USE = re.compile(r'\b(?:button|anything)\(\s*"((?:[^"\\]|\\.)*)"')
 FORMAT = re.compile(r"%(?:\d+\$)?(?:lld|ld|d|@|f|\.\d+f)")
 # Texts of iOS itself (no string of the app): an alert's or a popover's own parts.
 SYSTEM_TEXTS = {"PopoverDismissRegion"}
@@ -143,7 +146,8 @@ def app_texts() -> str:
     texts: list[str] = []
     for path in swift_files(APP):
         with open(path, encoding="utf-8") as f:
-            texts += LITERAL.findall(f.read())
+            # Code only: a text quoted in a comment is no string of the app.
+            texts += [t for line in f for t in LITERAL.findall(code(line))]
 
     def values(node):
         if isinstance(node, dict):
@@ -164,17 +168,21 @@ def app_texts() -> str:
 
 
 def missing_texts(files: list[str], blob: str) -> dict[str, list[str]]:
-    """{text: ["File.swift:line"]} of every word lookup whose text is in no string of the app
-    (the lookups match by "label CONTAINS", so a part of a string counts)."""
+    """{text: ["File.swift:line"]} of every word lookup whose text is in no string of the app: a
+    whole string for an exact lookup (a subscript), a part of one for "label CONTAINS" (button,
+    anything). Lookups with a variable instead of a literal are not checked here."""
+    whole = set(blob.split("\n"))
     missing: dict[str, list[str]] = {}
     for path in files:
         with open(path, encoding="utf-8") as f:
             for number, line in enumerate(f, 1):
-                for text in WORD_USE.findall(code(line)):
+                found = [(t, True) for t in EXACT_USE.findall(code(line))] + [(t, False) for t in PART_USE.findall(code(line))]
+                for text, exact in found:
                     if "\\(" in text or not text.strip() or ID_SHAPED.match(text) or text in SYSTEM_TEXTS:
                         continue
-                    if normal(text) not in blob:
-                        missing.setdefault(text, []).append(f"{os.path.basename(path)}:{number}")
+                    if (normal(text) in whole) if exact else (normal(text) in blob):
+                        continue
+                    missing.setdefault(text, []).append(f"{os.path.basename(path)}:{number}")
     return missing
 
 
@@ -204,9 +212,11 @@ class UIIdentifierRuleTests(unittest.TestCase):
 class UITextRuleTests(unittest.TestCase):
     """27.11. (gap of the stress run 45864829992: test12 looked for the chips "Nicht sortiert",
     "Sortiert" and "Alle" that the new design no longer had, and failed after 1.5 h on a Mac):
-    every text a UI test looks for by its words is in some string of the app. It catches a text
-    that left the app entirely (renamed, removed); a text that only moved to another screen still
-    needs a fixed identifier (docs/UI_IDENTIFIERS.md)."""
+    every text a UI test looks for by its words is a string of the app (an exact lookup: a whole
+    string; a "label CONTAINS" helper: part of one). It catches a text that left the app or was
+    reworded; it would NOT have caught that case itself (those chips were looked up through a
+    variable, and their words are still used elsewhere): a text that only moved to another
+    screen still needs a fixed identifier (docs/UI_IDENTIFIERS.md)."""
 
     def test_every_text_a_ui_test_looks_for_is_in_the_app(self):
         blob = app_texts()
@@ -221,9 +231,11 @@ class UITextRuleTests(unittest.TestCase):
             path = os.path.join(folder, "X.swift")
             with open(path, "w", encoding="utf-8") as f:
                 f.write('let a = app.buttons["Nur Lieblinge"]\nlet b = button("Weiter")\nlet c = anything("3 Fotos konnten")\n'
-                        'let d = app.buttons["plan.apply"]\nlet e = anything("\\(n) Fotos")\n')
+                        'let d = app.buttons["plan.apply"]\nlet e = anything("\\(n) Fotos")\nlet f = app.buttons["Weit"]\n'
+                        'let g = app.buttons["Weiter"] // app.buttons["Gone"]\n')
             blob = "\n".join(normal(t) for t in ("Weiter", "%lld Fotos konnten noch nicht gelesen werden"))
-            self.assertEqual(missing_texts([path], blob), {"Nur Lieblinge": ["X.swift:1"]})
+            # "Weit" is only part of a string: an exact lookup misses it; a comment is no lookup.
+            self.assertEqual(missing_texts([path], blob), {"Nur Lieblinge": ["X.swift:1"], "Weit": ["X.swift:6"]})
 
 
 class HelperTests(unittest.TestCase):

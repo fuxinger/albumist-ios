@@ -128,14 +128,22 @@ public enum PhotoGridZoom {
 }
 
 /// When a zoom step's photo is asked of the scroll view (`PhotoGridScroller.show`): once the grid
-/// has laid out its new size, which the scroll view's content height shows, and at the latest when
-/// the step lands. Asked at once, in the same update that changed the size and turned the grid's
-/// scroll targets on, the page went to its top instead (UI run 45695824722: offset 799 to -168,
-/// the photo pinched on from y 454 to 1072, off the screen).
+/// has laid out its new size, which the scroll view's content height shows, again at each further
+/// height until the step lands, and at the latest when it lands. Asked at once, in the same update
+/// that changed the size and turned the grid's scroll targets on, the page went to its top instead
+/// (UI run 45695824722: offset 799 to -168, the photo pinched on from y 454 to 1072, off the
+/// screen). Asked only at the first new height, an estimate of the lazy grid's, the page went to
+/// its top as the height settled (UI run 46033354388: asked at 5213, offset 906 to 94, then the
+/// content 3292 and 3283 and the page at -168, the photo from y 532 to 826).
 public struct PhotoGridZoomLanding<Photo: Equatable> {
     private var photo: Photo?
-    /// The content height when the step asked; nil before the scroll view reported itself.
+    /// The content height when the photo was last asked for, or when the step asked; nil before
+    /// the scroll view reported itself.
     private var heightAsked: Double?
+    /// How often this step's photo was asked for.
+    private var asks = 0
+    /// At most this many asks a step: the height settles in a few reports.
+    public static var mostAsks: Int { 4 }
 
     public init() {}
 
@@ -143,18 +151,21 @@ public struct PhotoGridZoomLanding<Photo: Equatable> {
     public mutating func asked(_ photo: Photo, contentHeight: Double?) {
         self.photo = photo
         heightAsked = contentHeight
+        asks = 0
     }
 
-    /// The scroll view reported its content `contentHeight` high: the photo to ask for now, once.
+    /// The scroll view reported its content `contentHeight` high: the photo to ask for now, at
+    /// each new height until the step lands, at most `mostAsks` times.
     public mutating func reported(contentHeight: Double) -> Photo? {
-        guard let photo, heightAsked != contentHeight else { return nil }
-        self.photo = nil
+        guard let photo, heightAsked != contentHeight, asks < Self.mostAsks else { return nil }
+        heightAsked = contentHeight
+        asks += 1
         return photo
     }
 
-    /// The step lands: the photo not asked for yet, if any.
+    /// The step lands: the photo, if it was not asked for yet; after it the scroll view is plain.
     public mutating func landed() -> Photo? {
         defer { photo = nil }
-        return photo
+        return asks == 0 ? photo : nil
     }
 }

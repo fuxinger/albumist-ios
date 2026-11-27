@@ -392,27 +392,28 @@ final class AlbumistFlowUITests: XCTestCase {
     /// (`completeOnboardingIfCutOff`). `extra`: the test's own launch arguments when the app is
     /// to run with them afterwards; nil leaves it as the fast start. Once a `prepare` on this
     /// simulator found the library ready (`UITestOnboarding.preparedLibrary`, bundle C 27.11.),
-    /// the check for a cut-off test 1 and the wait run in the one launch with the test's own
-    /// arguments, and the app is launched again only when that launch did work or did not stand
-    /// at rest at every check, so the test still starts in a launch nothing happened in. Before
-    /// (full UI run 45865545486, flow-other) each of tests 3-7 launched three times: for the
-    /// cut-off check (about 12 s), for `prepare` (16-25 s) and with its own arguments.
+    /// the test's own launch comes first and is only looked at (`preparedInOwnLaunch`): nothing
+    /// is tapped or repaired in it, so no onboarding, demo library or "Neu prüfen" ever runs
+    /// under a test's switches or in the launch the test then uses. When anything is missing,
+    /// that launch is ended and everything goes as before: the cut-off check in a launch without
+    /// switches, the fast start's repair and wait, then the test's own launch. Before (full UI
+    /// run 45865545486, flow-other) each of tests 3-7 launched three times: for the cut-off
+    /// check (about 12 s), for `prepare` (16-25 s) and with its own arguments.
     private func prepare(_ test: String? = nil, then extra: [String]? = nil) {
         let started = Date()
         let fastStart = ["-AlbumistUITestFastStart"]
-        let reuse = UITestOnboarding.preparedLibrary.reachedItsEnd
-        // A fresh simulator keeps the launches of before: the onboarding helpers and the fast
-        // start's demo library must not run with a test's switches.
-        if let test, !reuse { completeOnboardingIfCutOff(test) }
-        let first = reuse ? (extra ?? fastStart) : fastStart
-        launch(first)
-        // Whether this launch did more than wait: onboarding, photo access, the demo library or
-        // the rest of a cut-off analysis. Then the test gets a launch of its own, as before.
-        var worked = false
-        if let test, reuse, !UITestOnboarding.fullFlowReachedItsEnd {
-            if UITestOnboarding.completeIfNeeded(app, in: test) { shot("x-onboarded-again-\(test)") }
-            worked = UITestOnboarding.lastCompletionDidWork
+        if UITestOnboarding.preparedLibrary.reachedItsEnd {
+            let cutOffCheck = test != nil && !UITestOnboarding.fullFlowReachedItsEnd
+            if preparedInOwnLaunch(extra ?? fastStart, checkingCutOff: cutOffCheck) {
+                print("UI_STEP_OK prepared")
+                print("UI_FACT prepared in the test's own launch (at rest at every check), no second launch")
+                print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
+                return
+            }
+            print("UI_FACT prepare: the test's own launch was not ready at rest, prepared without its switches first")
         }
+        if let test { completeOnboardingIfCutOff(test) }
+        launch(fastStart)
         let noAccess = app.buttons["access.continue"]
         // The first screen: the overview, "Kein Zugriff" or the welcome screen, within the 5 s
         // the wait for "Kein Zugriff" alone had. The app picks it once when it has loaded
@@ -423,15 +424,13 @@ final class AlbumistFlowUITests: XCTestCase {
             app.tabBars.firstMatch.exists || noAccess.exists || button("Los geht").exists
         }
         if noAccess.exists {
-            worked = true
             // Photo access is not granted (the CI grant did not hold, or a test took it away):
             // with the introduction done the app shows "Kein Zugriff auf deine Fotos" (W4).
             noAccess.tap()
             allowPhotosIfAsked()
             // Opened once more, so the fast start runs as with access (demo library, if missing).
-            launch(first)
+            launch(fastStart)
         } else if button("Los geht").exists {
-            worked = true
             // A first start without the fast start's introduction: the real onboarding.
             tap(button("Los geht"), "welcome (prepare)")
             // The areas step is pushed: its "Weiter" (the welcome screen has none) can be tapped.
@@ -452,28 +451,49 @@ final class AlbumistFlowUITests: XCTestCase {
         let demo = button("Beispiel-Mediathek anlegen")
         let demoUntil = Date().addingTimeInterval(3)
         var demoTapped = false
-        // At rest: the condition held at every check (three), so nothing ran in this launch.
-        var checks = 0
         let ready = waitStable("demo library analysed", timeout: 900) {
-            checks += 1
             if !demoTapped, Date() < demoUntil, demo.exists, !anything("Beispielfotos werden angelegt").exists {
                 demoTapped = true
                 demo.tap()
                 return false
             }
-            return anything("Fotos analysiert").exists && !app.buttons["Pause"].exists && !anything("Beispielfotos werden angelegt").exists
-                && !demo.exists
+            return preparedLibraryReady(demo)
         }
         print(ready ? "UI_STEP_OK prepared" : "UI_STEP_MISSING prepared")
         XCTAssertTrue(ready, "The demo library was not created and analysed")
         if ready { UITestOnboarding.preparedLibrary.ends() }
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
-        guard let extra else { return }
-        if ready, reuse, !worked, checks == 3, first == extra {
-            print("UI_FACT prepared in the test's own launch (at rest at every check), no second launch")
-        } else {
-            launch(extra)
+        if let extra { launch(extra) }
+    }
+
+    /// What `prepare` waits for: the demo library is created and analysed and nothing runs.
+    private func preparedLibraryReady(_ demo: XCUIElement) -> Bool {
+        anything("Fotos analysiert").exists && !app.buttons["Pause"].exists && !anything("Beispielfotos werden angelegt").exists
+            && !demo.exists
+    }
+
+    /// The test's own launch (`arguments`), only looked at: the overview shows (no welcome, no
+    /// "Kein Zugriff"), with `checkingCutOff` no partial count (a cut-off analysis or unreadable
+    /// photos: `completeOnboardingIfCutOff` repairs or fails it in a launch without switches),
+    /// and `preparedLibraryReady` holds at all three checks (a failed check ends the wait after
+    /// three checks, about 4 s). Nothing is tapped. False: `prepare` goes the way of before.
+    private func preparedInOwnLaunch(_ arguments: [String], checkingCutOff: Bool) -> Bool {
+        launch(arguments)
+        let noAccess = app.buttons["access.continue"]
+        let welcome = button("Los geht")
+        _ = UITestWait.holds(timeout: 10) {
+            app.tabBars.firstMatch.exists || noAccess.exists || welcome.exists
         }
+        guard app.tabBars.firstMatch.exists, !noAccess.exists, !welcome.exists else { return false }
+        if checkingCutOff, UITestOnboarding.partialAnalysis(app) != nil { return false }
+        let demo = button("Beispiel-Mediathek anlegen")
+        var unmet = false
+        _ = waitStable("demo library analysed in the test's own launch", timeout: 30) {
+            if !unmet, !preparedLibraryReady(demo) { unmet = true }
+            // A failed check ends the wait (three checks in a row "done") instead of its time.
+            return true
+        }
+        return !unmet
     }
 
     /// Two photos from the library into a new album: opens its plan ("Umsetzen").

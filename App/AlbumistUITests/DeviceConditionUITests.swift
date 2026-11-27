@@ -309,18 +309,28 @@ final class DeviceConditionUITests: XCTestCase {
     ///
     /// `extra`: the test's own arguments of its next launch (`start(extra)`), nil when the test
     /// launches as it needs by itself. Once a `prepare` on this simulator found the library ready
-    /// (`UITestOnboarding.preparedLibrary`, bundle C 27.11.), the wait runs in the test's own
-    /// launch, and the app is launched again only when that launch did more than wait (a screen
-    /// before the overview) or did not stand at rest at every check: a heat script, a full disk
-    /// or unreadable photos are then still all there for the test, as in a launch of its own.
+    /// (`UITestOnboarding.preparedLibrary`, bundle C 27.11.), the test's own launch comes first
+    /// and is only looked at (`preparedInOwnLaunch`): the overview, the demo library there and
+    /// the same ready condition at rest at all three checks. Nothing is tapped or repaired in it,
+    /// so a heat script, a full disk or unreadable photos are all still there for the test, and
+    /// no repair ever runs under a test's switches. When anything is missing that launch is ended
+    /// and everything goes as before: a launch without switches, the repair, then the test's.
     /// In the full UI run 45865545486 the wait held at its first check in all 9 tests after a
     /// group's first, and the second launch cost each of them 12-15 s (end, launch, first screen).
     /// Not for a switch that starts work at launch (the large library, a rebuilt database).
     private func prepare(then extra: [String]? = nil) {
         let started = Date()
-        let reuse = extra != nil && UITestOnboarding.preparedLibrary.reachedItsEnd
-        start(reuse ? (extra ?? []) : [])
-        let worked = onboardIfNeeded()
+        if let extra, UITestOnboarding.preparedLibrary.reachedItsEnd {
+            if preparedInOwnLaunch(extra) {
+                print("UI_STEP_OK prepared")
+                print("UI_FACT prepared in the test's own launch (at rest at every check), no second launch")
+                print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
+                return
+            }
+            print("UI_FACT prepare: the test's own launch was not ready at rest, prepared without its switches first")
+        }
+        start()
+        onboardIfNeeded()
         // "Beispiel-Mediathek anlegen" is tapped (once) when it shows in the first 3 s of the
         // wait below (its checks at about 0 and 2 s). It used to get a wait of its own of the
         // same 3 s before it, which a seeded library (every test after the group's first)
@@ -333,17 +343,14 @@ final class DeviceConditionUITests: XCTestCase {
         // what the overview showed. The state is now printed every 60 s and at the end, with a
         // screenshot when it never got ready.
         var lastState = Date.distantPast
-        // At rest: the condition held at every check (three), so nothing ran in this launch.
-        var checks = 0
         let ready = waitStable("demo library analysed", timeout: 900) {
-            checks += 1
             if !demoTapped, Date() < demoUntil, demo.exists, !anything("Beispielfotos werden angelegt").exists {
                 demoTapped = true
                 UITestOnboarding.clock("tap demo library")
                 demo.tap()
                 return false
             }
-            let met = (analysedPhotos()?.total ?? 0) >= 200 && !analysisRunning && !anything("Beispielfotos werden angelegt").exists
+            let met = preparedLibraryReady
             if !met && Date().timeIntervalSince(lastState) >= 60 {
                 lastState = Date()
                 printPrepareState()
@@ -358,12 +365,36 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(ready, "The demo library was not created and analysed")
         if ready { UITestOnboarding.preparedLibrary.ends() }
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
-        guard let extra else { return }
-        if ready, reuse, !worked, checks == 3 {
-            print("UI_FACT prepared in the test's own launch (at rest at every check), no second launch")
-        } else {
-            start(extra)
+        if let extra { start(extra) }
+    }
+
+    /// What `prepare` waits for: the demo library is there (at least 200 photos) and nothing runs.
+    private var preparedLibraryReady: Bool {
+        (analysedPhotos()?.total ?? 0) >= 200 && !analysisRunning && !anything("Beispielfotos werden angelegt").exists
+    }
+
+    /// The test's own launch (`extra`), only looked at: the overview shows (no welcome, no
+    /// "Kein Zugriff"), no demo library is offered, and `preparedLibraryReady` holds at all three
+    /// checks of the wait (a check that fails ends it after three checks, about 4 s, and counts as
+    /// not ready). Nothing is tapped. False: `prepare` launches without switches and repairs there.
+    /// (A demo library the fast start would still create cannot be missing while the marker is
+    /// there; if it were, its seeding text fails the check and the launch without switches
+    /// creates it.)
+    private func preparedInOwnLaunch(_ extra: [String]) -> Bool {
+        start(extra)
+        let welcome = button("Los geht")
+        _ = UITestWait.holds(timeout: 20) {
+            welcome.exists || app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists
         }
+        guard app.tabBars.firstMatch.exists, !welcome.exists, !askAgain.exists, !toSettings.exists else { return false }
+        let demo = button("Beispiel-Mediathek anlegen")
+        var unmet = false
+        _ = waitStable("demo library analysed in the test's own launch", timeout: 30) {
+            if !unmet, demo.exists || !preparedLibraryReady { unmet = true }
+            // A failed check ends the wait (three checks in a row "done") instead of its time.
+            return true
+        }
+        return !unmet
     }
 
     /// What `prepare` waits on, in one line: the headline, "Pause", "Fortsetzen", the seeding
@@ -385,20 +416,16 @@ final class DeviceConditionUITests: XCTestCase {
     /// The introduction (fresh install) or the "Kein Zugriff" screen (access taken away after
     /// it), if one of them shows; afterwards the app has full access. A denied access cannot be
     /// given back inside the app: the workflow gives it back from the Mac (`grantFromHost`).
-    /// True when a screen before the overview showed (the launch did more than open).
-    @discardableResult
-    private func onboardIfNeeded(attempt: Int = 1) -> Bool {
+    private func onboardIfNeeded(attempt: Int = 1) {
         let extra = launchExtra
         let welcome = button("Los geht")
         _ = waitStable("first screen", timeout: 20, stableChecks: 1) {
             welcome.exists || app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists
         }
         var asked = false
-        let onWelcome = welcome.exists
-        let onNoAccess = !onWelcome && askAgain.exists
-        if onWelcome {
-            if onboarding(.full) { return true }
-        } else if onNoAccess {
+        if welcome.exists {
+            if onboarding(.full) { return }
+        } else if askAgain.exists {
             asked = grantOnNoAccessScreen(.full)
         }
         // In UI runs 43766407272 and 43795445305 iOS answered for the user after a reset (no
@@ -407,13 +434,11 @@ final class DeviceConditionUITests: XCTestCase {
             print("UI_FACT photo access denied: given back from the Mac")
             grantFromHost(relaunchWith: extra)
             onboardIfNeeded(attempt: attempt + 1)
-            return true
         } else if asked {
             // Opened once more, so the launch runs as with access (the fast start's demo
             // library, if missing), with the test's own arguments.
             launch(extra)
         }
-        return onWelcome || onNoAccess
     }
 
     /// Full photo access given back from outside: the simulator in CI shows no iOS question

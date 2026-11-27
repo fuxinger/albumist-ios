@@ -1200,6 +1200,35 @@ class HostTerminateTests(unittest.TestCase):
                 self.assertEqual(kills, [])
                 self.assertIn("not Albumist in this simulator", out)
 
+    def test_a_failed_ps_never_counts_as_gone(self):
+        # Review of bundle C: a ps that timed out or failed said "" (gone), and the Mac would
+        # then answer "ended" to the test. Only a ps that answered without the process counts.
+        for answer in ((124, "timed out after 10 s: ps"), (127, "No such file"), (1, "ps: illegal option")):
+            with self.subTest(answer=answer):
+                self.assertEqual(ui_tests.app_process("U", 35745, run=lambda cmd, timeout, quiet: answer),
+                                 ui_tests.PS_FAILED)
+        self.assertEqual(ui_tests.app_process("U", 35745, run=lambda cmd, timeout, quiet: (1, "")), "")
+        # At the first look: no signal to an unchecked id, and not ended.
+        calls = []
+
+        def failing(cmd, timeout, quiet):
+            calls.append(cmd)
+            return 124, "timed out after 10 s: ps"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertFalse(ui_tests.end_app_process("U", 35745, run=failing, sleep=lambda s: None))
+        self.assertEqual([c for c in calls if c[0] == "kill"], [])
+        self.assertIn("ps could not check", out.getvalue())
+        # After SIGTERM: a ps that keeps failing is never read as gone.
+        looks = [0]
+
+        def after_kill(cmd, timeout, quiet):
+            if cmd[0] == "ps":
+                looks[0] += 1
+                return (0, self.APP + "\n") if looks[0] == 1 else (124, "timed out after 10 s: ps")
+            return 0, ""
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(ui_tests.end_app_process("U", 35745, run=after_kill, sleep=lambda s: None))
+
     def test_a_process_that_is_gone_already_is_not_signalled(self):
         ended, kills, out = self.run_pid_end(alive_after=0, command="")
         self.assertTrue(ended)

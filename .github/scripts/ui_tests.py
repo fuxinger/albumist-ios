@@ -1334,13 +1334,24 @@ PID_KILL_WAIT = 5
 APP_PATH = "/Albumist.app/Albumist"
 
 
-def app_process(udid: str, pid: int, run=sh) -> str:
+# What `app_process` says when `ps` itself failed (a timeout, an error text): the process may
+# still be there, so it never counts as gone (review of bundle C, 27.11.: the Mac now answers
+# "ended" to the test, which then stops waiting for XCTest's state).
+PS_FAILED = "?"
+
+
+def app_process(udid: str, pid: int, run=sh) -> str | None:
     """The command line of process `pid` when it is this simulator's app, "" when there is no
-    such process, None when it is another process."""
+    such process (ps answered and listed nothing: exit 0 or 1 without output), PS_FAILED when
+    ps gave no answer to go by, None when it is another process."""
     code, output = run(["ps", "-o", "command=", "-p", str(pid)], timeout=10, quiet=True)
     command = output.strip()
-    if code != 0 or not command:
+    if code not in (0, 1):
+        return PS_FAILED
+    if not command:
         return ""
+    if code != 0:
+        return PS_FAILED
     return command if f"/Devices/{udid}/" in command and (APP_PATH + " " in command + " ") else None
 
 
@@ -1354,6 +1365,10 @@ def end_app_process(udid: str, pid: int, run=sh, sleep=time.sleep) -> bool:
     if found == "":
         print(f"UI_HOST app process {pid} had ended already", flush=True)
         return True
+    if found == PS_FAILED:
+        # No signal to an id nobody checked; the test ends the app through XCTest after its wait.
+        print(f"UI_HOST app end skipped: ps could not check process {pid}", flush=True)
+        return False
     for signal_name, wait in (("TERM", PID_TERM_WAIT), ("KILL", PID_KILL_WAIT)):
         run(["kill", f"-{signal_name}", str(pid)], timeout=10, quiet=True)
         for _ in range(int(wait * 2)):

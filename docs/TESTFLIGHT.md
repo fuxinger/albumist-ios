@@ -239,12 +239,13 @@ Suche (`flow-other`), Gerätezustände (`device`), voller Ablauf mit Video (`flo
 vier zugleich (im TestFlight-Lauf drei). Ein Pull Request startet vier Gruppen gleichzeitig; mit
 dem Mac-Job „Core tests hard (macOS)“ sind das fünf Macs, so viele, wie das Konto zugleich hat.
 `contrast` („after_core“) startet im Job `ui-late` erst, wenn dieser Mac-Job fertig ist (12–14
-Min.), auf dem Mac, den er frei macht: nie mehr als fünf Macs, keine Gruppe wartet (seit 27.11.
-abends). Wo der Mac-Job nicht läuft (TestFlight, schneller Lauf, Nachtlauf), ist `contrast` eine
+Min.), auf dem Mac, den er frei macht: der UI-Lauf selbst fragt nie mehr als fünf Macs an
+(seit 27.11. abends). Ein Push auf einen bereiten PR startet zusätzlich CI mit seinem Mac-Job;
+dann kann ein Job kurz auf einen Mac warten. Wo der Mac-Job nicht läuft (TestFlight, schneller Lauf, Nachtlauf), ist `contrast` eine
 gewöhnliche Gruppe. Einige Stunden am 27.11. lief der Kontrast-Test als zweite Phase von
 `accessibility` auf dem gelöschten Simulator; das kostete die Gruppe 5 Minuten Löschen und
 Neustart und machte sie zur längsten (45 Min., Lauf 45973048317). Verteilung seit 27.11. abends:
-AlbumistFlowUITests test5 und test7 und DeviceConditionUITests test03 in `flow-full`,
+AlbumistFlowUITests test5 und test7 in `flow-full`,
 DeviceConditionUITests test08 in `flow-other` (vor dem Kauf-Test verbrauchten Flow-Test 5 und 7
 die Vorschläge der Demo-Mediathek, er musste erst Pläne zurücknehmen: 345 statt 111 s).
 Ein Pull Request läuft also mit vier Gruppen, und sein „UI verdict (full)“ prüft `large-library` nicht; das

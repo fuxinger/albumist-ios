@@ -1067,7 +1067,12 @@ class GroupTests(unittest.TestCase):
         self.assertRegex(self.workflow(), r"\n      max-parallel: 1\n      matrix: \$\{\{ fromJSON\(needs\.plan\.outputs\.late_matrix\) \}\}\n")
         # The longest in a full run start first (TestFlight runs three at a time); a pull
         # request's run leaves large-library out.
-        self.assertEqual(list(self.groups())[:3], ["large-library", "accessibility", "contrast"])
+        self.assertEqual(list(self.groups())[:3], ["large-library", "accessibility", "flow-other"])
+        # contrast, the shortest, last: in TestFlight (three at a time) it never holds back a long one.
+        self.assertEqual(list(self.groups())[-1], "contrast")
+        # ui-late shares ui's steps, whose deadline assumes 150 min (second review 27.11.).
+        timeouts = re.findall(r"\n  ui(?:-late)?:\n(?:.*\n)*?    timeout-minutes: (\d+)\n", self.workflow())
+        self.assertEqual(timeouts, ["150", "150"])
 
     def test_other_flows_skip_exactly_what_the_others_run(self):
         groups = self.groups()

@@ -11,6 +11,7 @@ import re
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -379,6 +380,42 @@ class RedFromTheLogTests(unittest.TestCase):
         entry = ui_evidence.results(runs, logs=ui_evidence.log_reader(fake_api(runs, logs={11: ui_evidence.LogGone("410")})))[0]
         self.assertEqual((entry["result"], entry["log"]), ("red", "gone"))
         self.assertIn("log gone", ui_evidence.where(entry))
+
+    def test_a_late_log_is_asked_for_again(self):
+        """Run 45938312628: the log of a job cancelled two minutes before was not there yet."""
+        now = ui_evidence.datetime.now(ui_evidence.timezone.utc)
+        ended = (now - ui_evidence.timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        started = (now - ui_evidence.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        runs = [run(1, "a" * 40, [dict(job("device", "cancelled", "cancelled", job_id=11), started_at=started, completed_at=ended)])]
+        ui_evidence.late_tries_left[0] = ui_evidence.LOG_LATE_TRIES
+        answers = [None, None, "UI_PASS device first\nThe operation was canceled.\n"]
+        waits = []
+        with mock.patch.object(ui_evidence.time, "sleep", waits.append):
+            entry = ui_evidence.results(runs, logs=lambda job_id: answers.pop(0))[0]
+        self.assertEqual((entry["result"], entry["log"]), ("none", ""))
+        self.assertEqual(waits, [ui_evidence.LOG_LATE_WAIT] * 2)
+
+    def test_an_old_missing_log_is_not_waited_for_and_stays_red(self):
+        runs = [run(1, "a" * 40, [dict(job("device", "cancelled", "cancelled", job_id=11), started_at="2026-11-20T02:30:00Z",
+                                        completed_at="2026-11-20T03:00:00Z")])]
+        with mock.patch.object(ui_evidence.time, "sleep", lambda s: self.fail("waited for an old log")):
+            entry = ui_evidence.results(runs, logs=lambda job_id: None)[0]
+        self.assertEqual((entry["result"], entry["log"]), ("red", "gone"))
+
+    def test_a_log_still_missing_after_the_waits_stays_red(self):
+        now = ui_evidence.datetime.now(ui_evidence.timezone.utc)
+        ended = (now - ui_evidence.timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        started = (now - ui_evidence.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        runs = [run(1, "a" * 40, [dict(job("device", "cancelled", "cancelled", job_id=11), started_at=started, completed_at=ended)])]
+        ui_evidence.late_tries_left[0] = ui_evidence.LOG_LATE_TRIES
+        waits = []
+        with mock.patch.object(ui_evidence.time, "sleep", waits.append):
+            entry = ui_evidence.results(runs, logs=lambda job_id: None)[0]
+            # The tries are spent: a second late job is not waited for.
+            again = ui_evidence.results(runs, logs=lambda job_id: None)[0]
+        self.assertEqual(again["result"], "red")
+        self.assertEqual((entry["result"], entry["log"]), ("red", "gone"))
+        self.assertEqual(len(waits), ui_evidence.LOG_LATE_TRIES)
 
 
 class QuickTests(unittest.TestCase):

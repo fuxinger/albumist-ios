@@ -267,6 +267,40 @@ def ran_out_of_time(job: dict, minutes: int = GROUP_TIMEOUT_MINUTES) -> bool:
     return job.get("conclusion") != "success" and end - start >= timedelta(minutes=minutes - 1)
 
 
+# A job that ended a few minutes ago may not have its log yet: GitHub answers 404 (BlobNotFound)
+# until the file is up. PR #31, 27.11.: the plan of run 45938312628 read the device job
+# 140302168847 two minutes after a newer push had cancelled it, found no log and took it as a
+# red ("log gone"), so the whole run was red before a test ran. Such a log is asked for again
+# for up to LOG_LATE_TRIES x LOG_LATE_WAIT s; only a log still missing after that counts as gone.
+# The tries are shared by all jobs of one call of the script (`late_tries_left`), so the plan
+# (10 min) waits at most 3 min however many jobs a push cancelled.
+LOG_LATE_MINUTES = 15
+LOG_LATE_TRIES = 6
+LOG_LATE_WAIT = 30
+late_tries_left = [LOG_LATE_TRIES]
+
+
+def ended_lately(job: dict, now: datetime | None = None, minutes: int = LOG_LATE_MINUTES) -> bool:
+    """Whether `job` ended less than `minutes` ago (its log may still be on its way)."""
+    try:
+        end = datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00"))
+    except (KeyError, AttributeError, TypeError, ValueError):
+        return False
+    return (now or datetime.now(timezone.utc)) - end < timedelta(minutes=minutes)
+
+
+def late_log(logs, job: dict):
+    """The log of `job`, asked for again while it ended lately and GitHub has none yet."""
+    text = logs(job.get("id"))
+    while text is None and late_tries_left[0] > 0 and ended_lately(job):
+        late_tries_left[0] -= 1
+        print(f"UI_EVIDENCE log of job {job.get('id')} not there yet (ended {job.get('completed_at')}), "
+              f"asking again in {LOG_LATE_WAIT} s ({late_tries_left[0]} tries left)", flush=True)
+        time.sleep(LOG_LATE_WAIT)
+        text = logs(job.get("id"))
+    return text
+
+
 def results(runs_and_jobs, logs=None) -> list[dict]:
     """One entry per group job: group, app, tests (short), result, and where it ran. `logs`
     (job id -> log text or None) confirms a red; without it a red stays red."""
@@ -284,7 +318,7 @@ def results(runs_and_jobs, logs=None) -> list[dict]:
             result, log_state = classify(job, STRESS_STEP if stress else TEST_STEP), ""
             limit = STRESS_TIMEOUT_MINUTES if stress else GROUP_TIMEOUT_MINUTES
             if result == "red" and logs is not None and not ran_out_of_time(job, limit):
-                text = logs(job.get("id"))
+                text = late_log(logs, job)
                 if text is None:
                     log_state = "gone"  # red: whether a test failed cannot be checked any more
                 elif not red_in_log(text, "stress" if stress else match.group(1)):

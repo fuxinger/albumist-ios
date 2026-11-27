@@ -119,6 +119,65 @@ def text_lookups(source: str) -> int:
     return count
 
 
+# What a UI test looks for by its words: subscripts of the element kinds and the tests' helpers
+# button(...), anything(...), anything(exactly:), tabButton(...) (they match by "label CONTAINS").
+WORD_USE = re.compile(r'\b(?:(?:' + KINDS + r')\[|button\(|anything\(|tabButton\(|anything\(exactly:\s*)\s*"((?:[^"\\]|\\.)*)"')
+FORMAT = re.compile(r"%(?:\d+\$)?(?:lld|ld|d|@|f|\.\d+f)")
+# Texts of iOS itself (no string of the app): an alert's or a popover's own parts.
+SYSTEM_TEXTS = {"PopoverDismissRegion"}
+
+
+NUMBER = re.compile(r"[0-9][0-9.,]*")
+
+
+def normal(text: str) -> str:
+    """Numbers and format places ("%lld", "3.348") as one "#", so "7 Fotos konnten" is found in
+    "%lld Fotos konnten noch nicht gelesen werden"."""
+    return NUMBER.sub("#", FORMAT.sub("#", text))
+
+
+def app_texts() -> str:
+    """Every string literal of the app's Swift and every key and value of its string catalogs
+    (all languages), joined, with numbers and format places as "#" (`normal`)."""
+    import json
+    texts: list[str] = []
+    for path in swift_files(APP):
+        with open(path, encoding="utf-8") as f:
+            texts += LITERAL.findall(f.read())
+
+    def values(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "value" and isinstance(value, str):
+                    texts.append(value)
+                values(value)
+        elif isinstance(node, list):
+            for value in node:
+                values(value)
+    for path in sorted(glob.glob(os.path.join(APP, "**", "*.xcstrings"), recursive=True)):
+        with open(path, encoding="utf-8") as f:
+            catalog = json.load(f)
+        for key, entry in catalog.get("strings", {}).items():
+            texts.append(key)
+            values(entry)
+    return "\n".join(normal(t) for t in texts)
+
+
+def missing_texts(files: list[str], blob: str) -> dict[str, list[str]]:
+    """{text: ["File.swift:line"]} of every word lookup whose text is in no string of the app
+    (the lookups match by "label CONTAINS", so a part of a string counts)."""
+    missing: dict[str, list[str]] = {}
+    for path in files:
+        with open(path, encoding="utf-8") as f:
+            for number, line in enumerate(f, 1):
+                for text in WORD_USE.findall(code(line)):
+                    if "\\(" in text or not text.strip() or ID_SHAPED.match(text) or text in SYSTEM_TEXTS:
+                        continue
+                    if normal(text) not in blob:
+                        missing.setdefault(text, []).append(f"{os.path.basename(path)}:{number}")
+    return missing
+
+
 class UIIdentifierRuleTests(unittest.TestCase):
     def test_every_identifier_a_test_asks_for_is_set_in_the_app(self):
         set_in_app = app_identifiers(swift_files(APP))
@@ -140,6 +199,31 @@ class UIIdentifierRuleTests(unittest.TestCase):
                 self.assertLessEqual(count, ceiling, f"{name}: {count} lookups by visible words, at most {ceiling}. "
                                      "Use a fixed identifier (app.element(id:), docs/UI_IDENTIFIERS.md), or "
                                      "add // text: <why> when the words are what the test checks.")
+
+
+class UITextRuleTests(unittest.TestCase):
+    """27.11. (gap of the stress run 45864829992: test12 looked for the chips "Nicht sortiert",
+    "Sortiert" and "Alle" that the new design no longer had, and failed after 1.5 h on a Mac):
+    every text a UI test looks for by its words is in some string of the app. It catches a text
+    that left the app entirely (renamed, removed); a text that only moved to another screen still
+    needs a fixed identifier (docs/UI_IDENTIFIERS.md)."""
+
+    def test_every_text_a_ui_test_looks_for_is_in_the_app(self):
+        blob = app_texts()
+        self.assertIn("Beispiel-Mediathek anlegen", blob)
+        missing = missing_texts(swift_files(UI_TESTS), blob)
+        self.assertEqual(missing, {}, "UI tests look for texts that no string of the app has (renamed or removed? "
+                                      "use a fixed identifier, docs/UI_IDENTIFIERS.md)")
+
+    def test_finds_a_text_that_left_the_app(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "X.swift")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('let a = app.buttons["Nur Lieblinge"]\nlet b = button("Weiter")\nlet c = anything("3 Fotos konnten")\n'
+                        'let d = app.buttons["plan.apply"]\nlet e = anything("\\(n) Fotos")\n')
+            blob = "\n".join(normal(t) for t in ("Weiter", "%lld Fotos konnten noch nicht gelesen werden"))
+            self.assertEqual(missing_texts([path], blob), {"Nur Lieblinge": ["X.swift:1"]})
 
 
 class HelperTests(unittest.TestCase):

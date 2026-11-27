@@ -3,8 +3,9 @@
 ## Datenverarbeitung
 Alle Analysen laufen auf dem Gerät. Kein Foto wird hochgeladen; Albumist hat keinen Server, kein
 Konto, keine Werbung, kein Tracking und keine Analyse-SDKs. Für Ortsnamen schickt iOS einzelne
-Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst; das ist ab
-Werk an und in den Einstellungen abschaltbar (siehe „Externe Dienste“).
+Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen), an Apples
+Kartendienst; das ist ab Werk an und in den Einstellungen abschaltbar (siehe „Externe Dienste“).
+Ein Foto verlässt die App nur, wenn der Nutzer es selbst teilt (siehe „Teilen“).
 
 Albumist liest die Mediathek, um Alben vorzuschlagen, und schreibt erst, wenn der Nutzer einen
 Plan bestätigt: Es legt Alben und Ordner in Fotos an, benennt und verschiebt sie, fügt Fotos zu
@@ -109,7 +110,7 @@ Atlas-Lands und das Foto im teilbaren Reise-Atlas-Bild.
 
 ## Externe Dienste
 - **Apple-Geocoder** (`CLGeocoder`): Für Ortsnamen werden einzelne Aufnahmeorte als Koordinaten
-  (eine pro Rasterzelle, keine Fotos) und die Sprache der Ortsnamen (`preferredLocale`, die Sprache
+  (etwa einer pro Gegend, genauer einer pro Rasterzelle; keine Fotos) und die Sprache der Ortsnamen (`preferredLocale`, die Sprache
   der Albumnamen) an Apples Kartendienst gesendet; wie bei jedem Internetdienst sieht Apple dabei
   die IP-Adresse des Geräts. Ab Werk an (Entscheidung
   Fuchs 18.11.: zeigen mit Schalter, nicht vorab fragen). Das Onboarding sagt es auf der
@@ -128,7 +129,20 @@ standardmäßig ausgeschlossen. Sensible Dokumente werden nicht automatisch vorg
 Datenschutz-Manifest: `App/Albumist/Resources/PrivacyInfo.xcprivacy` (keine erhobenen Daten).
 
 ## Teilen
-Das Reise-Atlas-Bild wird auf dem Gerät gerendert und über das iOS-Teilen-Menü weitergegeben.
+Ein Foto verlässt die App nur, wenn der Nutzer es selbst teilt. Teilen gibt es nur auf einen Tipp des
+Nutzers, nie von selbst (Entscheidung Fuchs 26.11.: Teilen in der Foto-Ansicht bleibt).
+
+**Foto-Ansicht** („Teilen“ oben rechts, nur für Fotos, nicht für Videos; `PhotoShare`): Albumist
+gibt die Datei, die Fotos für das Foto auf dem iPhone hat (die bearbeitete Fassung, sonst das
+Original), an das iOS-Teilen-Menü; der Nutzer wählt, wohin. Die Datei behält ihre Aufnahmedaten
+(EXIF, auch den Ort, wenn das Foto ihn hat), so wie beim Teilen aus der Fotos-App. Nur was auf
+dem iPhone liegt: Ein Foto, das nur in iCloud liegt, lädt Albumist dafür nicht, der Knopf sagt
+dann, dass es in der Fotos-App geht. Die Datei liegt nur für das offene Teilen-Menü in einem
+eigenen temporären Ordner und wird gelöscht, sobald es schließt (Reste beim nächsten Start).
+„Bild sichern“ und „Zu geteiltem Album hinzufügen“ sind ausgeblendet, damit keine zweite Kopie in
+der Mediathek oder in iCloud entsteht. Die Mediathek bleibt unverändert.
+
+**Reise-Atlas-Bild:** Das Reise-Atlas-Bild wird auf dem Gerät gerendert und über das iOS-Teilen-Menü weitergegeben.
 Es enthält Länder, Zahlen und optional ein Foto vom Lieblingsziel (vor dem Teilen sichtbar und
 abschaltbar). Das gerenderte Bild hat keine EXIF- oder GPS-Daten.
 

@@ -46,6 +46,18 @@ struct PromiseWordingTests {
     /// of 752ba07: "nur Koordinaten" left out the language).
     static let placeNamesDE = "Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst"
     static let placeNamesEN = "For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service"
+    /// The app says how many go, as the privacy pages do ("etwa einen pro Gegend", "roughly one
+    /// per area"; editing of the texts, 26.11.: "single photo locations" read as every photo's
+    /// place). The store texts, the website and PRIVACY.md follow with the website corrections (A25).
+    static let placeNamesAppDE = "Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend"
+        + " (nur Koordinaten und die Sprache der Ortsnamen), an Apples Kartendienst"
+    static let placeNamesAppEN = "For place names, iOS sends a sample of photo locations, roughly one per area"
+        + " (only coordinates and the language for place names), to Apple’s map service"
+    /// Sharing stays in the photo view, only on a tap (decision Fuchs 26.11., A29): the privacy
+    /// pages and the store texts say what leaves, without "nothing leaves your iPhone" (place
+    /// names, map images and iCloud Photos do).
+    static let sharingDE = "Ein Foto verlässt die App nur, wenn du es selbst teilst."
+    static let sharingEN = "A photo leaves the app only when you share it yourself."
 
     /// Whitespace folded, so a sentence wrapped across lines in Markdown is still found.
     static func flat(_ path: String) throws -> String {
@@ -140,21 +152,25 @@ struct PromiseWordingTests {
         ]),
         ("App/Albumist/Views/OnboardingView.swift", ["Deine Fotos bleiben auf deinem Gerät. Kein Foto wird hochgeladen.",
                                                    "\(placeNamesDE) – das kannst du in den Einstellungen ausschalten."]),
-        ("docs/PRIVACY.md", ["Kein Foto wird hochgeladen;", "\(placeNamesDE); das ist ab Werk an und in den Einstellungen abschaltbar",
-                             "und die Sprache der Ortsnamen", "IP-Adresse"]),
-        ("website/pages/de/datenschutz.html", ["Kein Foto wird hochgeladen. \(placeNamesDE) – das ist ab Werk eingeschaltet",
-                                               "nur Koordinaten und die Sprache der Ortsnamen, keine Fotos und keine Namen", "IP-Adresse",
-                                               "Einstellungen › Datenschutz › Orte online genauer bestimmen"]),
-        ("website/pages/en/privacy.html", ["No photo is ever uploaded. \(placeNamesEN). This is on by default",
-                                           "only coordinates and the language for place names, no photos and no names", "IP address"]),
-        ("website/pages/de/index.html", ["Kein Foto wird hochgeladen.", "\(placeNamesDE) – das kannst du in der App ausschalten.",
-                                         "<h3>Länder, auf Wunsch auch Städte</h3>"]),
-        ("website/pages/en/index.html", ["No photo is ever uploaded.", "\(placeNamesEN); you can turn this off in the app.",
-                                         "<h3>Countries, and cities if you like</h3>"]),
-        ("website/pages/de/support.html", ["Nein, kein Foto wird hochgeladen.", "Nur f\(placeNamesDE.dropFirst()) – das kannst du in der App unter"]),
-        ("website/pages/en/support.html", ["No, no photo is ever uploaded.", "Only f\(placeNamesEN.dropFirst()); you can turn this off in the app under"]),
-        ("docs/launch/APP_STORE_DE.md", ["Kein Foto wird hochgeladen", "\(placeNamesDE) – das kannst du in den Einstellungen ausschalten"]),
-        ("docs/launch/APP_STORE_EN.md", ["No photo is ever uploaded", "\(placeNamesEN); you can turn this off in Settings."]),
+        ("docs/PRIVACY.md", ["Kein Foto wird hochgeladen;", "\(placeNamesAppDE); das ist ab Werk an und in den Einstellungen abschaltbar",
+                             "und die Sprache der Ortsnamen", "IP-Adresse", "Ein Foto verlässt die App nur, wenn der Nutzer es selbst teilt."]),
+        ("website/pages/de/datenschutz.html", ["Kein Foto wird hochgeladen. \(placeNamesAppDE) – das ist ab Werk eingeschaltet",
+                                               "nur Koordinaten und die Sprache der Ortsnamen, keine Fotos und nicht deinen Namen", "IP-Adresse",
+                                               "Einstellungen › Datenschutz › „Orte online genauer bestimmen“", "<li>\(sharingDE)",
+                                               "<p>\(sharingDE)"]),
+        ("website/pages/en/privacy.html", ["No photo is ever uploaded. \(placeNamesAppEN). This is on by default",
+                                           "only coordinates and the language for place names, no photos and not your name", "IP address",
+                                           "<li>\(sharingEN)", "<p>\(sharingEN)"]),
+        ("website/pages/de/index.html", ["Kein Foto wird hochgeladen.", "\(placeNamesAppDE) – das kannst du in der App ausschalten.",
+                                         "<h3>Länder, auf Wunsch auch Städte</h3>", sharingDE]),
+        ("website/pages/en/index.html", ["No photo is ever uploaded.", "\(placeNamesAppEN); you can turn this off in the app.",
+                                         "<h3>Countries, and cities if you like</h3>", sharingEN]),
+        ("website/pages/de/support.html", ["Nein, kein Foto wird hochgeladen.", "Nur f\(placeNamesAppDE.dropFirst()) – das kannst du in der App unter",
+                                           sharingDE]),
+        ("website/pages/en/support.html", ["No. {{APP_NAME}} never uploads your photos.", "\(placeNamesAppEN); you can turn this off in the app under",
+                                           sharingEN]),
+        ("docs/launch/APP_STORE_DE.md", ["Kein Foto wird hochgeladen", "\(sharingDE) \(placeNamesAppDE) – das kannst du in den Einstellungen ausschalten"]),
+        ("docs/launch/APP_STORE_EN.md", ["No photo is ever uploaded", "\(sharingEN) \(placeNamesAppEN); you can turn this off in Settings."]),
         // The system's question for photo access (review of bundle-i, 19.11.).
         ("App/project.yml", ["Kein Foto wird hochgeladen, Originale werden nie verändert."]),
         ("App/Albumist/Resources/InfoPlist.xcstrings", ["No photo is ever uploaded, and originals are never changed."]),

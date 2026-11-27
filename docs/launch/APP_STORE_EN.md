@@ -18,10 +18,11 @@ Wording check in the code: `Tests/AlbumistCoreTests/PromiseWordingTests.swift` c
 place-name sentence, "No photo is ever uploaded", and the heading "CITIES IF YOU LIKE" word for
 word with the app, and rejects a few wrong words (listed in the test). Change these only together
 with the test: `.md`-only changes start no tests, so a mismatch would only show up in the next app
-run. With the design package the app says "a sample of photo locations, roughly one per area" (both
-reviewers: "single photo locations" reads as every photo's location). This page, the website, and
-`docs/PRIVACY.md` switch to that sentence in one step with the test, together with the website
-corrections (before submission).
+run. Since the design package the app says "a sample of photo locations, roughly one per area" (both
+reviewers: "single photo locations" reads as every photo's location); this page, the website, and
+`docs/PRIVACY.md` say the same (A25). Sharing: "A photo leaves the app only when you share it
+yourself." (Fuchs' decision 26.11.: sharing stays in the photo view, only on a tap; A29), also
+checked by the test.
 
 Style: US English (organize, favorite, color), serial comma, curly quotes (“ ” ’), Apple's
 spellings and capitalization (iPhone, iPad, Mac, iCloud Photos, Photos app, Lock Screen, Dark
@@ -87,7 +88,7 @@ You also get albums for:
 • Months and years, if you want them
 
 PRIVATE BY DESIGN
-All analysis happens on your iPhone. No photo is ever uploaded, and there’s no account, no tracking, and no ads. For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service; you can turn this off in Settings.
+All analysis happens on your iPhone. No photo is ever uploaded, and there’s no account, no tracking, and no ads. A photo leaves the app only when you share it yourself. For place names, iOS sends a sample of photo locations, roughly one per area (only coordinates and the language for place names), to Apple’s map service; you can turn this off in Settings.
 [MAP] Map images come from Apple, only for the area you’re viewing. You can turn that off, too.
 
 KEEPS WORKING IN THE BACKGROUND
@@ -134,8 +135,6 @@ After matching the wording check in the code (26 Nov):
 - So countries and cities get their own section before "MORE THAN TRIPS", and privacy is a short
   paragraph instead of a list, because the app's sentence is a full sentence (the lists have no
   periods).
-- Until the switch described above, the place-name sentence still says "single photo locations",
-  as the app does today.
 
 Same checks as the German page (Voice Control test, Family Sharing is off today, search examples
 "dogs Italy 2023" and "barbecue at Grandma’s last summer" tried with the English demo library, the

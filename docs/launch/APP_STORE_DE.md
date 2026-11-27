@@ -34,9 +34,10 @@ Regeln für jeden Satz:
   STÄDTE“ Wort für Wort mit der App und verbietet einige falsche Wörter (Liste im Test). Diese
   Stellen nur zusammen mit dem Test ändern. Reine `.md`-Änderungen starten keine Tests, ein Fehler
   fiele erst beim nächsten App-Lauf auf.
-- **Geplanter Wechsel:** Mit dem Design-Paket sagt die App genauer „einzelne Aufnahmeorte, etwa
-  einen pro Gegend“. Produktseite, Webseite und `docs/PRIVACY.md` übernehmen den Satz dann in
-  einem Schritt mit dem Test, zusammen mit den Webseiten-Korrekturen (vor dem Einreichen).
+- **Ortsnamen-Satz:** Seit dem Design-Paket sagt die App genauer „einzelne Aufnahmeorte, etwa
+  einen pro Gegend“; Produktseite, Webseite und `docs/PRIVACY.md` sagen es wortgleich (A25).
+- **Teilen:** „Ein Foto verlässt die App nur, wenn du es selbst teilst.“ (Entscheidung Fuchs 26.11.:
+  Teilen in der Foto-Ansicht bleibt, nur auf Tipp; A29). Der Test prüft auch diesen Satz.
 - Keine Fachwörter. Knopfnamen genau wie in der App, in „…“.
 - Albumist spricht als **ich** (eine Person, kein Team), wie Webseite, Pressemails und
   Featuring-Bewerbung. Die Leser werden geduzt, wie in der App.
@@ -117,7 +118,7 @@ Dazu kommen Alben für:
 • Monate und Jahre, wenn du magst
 
 PRIVAT VON ANFANG AN
-Die ganze Analyse läuft auf deinem iPhone. Kein Foto wird hochgeladen, und es gibt kein Konto, kein Tracking und keine Werbung. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten.
+Die ganze Analyse läuft auf deinem iPhone. Kein Foto wird hochgeladen, und es gibt kein Konto, kein Tracking und keine Werbung. Ein Foto verlässt die App nur, wenn du es selbst teilst. Für Ortsnamen schickt iOS einzelne Aufnahmeorte, etwa einen pro Gegend (nur Koordinaten und die Sprache der Ortsnamen), an Apples Kartendienst – das kannst du in den Einstellungen ausschalten.
 [KARTE] Kartenbilder kommen von Apple, nur für den Ausschnitt, den du gerade ansiehst. Auch das kannst du ausschalten.
 
 LÄUFT IM HINTERGRUND WEITER

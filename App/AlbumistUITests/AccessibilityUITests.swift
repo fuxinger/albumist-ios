@@ -668,6 +668,7 @@ final class AccessibilityUITests: XCTestCase {
         options.issueMatcher = { $0.compactDescription.contains("Failed to get matching snapshot") }
         for attempt in 1...2 {
             var finished = false
+            let started = Date()
             XCTExpectFailure("The screen changed during the accessibility audit", options: options) {
                 do {
                     try app.performAccessibilityAudit(for: Self.failingAuditTypes) { issue in
@@ -679,7 +680,12 @@ final class AccessibilityUITests: XCTestCase {
                     print("A11Y_AUDIT_ERROR \(screen) attempt \(attempt) \(error.localizedDescription)")
                 }
             }
+            // How long each screen's audit takes (A28): a screen that is slow on a calm Mac
+            // shows here before it times out on a busy one; a slow one gets the pixel probe.
+            let took = Date().timeIntervalSince(started)
+            print("A11Y_AUDIT_TIME \(screen) attempt \(attempt) \(String(format: "%.1f", took)) s \(finished ? "completed" : "timed out")")
             if finished {
+                if took > 5 { UITestScreenProbe.logPixels(screen: screen) }
                 confirmContrast(screen)
                 return
             }
@@ -688,6 +694,7 @@ final class AccessibilityUITests: XCTestCase {
             // What keeps changing right after the timeout, and later after the second one
             // (`UITestScreenProbe`): evidence, not a retry.
             UITestScreenProbe.logChanges(app, screen: "\(screen) after attempt \(attempt)")
+            UITestScreenProbe.logPixels(screen: "\(screen) after attempt \(attempt)")
             if attempt == 1 { waitForResponsiveApp(before: screen) }
         }
         XCTExpectFailure("The screen changed during the accessibility audit", options: options) {

@@ -2092,13 +2092,23 @@ def swiftui_warnings(path: str) -> int:
     except OSError:
         return 0
     counts: dict[str, int] = {}
+    minutes: dict[str, dict[str, int]] = {}
     for line in lines:
         if re.search(r"^Filtering|^Timestamp|SwiftUI:Scenes|_UIHostingView|renderbox|UI_MAIN_HANG|UI_FACT main thread checker", line):
             continue
         key = line[24:]
         counts[key] = counts.get(key, 0) + 1
+        # The minute of the line (compact style: "2026-11-21 05:01:02.123 ..."), so a warning is
+        # placed beside the screen the tests checked then (`UI_FACT clock`); A28: "Geometry action
+        # is cycling" came 84 times in a pass without saying on which screen.
+        stamp = line[11:16] if re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d", line) else ""
+        if stamp:
+            per = minutes.setdefault(key, {})
+            per[stamp] = per.get(stamp, 0) + 1
     for key, count in sorted(counts.items(), key=lambda kv: -kv[1])[:40]:
-        print(f"UI_RUNTIME_WARNING {count:>7} {key}")
+        per = minutes.get(key, {})
+        at = ", ".join(f"{m} {n}x" for m, n in sorted(per.items())[:12]) + (" ..." if len(per) > 12 else "")
+        print(f"UI_RUNTIME_WARNING {count:>7} {key}" + (f" | at {at}" if at else ""))
     text = "\n".join(lines)
     if re.search(r"Publishing changes from within view updates|Modifying state during view update", text, re.I):
         print("::warning::SwiftUI state was changed during a view update (see UI_RUNTIME_WARNING)")

@@ -489,7 +489,11 @@ final class AlbumistFlowUITests: XCTestCase {
         let demo = button("Beispiel-Mediathek anlegen")
         var unmet = false
         _ = waitStable("demo library analysed in the test's own launch", timeout: 30) {
-            if !unmet, !preparedLibraryReady(demo) { unmet = true }
+            // With `checkingCutOff` a partial count fails every check too: the headline can draw
+            // after the 3 s look above, and "180 von 246 Fotos analysiert" still says "Fotos
+            // analysiert" (blind review 27.11.).
+            if !unmet, !preparedLibraryReady(demo)
+                || (checkingCutOff && UITestOnboarding.partialAnalysis(app, wait: 0) != nil) { unmet = true }
             // A failed check ends the wait (three checks in a row "done") instead of its time.
             return true
         }

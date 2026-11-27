@@ -247,6 +247,13 @@ extension LoadTests {
 /// `MainThreadWork.ownStall` takes off only the machine's load: work that holds the main actor
 /// still shows (not a load test: it runs in every core test run).
 struct MainThreadWorkStallTests {
+    /// Blocks the calling thread (`Thread.sleep` is unavailable in an async context such as the
+    /// main actor's task, Linux core tests 45935589057; a synchronous function in between is
+    /// what the app's own blocking work would be).
+    static func hold(_ seconds: TimeInterval) {
+        Thread.sleep(forTimeInterval: seconds)
+    }
+
     @Test func theMachinesLoadIsTakenOffNeverMore() {
         #expect(MainThreadWork.ownStall(.milliseconds(60), baseline: .milliseconds(25)) == .milliseconds(35))
         #expect(MainThreadWork.ownStall(.milliseconds(10), baseline: .milliseconds(25)) == .zero)
@@ -259,7 +266,7 @@ struct MainThreadWorkStallTests {
     @Test func workOnTheMainActorStillCounts() async {
         let (stall, took) = await MainThreadWork.mainActorStall {
             // The detached work puts 300 ms on the main actor and runs on past it.
-            Task { @MainActor in Thread.sleep(forTimeInterval: 0.3) }
+            Task { @MainActor in MainThreadWorkStallTests.hold(0.3) }
             Thread.sleep(forTimeInterval: 0.6)
         }
         let baseline = await MainThreadWork.baselineStall(for: took)

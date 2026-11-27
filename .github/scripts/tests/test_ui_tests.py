@@ -1200,6 +1200,35 @@ class HostTerminateTests(unittest.TestCase):
                 self.assertEqual(kills, [])
                 self.assertIn("not Albumist in this simulator", out)
 
+    def test_a_failed_ps_never_counts_as_gone(self):
+        # Review of bundle C: a ps that timed out or failed said "" (gone), and the Mac would
+        # then answer "ended" to the test. Only a ps that answered without the process counts.
+        for answer in ((124, "timed out after 10 s: ps"), (127, "No such file"), (1, "ps: illegal option")):
+            with self.subTest(answer=answer):
+                self.assertEqual(ui_tests.app_process("U", 35745, run=lambda cmd, timeout, quiet: answer),
+                                 ui_tests.PS_FAILED)
+        self.assertEqual(ui_tests.app_process("U", 35745, run=lambda cmd, timeout, quiet: (1, "")), "")
+        # At the first look: no signal to an unchecked id, and not ended.
+        calls = []
+
+        def failing(cmd, timeout, quiet):
+            calls.append(cmd)
+            return 124, "timed out after 10 s: ps"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertFalse(ui_tests.end_app_process("U", 35745, run=failing, sleep=lambda s: None))
+        self.assertEqual([c for c in calls if c[0] == "kill"], [])
+        self.assertIn("ps could not check", out.getvalue())
+        # After SIGTERM: a ps that keeps failing is never read as gone.
+        looks = [0]
+
+        def after_kill(cmd, timeout, quiet):
+            if cmd[0] == "ps":
+                looks[0] += 1
+                return (0, self.APP + "\n") if looks[0] == 1 else (124, "timed out after 10 s: ps")
+            return 0, ""
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(ui_tests.end_app_process("U", 35745, run=after_kill, sleep=lambda s: None))
+
     def test_a_process_that_is_gone_already_is_not_signalled(self):
         ended, kills, out = self.run_pid_end(alive_after=0, command="")
         self.assertTrue(ended)
@@ -1306,7 +1335,55 @@ class HostTerminateTests(unittest.TestCase):
         # Last possible start of a call, plus its timeout and the watcher's read interval.
         self.assertLess(ui_tests.TERMINATE_FRESH + ui_tests.TERMINATE_TIMEOUT + 2, ui_tests.TERMINATE_WAIT)
         swift = open(os.path.join(self.ROOT, "App", "AlbumistUITests", "UITestAppEnd.swift"), encoding="utf-8").read()
-        self.assertIn(f"app.wait(for: .notRunning, timeout: {ui_tests.TERMINATE_WAIT})", swift)
+        self.assertIn(f"static let macEndWait: TimeInterval = {ui_tests.TERMINATE_WAIT}", swift)
+        # The Mac's whole end (SIGTERM, then SIGKILL) and its answer come before the test's
+        # wait is over, so "ended" is read while it still waits.
+        self.assertLess(ui_tests.PID_TERM_WAIT + ui_tests.PID_KILL_WAIT + 2 * 2, ui_tests.TERMINATE_WAIT)
+
+    # Bundle C (27.11.): device test07 in the full UI run 45865545486 waited 60 s for XCTest to
+    # read the app as gone although the Mac had ended its process 12 s after the request.
+    DEVICE = "/Users/runner/Library/Developer/CoreSimulator/Devices/U/data/Containers/Data/Application/X/tmp"
+
+    def test_an_end_with_an_answer_file_is_answered_after_the_end(self):
+        answer = f"{self.DEVICE}/uitest-host-answer-1A"
+        self.assertEqual(ui_tests.host_requests(f"UI_HOST_TERMINATE_APP 1700000000 35745 {answer}\n"),
+                         [("terminate", 1700000000.0, 35745), ("ended", None, answer)])
+        self.assertEqual(ui_tests.host_requests(f"UI_HOST_TERMINATE_APP 1700000000 {answer}\n"),
+                         [("terminate", 1700000000.0, None), ("ended", None, answer)])
+        # A relative path is no answer file; the line is no request then, as before.
+        self.assertEqual(ui_tests.host_requests("UI_HOST_TERMINATE_APP 1700000000 35745 tmp/a\n"), [])
+        done = []
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "log.txt")
+            with open(path, "w") as out:
+                out.write("UI_HOST_TERMINATE_APP 1700000000 5 /D/a\nUI_HOST_TERMINATE_APP 1700000001 6 /D/b\n"
+                          "UI_HOST_TERMINATE_APP 1700000002 7\n")
+            results = iter([True, False, True])
+            watcher = ui_tests.HostGrants("U", path, interval=0.01,
+                                          terminate=lambda asked, pid: done.append(("terminate", pid)) or next(results),
+                                          answer=lambda answer, text: done.append((answer, text)))
+            watcher.check()
+        self.assertEqual(done, [("terminate", 5), ("/D/a", "ended"), ("terminate", 6), ("/D/b", "not ended"),
+                                ("terminate", 7)])
+
+    def test_the_watcher_says_whether_its_end_left_the_app_gone(self):
+        watcher = ui_tests.HostGrants("U", "/nonexistent", grant=lambda: None)
+        with mock.patch.object(ui_tests, "end_app_process", lambda udid, pid: pid == 1), \
+                mock.patch.object(ui_tests, "terminate_app", lambda udid, asked: False):
+            self.assertTrue(watcher.terminate_app(1700000000.0, 1))
+            self.assertFalse(watcher.terminate_app(1700000000.0, 2))
+            self.assertFalse(watcher.terminate_app(1700000000.0, None))
+
+    def test_the_test_names_its_answer_file_and_reads_ended(self):
+        with open(os.path.join(self.ROOT, "App", "AlbumistUITests", "UITestAppEnd.swift"), encoding="utf-8") as f:
+            swift = f.read()
+        body = swift[swift.index("static func end(_ app: XCUIApplication"):]
+        body = body[:body.index("\n    }\n")]
+        self.assertIn('"uitest-host-answer-\\(UUID().uuidString)"', body)
+        self.assertIn('(answered ? " \\(answer)" : "")', body)
+        self.assertIn('== "ended"', swift)
+        # Only "ended" shortens the wait; XCTest still ends the app (its terminate) when it reads it running.
+        self.assertLess(body.index("waitForEnd("), body.index("app.terminate()"))
 
     def test_the_tests_know_the_helper_from_the_runner_environment(self):
         env = ui_tests.runner_env({"PATH": "/usr/bin", "TEST_RUNNER_ALBUMIST_UI_QUICK": "1"})

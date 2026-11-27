@@ -50,6 +50,17 @@ enum UITestOnboarding {
     static func fullFlowFinished() { fullFlow.ends() }
     static var fullFlowReachedItsEnd: Bool { fullFlow.reachedItsEnd }
 
+    /// Set by `prepare` (AlbumistFlowUITests, DeviceConditionUITests) once it found the demo
+    /// library created and analysed on this simulator; the test runner's folder belongs to the
+    /// simulator, so a group's fresh simulator starts without it. With it a later `prepare`
+    /// first only looks at the test's own launch and keeps it when the library stands ready at
+    /// rest there; any repair still runs in a launch without the test's switches (bundle C,
+    /// 27.11.). In the full UI run 45865545486 every test after the group's first launched the
+    /// app for `prepare` (16-32 s, its idle wait held at the first check in all 9 device tests)
+    /// and then again with its own arguments, and the flow tests 3-7 launched once more before
+    /// that for `completeOnboardingIfCutOff` (about 12 s).
+    static let preparedLibrary = Markers("library-prepared")
+
     /// The overview says the analysis is done and nothing runs (as `analysisIdle` in the tests).
     static func analysisIdle(_ app: XCUIApplication) -> Bool {
         func anything(_ text: String) -> Bool {

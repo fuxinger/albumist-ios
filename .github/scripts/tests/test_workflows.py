@@ -788,7 +788,7 @@ class ReadyPullRequestTests(unittest.TestCase):
         # The app tests run exactly as in CI: the same erased and settled simulator (StoreKit,
         # CI 44383157858) and the same test command; only the step conditions differ.
         ci_runs = {name: run for name, _, run in steps}
-        for name in ("Fresh simulator (erased and booted)", "Build and test app", "Build app and its tests"):
+        for name in ("Fresh simulator (erased and booted)", "Build and test app", "Build app and its tests", "App icon compiled"):
             with self.subTest(same=name):
                 self.assertIn(name, core)
                 self.assertEqual(core[name][1], ci_runs[name])

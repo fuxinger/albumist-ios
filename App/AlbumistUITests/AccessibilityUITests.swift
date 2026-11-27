@@ -737,13 +737,15 @@ final class AccessibilityUITests: XCTestCase {
 
     /// Evidence for A28 after a real hang, never a pass: which part of the screen the contrast
     /// audit hangs on. "en plan lower" hung in four runs in a row, also at load 160, while every
-    /// other screen completed, and texts cut by a bar were not it (UI run 46012910058). The page
-    /// is pulled down three times by 140 pt, bringing what was above into view and taking the
-    /// bottom away, and the contrast audit runs alone after each pull, with the texts on screen.
+    /// other screen completed, and texts cut by a bar were not it (UI run 46012910058). Pulled
+    /// down 140 pt it completed in 4.8 s (UI run 46033354388): the cause is in the screen's
+    /// bottom 140 pt (the sixth album, "Show All", the undo note and "Learn More"). So the page
+    /// is pulled down five times by 35 pt, and the contrast audit runs alone after each pull,
+    /// with the texts on screen: the first pull that completes names what left the screen.
     private func contrastBisect(_ screen: String, options: XCTExpectedFailure.Options) {
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
-        for pull in 1...3 {
-            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 140)))
+        for pull in 1...5 {
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 35)))
             _ = UITestWait.until("\(screen): at rest for contrast experiment \(pull)", timeout: 5) { (try? self.app.snapshot()) != nil }
             let started = Date()
             var completed = false
@@ -751,7 +753,7 @@ final class AccessibilityUITests: XCTestCase {
                 completed = (try? app.performAccessibilityAudit(for: .contrast) { _ in true }) != nil
             }
             let took = String(format: "%.1f", Date().timeIntervalSince(started))
-            print("A11Y_CONTRAST_BISECT \(screen) pulled \(pull * 140) pt: \(completed ? "completed" : "hung") in \(took) s; "
+            print("A11Y_CONTRAST_BISECT \(screen) pulled \(pull * 35) pt: \(completed ? "completed" : "hung") in \(took) s; "
                   + "texts: \(textsOnScreen())")
         }
     }

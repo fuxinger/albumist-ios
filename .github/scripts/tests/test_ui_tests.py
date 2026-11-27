@@ -526,10 +526,38 @@ class SelectionTests(unittest.TestCase):
         code, marker, log = self.run_with_passes([green], reset_ok=False, contrast_only=[test5])
         self.assertEqual((code, marker), (ui_tests.NO_TEST_EXIT, True), log)
         self.assertIn("contrast phase not started", log)
+        # Too little time left before the erase: not started, no result.
+        code, marker, log = self.run_with_passes([green], deadline=time.time() + ui_tests.RETRY_BEFORE_RESET - 60,
+                                                 contrast_only=[test5])
+        self.assertEqual((code, marker), (ui_tests.NO_TEST_EXIT, True), log)
+        self.assertIn("min left before the job's deadline", log)
         # Without --contrast-only nothing is erased between passes.
         calls = []
         self.run_with_passes([green], calls=calls)
         self.assertEqual(calls, [("pass", "first", [])])
+
+    def test_a_contrast_phase_whose_erase_ate_the_time_does_not_start(self):
+        # Blind review 27.11.: after the erase the phase needs RETRY_AFTER_RESET like a repeat,
+        # or test5 would be cut off by the deadline (a false red); and a phase that never
+        # started is no repeat in the flaky record.
+        args = argparse.Namespace(name="accessibility", udid="X", reduce_motion=True,
+                                  deadline=time.time() + ui_tests.RETRY_BEFORE_RESET + 600)
+
+        def slow_reset(udid, reduce_motion, increase_contrast):
+            args.deadline = time.time() + ui_tests.RETRY_AFTER_RESET - 60
+            return True
+        saved = ui_tests.reset, ui_tests.run_phase
+        ui_tests.reset = slow_reset
+        ui_tests.run_phase = lambda *a, **k: self.fail("the phase must not run")
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                test5 = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
+                phase = ui_tests.contrast_phase(args, [test5])
+        finally:
+            ui_tests.reset, ui_tests.run_phase = saved
+        self.assertEqual((phase["failed"], phase["infra_only"]), (True, True))
+        self.assertEqual(phase["record"], {"retries": [], "flaky": []})
+        self.assertIn("the erase took until", log.getvalue())
 
     def test_a_late_launch_is_repeated_once_and_a_late_repeat_is_red(self):
         # Rule of 26.11.: one repeat; late again is a real finding, never "no result".

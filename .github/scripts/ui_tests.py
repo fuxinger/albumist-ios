@@ -1819,24 +1819,30 @@ def run_phase(args, only: list[str], skip: list[str], increase_contrast: bool, f
 # simulator is shut down, erased, booted and prepared again with Reduce Motion as before and
 # Increase Contrast and Reduce Transparency on (reset), so test5 meets the same fresh simulator
 # as in its own job: the welcome screen, no library, the switches on before the app's first
-# launch. Too little time before the job's deadline or a simulator that does not come back: no
-# result for the group (infra), never a green.
+# launch. Too little time before the job's deadline (before the erase, or after it, as for a
+# repeat) or a simulator that does not come back: no result for the group (infra), never a green
+# and never a red cut off by the deadline. A phase that did not start is no repeat: the flaky
+# record keeps it out of "retries".
 def contrast_phase(args, only: list[str]) -> dict:
-    deadline = getattr(args, "deadline", 0) or 0
+    def left() -> float:
+        deadline = getattr(args, "deadline", 0) or 0
+        return deadline - time.time() if deadline else float("inf")
     print(f"UI_PHASE {args.name} contrast: erase, Increase Contrast on, then {' '.join(only)}", flush=True)
     started = time.monotonic()
     why = ""
-    if deadline and deadline - time.time() < RETRY_BEFORE_RESET:
-        why = f"{max(0, deadline - time.time()) / 60:.0f} min left before the job's deadline"
+    if left() < RETRY_BEFORE_RESET:
+        why = f"{max(0, left()) / 60:.0f} min left before the job's deadline"
     elif not reset(args.udid, args.reduce_motion, True):
         why = "the simulator did not come back after the erase"
+    elif left() < RETRY_AFTER_RESET:
+        why = f"the erase took until {max(0, left()) / 60:.0f} min before the job's deadline"
     timing("contrast phase: simulator erased and prepared", started)
     if why:
         reasons = [f"contrast phase not started ({why})"]
         print(f"::warning title=UI {args.name}::{reasons[0]}: no result for this group", flush=True)
         print(f"UI_VERDICT {args.name} contrast: infra ({reasons[0]})", flush=True)
         return {"passes": [("contrast", 1, "infra", reasons, "")], "log": "", "failed": True, "infra_only": True,
-                "record": {"retries": [{"reasons": reasons, "result": "not started"}], "flaky": []}}
+                "record": {"retries": [], "flaky": []}}
     return run_phase(args, only, [], True, first="contrast")
 
 

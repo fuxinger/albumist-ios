@@ -721,6 +721,7 @@ final class AccessibilityUITests: XCTestCase {
             auditFailures.append(why)
             // What the retry recorded before it hung is no finding of the next screen (review round 2).
             pendingContrast = []
+            if retry == .hungAgain { contrastBisect(screen, options: options) }
             return
         case .otherTypesHung:
             break
@@ -732,6 +733,42 @@ final class AccessibilityUITests: XCTestCase {
         // checked must not pass (Prüfer B G5-06). The tree checks still ran; check() fails the test.
         print("A11Y_FAIL \(screen) | audit | did not complete in 2 attempts, screen not audited")
         auditFailures.append("audit did not complete in 2 attempts, screen not audited")
+    }
+
+    /// Evidence for A28 after a real hang, never a pass: which part of the screen the contrast
+    /// audit hangs on. "en plan lower" hung in four runs in a row, also at load 160, while every
+    /// other screen completed, and texts cut by a bar were not it (UI run 46012910058). The page
+    /// is pulled down three times by 140 pt, bringing what was above into view and taking the
+    /// bottom away, and the contrast audit runs alone after each pull, with the texts on screen.
+    private func contrastBisect(_ screen: String, options: XCTExpectedFailure.Options) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+        for pull in 1...3 {
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 140)))
+            _ = UITestWait.until("\(screen): at rest for contrast experiment \(pull)", timeout: 5) { (try? self.app.snapshot()) != nil }
+            let started = Date()
+            var completed = false
+            XCTExpectFailure("The screen changed during the accessibility audit", options: options) {
+                completed = (try? app.performAccessibilityAudit(for: .contrast) { _ in true }) != nil
+            }
+            let took = String(format: "%.1f", Date().timeIntervalSince(started))
+            print("A11Y_CONTRAST_BISECT \(screen) pulled \(pull * 140) pt: \(completed ? "completed" : "hung") in \(took) s; "
+                  + "texts: \(textsOnScreen())")
+        }
+    }
+
+    /// The texts on screen, top to bottom, shortened: "'Lissabon, April 2022' 230; …".
+    private func textsOnScreen() -> String {
+        guard let root = try? app.snapshot() else { return "-" }
+        let screen = app.frame
+        var texts: [(Int, String)] = []
+        var stack: [any XCUIElementSnapshot] = [root]
+        while let node = stack.popLast() {
+            stack.append(contentsOf: node.children)
+            if node.elementType == .staticText, node.frame.intersects(screen) {
+                texts.append((Int(node.frame.minY), "'\(node.label.prefix(24))' \(Int(node.frame.minY))"))
+            }
+        }
+        return texts.sorted { $0.0 < $1.0 }.map(\.1).joined(separator: "; ")
     }
 
     /// How many texts a bar cuts (partly under it, partly not): evidence for A28, whether the

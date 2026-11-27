@@ -947,7 +947,7 @@ def definition(group: dict) -> dict:
 # The smoke test of a draft pull request (rebuild stage 1, the owner's decision of 26.11.2026,
 # "alles wie empfohlen"): while a pull request is a draft, ui.yml runs only these two tests,
 # quick, on one Mac (the full flow from onboarding to plan, and undo from the history; each
-# onboards by itself), instead of all six groups. The full UI run comes once, when the pull
+# onboards by itself), instead of all groups. The full UI run comes once, when the pull
 # request is marked ready for review. Not a group: its result is no evidence for any group
 # (its job name carries the test key SMOKE_TESTS_KEY, which no group's fingerprint can be), so
 # the verdict of a ready pull request, the TestFlight gate and every plan run the groups
@@ -963,7 +963,7 @@ def smoke_entry(app: str, tests: str) -> dict:
     """ui.yml's job matrix entry for the smoke test of a draft pull request (`tests`: its
     fingerprint, Groups.smoke_fingerprint)."""
     return {"group": SMOKE_GROUP, "title": "smoke test, full flow and undo (quick)", "device": "pro",
-            "only": " ".join(SMOKE_TESTS), "skip": "", "video": False, "reduce_motion": False,
+            "only": " ".join(SMOKE_TESTS), "skip": "", "contrast_only": "", "video": False, "reduce_motion": False,
             "increase_contrast": False, "budget_min": SMOKE_BUDGET_MIN, "quick": True,
             "app": app[:SHORT], "tests": tests[:SHORT]}
 
@@ -1013,9 +1013,12 @@ class Groups:
         return next(g for g in self.groups if g["group"] == name)
 
     def selected_tests(self, name: str) -> list[str]:
+        """The group's tests: its selection (only, skip) and the tests of its second phase on an
+        erased simulator with Increase Contrast on ("contrast_only", ui_tests.py --contrast-only)."""
         g = self.group(name)
         only, skip = g.get("only", "").split(), g.get("skip", "").split()
-        return sorted(t for t in self.tests if selected(t, only, skip))
+        contrast = g.get("contrast_only", "").split()
+        return sorted(t for t in self.tests if selected(t, only, skip) or (contrast and selected(t, contrast, [])))
 
     def own_files(self, name: str) -> set[str]:
         return {p for t in self.selected_tests(name) for p in self.tests[t]}
@@ -1069,7 +1072,7 @@ class Groups:
         """One entry of ui.yml's job matrix: the group's fields and both short fingerprints (they
         go into the job name, where ui_evidence.py finds them again)."""
         g = definition(self.group(name))
-        entry = {k: g.get(k, "") for k in ("group", "title", "device", "only", "skip")}
+        entry = {k: g.get(k, "") for k in ("group", "title", "device", "only", "skip", "contrast_only")}
         for flag in ("video", "reduce_motion", "increase_contrast"):
             entry[flag] = bool(g.get(flag, False))
         # The group's time budget in minutes (0: none), checked by ui_tests.py --budget-min.

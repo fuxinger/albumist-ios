@@ -34,7 +34,7 @@ final class MapPrototypeUITests: XCTestCase {
         UITestAppEnd.launch(app)
     }
 
-    private func button(_ text: String) -> XCUIElement {
+    func button(_ text: String) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
@@ -43,7 +43,7 @@ final class MapPrototypeUITests: XCTestCase {
     }
 
     /// One of the page's own elements, by its accessibility identifier ("proto.…").
-    private func page(_ identifier: String) -> XCUIElement {
+    func page(_ identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
@@ -58,7 +58,7 @@ final class MapPrototypeUITests: XCTestCase {
     }
 
     @discardableResult
-    private func tap(_ element: XCUIElement, _ step: String, timeout: TimeInterval = 15) -> Bool {
+    func tap(_ element: XCUIElement, _ step: String, timeout: TimeInterval = 15) -> Bool {
         guard element.waitForExistence(timeout: timeout) else {
             print("UI_STEP_MISSING \(step)")
             shot("x-missing-" + step.replacingOccurrences(of: " ", with: "-"))
@@ -79,7 +79,7 @@ final class MapPrototypeUITests: XCTestCase {
         return true
     }
 
-    private func shot(_ name: String) {
+    func shot(_ name: String) {
         let screenshot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
@@ -213,7 +213,11 @@ final class MapPrototypeUITests: XCTestCase {
         if app.tabBars.buttons[UITestScreens.Tabs.german.suggestions].exists { tabButton(UITestScreens.Tabs.german.suggestions).tap() }
         guard tap(button("Reise-Atlas"), "open atlas", timeout: 30) else { return }
         UITestWait.appears(app.navigationBars["Reise-Atlas"], "atlas screen", timeout: 30)
-        guard tap(app.buttons["Karten-Prototyp"], "open map prototype") else { return }
+        guard tap(page("atlas.map"), "open map") else { return }
+        guard UITestWait.appears(page("worldmap.all"), "map for laypeople", timeout: 30) else { return }
+        worldMap()
+        guard tap(page("worldmap.more"), "map menu") else { return }
+        guard tap(page("worldmap.measure"), "open measuring page") else { return }
         guard UITestWait.appears(page("proto.hud"), "map prototype page with its HUD", timeout: 20) else { return }
 
         ownGlobe()
@@ -225,6 +229,8 @@ final class MapPrototypeUITests: XCTestCase {
 
         tap(page("proto.close"), "close map prototype")
         UITestWait.disappears(page("proto.hud"), "map prototype closed", timeout: 15)
+        UITestWait.appears(page("worldmap.all"), "back on the map", timeout: 15)
+        tap(page("worldmap.close"), "close map")
         UITestWait.appears(app.navigationBars["Reise-Atlas"], "back on the atlas", timeout: 15)
     }
 

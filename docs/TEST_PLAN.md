@@ -39,13 +39,13 @@ Fälle“):
 | Hält auf | kleines Tor (täglicher Build, Fuchs) | großes Tor (Tester, App Store) |
 |---|---|---|
 | ein roter schneller Test: Regeln, Kern-Tests auf Linux, iOS-Build, Kern- und App-Tests auf dem Mac (StoreKit eingeschlossen) | ja | ja |
-| ein roter UI-Test | nur in den zwei kurzen Gruppen `flow-full` (ganzer Ablauf mit Video) und `contrast` (Kontrast) | ja, jede UI-Gruppe im vollen Lauf |
+| ein roter UI-Test | nur in den Gruppen `flow-full` (ganzer Ablauf mit Video) und `accessibility` (Barrierefreiheit und Kontrast) | ja, jede UI-Gruppe im vollen Lauf |
 | ein roter kleiner Härtetest (10.000 Fotos, 15 Minuten) | ja (Regel 17.11. und Entscheidung 4: vor jedem Upload) | ja |
 | ein Fall mit ⛔ | nein | ja |
 | ein Fall mit ⚪ oder 📱, eine Lücke in den Tests (G5, unten) | nein | nein |
 
 Für einen ✅-Fall heißt das: ist sein schneller Test rot, hält er beide Tore auf, ist nur sein
-UI-Test rot, das große (`flow-full` und `contrast` auch das kleine). Vor dem **Start im App Store** zusätzlich: der volle Härtetest (50.000
+UI-Test rot, das große (`flow-full` und `accessibility` auch das kleine). Vor dem **Start im App Store** zusätzlich: der volle Härtetest (50.000
 Fotos) grün, alle Punkte unter „Am iPhone prüfen“ von Fuchs geprüft, jeder ⚪-Fall und jede Lücke
 in den Tests behoben oder von Fuchs bewusst offen gelassen (Grund in der Tabelle).
 
@@ -53,7 +53,7 @@ So wird es heute durchgesetzt:
 - Beide Tore laufen in `.github/workflows/testflight.yml` (Eingabe **gate**, `docs/TESTFLIGHT.md`,
   „Zwei Tore“). Großes Tor: CI, alle UI-Gruppen mit vollem Ergebnis und der kleine Härtetest
   müssen grün sein. Kleines Tor (täglicher Build, `daily-build.yml`): CI, die UI-Gruppen
-  `flow-full` und `contrast` und der kleine Härtetest. Hochgeladen wird in beiden Fällen erst nach
+  `flow-full` und `accessibility` und der kleine Härtetest. Hochgeladen wird in beiden Fällen erst nach
   der Freigabe durch Fuchs (Umgebung `testflight-upload`).
 - ⛔ liest kein Workflow. Vor jeder Freigabe eines Builds an Tester sieht der Koordinator in die
   Tabellen dieses Plans; steht dort ein ⛔, bekommt nur Fuchs den Build.

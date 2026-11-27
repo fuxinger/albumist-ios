@@ -439,18 +439,25 @@ class SelectionTests(unittest.TestCase):
             "AccessibilityUITests/test4_Landscape": "passed",
         })
 
-    def run_with_passes(self, logs, reset_ok=True, deadline=0):
-        """command_run with faked passes (status 65 unless the log says otherwise)."""
+    def run_with_passes(self, logs, reset_ok=True, deadline=0, contrast_only=None, calls=None):
+        """command_run with faked passes (status 65 unless the log says otherwise). `calls`, a
+        list, gets ("pass", label, selection) and ("reset", increase_contrast) in order."""
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         queue = list(logs)
+        calls = [] if calls is None else calls
+
+        def fake_reset(udid, reduce_motion, increase_contrast):
+            calls.append(("reset", increase_contrast))
+            return reset_ok
 
         def fake_pass(args, label, chosen, build):
+            calls.append(("pass", label, chosen))
             text = queue.pop(0)
             return (0 if "** TEST SUCCEEDED **" in text else 65), text, "none.xcresult", 0.0, False
         fakes = {"run_pass": fake_pass, "crash_reports": lambda since: [], "other_crash_reports": lambda since: [],
                  "sh": lambda *a, **k: (0, "/Users/runner"), "read_bundle": lambda path: [],
-                 "reset": lambda *a: reset_ok, "swiftui_warnings": lambda path: 0, "boot_retries": lambda out: [],
+                 "reset": fake_reset, "swiftui_warnings": lambda path: 0, "boot_retries": lambda out: [],
                  "write_flaky": lambda args, record: None,
                  # The hang and checker gates have their own tests (test_quality_gates.py); the
                  # faked passes run no app, so a checker in fail mode would find no launch.
@@ -461,7 +468,7 @@ class SelectionTests(unittest.TestCase):
         try:
             args = argparse.Namespace(
                 out=folder.name, only=[], skip=[], increase_contrast=False, reduce_motion=False, video=None,
-                a11y_summary=False, name="device", udid="X", deadline=deadline)
+                a11y_summary=False, name="device", udid="X", deadline=deadline, contrast_only=contrast_only or [])
             with contextlib.redirect_stdout(io.StringIO()) as log:
                 code = ui_tests.command_run(args)
         finally:
@@ -485,6 +492,72 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual((code, marker), (1, False))
         self.assertIn("UI_RESULT device fail", log)
         self.assertIn("UI_RESULT device pass", self.run_with_passes(["** TEST SUCCEEDED **\n" + PASSED_ONE])[2])
+
+    def test_the_contrast_phase_runs_on_an_erased_simulator_with_increase_contrast(self):
+        # 27.11. (four groups): accessibility runs tests 1-4, then test5 after an erase with
+        # Increase Contrast on (its own job "contrast" before).
+        test5 = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
+        green = "** TEST SUCCEEDED **\n" + PASSED_ONE
+        calls = []
+        code, marker, log = self.run_with_passes([green, green], contrast_only=[test5], calls=calls)
+        self.assertEqual((code, marker), (0, False), log)
+        self.assertEqual(calls, [("pass", "first", []), ("reset", True),
+                                 ("pass", "contrast", [f"-only-testing:AlbumistUITests/{test5}"])])
+        self.assertIn("UI_RESULT device pass", log)
+        # A failed test in either phase: red; the other phase still runs.
+        calls = []
+        code, marker, log = self.run_with_passes([FLOW_ASSERTION, green], contrast_only=[test5], calls=calls)
+        self.assertEqual((code, marker, len(calls)), (1, False, 3))
+        self.assertIn("UI_RESULT device fail", log)
+        code, marker, log = self.run_with_passes([green, FLOW_ASSERTION], contrast_only=[test5])
+        self.assertEqual((code, marker), (1, False))
+        self.assertIn("UI_VERDICT device contrast: fail", log)
+        # The contrast phase lost the simulator in both passes: no result, never green; its
+        # repeat erases again with Increase Contrast on.
+        calls = []
+        code, marker, log = self.run_with_passes([green, AX_TIMEOUT, AX_TIMEOUT], contrast_only=[test5], calls=calls)
+        self.assertEqual((code, marker), (ui_tests.NO_TEST_EXIT, True), log)
+        self.assertEqual([c for c in calls if c[0] == "reset"], [("reset", True), ("reset", True)])
+        self.assertEqual(calls[-1][1], "contrast-retry")
+        # ... but a red in the first phase stays red.
+        self.assertEqual(self.run_with_passes([FLOW_ASSERTION, AX_TIMEOUT, AX_TIMEOUT], contrast_only=[test5])[:2],
+                         (1, False))
+        # The simulator did not come back after the erase: no result.
+        code, marker, log = self.run_with_passes([green], reset_ok=False, contrast_only=[test5])
+        self.assertEqual((code, marker), (ui_tests.NO_TEST_EXIT, True), log)
+        self.assertIn("contrast phase not started", log)
+        # Too little time left before the erase: not started, no result.
+        code, marker, log = self.run_with_passes([green], deadline=time.time() + ui_tests.RETRY_BEFORE_RESET - 60,
+                                                 contrast_only=[test5])
+        self.assertEqual((code, marker), (ui_tests.NO_TEST_EXIT, True), log)
+        self.assertIn("min left before the job's deadline", log)
+        # Without --contrast-only nothing is erased between passes.
+        calls = []
+        self.run_with_passes([green], calls=calls)
+        self.assertEqual(calls, [("pass", "first", [])])
+
+    def test_a_contrast_phase_whose_erase_ate_the_time_does_not_start(self):
+        # Blind review 27.11.: after the erase the phase needs RETRY_AFTER_RESET like a repeat,
+        # or test5 would be cut off by the deadline (a false red); and a phase that never
+        # started is no repeat in the flaky record.
+        args = argparse.Namespace(name="accessibility", udid="X", reduce_motion=True,
+                                  deadline=time.time() + ui_tests.RETRY_BEFORE_RESET + 600)
+
+        def slow_reset(udid, reduce_motion, increase_contrast):
+            args.deadline = time.time() + ui_tests.RETRY_AFTER_RESET - 60
+            return True
+        saved = ui_tests.reset, ui_tests.run_phase
+        ui_tests.reset = slow_reset
+        ui_tests.run_phase = lambda *a, **k: self.fail("the phase must not run")
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                test5 = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
+                phase = ui_tests.contrast_phase(args, [test5])
+        finally:
+            ui_tests.reset, ui_tests.run_phase = saved
+        self.assertEqual((phase["failed"], phase["infra_only"]), (True, True))
+        self.assertEqual(phase["record"], {"retries": [], "flaky": []})
+        self.assertIn("the erase took until", log.getvalue())
 
     def test_a_late_launch_is_repeated_once_and_a_late_repeat_is_red(self):
         # Rule of 26.11.: one repeat; late again is a real finding, never "no result".
@@ -945,43 +1018,54 @@ class GroupTests(unittest.TestCase):
             return any(test == e or test.startswith(e + "/") for e in entries)
         return (not only or hits(only)) and not hits(skip)
 
-    def test_six_groups_and_the_contrast_job(self):
+    def test_four_groups_and_large_library(self):
         groups = self.groups()
-        self.assertEqual(set(groups), {"large-library", "device-flows", "device", "flow-other", "accessibility", "flow-full",
-                                       "contrast"})
+        # 27.11. (four groups): four groups of a pull request's run and CI's macOS job are the
+        # account's five Macs; device-flows was split up, contrast is the second phase of
+        # accessibility.
+        self.assertEqual(set(groups), {"large-library", "device", "flow-other", "accessibility", "flow-full"})
         test5 = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
-        self.assertEqual(groups["contrast"]["only"], test5)
-        self.assertEqual(groups["contrast"]["increase_contrast"], "true")
-        self.assertEqual(groups["contrast"]["reduce_motion"], "true")
-        self.assertEqual(groups["contrast"]["device"], "se")
+        # Tests 1-4 without Increase Contrast, then test5 on the erased small iPhone with it on
+        # (ui_tests.py --contrast-only), with Reduce Motion in both phases, as in its own job.
+        self.assertEqual(groups["accessibility"]["only"], "AccessibilityUITests")
         self.assertEqual(groups["accessibility"]["skip"], test5)
+        self.assertEqual(groups["accessibility"]["contrast_only"], test5)
+        self.assertEqual(groups["accessibility"]["reduce_motion"], "true")
+        self.assertEqual(groups["accessibility"]["device"], "se")
         self.assertNotIn("increase_contrast", groups["accessibility"])
-        self.assertEqual(groups["device"]["device"], "pro")
-        self.assertNotIn("reduce_motion", groups["device"])
-        # Tempo plan 20.11.: the large library and the undo / interrupted-plan tests have their
-        # own group, so neither device conditions nor other flows sets the run's time alone.
-        self.assertEqual(groups["device-flows"]["device"], "pro")
+        for name in ("device", "flow-other", "flow-full", "large-library"):
+            with self.subTest(group=name):
+                self.assertEqual(groups[name]["device"], "pro")
+                self.assertNotIn("reduce_motion", groups[name])
+                self.assertNotIn("contrast_only", groups[name])
+        # test1 first on its fresh simulator, then test1b and the speed report on its library.
+        self.assertEqual(groups["flow-full"]["only"].split()[:2],
+                         ["AlbumistFlowUITests/test1_FullFlow", "AlbumistFlowUITests/test1b_AtlasLibrarySearch"])
+        self.assertIn("PerformanceUITests", groups["flow-full"]["only"].split())
         # 27.11. (speed first): the large library (26.8 min) and the tap-through sweep run before
         # uploads, at night and by hand only, in a group of their own that pull requests leave out.
         self.assertEqual(groups["large-library"]["device"], "pro")
         self.assertEqual(set(groups["large-library"]["only"].split()),
                          {"DeviceConditionUITests/test11_LargeLibrary", "AlbumistFlowUITests/test3_TapThroughSweep"})
 
-    def test_at_most_five_groups_at_a_time(self):
-        # With CI's one macOS job, six asked for at the peak; GitHub queues the last one
-        # (contrast, short) until a Mac is free (tempo plan 20.11.).
-        # Three when TestFlight calls it (test_workflows.py ReleaseSmokeTests: five Macs at most).
-        self.assertRegex(self.workflow(), r"\n      max-parallel: \$\{\{ inputs\.release && 3 \|\| 5 \}\}\n")
-        self.assertEqual(list(self.groups())[-1], "contrast")
+    def test_at_most_four_groups_at_a_time(self):
+        # With CI's one macOS job, five asked for at the peak: the account's five Macs, nothing
+        # waits (27.11., four groups). Three when TestFlight calls it (test_workflows.py
+        # ReleaseSmokeTests: five Macs at most).
+        self.assertRegex(self.workflow(), r"\n      max-parallel: \$\{\{ inputs\.release && 3 \|\| 4 \}\}\n")
+        with open(os.path.join(self.ROOT, ".github", "ui-groups.json"), encoding="utf-8") as f:
+            listed = json.load(f)["groups"]
+        on_pull_requests = [g["group"] for g in listed if g.get("pull_requests", True) is not False]
+        self.assertEqual(len(on_pull_requests), 4)
         # The longest in a full run start first (TestFlight runs three at a time); a pull
-        # request's run leaves large-library out and starts device-flows and device first.
-        self.assertEqual(list(self.groups())[:3], ["large-library", "device-flows", "device"])
+        # request's run leaves large-library out.
+        self.assertEqual(list(self.groups())[:3], ["large-library", "accessibility", "flow-other"])
 
     def test_other_flows_skip_exactly_what_the_others_run(self):
         groups = self.groups()
         others = set()
-        for name in ("large-library", "device-flows", "device", "flow-full", "accessibility", "contrast"):
-            others |= set(groups[name]["only"].split())
+        for name in ("large-library", "device", "flow-full", "accessibility"):
+            others |= set(groups[name]["only"].split()) | set(groups[name].get("contrast_only", "").split())
         covered = {t for t in others if not any(t != o and t.startswith(o + "/") for o in others)}
         self.assertEqual(set(groups["flow-other"]["skip"].split()), covered)
         self.assertEqual(groups["flow-other"]["only"], "")
@@ -1000,6 +1084,8 @@ class GroupTests(unittest.TestCase):
         for test in tests:
             with self.subTest(test=test):
                 runs = [name for name, f in groups.items() if self.selected(test, f["only"].split(), f["skip"].split())]
+                runs += [f"{name} (contrast phase)" for name, f in groups.items()
+                         if f.get("contrast_only") and self.selected(test, f["contrast_only"].split(), [])]
                 self.assertEqual(len(runs), 1, f"{test} runs in {runs or 'no group'}")
 
     def test_the_stress_run_is_not_part_of_the_ui_run(self):

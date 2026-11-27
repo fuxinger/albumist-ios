@@ -231,12 +231,20 @@ Actions > **TestFlight feedback** > Run workflow.
 
 ## UI-Tests: nur betroffene Gruppen (Regel Fuchs, 17.11.2026)
 
-Die UI-Tests laufen in sieben Gruppen (`.github/ui-groups.json`): große Mediathek und
+Die UI-Tests laufen in fünf Gruppen (`.github/ui-groups.json`): große Mediathek und
 Durchklick-Test (`large-library`, seit 27.11.: nicht in Pull Requests, sondern vor jedem Upload,
-nachts um 02:10 UTC auf main und von Hand), Rückgängig, unterbrochener Plan und Neuaufbau
-(`device-flows`), Gerätezustände, übrige Abläufe mit Kauf und Suche, Barrierefreiheit, voller
-Ablauf mit Video, Kontrast; bis zu fünf zugleich (im TestFlight-Lauf drei). Ein Pull Request
-läuft also mit sechs Gruppen, und sein „UI verdict (full)“ prüft `large-library` nicht; das
+nachts um 02:10 UTC auf main und von Hand), Barrierefreiheit mit Kontrast auf dem kleinen iPhone
+(`accessibility`), übrige Abläufe mit Kauf und Suche (`flow-other`), Gerätezustände (`device`),
+voller Ablauf mit Video (`flow-full`); bis zu vier zugleich (im TestFlight-Lauf drei). Ein Pull
+Request läuft also mit vier Gruppen; mit dem Mac-Job „Core tests hard (macOS)“ sind das fünf
+Macs, so viele, wie das Konto zugleich hat: keine Gruppe wartet mehr (seit 27.11.; vorher
+sieben Mac-Jobs, zwei warteten 10–30 Minuten). Die frühere Gruppe `device-flows` ist aufgeteilt
+(DeviceConditionUITests 07 und 08 in `device`, 05 sowie AlbumistFlowUITests test5 und test7 in
+`flow-other`, test4 in `flow-full`). Der Kontrast-Test (AccessibilityUITests test5, vorher Gruppe
+`contrast`) läuft als zweite Phase von `accessibility`: nach den Tests 1–4 wird der Simulator
+gelöscht, neu gestartet und mit „Kontrast erhöhen“ und „Transparenz reduzieren“ vorbereitet, dann
+läuft test5 allein darauf, wie vorher im eigenen Job (`ui_tests.py --contrast-only`). Ein roter
+Test in einer der beiden Phasen macht die Gruppe rot. Ein Pull Request läuft also mit vier Gruppen, und sein „UI verdict (full)“ prüft `large-library` nicht; das
 große Tor jedes TestFlight-Laufs prüft sie (das kleine und das schnelle Tor prüfen wie bisher nur
 ihre Gruppen). Ein Release (`ci_gate.py`) zählt Läufe von Pull Requests und den Nachtlauf
 („UI verdict (night)“) nicht mehr und braucht einen vollen Lauf von Hand auf dem Commit. Die Zählung großer Listen (0 bis 50.000 Fotos) prüfen die
@@ -384,7 +392,7 @@ Testcode gibt.
   zählt die Einträge (`TIME_LIMIT_ENTRIES`, davon offen). Eine neue oder kürzere Grenze braucht
   nichts. Nicht gesehen werden eine ganz gelöschte Grenze und eine aus Variablen berechnete.
 - **TestFlight**: der Lauf ruft die UI-Tests mit „auto“ auf (kleines Tor: nur `flow-full` und
-  `contrast`, Abschnitt „Zwei Tore“). Vor dem Hochladen prüft der Job
+  `accessibility`, Abschnitt „Zwei Tore“). Vor dem Hochladen prüft der Job
   **UI gate** auf Linux, dass jede Gruppe des Tors für genau diese App und ihren Testcode grün
   ist (aus diesem Lauf oder einem früheren) und keine dafür rot war. Seine Zusammenfassung nennt jede
   übernommene Gruppe mit Lauf und Commit und listet deren wackelnde Tests (Test erst in der
@@ -406,7 +414,7 @@ Testcode gibt.
   in beiden Modi. Für die Freigabe eines Commits, der nur schnelle Läufe hat: „UI flow“ von
   Hand ohne `quick` starten; dann laufen alle Gruppen ohne volles Grün für diesen Stand.
 - Von Hand: Actions > **UI flow** > Run workflow, Feld **groups**: `auto` (Vorgabe), `all`
-  (alle Gruppen) oder Gruppennamen (`large-library device-flows device flow-other accessibility flow-full contrast`), und
+  (alle Gruppen) oder Gruppennamen (`large-library accessibility flow-other device flow-full`), und
   **quick** (aus = voller Lauf). In **TestFlight** gibt es dafür **ui_groups** (`auto` oder
   `all`); TestFlight läuft immer voll.
 
@@ -693,7 +701,7 @@ Jobs davor brauchen sie nicht.
 |---|---|---|
 | Start | jeden Morgen um 03:30 UTC von selbst (`daily-build.yml`), wenn sich die App geändert hat; von Hand: TestFlight > Run workflow, **gate** `small` | von Hand: Actions > TestFlight > Run workflow, **gate** `big` (Vorgabe) |
 | CI | Regeln, Kern-Tests Linux, iOS-Bau mit Kern- und App-Tests auf dem Mac | gleich |
-| UI-Tests | nur die zwei kurzen Gruppen `flow-full` (ganzer Ablauf mit Video) und `contrast` (Kontrast), je Job rund 18 Minuten, nebeneinander | alle Gruppen (`auto`: jede ohne Grün für genau diese App und ihren Testcode) |
+| UI-Tests | nur die Gruppen `flow-full` (ganzer Ablauf mit Video) und `accessibility` (Barrierefreiheit und Kontrast auf dem kleinen iPhone; bis 27.11. nur `contrast`), je Job rund 35–45 Minuten, nebeneinander und neben dem Härtetest | alle Gruppen (`auto`: jede ohne Grün für genau diese App und ihren Testcode) |
 | UI-Tor | diese zwei Gruppen grün für genau diese App und ihren Testcode, keine davon je rot dafür | alle Gruppen, gleiche Regeln |
 | Härtetest 10.000 Fotos | ja (vor jedem Upload: Regel 17.11., Entscheidung 4), neben den zwei Gruppen | ja |
 | Release-Kurztest | ja (P5-03: die Release-Fassung einmal gestartet), daneben | ja |
@@ -748,7 +756,7 @@ TestFlight > Run workflow auf `main`, **gate** `fast`.
 - **Nicht in `nightly.yml`**: dessen Jobs sind seit 18.11. bewusst unverändert der Vergleichslauf
   für den StoreKit-Fall („no product“), und ein TestFlight-Build braucht die Laufnummern von
   `testflight.yml` (Build-Nummer) und dessen Gruppe `testflight`.
-- **Kleines Tor = CI + `flow-full` + `contrast` + Härtetest + Release-Kurztest**, rund 70 Minuten
+- **Kleines Tor = CI + `flow-full` + `accessibility` + Härtetest + Release-Kurztest**, rund 70 Minuten
   bis zum Upload-Job. Den Härtetest verlangen deine Regel vom 17.11. und Entscheidung 4 vor jedem
   Upload, und auch der tägliche Build lädt hoch. Die Dauer bestimmt darum der Härtetest (rund 45
   Minuten nach CI), nicht die UI-Tests; die Fable-Analyse (P6-02) wünschte höchstens 20 Minuten.

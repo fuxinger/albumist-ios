@@ -149,7 +149,7 @@ RESERVED_CALLS = 60
 # has (HTTP 404, 410) counts as red, so such a red stays until the app or the test changes; a log
 # the API did not answer for is no verdict (log_reader).
 RESULT_LINE = re.compile(r"^(?:\ufeff)?(?:\d{4}-\d\d-\d\dT[\d:.]+Z )?UI_RESULT (\S+) (pass|fail|infra)\s*$", re.M)
-RED_IN_LOG = re.compile(r"Test Case '-\[[^\]]+\]' failed|UI_LIVE .*: error: -\[|UI_VERDICT \S+ (?:first|retry): fail|the failed pass stays red"
+RED_IN_LOG = re.compile(r"Test Case '-\[[^\]]+\]' failed|UI_LIVE .*: error: -\[|UI_VERDICT \S+ (?:first|retry|contrast|contrast-retry): fail|the failed pass stays red"
                         r"|has exceeded the maximum execution time")
 
 

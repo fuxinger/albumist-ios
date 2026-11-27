@@ -2,6 +2,10 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- Karte „Deine Welt“ für Laien (Entwurf von Fuchs freigegeben am 26.11.2026, vorerst nur TestFlight):
+  jede Stecknadel lässt sich antippen (`MapTapAction`), ein Blatt mit einem Hauptknopf,
+  „Reise abspielen“ als ruhiger Film über die Gegend nur ab 3 Stationen; Orte unter 25 km sind eine
+  Station (`TripFilm`), kürzere Reisen werden eine Fotogeschichte. Die Messseite liegt unter „Messwerte“.
 - Datenbank v7: was ein Plan je Album will, steht in `plan_wanted` und wird einmal je Plan
   geschrieben, nicht mit jedem Schritt (Lasttest: 100.000 Fotos in 200 Alben wieder in 3 s statt 165 s).
 - „Album fürs Zuhause vorschlagen“ in „Dein Zuhause“: die eigene Wohnung kommt nur noch auf

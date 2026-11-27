@@ -32,12 +32,27 @@ Danke fürs Testen! Dieser Build bringt das neue Aussehen von Albumist: große F
 - Neues App-Symbol im Stil von iOS 26. Wie sieht es auf deinem Home-Bildschirm aus, hell, dunkel und getönt?
 - Foto-Ansicht: Wischen geht durch alle Fotos der Liste, auch in großen Mediatheken, nicht nur durch die ersten 3.000. Reagiert es beim ersten Wischen?
 - Zuhause: Deine Wohnung wird nicht mehr als „Häufiger Ort in …“ vorgeschlagen. Unter Einstellungen › Dein Zuhause gibt es „Album fürs Zuhause vorschlagen“, falls du es doch willst.
+- Karte „Deine Welt“ (Reise-Atlas, oben rechts die Weltkugel): Funktioniert sie mit dem neuen Aussehen wie im letzten Build?
 - Größte Schrift und VoiceOver: Ist alles lesbar und jeder Knopf erreichbar?
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
 <!-- testflight:end -->
 
 ## Frühere Builds
+
+### Build vom 27.11.2026 (Karte „Deine Welt“)
+
+Danke fürs Testen! Dieser Build bringt die neue, einfache Karte „Deine Welt“. Sie gibt es vorerst nur in TestFlight: Reise-Atlas, oben rechts die Weltkugel. Bitte achte besonders auf:
+
+- Antippen: Tippe Länder, Reisen und Orte an. Fliegt die Karte hin, und siehst du unten die passenden Fotos? Tut irgendein Punkt beim Antippen nichts?
+- Reise abspielen: Gibt es nur bei Reisen mit mindestens 3 Stationen. Orte, die näher als 25 km beieinander liegen, sind ein Punkt. Wirkt der Film ruhig, und zeigt er die Gegend statt nur einer Stadt?
+- Kurze Reisen: Reisen mit 1 oder 2 Stationen zeigen „Fotos ansehen“ als Fotogeschichte. Passt das?
+- Die alte Messseite liegt jetzt in der Karte unter „…“ › „Messwerte“.
+- Foto-Ansicht: Öffne in „Nicht sortiert“ ein Foto. Oben steht jetzt „1 von …“ mit derselben Zahl wie in der Liste, nicht mehr 3.000. Wisch ein paar Fotos weiter: Reagiert es beim ersten Wischen?
+- Zuhause: Deine Wohnung sollte nicht mehr als „Häufiger Ort in …“ vorgeschlagen werden. Unter Einstellungen › Dein Zuhause gibt es „Album fürs Zuhause vorschlagen“, falls du es doch willst.
+- Alles andere sollte genau wie im letzten Build funktionieren.
+
+Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
 
 ### Build vom 26.11.2026 (Karten-Testseite, Foto-Ansicht ohne 3.000-Grenze)
 

@@ -12,7 +12,7 @@ name: Daily build
 #     and the pipeline do not count), and no TestFlight run tested this commit yet, nor an
 #     earlier commit with the same app from which only docs changed (no re-run until green).
 # The TestFlight run then tests main with the small gate (CI, the UI groups flow-full and
-# contrast and the small stress pass, about 70 min; the stress pass runs before every upload,
+# accessibility and the small stress pass, about 70 min; the stress pass runs before every upload,
 # the owner's rule 17.11. and decision 4), and when every gate is green its upload job uploads
 # by itself (the owner's decision of 19.11.2026, which replaced the click of decision 5): each
 # day the app changed, an internal build for the owner, never for testers. This job reads no secret, runs on Linux

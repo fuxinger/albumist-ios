@@ -77,6 +77,10 @@ final class PhotoGridScroller {
     /// This scroll view scrolls by itself: only its reports answer the steps asked (the lesson is
     /// the app's, every grid's).
     @ObservationIgnored private var scrollsByItself = false
+    /// For a UI run's record while a zoom step lands: each place the scroll view reported, up to
+    /// 24 a step, to see where a step that lost its photo went (UI run 45997759108, at the top).
+    @ObservationIgnored private var placesRecorded = 0
+    @ObservationIgnored private var lastPlaceRecorded = ""
 
     /// The offset the scroll view reported last.
     var offset: Double {
@@ -116,6 +120,14 @@ final class PhotoGridScroller {
         target.reported(offset)
         if let photo = landing.reported(contentHeight: Double(geometry.contentSize.height)) { ask(photo) }
         if scrollsByItself { Self.calibration.reported(offset) }
+        if anchor != nil, ProgressLineLog.isOn, placesRecorded < 24 {
+            let place = placeForRecord(unitY: nil)
+            if place != lastPlaceRecorded {
+                placesRecorded += 1
+                lastPlaceRecorded = place
+                ProgressLineLog.mark("grid pinch moved " + place)
+            }
+        }
     }
 
     func reported(safeArea: PhotoGridSafeEdges) {
@@ -154,6 +166,8 @@ final class PhotoGridScroller {
         if ProgressLineLog.isOn { ProgressLineLog.mark("grid pinch show " + placeForRecord(unitY: unitY)) }
         findsPhotos = true
         anchor = point
+        placesRecorded = 0
+        lastPlaceRecorded = ""
         landing.asked(photo, contentHeight: geometry.map { Double($0.contentSize.height) })
         steps += 1
         waitToLand(steps)

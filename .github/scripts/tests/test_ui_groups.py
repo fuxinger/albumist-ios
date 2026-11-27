@@ -299,7 +299,15 @@ class GroupTests(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(after.fingerprint(name), before.fingerprint(name))
                 self.assertEqual(after.matrix_entry(name, "a" * 64)["budget_min"], 25)
-        self.assertEqual(ui_groups.REPORT_ONLY, ("budget_min",))
+        self.assertEqual(ui_groups.REPORT_ONLY, ("budget_min", "after_core"))
+        # after_core only says when ui.yml starts a group (job ui-late), not what it runs.
+        late = {"groups": [dict(g, after_core=True) for g in GROUPS["groups"]]}
+        moved = ui_groups.Groups(repo(**{".github__ui-groups.json": json.dumps(late)}))
+        for name in before.names():
+            with self.subTest(after_core=name):
+                self.assertEqual(moved.fingerprint(name), before.fingerprint(name))
+                self.assertTrue(moved.after_core(name))
+                self.assertFalse(before.after_core(name))
 
     def test_every_real_group_has_a_time_budget(self):
         with open(os.path.join(ui_groups.ROOT, ".github", "ui-groups.json"), encoding="utf-8") as f:

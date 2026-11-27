@@ -16,6 +16,11 @@ Dateien. Gilt etwas noch nicht technisch, steht davor „Ziel:“.
 - Gegen den Schutz der Fotos verstoßen.
 - Ohne Auftrag in `main` zusammenführen. Reine Doku-Änderungen dürfen die Stränge selbst mergen.
 - Einen Lauf wiederholen, bis er grün ist. Ein wackelnder Test wird gezählt (`UI_FLAKY_RETRY`) und repariert.
+  Ausnahme Kontrastprüfung (Koordinator 27.11.2026): Hängt die Barrierefreiheitsprüfung zweimal, und die
+  drei anderen Prüfarten werden fertig, gibt es genau eine Wiederholung nur der Kontrastprüfung, nachdem die
+  App im Hintergrund war und zurückkam (derselbe Bildschirm), gezählt als `UI_FLAKY_RETRY` und in der
+  Tageskennzahl ausgewiesen (`AccessibilityUITests.contrastHangRetry`). Hängt sie wieder: echter Befund.
+  Eine Kontrastprüfung, die fertig wird und etwas findet, wird nie wiederholt.
 - Fremde Mac-Läufe abbrechen. Läufe auf einem überholten Stand bricht die Bau-Strecke selbst ab.
 - Als Unter-Agent `mcp__hearthbot__*` aufrufen; mit Fuchs spricht nur der Strang.
 - Neue Funktionen in Version 1.0 aufnehmen: Der Umfang ist eingefroren (Entscheidung 12,

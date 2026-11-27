@@ -934,9 +934,10 @@ def load_groups(tree) -> list[dict] | None:
     return groups
 
 
-# Keys of a group that only report and never change what runs: left out of the test
-# fingerprint, so a new budget does not run a group again.
-REPORT_ONLY = ("budget_min",)
+# Keys of a group that only report or schedule and never change what runs: left out of the test
+# fingerprint, so a new budget does not run a group again. "after_core" (27.11.) only says when
+# ui.yml starts the group (after CI's macOS job, job ui-late), not what it tests.
+REPORT_ONLY = ("budget_min", "after_core")
 
 
 def definition(group: dict) -> dict:
@@ -1008,6 +1009,11 @@ class Groups:
         false leaves it to TestFlight runs, the nightly run on main and runs by hand; 27.11.,
         large-library)."""
         return self.group(name).get("pull_requests", True) is not False
+
+    def after_core(self, name: str) -> bool:
+        """Whether ui.yml starts the group after CI's macOS job, on the Mac that job frees (job
+        ui-late), in a run where that job runs ("after_core": true; 27.11., contrast)."""
+        return self.group(name).get("after_core") is True
 
     def group(self, name: str) -> dict:
         return next(g for g in self.groups if g["group"] == name)

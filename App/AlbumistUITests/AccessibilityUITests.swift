@@ -627,6 +627,7 @@ final class AccessibilityUITests: XCTestCase {
         options.issueMatcher = { $0.compactDescription.contains("Failed to get matching snapshot") }
         for attempt in 1...2 {
             var finished = false
+            let started = Date()
             XCTExpectFailure("The screen changed during the accessibility audit", options: options) {
                 do {
                     try app.performAccessibilityAudit(for: Self.failingAuditTypes) { issue in
@@ -638,18 +639,138 @@ final class AccessibilityUITests: XCTestCase {
                     print("A11Y_AUDIT_ERROR \(screen) attempt \(attempt) \(error.localizedDescription)")
                 }
             }
+            // How long each screen's audit takes (A28): a screen that is slow on a calm Mac
+            // shows here before it times out on a busy one; a slow one gets the pixel probe.
+            let took = Date().timeIntervalSince(started)
+            print("A11Y_AUDIT_TIME \(screen) attempt \(attempt) \(String(format: "%.1f", took)) s \(finished ? "completed" : "timed out")")
             if finished {
+                if took > 5 { UITestScreenProbe.logPixels(app, screen: screen) }
                 confirmContrast(screen)
                 return
             }
             auditFailures = []
             pendingContrast = []
+            // What keeps changing right after the timeout, and later after the second one
+            // (`UITestScreenProbe`): evidence, not a retry.
+            UITestScreenProbe.logChanges(app, screen: "\(screen) after attempt \(attempt)")
+            UITestScreenProbe.logPixels(app, screen: "\(screen) after attempt \(attempt)")
             if attempt == 1 { waitForResponsiveApp(before: screen) }
+        }
+        afterTwoHangs(screen, chrome: chrome, bounds: bounds, barOverContent: barOverContent, options: options)
+    }
+
+    /// The whole audit did not complete twice: the one contrast retry (`contrastHangRetry`), or,
+    /// when the other types hung too, the screen goes unaudited and red.
+    private func afterTwoHangs(_ screen: String, chrome: [CGRect], bounds: CGRect, barOverContent: Bool,
+                               options: XCTExpectedFailure.Options) {
+        var retry = ContrastRetry.otherTypesHung
+        XCTExpectFailure("The screen changed during the accessibility audit", options: options) {
+            retry = contrastHangRetry(screen, chrome: chrome, bounds: bounds, barOverContent: barOverContent)
+        }
+        switch retry {
+        case .completed:
+            confirmContrast(screen)
+            return
+        case .hungAgain, .screenChanged:
+            // The other three types were audited (their findings stand); the contrast was not.
+            let why = retry == .hungAgain ? "contrast audit hung after its one retry"
+                : "contrast audit hung twice and the screen changed in the background, no retry"
+            print("A11Y_FAIL \(screen) | audit | \(why)")
+            auditFailures.append(why)
+            return
+        case .otherTypesHung:
+            break
+        }
+        XCTExpectFailure("The screen changed during the accessibility audit", options: options) {
+            UITestScreenProbe.auditTypesAlone(app, screen: screen)
         }
         // "Audit failed to complete in time" twice: the screen went unaudited, and a screen nobody
         // checked must not pass (Prüfer B G5-06). The tree checks still ran; check() fails the test.
         print("A11Y_FAIL \(screen) | audit | did not complete in 2 attempts, screen not audited")
         auditFailures.append("audit did not complete in 2 attempts, screen not audited")
+    }
+
+    /// The audit types other than contrast. Run on their own when the whole audit did not
+    /// complete twice (`contrastHangRetry`).
+    private static let otherAuditTypes: XCUIAccessibilityAuditType = [.textClipped, .hitRegion, .sufficientElementDescription]
+
+    private enum ContrastRetry { case otherTypesHung, completed, hungAgain, screenChanged }
+
+    /// The screen as the tree says it: each element's type, label and frame, for "the same
+    /// screen" before and after the background (`contrastHangRetry`). Nil when unreadable.
+    private func screenSignature() -> Set<String>? {
+        guard let root = try? app.snapshot() else { return nil }
+        var seen = Set<String>()
+        var stack: [any XCUIElementSnapshot] = [root]
+        while let node = stack.popLast() {
+            let frame = node.frame
+            seen.insert(String(format: "%lu '%@' %.0f,%.0f %.0fx%.0f", node.elementType.rawValue, node.label,
+                               frame.minX, frame.minY, frame.width, frame.height))
+            stack.append(contentsOf: node.children)
+        }
+        return seen
+    }
+
+    /// After the whole audit did not complete twice (coordinator's rule of 27.11.2026, CLAUDE.md).
+    /// XCTest's contrast audit hung on calm Macs on screens that passed in 4.5 s before: in UI run
+    /// 45971115191 it hung on "xxxl suggestion detail lower" at load 164 (passed twice before),
+    /// and "en plan lower", which hung in run 45911944178, passed in 5.6 s. The tree and the
+    /// screen's pixels stood still both times. The other three types are audited first, with
+    /// their findings recorded as in `audit`. Only when they complete is the app sent to the
+    /// background and brought back: the same screen, a new connection for the audit. Then the
+    /// contrast audit runs once more, counted (`UI_FLAKY_RETRY`, in the daily KPI), when the
+    /// tree is the same as before the background. `.completed`: its findings are confirmed as
+    /// always (`confirmContrast`). A contrast audit that completed with findings never comes
+    /// here: those are findings. A second hang, or a changed screen, is red.
+    private func contrastHangRetry(_ screen: String, chrome: [CGRect], bounds: CGRect, barOverContent: Bool) -> ContrastRetry {
+        let started = Date()
+        do {
+            try app.performAccessibilityAudit(for: Self.otherAuditTypes) { issue in
+                self.record(issue, screen: screen, chrome: chrome, bounds: bounds, barOverContent: barOverContent)
+                return true
+            }
+        } catch {
+            auditFailures = []
+            print("A11Y_CONTRAST_HANG \(screen) no retry: the other audit types did not complete either "
+                  + "(\(error.localizedDescription), \(String(format: "%.1f", Date().timeIntervalSince(started))) s)")
+            return .otherTypesHung
+        }
+        let before = screenSignature()
+        print("A11Y_CONTRAST_HANG \(screen) the other audit types completed in "
+              + "\(String(format: "%.1f", Date().timeIntervalSince(started))) s; only the contrast audit hung")
+        print("UI_FLAKY_RETRY \(UITestWait.testID(self)) contrast audit of \(screen) hung twice while the other "
+              + "audit types completed; one more after the app went to the background and came back")
+        let why = "for the contrast audit of \(screen)"
+        UITestWait.toBackground(app, why, atLeast: 1, in: self)
+        let back = UITestWait.toForeground(app, why, in: self)
+        // Answers again: a snapshot in under 2 s, at most 30 s.
+        _ = UITestWait.holds(timeout: 30, interval: 1) {
+            let asked = Date()
+            return (try? app.snapshot()) != nil && Date().timeIntervalSince(asked) < 2
+        }
+        // The same screen, or no retry: coming back can rebuild a page (the start page begins a
+        // visit) or take a keyboard away (second review of 27.11.).
+        let after = screenSignature()
+        guard let before, let after, before == after else {
+            let changed = (before ?? []).symmetricDifference(after ?? []).sorted().prefix(5)
+            print("A11Y_CONTRAST_HANG \(screen) the screen is not the same after the background "
+                  + "(app back in front: \(back)): \(changed.joined(separator: " / "))")
+            return .screenChanged
+        }
+        let again = Date()
+        do {
+            try app.performAccessibilityAudit(for: .contrast) { issue in
+                self.record(issue, screen: screen, chrome: chrome, bounds: bounds, barOverContent: barOverContent)
+                return true
+            }
+        } catch {
+            print("A11Y_CONTRAST_HANG \(screen) retry did not complete either (app back in front: \(back), "
+                  + "\(String(format: "%.1f", Date().timeIntervalSince(again))) s): a real finding")
+            return .hungAgain
+        }
+        print("A11Y_CONTRAST_HANG \(screen) retry completed in \(String(format: "%.1f", Date().timeIntervalSince(again))) s "
+              + "(app back in front: \(back))")
+        return .completed
     }
 
     /// Before the second attempt of an audit that did not complete: waits until the app's
@@ -658,6 +779,14 @@ final class AccessibilityUITests: XCTestCase {
     /// twice in a row (UI run 45651824235, Mac load 549) while the same group was green on the
     /// commit before. Two snapshots in a row under 2 s count as caught up, at most 90 s; the
     /// second attempt runs anyway after that, and a second timeout still fails the screen.
+    ///
+    /// Then waits for the Mac itself (coordinator's rule of 26.11.2026): the app can answer
+    /// quickly while XCTest's own audit has no room (UI run 45759464360: "en plan lower" timed
+    /// out twice although the app answered after 1.5 s; load 370-452 the whole pass, testmanagerd
+    /// at 80-200 % CPU; the green pass on main, run 45743255283, had a median load of 247). Until
+    /// the 1-minute load is under `calmLoad`, at most 120 s, the load is logged every 10 s (the
+    /// pass's PASS_TOP lines say what kept the Mac busy at that clock). The wait is a counted
+    /// retry (`UI_FLAKY_RETRY`), never silent; a second timeout stays red as a real finding.
     private func waitForResponsiveApp(before screen: String) {
         let start = Date()
         var calm = 0
@@ -669,6 +798,35 @@ final class AccessibilityUITests: XCTestCase {
         }
         let waited = String(format: "%.1f", Date().timeIntervalSince(start))
         print("A11Y_AUDIT_RETRY \(screen) app \(caughtUp ? "answered quickly again" : "still slow") after \(waited) s")
+        waitForCalmMac(before: screen)
+    }
+
+    /// Between the green pass's median (247) and the lowest load of the red one (370).
+    static let calmLoad = 300.0
+
+    /// The Mac's 1-minute load as the simulator sees it (the host's kernel), nil when unknown.
+    static func macLoad() -> Double? {
+        var loads = [Double](repeating: 0, count: 1)
+        return getloadavg(&loads, 1) == 1 ? loads[0] : nil
+    }
+
+    private func waitForCalmMac(before screen: String) {
+        let start = Date()
+        let first = Self.macLoad()
+        var lastLog = Date.distantPast
+        let calmed = UITestWait.holds(timeout: 120, interval: 2) {
+            guard let load = Self.macLoad() else { return true }
+            if Date().timeIntervalSince(lastLog) >= 10 {
+                lastLog = Date()
+                print("A11Y_AUDIT_LOAD \(screen) load(1m) \(String(format: "%.0f", load)) after \(Int(Date().timeIntervalSince(start))) s")
+            }
+            return load < Self.calmLoad
+        }
+        let end = Self.macLoad().map { String(format: "%.0f", $0) } ?? "unknown"
+        let began = first.map { String(format: "%.0f", $0) } ?? "unknown"
+        print("UI_FLAKY_RETRY \(UITestWait.testID(self)) audit of \(screen) did not complete, second attempt after "
+              + "\(Int(Date().timeIntervalSince(start))) s for the Mac (load(1m) \(began) to \(end), \(calmed ? "under" : "still over") "
+              + "\(Int(Self.calmLoad)))")
     }
 
     /// "Contrast failed" must repeat in a second contrast audit two seconds later to count.

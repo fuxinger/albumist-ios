@@ -25,11 +25,13 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
       the photo access (the CI simulator then answers "denied" without asking) prints
       UI_HOST_GRANT_PHOTOS [<answer file>], and the access is given back (`simctl privacy grant`;
       then "granted" or "failed" is written to the test's answer file, `write_host_answer`); a device
-      test about to launch the app again prints "UI_HOST_TERMINATE_APP <epoch second> [<pid>]",
-      and the running app is ended by the Mac instead of XCTest's terminate, which failed on an
+      test about to launch the app again prints "UI_HOST_TERMINATE_APP <epoch second> [<pid>]
+      [<answer file>]", and the running app is ended by the Mac instead of XCTest's terminate, which failed on an
       idle app in UI run 44446270757 (test07): with the app's process id exactly that process
-      (SIGTERM, then SIGKILL; `end_app_process`), without it with `simctl terminate`. The test only reads the app's state
-      meanwhile and ends it through XCTest itself after 60 s; a request older than 30 s (or
+      (SIGTERM, then SIGKILL; `end_app_process`), without it with `simctl terminate`, and
+      "ended" or "not ended" is written to the answer file. The test only reads the app's state
+      meanwhile and ends it through XCTest itself after 60 s, or soon after "ended" when XCTest
+      still reads the app as running; a request older than 30 s (or
       without its second) is not answered any more, and a call that timed out is not repeated
       (`terminate_app`), so the Mac's end does not land on the next launch.
   settle --udid U [--limit S]
@@ -1151,8 +1153,12 @@ class Recorder(threading.Thread):
 # "UI_HOST_GRANT_PHOTOS [<answer file>]": with a file (DeviceConditionUITests.grantFromHost) the
 # Mac writes its answer there once the grant has ended (`write_host_answer`).
 HOST_GRANT = re.compile(r"(?:^|\s)UI_HOST_GRANT_PHOTOS(?: (/\S+))?\s*$")
-# UITestAppEnd.end: "UI_HOST_TERMINATE_APP <epoch second of the request> [<app process id>]".
-HOST_TERMINATE = re.compile(r"(?:^|\s)UI_HOST_TERMINATE_APP(?: (\d+))?(?: (\d+))?\s*$")
+# UITestAppEnd.end: "UI_HOST_TERMINATE_APP <epoch second of the request> [<app process id>]
+# [<answer file>]". With a file the Mac writes "ended" or "not ended" there once its end is
+# done: XCTest can read the app as running long after its process is gone (device test07 in
+# the full UI run 45865545486: the Mac ended it 12 s after the request, XCTest still read it
+# running 60 s later and only its own terminate, 17 s, ended the wait).
+HOST_TERMINATE = re.compile(r"(?:^|\s)UI_HOST_TERMINATE_APP(?: (\d+))?(?: (\d+))?(?: (/\S+))?\s*$")
 # UITestAppEnd.launch after an end that took SLOW_END s or more: "UI_HOST_SETTLE <answer file>".
 # The Mac waits until the simulator answers quickly again (`settle`, at most LAUNCH_SETTLE_LIMIT
 # s) and writes "settled" or "busy" there; the test launches then (Z4, 27.11.).
@@ -1170,7 +1176,7 @@ def host_requests(text: str) -> list[tuple[str, float | None, int | str | None]]
     """The requests to the Mac in the complete lines of `text`, in log order: ("grant", None,
     answer file or None) for UI_HOST_GRANT_PHOTOS, ("settle", None, answer file) for
     UI_HOST_SETTLE, ("terminate", epoch second or None, process id or None) for
-    UI_HOST_TERMINATE_APP."""
+    UI_HOST_TERMINATE_APP, followed by ("ended", None, answer file) when that line names one."""
     found: list[tuple[str, float | None, int | str | None]] = []
     for line in text.split("\n"):
         if match := HOST_GRANT.search(line):
@@ -1180,6 +1186,8 @@ def host_requests(text: str) -> list[tuple[str, float | None, int | str | None]]
         elif match := HOST_TERMINATE.search(line):
             found.append(("terminate", float(match.group(1)) if match.group(1) else None,
                           int(match.group(2)) if match.group(2) else None))
+            if match.group(3):
+                found.append(("ended", None, match.group(3)))
     return found
 
 
@@ -1223,7 +1231,7 @@ SIMULATOR_DEVICES = "~/Library/Developer/CoreSimulator/Devices"
 
 
 def write_host_answer(udid: str, path: str, answer: str) -> bool:
-    """Writes `answer` ("granted"/"failed", or "settled"/"busy") to the test's answer file `path`; True when written."""
+    """Writes `answer` ("granted"/"failed", "settled"/"busy" or "ended"/"not ended") to the test's answer file `path`; True when written."""
     folder, name = os.path.split(path)
     device = os.path.realpath(os.path.join(os.path.expanduser(SIMULATOR_DEVICES), udid))
     real_folder = os.path.realpath(folder) if folder else ""
@@ -1326,13 +1334,24 @@ PID_KILL_WAIT = 5
 APP_PATH = "/Albumist.app/Albumist"
 
 
-def app_process(udid: str, pid: int, run=sh) -> str:
+# What `app_process` says when `ps` itself failed (a timeout, an error text): the process may
+# still be there, so it never counts as gone (review of bundle C, 27.11.: the Mac now answers
+# "ended" to the test, which then stops waiting for XCTest's state).
+PS_FAILED = "?"
+
+
+def app_process(udid: str, pid: int, run=sh) -> str | None:
     """The command line of process `pid` when it is this simulator's app, "" when there is no
-    such process, None when it is another process."""
+    such process (ps answered and listed nothing: exit 0 or 1 without output), PS_FAILED when
+    ps gave no answer to go by, None when it is another process."""
     code, output = run(["ps", "-o", "command=", "-p", str(pid)], timeout=10, quiet=True)
     command = output.strip()
-    if code != 0 or not command:
+    if code not in (0, 1):
+        return PS_FAILED
+    if not command:
         return ""
+    if code != 0:
+        return PS_FAILED
     return command if f"/Devices/{udid}/" in command and (APP_PATH + " " in command + " ") else None
 
 
@@ -1346,6 +1365,10 @@ def end_app_process(udid: str, pid: int, run=sh, sleep=time.sleep) -> bool:
     if found == "":
         print(f"UI_HOST app process {pid} had ended already", flush=True)
         return True
+    if found == PS_FAILED:
+        # No signal to an id nobody checked; the test ends the app through XCTest after its wait.
+        print(f"UI_HOST app end skipped: ps could not check process {pid}", flush=True)
+        return False
     for signal_name, wait in (("TERM", PID_TERM_WAIT), ("KILL", PID_KILL_WAIT)):
         run(["kill", f"-{signal_name}", str(pid)], timeout=10, quiet=True)
         for _ in range(int(wait * 2)):
@@ -1385,13 +1408,12 @@ class HostGrants(threading.Thread):
         return settle(lambda: simulator_probe(self.udid), limit=LAUNCH_SETTLE_LIMIT, step=LAUNCH_SETTLE_STEP,
                       going_on="the launch goes on")
 
-    def terminate_app(self, asked: float | None, pid: int | None = None) -> None:
+    def terminate_app(self, asked: float | None, pid: int | None = None) -> bool:
         # With the app's process id: exactly that process (`end_app_process`); without (a
-        # launch that wrote no id yet), by bundle id as before.
+        # launch that wrote no id yet), by bundle id as before. True when the app is gone.
         if pid is not None:
-            end_app_process(self.udid, pid)
-        else:
-            terminate_app(self.udid, asked)
+            return end_app_process(self.udid, pid)
+        return terminate_app(self.udid, asked)
 
     def check(self) -> None:
         """Reads what was added to the log since the last call; one answer per complete request line."""
@@ -1403,6 +1425,8 @@ class HostGrants(threading.Thread):
         except OSError:
             chunk = ""
         complete, _, self.tail = (self.tail + chunk).rpartition("\n")
+        # Whether the end of the request just before an "ended" one left the app gone.
+        ended = False
         for kind, asked, detail in host_requests(complete):
             if kind == "grant":
                 granted = self.grant()
@@ -1412,8 +1436,12 @@ class HostGrants(threading.Thread):
             elif kind == "settle":
                 if isinstance(detail, str):
                     self.answer(detail, "settled" if self.calm() else "busy")
+            elif kind == "ended":
+                # The test stops waiting for XCTest's state on "ended" (UITestAppEnd.end).
+                if isinstance(detail, str):
+                    self.answer(detail, "ended" if ended else "not ended")
             else:
-                self.terminate(asked, detail)
+                ended = self.terminate(asked, detail) is True
         # A failure shows in the job log at once, not only when the pass ends: a run cancelled
         # (or a runner lost) after it is still red for ui_evidence.py.
         for line in complete.splitlines():
@@ -1546,6 +1574,10 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     else:
         command = ["xcodebuild", "test" if build else "test-without-building", "-project", args.project,
                    "-scheme", args.scheme, "CODE_SIGNING_ALLOWED=NO"]
+    # One simulator, one test at a time, said explicitly: a scheme or Xcode default that turned
+    # parallel testing on would clone the simulator on a 3-core, 7 GB runner (ChatGPT's pipeline
+    # review 27.11.); every timing and repeat rule here assumes a single test process.
+    command += ["-parallel-testing-enabled", "NO"]
     command += ["-destination", f"id={args.udid}", "-resultBundlePath", result] + chosen
     settled = time.monotonic()
     settle(lambda: simulator_probe(args.udid), limit=settle_limit(getattr(args, "deadline", 0) or 0, time.time()))

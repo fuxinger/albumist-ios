@@ -1,0 +1,11 @@
+{
+  "_comment": "UI group jobs whose log GitHub never stored, approved one by one to count as 'no result' (not red, never green): the group then runs fresh and must be green. Each entry names the job, why it has no log and who approved it. Read by .github/scripts/ui_evidence.py (UNREADABLE_FILE).",
+  "jobs": {
+    "140302168847": {
+      "group": "device",
+      "run": 45936196002,
+      "why": "Cancelled at 04:15 UTC 27.11. by a newer push to PR #31 (ui-supersede), mid-tests; GitHub never stored its log (BlobNotFound, also missing from the run's log zip).",
+      "approved": "coordinator for Fuchs, 27.11.2026 04:21 UTC"
+    }
+  }
+}

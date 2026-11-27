@@ -1050,3 +1050,19 @@ class MacQueueTests(unittest.TestCase):
         self.assertEqual(gh_expr("a.b == 'x' && 'yes' || 'no'", {"a": {"b": "x"}}), "yes")
         self.assertEqual(gh_expr("a.b == 'x' && 'yes' || 'no'", {"a": {"b": "y"}}), "no")
         self.assertEqual(gh_expr("!a && format('q-{0}', n)", {"n": 3}), "q-3")
+
+
+class PinnedActionTests(unittest.TestCase):
+    """Every action runs at a fixed commit, not a tag its owner can move (ChatGPT's pipeline
+    review 27.11. found four floating tags in pages.yml)."""
+
+    def test_every_action_is_pinned_to_a_commit(self):
+        floating = []
+        for path in WORKFLOWS:
+            for number, line in enumerate(read(path).splitlines(), 1):
+                found = re.search(r"\buses:\s*([^\s#]+)", strip_comment(line))
+                if not found or found.group(1).startswith("./"):
+                    continue
+                if not re.search(r"@[0-9a-f]{40}$", found.group(1)):
+                    floating.append(f"{os.path.basename(path)}:{number} {found.group(1)}")
+        self.assertEqual(floating, [])

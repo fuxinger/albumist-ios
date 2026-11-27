@@ -389,9 +389,33 @@ final class AlbumistFlowUITests: XCTestCase {
     /// Every test except test1 may be the first on a fresh simulator: the onboarding counts as
     /// done (`-AlbumistUITestFastStart`), the demo library is created and analysed. On a
     /// simulator where that already happened this only waits until nothing runs.
-    private func prepare() {
+    ///
+    /// `test`: the test's name when a cut-off test 1 may have left the app unfinished
+    /// (`completeOnboardingIfCutOff`). `extra`: the test's own launch arguments when the app is
+    /// to run with them afterwards; nil leaves it as the fast start. Once a `prepare` on this
+    /// simulator found the library ready (`UITestOnboarding.preparedLibrary`, bundle C 27.11.),
+    /// the test's own launch comes first and is only looked at (`preparedInOwnLaunch`): nothing
+    /// is tapped or repaired in it, so no onboarding, demo library or "Neu prüfen" ever runs
+    /// under a test's switches or in the launch the test then uses. When anything is missing,
+    /// that launch is ended and everything goes as before: the cut-off check in a launch without
+    /// switches, the fast start's repair and wait, then the test's own launch. Before (full UI
+    /// run 45865545486, flow-other) each of tests 3-7 launched three times: for the cut-off
+    /// check (about 12 s), for `prepare` (16-25 s) and with its own arguments.
+    private func prepare(_ test: String? = nil, then extra: [String]? = nil) {
         let started = Date()
-        launch(["-AlbumistUITestFastStart"])
+        let fastStart = ["-AlbumistUITestFastStart"]
+        if UITestOnboarding.preparedLibrary.reachedItsEnd {
+            let cutOffCheck = test != nil && !UITestOnboarding.fullFlowReachedItsEnd
+            if preparedInOwnLaunch(extra ?? fastStart, checkingCutOff: cutOffCheck) {
+                print("UI_STEP_OK prepared")
+                print("UI_FACT prepared in the test's own launch (at rest at every check), no second launch")
+                print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
+                return
+            }
+            print("UI_FACT prepare: the test's own launch was not ready at rest, prepared without its switches first")
+        }
+        if let test { completeOnboardingIfCutOff(test) }
+        launch(fastStart)
         let noAccess = app.buttons["access.continue"]
         let welcome = app.buttons["onboarding.letsGo"]
         // The first screen: the start page, "Kein Zugriff" or the welcome screen, within the 5 s
@@ -408,7 +432,7 @@ final class AlbumistFlowUITests: XCTestCase {
             noAccess.tap()
             allowPhotosIfAsked()
             // Opened once more, so the fast start runs as with access (demo library, if missing).
-            launch(["-AlbumistUITestFastStart"])
+            launch(fastStart)
         } else if welcome.exists {
             // A first start without the fast start's introduction: the real onboarding, the
             // welcome and the access page (design wave 1).
@@ -430,10 +454,11 @@ final class AlbumistFlowUITests: XCTestCase {
                 demo.tap()
                 return false
             }
-            return analysisIdle && !anything("Beispielfotos werden angelegt").exists && !demo.exists
+            return preparedLibraryReady(demo)
         }
         print(ready ? "UI_STEP_OK prepared" : "UI_STEP_MISSING prepared")
         XCTAssertTrue(ready, "The demo library was not created and analysed")
+        if ready { UITestOnboarding.preparedLibrary.ends() }
         // Every test starts with the whole library: a trial year left on by a test before (test6
         // takes its year back at its end; when that step failed, every later test of the group
         // found "Keine Fotos aus 2026" and nothing to sort, UI run 44852630315).
@@ -444,6 +469,42 @@ final class AlbumistFlowUITests: XCTestCase {
             _ = waitStable("analysis idle after all years (prepare)", timeout: 300) { analysisIdle }
         }
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
+        if let extra { launch(extra) }
+    }
+
+    /// What `prepare` waits for: the demo library is created and analysed and nothing runs.
+    private func preparedLibraryReady(_ demo: XCUIElement) -> Bool {
+        analysisIdle && !anything("Beispielfotos werden angelegt").exists && !demo.exists
+    }
+
+    /// The test's own launch (`arguments`), only looked at: the overview shows (no welcome, no
+    /// "Kein Zugriff"), with `checkingCutOff` no partial count (a cut-off analysis or unreadable
+    /// photos: `completeOnboardingIfCutOff` repairs or fails it in a launch without switches),
+    /// and `preparedLibraryReady` holds at all three checks (a failed check ends the wait after
+    /// three checks, about 4 s). Nothing is tapped. False: `prepare` goes the way of before.
+    private func preparedInOwnLaunch(_ arguments: [String], checkingCutOff: Bool) -> Bool {
+        launch(arguments)
+        let noAccess = app.buttons["access.continue"]
+        let welcome = app.buttons["onboarding.letsGo"]
+        _ = UITestWait.holds(timeout: 10) {
+            app.tabBars.firstMatch.exists || noAccess.exists || welcome.exists
+        }
+        guard app.tabBars.firstMatch.exists, !noAccess.exists, !welcome.exists else { return false }
+        // A trial year a test before left on: `prepare` takes in all years in its own launch.
+        if UITestScreens.TrialYear.shown(app).exists { return false }
+        if checkingCutOff, UITestOnboarding.partialAnalysis(app) != nil { return false }
+        let demo = button("Beispiel-Mediathek anlegen")
+        var unmet = false
+        _ = waitStable("demo library analysed in the test's own launch", timeout: 30) {
+            // With `checkingCutOff` a partial count fails every check too: the headline can draw
+            // after the 3 s look above, and "180 von 246 Fotos analysiert" still says "Fotos
+            // analysiert" (blind review 27.11.).
+            if !unmet, !preparedLibraryReady(demo)
+                || (checkingCutOff && UITestOnboarding.partialAnalysis(app, wait: 0) != nil) { unmet = true }
+            // A failed check ends the wait (three checks in a row "done") instead of its time.
+            return true
+        }
+        return !unmet
     }
 
     /// Two photos from the tab "Unsortiert" into a new album: opens its plan ("Anlegen").
@@ -2029,9 +2090,8 @@ final class AlbumistFlowUITests: XCTestCase {
     /// Third run: every tab, every row, one level deep.
     func test3_TapThroughSweep() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("test3")
         let prepared = Date()
-        prepare()
+        prepare("test3")
         UITestWait.appears(app.tabBars.firstMatch, "tab bar before the sweep", timeout: 60)
         ensureAlbumForSweep()
         // The old 5 s at least (second review of C2): the start page settles before the sweep.
@@ -2102,10 +2162,8 @@ final class AlbumistFlowUITests: XCTestCase {
     /// must bring the decisions and the history back and say so.
     func test4_DecisionsComeBackAfterRebuild() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("test4")
-        prepare()
         // Decisions and a plan in the history, made in a run that keeps the backup copy.
-        launch(["-AlbumistUITestBackup"])
+        prepare("test4", then: ["-AlbumistUITestBackup"])
         applyRecommended("backup", relaunchWith: ["-AlbumistUITestBackup"])
         UITestWait.appears(app.tabBars.firstMatch, "app back after the backup plan", timeout: 60)
         // The copy must hold a history to bring back: when the earlier tests left none (test 1
@@ -2165,11 +2223,9 @@ final class AlbumistFlowUITests: XCTestCase {
     /// (Fortsetzen and Rückgängig: DeviceConditionUITests.test07.)
     func test5_InterruptedPlanCanBeLeftAndRetried() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("test5")
-        prepare()
         // The first change in Photos goes through at once, every later one waits 30 s, so the
         // app is always closed half way.
-        launch(["-AlbumistUITestSlowPlan"])
+        prepare("test5", then: ["-AlbumistUITestSlowPlan"])
         _ = waitStable("analysis idle before interruption", timeout: 120) { analysisIdle }
         // Something to apply: the selection of earlier runs, else the recommended ones, else a
         // new album of two photos. Tests 1c and 4 apply the recommended suggestions on this
@@ -2276,8 +2332,9 @@ final class AlbumistFlowUITests: XCTestCase {
     /// year: choosing one shows it on the overview, "Alle Jahre" takes it back.
     func test6_AnalysisKeepsGoingThroughBackgroundAndTabs() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("test6")
-        prepare()
+        prepare("test6")
+        // A launch of its own, not `prepare`'s: the slowed analysis must not be the one that
+        // finishes a cut-off analysis there.
         launch(["-AlbumistUITestSlowAnalysis"])
         _ = waitStable("analysis idle before rebuild", timeout: 300) { analysisIdle }
         // A full run from scratch: "Analyse neu aufbauen" in the settings.
@@ -2476,8 +2533,7 @@ final class AlbumistFlowUITests: XCTestCase {
     /// missing there). The test goes back before creating anything: nothing is stored.
     func test7_PersonalPlaceAsksForName() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("test7")
-        prepare()
+        prepare("test7")
         // The demo library's second frequent place (`DemoLibrary.grandma`) has no name: its card
         // says "Häufiger Ort" and "Benennen …". With more than one frequent place open they are
         // behind "Alle N" of their row on the start page; with one, its card stands there.
@@ -2622,8 +2678,7 @@ final class AlbumistFlowUITests: XCTestCase {
     /// no tab bar.
     func testRemovePhotoFromSuggestion() {
         continueAfterFailure = true
-        completeOnboardingIfCutOff("testRemovePhotoFromSuggestion")
-        prepare()
+        prepare("testRemovePhotoFromSuggestion")
         // The last test of its group in flow-other: the flows before it made nearly every
         // suggestion, no area has two open and so no "Alle N" (every UI run of design waves 1
         // to 3, the last 44878163259; test7 found its personal place alone on the page). The

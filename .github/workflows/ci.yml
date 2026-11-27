@@ -204,14 +204,23 @@ jobs:
     # Fast first, then expensive (Fuchs 15.11.): the Mac job starts only when the Linux core
     # tests and the app rules passed. It still runs unless the changes job positively found a
     # docs-only change (also when that job failed).
-    # Not in the Mac queue ("mac-queue", ui.yml) on purpose: this is the quick verdict of every
-    # push (one Mac, ~20 min). In the queue it would wait behind the UI run of its own commit
-    # (about an hour), and since GitHub keeps only one waiting run per group, the next run to
-    # join would cancel it. Per branch only the newest CI run goes on (concurrency above).
+    # The quick verdict of every push to main, of every push to a draft pull request, of a run
+    # by hand and of a TestFlight run. Per branch only the newest CI run goes on (concurrency).
+    # Not on a pull request that is ready for review (27.11. evening, A31, coordinator's
+    # condition): there the full UI run (ui.yml) tests everything this job tests, in its jobs
+    # "UI build" (app and UI tests built) and "Core and app tests hard (macOS)" (app build, core
+    # tests, fresh simulator, app tests with StoreKit), and its verdict is the merge check. With
+    # this job as well a ready push asked for six Macs, one more than the account has, and the
+    # UI run's late group waited 22 min for it (run 46048374332). test_workflows.py
+    # ReadyPullRequestTests checks that every test step here has its counterpart there. The
+    # strings export below is no test; main's CI still uploads it after every merge.
     needs: [changes, lint, core-linux]
     # Not for a Dependabot pull request: a version bump uses no Mac by itself; its UI run by hand
     # before the merge builds and tests the app (ui.yml, "concurrency").
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success' && needs.core-linux.result == 'success' && github.event.pull_request.user.login != 'dependabot[bot]' }}
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success'
+      && needs.core-linux.result == 'success' && github.event.pull_request.user.login != 'dependabot[bot]'
+      && !(github.event_name == 'pull_request' && !github.event.pull_request.draft) }}
     runs-on: xcode-27
     # 64 green jobs since 16.11.: p95 28.6, longest 32.4 min; the longest + 50 % is 49 (fourth
     # review of the tempo plan; was 45, entry "Zeitgrenze gelockert" in docs/IMPROVEMENTS.md).

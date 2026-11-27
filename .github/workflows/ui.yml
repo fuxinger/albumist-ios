@@ -329,27 +329,62 @@ jobs:
         run: python3 .github/scripts/timing_report.py core-linux.log >> "$GITHUB_STEP_SUMMARY"
 
   core-macos:
-    # The macOS core tests with hard wall-clock limits, once in the full run before the merge
-    # (rule of 26.11., second review: CI's macOS job only reports them on a pull request, and
-    # CI is not part of the merge gate). Only what the full run lacks: the Linux tests, the
-    # app build and the UI groups are already in it. Not in a draft's smoke run or a quick run,
-    # and not in a TestFlight run (CI ran hard on main before it). In the full run of a ready
-    # pull request (the merge check since stage 1) hard as well: its own ALBUMIST_TIMING.
-    name: Core tests hard (macOS)
+    # The macOS core tests and the app's own unit tests (AlbumistTests, StoreKit included) with
+    # hard wall-clock limits, once in the full run before the merge (rule of 26.11., second
+    # review: CI's macOS job only reports limits on a pull request, and CI is not part of the
+    # merge gate). Since 27.11. evening (A31, coordinator's condition) CI's macOS job does not
+    # run on a ready pull request any more: everything it tests is here or in the UI build
+    # (test_workflows.py ReadyPullRequestTests checks it step by step), so the full run asks
+    # for five Macs, not six, and the late group (ui-late) no longer waits for CI's job
+    # (run 46048374332: 22 min). Only what the full run lacks: the Linux tests, the UI build
+    # and the UI groups are already in it. Not in a draft's smoke run or a quick run, and not
+    # in a TestFlight run (CI ran hard on main before it, and runs in that TestFlight run).
+    name: Core and app tests hard (macOS)
     needs: plan
     # Not at night (27.11.): the nightly run tests large-library only.
     if: ${{ needs.plan.result == 'success' && !inputs.release && !inputs.quick && github.event_name != 'schedule' && !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
     runs-on: xcode-27
     env:
       ALBUMIST_TIMING: hard
-    timeout-minutes: 25
+    # Was 25 (core and load test, 15 min in run 46048374332). Now also CI's app build and app
+    # tests: in CI 2.7 + 7 + 3 min (runs 46048374480, 46035970115, 45989750902), job limit 50
+    # there with the strings export (6 min) this job leaves out; the load test is here instead.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Select pinned Xcode
-        run: python3 .github/scripts/toolchain.py xcode
+        # With the simulator runtime, as in CI's macOS job (the app tests need it).
+        run: python3 .github/scripts/toolchain.py xcode --runtime
+      - name: Install XcodeGen
+        run: python3 .github/scripts/toolchain.py xcodegen
+      - name: Generate Xcode project
+        run: cd App && xcodegen generate
+      - name: Pick simulator
+        id: sim
+        # Not booted before the core tests (see CI's macOS job): a boot competes with the build.
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --role default)
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+      - name: Build app and its tests
+        # Compile first, as in CI's macOS job: a compile error of the app's unit tests is red within
+        # minutes. Its failure stops the tests below (the job is red then anyway).
+        id: appbuild
+        if: steps.sim.outputs.udid != ''
+        run: |
+          cd App
+          xcodebuild build-for-testing \
+            -project Albumist.xcodeproj \
+            -scheme Albumist \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1 \
+            || { grep -E "error:" -A3 ../build-log.txt | grep -v "/SourcePackages/" | head -80; echo "--- last 30 lines of the build log"; tail -30 ../build-log.txt; exit 1; }
+          tail -2 ../build-log.txt
       - name: Core tests (macOS), hard limits
+        id: core
+        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' }}
         timeout-minutes: 15
         run: |
           mkdir -p build
@@ -358,6 +393,8 @@ jobs:
         # Here, not in core-linux: that job is skipped when every group's green is reused, and
         # this job runs in every full run (second review 26.11.). Limits as in the nightly run,
         # which runs the same load test on macOS.
+        id: load
+        if: ${{ !cancelled() && steps.core.outcome == 'success' }}
         timeout-minutes: 9
         run: |
           set +e
@@ -369,6 +406,97 @@ jobs:
       - name: Time limits reported
         if: ${{ always() }}
         run: python3 .github/scripts/timing_report.py build/core-macos.log build/load.log >> "$GITHUB_STEP_SUMMARY"
+      - name: Fresh simulator (erased and booted)
+        # As in CI's macOS job (ci.yml, the reasons there): erased, booted after the core tests,
+        # settled, StoreKit log recorded live.
+        id: fresh
+        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' && steps.core.outcome == 'success' && steps.load.outcome == 'success' }}
+        timeout-minutes: 20
+        run: |
+          UDID="${{ steps.sim.outputs.udid }}"
+          xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
+          xcrun simctl erase "$UDID"
+          for attempt in 1 2 3; do
+            xcrun simctl boot "$UDID" > /dev/null 2>&1 || true
+            xcrun simctl bootstatus "$UDID" -b > /dev/null && break
+            [ "$attempt" = 3 ] && { echo "simulator did not boot (3 attempts)"; exit 1; }
+            echo "FLAKY_BOOT bootstatus failed (attempt $attempt of 3), retrying"
+            echo "::warning title=Environment retry (simulator boot)::bootstatus failed (attempt $attempt of 3), erased simulator booted again; counted, a finding to fix, not a test result"
+            echo "- Environment retry (simulator boot): attempt $attempt of 3 failed" >> "$GITHUB_STEP_SUMMARY"
+            xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
+            sleep 15
+          done
+          python3 .github/scripts/ui_tests.py settle --udid "$UDID"
+          nohup xcrun simctl spawn "$UDID" log stream --style compact --level debug \
+            --predicate 'process CONTAINS[c] "storekit" OR subsystem CONTAINS[c] "storekit" OR process == "appstored" OR process == "itunesstored" OR subsystem == "com.apple.AppleMediaServices"' \
+            > storekit-live.log 2>&1 &
+          echo "simulator $UDID erased and booted; StoreKit log recorded live (pid $!)"
+      - name: Build and test app
+        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' && steps.core.outcome == 'success' && steps.load.outcome == 'success' && steps.fresh.outcome == 'success' }}
+        run: |
+          echo "LOAD at start: $(sysctl -n vm.loadavg)"
+          ps -Ao pcpu=,state=,comm= -r | head -8 | cut -c1-160 | sed 's/^/SIM_TOP at start /'
+          set +e
+          cd App
+          xcodebuild test \
+            -project Albumist.xcodeproj \
+            -scheme Albumist \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath ../build/TestResults.xcresult \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1
+          status=$?
+          # StoreKit's own lines too (SKTestSession, StoreKitServiceError with its environment):
+          # "[SKTestSession] Error saving configuration file: ... SKInternalErrorDomain" names no
+          # "error:" and stayed in the artifact, where it cannot be read when the download fails.
+          grep -E "error:|warning: .*Albumist|test host signed ad hoc|STOREKIT|SKTestSession|SKInternalErrorDomain|StoreKitServiceError|Test Suite|Test case|Executed|TAXONOMY|VISION_IDENTIFIERS|PREVIEW_JPEG|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -3000
+          # Whether the test session's configuration reached the simulator: storekitd keeps it in
+          # its app group under Persistence/Octane/<bundle id>/Configuration.storekit (Apple
+          # forum 826971, FB22237318: "Missing" when SKTestSession could not save it). In green
+          # runs too, so a red one can be compared; nothing listed in both says nothing.
+          find "$HOME/Library/Developer/CoreSimulator/Devices/${{ steps.sim.outputs.udid }}/data/Containers/Shared/AppGroup" \
+            -maxdepth 6 -path "*/Persistence/Octane*" -exec ls -ld {} + 2>&1 | head -20 | sed 's/^/OCTANE /'
+          echo "OCTANE end of list (empty: no Octane folder in the simulator's app groups)"
+          exit $status
+      - name: StoreKit daemon log
+        # As in CI's macOS job (ci.yml).
+        if: (failure() || cancelled()) && steps.sim.outputs.udid != ''
+        run: |
+          if [ -f build-log.txt ] && grep -q "StoreKit test environment not" build-log.txt; then
+            [ -f storekit-live.log ] && echo "StoreKit log: $(wc -l < storekit-live.log | tr -d ' ') lines" || echo "no live StoreKit log"
+            # CI 44390350152: the last 300 lines below were all product requests from the last
+            # minute; what storekitd did with the session's configuration at set-up was cut off.
+            echo "--- how storekitd classed this app's requests ([Client] bundle id (name) environment)"
+            grep -aoE "\[Client\] [^ ]+ \([^)]*\) [A-Za-z]+" storekit-live.log | sort | uniq -c || true
+            echo "--- StoreKit Testing in Xcode: storekitd's XcodeTest and Octane lines (first 150)"
+            grep -aE "XcodeTest|Octane|SKTestSession" storekit-live.log | head -150 || true
+            echo "--- errors and failures (last 300)"
+            grep -iE "error|fail|denied|timed? ?out|invalid|unable|refus|not (found|allowed|available)|configuration|products?|sandbox|octane|storefront|environment" storekit-live.log | tail -300 || true
+            echo "--- last 200 lines"
+            tail -200 storekit-live.log || true
+            echo "--- Apple store hosts from this runner (connect time: a hang shows as a long one or as the 15 s limit)"
+            for url in https://bag.itunes.apple.com/bag.xml https://buy.itunes.apple.com https://xp.apple.com; do
+              curl -sS -o /dev/null -m 15 -w "$url: HTTP %{http_code}, connect %{time_connect} s, total %{time_total} s\n" "$url" 2>&1 || true
+            done
+          fi
+      - name: Job summary
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results tests --path build/TestResults.xcresult > build/app-tests.json 2>/dev/null || true
+          python3 .github/scripts/test_summary.py summary --title "Core and app tests hard (macOS)" \
+            --swift-log build/core-macos.log --xcresult-json build/app-tests.json >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: core-app-macos-log
+          path: |
+            build-log.txt
+            build/TestResults.xcresult
+            storekit-live.log
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
 
   build:
     name: UI build
@@ -657,7 +785,7 @@ jobs:
           CORE_MACOS: ${{ needs.core-macos.result }}
         run: |
           echo "core-macos: $CORE_MACOS"
-          [ "$CORE_MACOS" = success ] || { echo "::error title=Merge gate::Core tests hard (macOS) is $CORE_MACOS, not green"; exit 1; }
+          [ "$CORE_MACOS" = success ] || { echo "::error title=Merge gate::Core and app tests hard (macOS) is $CORE_MACOS, not green"; exit 1; }
       - name: Core tests (Linux) green
         # The UI build no longer waits for them (27.11.); every verdict does, also when no group
         # had to run (greens of a commit with red core tests must not make a later run green).

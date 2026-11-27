@@ -237,11 +237,16 @@ nachts um 02:10 UTC auf main und von Hand), Barrierefreiheit auf dem kleinen iPh
 (`accessibility`), Kontrast auf dem kleinen iPhone (`contrast`), übrige Abläufe mit Kauf und
 Suche (`flow-other`), Gerätezustände (`device`), voller Ablauf mit Video (`flow-full`); bis zu
 vier zugleich (im TestFlight-Lauf drei). Ein Pull Request startet vier Gruppen gleichzeitig; mit
-dem Mac-Job „Core tests hard (macOS)“ sind das fünf Macs, so viele, wie das Konto zugleich hat.
-`contrast` („after_core“) startet im Job `ui-late` erst, wenn dieser Mac-Job fertig ist (12–14
+dem Mac-Job „Core and app tests hard (macOS)“ sind das fünf Macs, so viele, wie das Konto zugleich hat.
+`contrast` („after_core“) startet im Job `ui-late` erst, wenn dieser Mac-Job fertig ist (rund 30
 Min.), auf dem Mac, den er frei macht: der UI-Lauf selbst fragt nie mehr als fünf Macs an
-(seit 27.11. abends). Ein Push auf einen bereiten PR startet zusätzlich CI mit seinem Mac-Job;
-dann kann ein Job kurz auf einen Mac warten. Wo der Mac-Job nicht läuft (TestFlight, schneller Lauf, Nachtlauf), ist `contrast` eine
+(seit 27.11. abends). Seit 27.11. spät startet ein Push auf einen bereiten PR keinen Mac-Job
+von CI mehr („iOS build and tests (macOS)“, rund 29 Min.): alles, was er testet, testet der
+volle Lauf selbst (App bauen und ihre Unit-Tests mit StoreKit in „Core and app tests hard
+(macOS)“, UI-Tests bauen in „UI build“; `test_workflows.py` `ReadyPullRequestTests` prüft es
+Schritt für Schritt). Vorher fragte so ein Push sechs Macs an, und `contrast` wartete 22 Min.
+(Lauf 46048374332). Entwürfe, `main`, Läufe von Hand und TestFlight behalten den CI-Mac-Job;
+der Text-Export für Übersetzungen (kein Test) kommt weiter von `main`. Wo der Mac-Job nicht läuft (TestFlight, schneller Lauf, Nachtlauf), ist `contrast` eine
 gewöhnliche Gruppe. Einige Stunden am 27.11. lief der Kontrast-Test als zweite Phase von
 `accessibility` auf dem gelöschten Simulator; das kostete die Gruppe 5 Minuten Löschen und
 Neustart und machte sie zur längsten (45 Min., Lauf 45973048317). Verteilung seit 27.11. abends:
@@ -517,7 +522,7 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   dem Verlauf `test1c`, schnell, ein Mac, rund 25 Minuten mit Bau; Urteil „UI verdict
   (smoke)“; zählt für keine Gruppe). Ist der letzte Commit drin, stellt der Strang den PR auf
   **„Ready for review“**: dann startet von selbst der volle UI-Lauf (alle Gruppen ohne volles
-  Grün für diesen Inhalt, voll, mit „Core tests hard (macOS)“), und sein „UI verdict (full)“ ist
+  Grün für diesen Inhalt, voll, mit „Core and app tests hard (macOS)“), und sein „UI verdict (full)“ ist
   das Merge-Tor. Nichts mehr von Hand starten. Danach läuft bei einem Fix-Push wieder der volle
   Lauf, übernimmt aber jede Gruppe, deren App- und Testschlüssel gleich blieb (nur ein reiner
   Testfix lässt also nur die betroffene Gruppe laufen). „UI supersede“ bricht beim Wechsel auf
@@ -534,7 +539,8 @@ weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
   gleichem Schlüssel werden übernommen, kosten also keinen Mac).
 - **Zeitgrenzen hart vor dem Merge** (Regel 26.11., Koordinator für Fuchs): Auf einem Pull
   Request melden Zeitgrenzen auf der Wanduhr nur (`TimingLimit`, `TIMING_OVER`, gezählt). Der
-  volle Lauf prüft sie hart: Job „Core tests hard (macOS)“ (macOS-Core-Tests und Lasttest). „UI verdict (full)“ ist nur grün, wenn „Core tests hard (macOS)“
+  volle Lauf prüft sie hart: Job „Core and app tests hard (macOS)“ (macOS-Core-Tests, Lasttest, seit
+  27.11. auch App-Bau und App-Unit-Tests). „UI verdict (full)“ ist nur grün, wenn „Core and app tests hard (macOS)“
   grün ist. Nur diese fehlenden Teile, keine zweite App-Build oder UI-Gruppe.
 - **Damit GitHub es erzwingt** (nur Fuchs, Einstellung, P5-09): Schutzregel für `main` mit
   Pflicht-Prüfung „UI verdict (full)“ (seit 26.11. ohne „UI stress verdict“, unten) und „Require

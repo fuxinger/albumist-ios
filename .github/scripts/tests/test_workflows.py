@@ -716,6 +716,86 @@ class DraftAndReadyTests(unittest.TestCase):
                 self.assertEqual(got, expected[kind])
 
 
+class ReadyPullRequestTests(unittest.TestCase):
+    """27.11.2026 evening (A31, coordinator's condition): CI's macOS job does not run on a pull
+    request that is ready for review, only because the full UI run of that push tests everything
+    it tests: the app's unit tests (AlbumistTests, StoreKit) and its build in "Core and app tests
+    hard (macOS)", the UI tests' build in "UI build", the macOS core tests there too. Drafts, main,
+    runs by hand and TestFlight keep CI's macOS job. A ready push asked for six Macs before (one
+    more than the account has; run 46048374332, the late group waited 22 min)."""
+
+    NOT_TESTS = {"Export strings for translation", "Upload strings", "Upload logs", "Job summary",
+                 "Time limits reported", "StoreKit daemon log"}
+
+    def setUp(self):
+        self.ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        self.ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+
+    @staticmethod
+    def condition(text, job):
+        expr = job_field(text, job, "if").replace("${{", "").replace("}}", "")
+        return expr.replace("!cancelled() &&", "").strip()
+
+    def contexts(self):
+        main = dispatch_context("refs/heads/main", "CI", event="push")
+        hand = dispatch_context("refs/heads/claude/x", "CI")
+        release = dispatch_context("refs/heads/main", "TestFlight", True, "workflow_call")
+        return {"draft": pr_context(draft=True), "ready": pr_context(), "main": main, "hand": hand,
+                "release": release, "dependabot": pr_context(user="dependabot[bot]", draft=True)}
+
+    def test_ci_mac_job_skips_only_ready_pull_requests(self):
+        ios = self.condition(self.ci, "ios")
+        expected = {"draft": True, "ready": False, "main": True, "hand": True, "release": True, "dependabot": False}
+        green = {"changes": {"outputs": {"code": "true"}}, "lint": {"result": "success"},
+                 "core-linux": {"result": "success"}}
+        for kind, ctx in self.contexts().items():
+            with self.subTest(kind=kind):
+                self.assertEqual(bool(gh_expr(ios, dict(ctx, needs=green))), expected[kind])
+        # Wherever CI's macOS job is left out, the full UI run's macOS job runs, and the verdict
+        # (the merge check) needs it green.
+        core = self.condition(self.ui, "core-macos")
+        ready = dict(pr_context(), needs={"plan": {"result": "success"}})
+        self.assertTrue(gh_expr(core, ready))
+        self.assertIn("core-macos", job_field(self.ui, "verdict", "needs"))
+        self.assertIn('[ "$CORE_MACOS" = success ]', job_blocks(self.ui)["verdict"])
+        # Both workflows start on the same pushes of a pull request (code, not only Markdown).
+        for text in (self.ci, self.ui):
+            self.assertIn("  pull_request:\n", text)
+        self.assertIn("    paths-ignore: ['**.md']\n", self.ui.split("  pull_request:\n", 1)[1][:200])
+
+    def test_every_test_of_the_ci_mac_job_is_in_the_full_run(self):
+        steps = job_steps(self.ci, "ios")
+        core = {name: (rule, run) for name, rule, run in job_steps(self.ui, "core-macos")}
+        build = "\n".join(run for _, _, run in job_steps(self.ui, "build"))
+        full = "\n".join(run for _, run in core.values())
+        covered = 0
+        for name, _, run in steps:
+            if not run or name in self.NOT_TESTS:
+                continue
+            with self.subTest(step=name):
+                flat = run.replace("\\\n", " ")
+                for action, scheme in re.findall(r"xcodebuild\s+([a-z-]+)\s.*?-scheme\s+(\S+)", flat, re.S):
+                    where = build if scheme == "AlbumistUI" else full
+                    self.assertRegex(where.replace("\\\n", " "), rf"xcodebuild\s+{action}\s[^\n]*?-scheme\s+{scheme}\b")
+                    covered += 1
+                for command in re.findall(r"swift test[^\n]*", run):
+                    self.assertIn(command, full)
+                    covered += 1
+        self.assertGreaterEqual(covered, 4)  # app build, UI build, core tests, app tests
+        # The app tests run exactly as in CI: the same erased and settled simulator (StoreKit,
+        # CI 44383157858) and the same test command; only the step conditions differ.
+        ci_runs = {name: run for name, _, run in steps}
+        for name in ("Fresh simulator (erased and booted)", "Build and test app", "Build app and its tests"):
+            with self.subTest(same=name):
+                self.assertIn(name, core)
+                self.assertEqual(core[name][1], ci_runs[name])
+        # The strings export is the one step left out (no test; main's CI uploads it).
+        left_out = {name for name, _, run in steps if run and name not in core and name not in self.NOT_TESTS}
+        self.assertEqual(left_out, {"Build UI tests", "Core tests (macOS)"})
+        self.assertIn("Core tests (macOS), hard limits", core)
+        self.assertIn("ALBUMIST_TIMING: hard", job_blocks(self.ui)["core-macos"])
+
+
 class StressEveryNightTests(unittest.TestCase):
     """Rebuild stage 1 (the owner's decision of 26.11.2026): the 10,000-photo pass is no merge
     check any more; it runs before each TestFlight build and every night on main (Monday to

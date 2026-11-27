@@ -164,7 +164,7 @@ struct WorldMapSheet: View {
         let trips = data.trips(inCountry: key)
         let name = WorldMapText.countryName(key)
         let photos = trips.reduce(0) { $0 + ($1.geometry.countryPhotos[key] ?? 0) }
-        header(name, [String(localized: "\(trips.count) Reisen"), String(localized: "\(photos) Fotos")].joined(separator: " · "), closable: true)
+        header(name, [String(localized: "\(trips.count) Reisen"), String(localized: "\(photos) \(photos.formatted()) Fotos")].joined(separator: " · "), closable: true)
         mainButton("Alle Fotos ansehen", systemImage: "photo.on.rectangle", identifier: "worldmap.country.photos") {
             countryPhotos = CountryCode(id: key)
         }
@@ -174,7 +174,7 @@ struct WorldMapSheet: View {
     @ViewBuilder private func tripView(_ trip: MapTrip) -> some View {
         let film = data.film(trip)
         let photos = data.photos(trip)
-        header(trip.title, [WorldMapText.when(trip.geometry), String(localized: "\(trip.geometry.photoCount) Fotos")].joined(separator: " · "), closable: true)
+        header(trip.title, [WorldMapText.when(trip.geometry), String(localized: "\(trip.geometry.photoCount) \(trip.geometry.photoCount.formatted()) Fotos")].joined(separator: " · "), closable: true)
         switch film.kind {
         case .film:
             mainButton("Reise abspielen", systemImage: "play.fill", identifier: "worldmap.play") { onPlay(trip) }
@@ -220,7 +220,7 @@ struct WorldMapSheet: View {
         let photos = data.photos(trip)
         let own = photos.photos(ofPlaces: [index])
         let count = trip.geometry.places.indices.contains(index) ? trip.geometry.places[index].photoCount : own.count
-        let subtitle = [WorldMapText.when(trip.geometry), String(localized: "\(count) Fotos")].joined(separator: " · ")
+        let subtitle = [WorldMapText.when(trip.geometry), String(localized: "\(count) \(count.formatted()) Fotos")].joined(separator: " · ")
         header(WorldMapText.placeName(trip, index), subtitle, closable: true)
         mainButton("Fotos ansehen", systemImage: "photo.on.rectangle", identifier: "worldmap.story") {
             story = WorldPhotoStory(trip: trip, photos: photos, places: [index])

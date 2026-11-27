@@ -104,6 +104,14 @@ TAKE_TURNS = {
          ("App/Albumist/Views/ProposalViews.swift", r"if needsFullAccess \{\s*notNowButton\(card, beside: false\)"
                                                     r"\s*\} else if")],
     )],
+    "WorldMapView": [(
+        {"TripFilmOverlay.endCard"},
+        "the map lays the film over itself twice, the route under the pins and the controls above; "
+        "only the controls layer draws the end card with \"Fertig\", once, after the film ended "
+        "(merged from main with the map, 27.11.)",
+        [("App/Albumist/Map/World/TripFilmOverlay.swift", r"case \.controls:\s*VStack"),
+         ("App/Albumist/Map/World/TripFilmOverlay.swift", r"case \.finished:\s*endCard")],
+    )],
     "TripWorkshopView": [(
         {"TripWorkshopView.splitBar", "TripWorkshopView.finished"},
         "the bar with \"Reise aufteilen\" stands only while nothing is done; \"Zu den Reisen\" only once a "
@@ -450,12 +458,16 @@ class Many(Node):
 
 
 class Apart(Node):
-    """`child`, whose buttons in one group of `groups` never show together."""
+    """`child`, whose buttons in one group of `groups` never show together. A group of one button
+    says that the page places its view more than once and only one of them draws it (the map's
+    film: a route layer and a controls layer); a button repeated in a list still counts with others."""
 
     def __init__(self, child: Node, groups):
         self.leaves = child.leaves
+        alone = {next(iter(group)) for group in groups if len(group) == 1}
         self.pairs = frozenset(p for p in child.pairs
-                               if p[0] == p[1] or not any(p[0] in group and p[1] in group for group in groups))
+                               if (p[0] == p[1] and p[0] not in alone)
+                               or (p[0] != p[1] and not any(p[0] in group and p[1] in group for group in groups)))
 
 
 EMPTY = Seq([])

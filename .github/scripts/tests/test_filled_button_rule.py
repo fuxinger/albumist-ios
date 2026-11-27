@@ -492,13 +492,22 @@ class AppTests(unittest.TestCase):
         self.assertIn("PrimaryButtonStyle", declared)
         self.assertEqual(declared - named, set())
 
+    def test_a_group_of_one_lets_a_view_placed_twice_draw_its_button_once(self):
+        twice = rule.Seq([rule.One(0), rule.One(0)])
+        self.assertEqual(twice.pairs, {(0, 0)})
+        self.assertEqual(rule.Apart(twice, [frozenset([0])]).pairs, frozenset())
+        # A button repeated in a list's rows stays a pair when it only takes turns with another.
+        rows = rule.Many(rule.One(0), set())
+        self.assertEqual(rule.Apart(rows, [frozenset([0, 1])]).pairs, {(0, 0)})
+
     def test_every_entry_names_a_view_of_the_app(self):
         views = {info.name for info in self.app.types.values() if info.is_view}
         self.assertEqual(set(rule.TAKE_TURNS) - views, set())
         for page_name, groups in rule.TAKE_TURNS.items():
             for names, reason, witnesses in groups:
                 with self.subTest(page=page_name, names=sorted(names)):
-                    self.assertGreaterEqual(len(names), 2)
+                    # One name: the page places that view twice and only one draws the button.
+                    self.assertGreaterEqual(len(names), 1)
                     self.assertTrue(reason.strip())
                     self.assertTrue(witnesses, "an entry says which code keeps the buttons apart")
         for (owner, _), (reason, witnesses) in rule.SHOWN_ONCE.items():

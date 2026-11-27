@@ -109,7 +109,8 @@ enum UITestAppEnd {
                 print("UI_TIMING app ended \(when) \(Int(Date().timeIntervalSince(asked))) s (by the Mac, ended)")
                 return
             case .staleAfterMacEnd:
-                print("UI_FACT the Mac ended the app, XCTest still reads it running \(Int(Date().timeIntervalSince(asked))) s after the request: XCTest ends it")
+                let since = Int(Date().timeIntervalSince(asked))
+                print("UI_FACT the Mac ended the app, XCTest still reads it running \(since) s after the request: XCTest ends it")
                 way = "by XCTest after the Mac ended it"
             case .running:
                 print("UI_FACT app still running \(Int(Date().timeIntervalSince(asked))) s after asking the Mac to end it: XCTest ends it")

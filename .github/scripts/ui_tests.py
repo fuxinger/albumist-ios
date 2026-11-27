@@ -86,13 +86,19 @@ pass in which a test has started (the log is read again right before the stop, s
 started while simctl was being asked counts too).
 Anything else is never repeated: a real failure stays red. That includes XCTest losing the
 app at a launch ("Application ... does not have a process ID", device test 04 of UI run
-44066730498): it is never repeated, but the verdict says which side it points at
+44066730498): it is not repeated (one exception below), but the verdict says which side it points at
 (`lost_app_at_launch`), from the crash reports and the app's own launch record (the device
 tests print "UI_FACT app process P started T UTC" from the file the app writes at launch):
 a crash report means the app crashed; a process that started 30 s or more after the test's
 "UI_FACT clock T launch" means the simulator began the launch late (simulator/XCTest side);
 a process that started at once means the app itself did not come up in time (app side);
-without a record of a new process the cause stays open. A pass that ran no test at all
+without a record of a new process the cause stays open. The exception (Z4, 27.11.,
+`lost_while_up`): when that loss is the pass's only failure, no crash report was written and the
+app's own record shows it in the foreground within 60 s of the launch request, without a long
+stall, staying there until the next test's end of the app ended that same process, XCTest lost
+an app that had come up; the pass is repeated once on a fresh simulator, counted,
+and a red repeat is red. After an end of the app that took 8 s or more, the test also asks the
+Mac to wait for the simulator before the launch (UI_HOST_SETTLE). A pass that ran no test at all
 fails (a renamed test would otherwise make an empty, green selection), and so does a group in
 which no test passed because every test skipped itself (XCTSkip; G5-08), and a repeat whose
 selection would be empty is not started (only possible when every --only entry is a single
@@ -290,6 +296,61 @@ LOST_APP = re.compile(r"does not have a process ID")
 LAUNCH_CLOCK = re.compile(r"UI_FACT clock (\d\d):(\d\d):(\d\d(?:\.\d)?) launch\b")
 APP_PROCESS = re.compile(r"UI_FACT app process (\d+) started (\d\d):(\d\d):(\d\d(?:\.\d)?) UTC")
 LATE_START = 30.0
+# The app's own record of reaching the screen (UITestLifecycle, read from the file the app writes).
+APP_UP = re.compile(r"UI_FACT app lifecycle (?:foreground|active) at (\d\d):(\d\d):(\d\d(?:\.\d)?) UTC")
+MAIN_STALL = re.compile(r"UI_FACT main stall (\d+(?:\.\d+)?) s from")
+# A stall that never ended leaves only these (the app writes "main stall" when one ends).
+MAIN_STACK = re.compile(r"UI_FACT main stack after (\d+(?:\.\d+)?) s of the stall")
+APP_LEFT = re.compile(r"UI_FACT app lifecycle (?:resign-active|background)\b")
+# A step of the test between the launch and the loss: then it was not lost at the launch.
+TEST_STEP = re.compile(r"UI_STEP|UI_FACT clock \S+ wait (?:start|end)")
+# Z4 (27.11.): the app came up this soon after the launch request, its main thread never stalled
+# this long, and XCTest still lost it minutes later. Seen: up after 15-30 s, stalls of 2.1-2.2 s.
+UP_WITHIN = 60.0
+UP_STALL_LIMIT = 5.0
+
+
+def clock_seconds(match: re.Match, first: int) -> float:
+    return int(match.group(first)) * 3600 + int(match.group(first + 1)) * 60 + float(match.group(first + 2))
+
+
+def app_came_up(lines: list[str], index: int) -> tuple[float, float] | None:
+    """For the lost app of lines[index]: (s from the launch request to the new process, s to the
+    app's first foreground/active) when the app's own record shows that it came up within
+    UP_WITHIN s and its main thread never stalled UP_STALL_LIMIT s or more (also a stall that
+    never ended, seen only as "main stack after N s"), it never left the screen afterwards, and
+    the next test's end of the app (UI_HOST_TERMINATE_APP ... <pid>) ended that same process;
+    else None.
+
+    The record is printed after the failure, up to the next test's start; the launch request
+    must come right before the failure in the same test, with no test step between them."""
+    launch = process = up = None
+    for earlier in reversed(lines[:index]):
+        if STARTED.search(earlier) or TEST_STEP.search(earlier):
+            break
+        if launch := LAUNCH_CLOCK.search(earlier):
+            break
+    ended = False
+    for number, later in enumerate(lines[index + 1:]):
+        if STARTED.search(later):
+            # The same process stayed until the next test's end of the app ended it.
+            ended = bool(process) and any(
+                (term := HOST_TERMINATE.search(line)) and term.group(2) == process.group(1)
+                for line in lines[index + 1 + number:index + 1 + number + 40])
+            break
+        stall = MAIN_STALL.search(later) or MAIN_STACK.search(later)
+        if stall and float(stall.group(1)) >= UP_STALL_LIMIT:
+            return None
+        process = process or APP_PROCESS.search(later)
+        if process and not up:
+            up = APP_UP.search(later)
+        elif up and APP_LEFT.search(later):
+            return None
+    if not (launch and process and up and ended):
+        return None
+    start = (clock_seconds(process, 2) - clock_seconds(launch, 1)) % 86_400
+    shown = (clock_seconds(up, 1) - clock_seconds(launch, 1)) % 86_400
+    return (start, shown) if start <= shown <= UP_WITHIN else None
 
 
 def lost_app_at_launch(log: str, crash_reports: list[str] | None = None) -> list[str]:
@@ -316,6 +377,9 @@ def lost_app_at_launch(log: str, crash_reports: list[str] | None = None) -> list
             process = process or APP_PROCESS.search(later)
         if crash_reports:
             reason = "XCTest lost the app at a launch, and a crash report was written (app side)"
+        elif up := app_came_up(lines, index):
+            reason = (f"XCTest lost the app at a launch although the app came up: process after {up[0]:.0f} s, "
+                      f"on screen after {up[1]:.0f} s, no crash report (XCTest side)")
         elif launch and process:
             late = (seconds(process, 2) - seconds(launch, 1)) % 86_400
             if late >= LATE_START:
@@ -376,6 +440,40 @@ def late_launch(log: str, crash_reports: list[str] | None = None) -> list[str]:
             return []
         reasons.append(f"{LATE_LAUNCH_REASON} the simulator started the app process {late:.0f} s after the launch "
                        f"request, no crash report (simulator side, repeated once)")
+    return reasons[:1]
+
+
+LOST_UP_REASON = "app up, XCTest lost it:"
+# Reasons for which a pass is repeated once only; a repeat that is not green is red, never "no result".
+ONE_REPEAT = (LATE_LAUNCH_REASON, LOST_UP_REASON)
+
+
+def lost_while_up(log: str, crash_reports: list[str] | None = None) -> list[str]:
+    """XCTest lost the app at a launch ("does not have a process ID") although the app came up
+    (Z4, 27.11.): every failure of the pass is such a loss, no crash report was written, and for
+    each the app's own record shows its new process and its first foreground/active within
+    UP_WITHIN s of the launch request, without a main-thread stall of UP_STALL_LIMIT s
+    (`app_came_up`). The app was then on screen for minutes while XCTest still waited for it:
+    device test02 in jobs 140195305412 and 140208691916 (PR #29, 26.11.), test07 in job
+    139048797216 (25.11.): on screen after 15-30 s, the failure 3-4 min later, load 290-740.
+    Each came right after an end of the app that took 11-21 s (median 1.8 s). Such a pass is
+    repeated once on a fresh simulator, counted like every repeat; a red repeat is a real
+    finding. [] when the picture is not this one."""
+    if crash_reports:
+        return []
+    lines = [line for line in log.splitlines() if not DATA_LINE.search(line)]
+    errors = [index for index, line in enumerate(lines) if strong_real(line)]
+    lost = [index for index in errors if LOST_APP.search(lines[index]) and ERROR_OF.search(lines[index])]
+    if not lost or not all(index in lost or AGGREGATE.search(lines[index]) or FAILED_CASE.search(lines[index])
+                           for index in errors):
+        return []
+    reasons = []
+    for index in lost:
+        up = app_came_up(lines, index)
+        if up is None:
+            return []
+        reasons.append(f"{LOST_UP_REASON} the app's process started {up[0]:.0f} s and its screen {up[1]:.0f} s "
+                       f"after the launch request, no crash report (XCTest side, repeated once)")
     return reasons[:1]
 
 
@@ -441,15 +539,18 @@ def decide(status: int, log: str, crash_reports: list[str] | None = None, probe:
     log, bundle, daemon = daemon_crash(log, list(bundle or []))
     real, infra = scan(log)
     infra[:0] = daemon
-    real += [reason for reason in lost_app_at_launch(log, crash_reports) if reason not in real]
+    up = lost_while_up(log, crash_reports)
+    if not up:
+        real += [reason for reason in lost_app_at_launch(log, crash_reports) if reason not in real]
     if crash_reports:
         real.append("crash report " + ", ".join(os.path.basename(p) for p in crash_reports))
-    late = late_launch(log, crash_reports)
-    if late and all(LAUNCH_FAIL.search(finding) for finding in bundle or []):
+    late = late_launch(log, crash_reports) or up
+    if late and all(LAUNCH_FAIL.search(finding) or LOST_APP.search(finding) for finding in bundle or []):
         # Every reason the log gives must come from the launch failure and the lines XCTest
         # writes around any failure; anything else (an accessibility finding, a hang, a Fatal
         # error, a recorded issue) keeps it red (second review 26.11.).
-        launch_lines = [line for line in log.splitlines() if LAUNCH_FAIL.search(line) or FAILED_CASE.search(line)
+        launch_lines = [line for line in log.splitlines()
+                        if LAUNCH_FAIL.search(line) or (up and LOST_APP.search(line)) or FAILED_CASE.search(line)
                         or AGGREGATE.search(line) or "TEST EXECUTE FAILED" in line or "Executed " in line]
         explained = scan("\n".join(launch_lines))[0]
         if all(reason in explained for reason in real):
@@ -1052,6 +1153,12 @@ class Recorder(threading.Thread):
 HOST_GRANT = re.compile(r"(?:^|\s)UI_HOST_GRANT_PHOTOS(?: (/\S+))?\s*$")
 # UITestAppEnd.end: "UI_HOST_TERMINATE_APP <epoch second of the request> [<app process id>]".
 HOST_TERMINATE = re.compile(r"(?:^|\s)UI_HOST_TERMINATE_APP(?: (\d+))?(?: (\d+))?\s*$")
+# UITestAppEnd.launch after an end that took SLOW_END s or more: "UI_HOST_SETTLE <answer file>".
+# The Mac waits until the simulator answers quickly again (`settle`, at most LAUNCH_SETTLE_LIMIT
+# s) and writes "settled" or "busy" there; the test launches then (Z4, 27.11.).
+HOST_SETTLE = re.compile(r"(?:^|\s)UI_HOST_SETTLE (/\S+)\s*$")
+LAUNCH_SETTLE_LIMIT = 60
+LAUNCH_SETTLE_STEP = 5
 
 
 def host_grant_requests(text: str) -> int:
@@ -1061,12 +1168,15 @@ def host_grant_requests(text: str) -> int:
 
 def host_requests(text: str) -> list[tuple[str, float | None, int | str | None]]:
     """The requests to the Mac in the complete lines of `text`, in log order: ("grant", None,
-    answer file or None) for UI_HOST_GRANT_PHOTOS, ("terminate", epoch second or None, process id
-    or None) for UI_HOST_TERMINATE_APP."""
+    answer file or None) for UI_HOST_GRANT_PHOTOS, ("settle", None, answer file) for
+    UI_HOST_SETTLE, ("terminate", epoch second or None, process id or None) for
+    UI_HOST_TERMINATE_APP."""
     found: list[tuple[str, float | None, int | str | None]] = []
     for line in text.split("\n"):
         if match := HOST_GRANT.search(line):
             found.append(("grant", None, match.group(1)))
+        elif match := HOST_SETTLE.search(line):
+            found.append(("settle", None, match.group(1)))
         elif match := HOST_TERMINATE.search(line):
             found.append(("terminate", float(match.group(1)) if match.group(1) else None,
                           int(match.group(2)) if match.group(2) else None))
@@ -1113,7 +1223,7 @@ SIMULATOR_DEVICES = "~/Library/Developer/CoreSimulator/Devices"
 
 
 def write_host_answer(udid: str, path: str, answer: str) -> bool:
-    """Writes `answer` ("granted" or "failed") to the test's answer file `path`; True when written."""
+    """Writes `answer` ("granted"/"failed", or "settled"/"busy") to the test's answer file `path`; True when written."""
     folder, name = os.path.split(path)
     device = os.path.realpath(os.path.join(os.path.expanduser(SIMULATOR_DEVICES), udid))
     real_folder = os.path.realpath(folder) if folder else ""
@@ -1252,14 +1362,17 @@ class HostGrants(threading.Thread):
     """Answers the tests' requests to the Mac, in log order, each time a test asks: gives the
     photo access back (UI_HOST_GRANT_PHOTOS, DeviceConditionUITests.grantFromHost; the CI
     simulator shows no iOS question after an access reset, and Settings opens on its first page,
-    not on Albumist's) and ends the app before the next launch (UI_HOST_TERMINATE_APP,
-    UITestAppEnd.end; `terminate_app`)."""
+    not on Albumist's), ends the app before the next launch (UI_HOST_TERMINATE_APP,
+    UITestAppEnd.end; `terminate_app`) and, after a slow end, waits for the simulator before the
+    launch (UI_HOST_SETTLE, UITestAppEnd.launch; `settle`)."""
 
-    def __init__(self, udid: str, log_path: str, interval: float = 2, grant=None, terminate=None, answer=None):
+    def __init__(self, udid: str, log_path: str, interval: float = 2, grant=None, terminate=None, answer=None,
+                 calm=None):
         super().__init__(daemon=True)
         self.udid, self.log_path, self.interval = udid, log_path, interval
         self.grant = grant or self.grant_photos
         self.terminate = terminate or self.terminate_app
+        self.calm = calm or self.settle_simulator
         self.answer = answer or (lambda path, text: write_host_answer(self.udid, path, text))
         self.stopped = threading.Event()
         self.offset = 0
@@ -1267,6 +1380,10 @@ class HostGrants(threading.Thread):
 
     def grant_photos(self) -> bool:
         return grant_photos(self.udid)
+
+    def settle_simulator(self) -> bool:
+        return settle(lambda: simulator_probe(self.udid), limit=LAUNCH_SETTLE_LIMIT, step=LAUNCH_SETTLE_STEP,
+                      going_on="the launch goes on")
 
     def terminate_app(self, asked: float | None, pid: int | None = None) -> None:
         # With the app's process id: exactly that process (`end_app_process`); without (a
@@ -1292,6 +1409,9 @@ class HostGrants(threading.Thread):
                 # The test waits for this answer instead of a fixed 190 s (`write_host_answer`).
                 if isinstance(detail, str):
                     self.answer(detail, "granted" if granted else "failed")
+            elif kind == "settle":
+                if isinstance(detail, str):
+                    self.answer(detail, "settled" if self.calm() else "busy")
             else:
                 self.terminate(asked, detail)
         # A failure shows in the job log at once, not only when the pass ends: a run cancelled
@@ -1644,11 +1764,14 @@ def run_group(args) -> int:
                                           earlier=first_log)
                 # "infra": the repeat failed on the simulator or XCTest alone again.
                 final = {"pass": "pass", "retry": "infra"}.get(verdict, "fail")
-                if final == "infra" and any(r.startswith(LATE_LAUNCH_REASON) for r in retry_reasons):
-                    # Rule of 26.11.: one repeat for a late launch; a repeat that is not green
-                    # is a real finding (second review: "no result" would hide it).
+                if final == "infra" and any(r.startswith(ONE_REPEAT) for r in retry_reasons):
+                    # Rule of 26.11.: one repeat for a late launch (and, Z4, for an app XCTest lost
+                    # although it came up); a repeat that is not green is a real finding (second
+                    # review: "no result" would hide it).
                     final = "fail"
-                    reasons = ["the repeat after a late launch was not green either (counted as red)"] + reasons
+                    cause = "a late launch" if any(r.startswith(LATE_LAUNCH_REASON) for r in retry_reasons) \
+                        else "an app XCTest lost although it came up"
+                    reasons = [f"the repeat after {cause} was not green either (counted as red)"] + reasons
                 again = daemon_crash_tests(first_log) & daemon_crash_tests(text)
                 if final == "infra" and again:
                     # The daemon crashed again in the same test: likely caused by what the test

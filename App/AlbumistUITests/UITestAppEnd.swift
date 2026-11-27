@@ -124,24 +124,25 @@ enum UITestAppEnd {
 
     /// How long the test waits for the Mac's end (TERMINATE_WAIT in ui_tests.py).
     static let macEndWait: TimeInterval = 60
-    /// XCTest's time to see the app gone after the Mac answered "ended".
+    /// XCTest's least time to see the app gone after the Mac answered "ended" (the rest of
+    /// `macEndWait` when that is longer).
     static let staleStateWait: TimeInterval = 5
 
     /// What `waitForEnd` saw.
     enum MacEnd {
         /// XCTest reads the app as not running.
         case gone
-        /// The Mac answered that the process is gone, and XCTest still read it as running
-        /// `staleStateWait` s later.
+        /// The Mac answered that the process is gone, and XCTest still read it as running at
+        /// the end of the whole wait.
         case staleAfterMacEnd
         /// Still running after `macEndWait` s, and the Mac did not say it ended it.
         case running
     }
 
     /// Waits up to `macEndWait` s until XCTest reads `app` as not running, as the single wait
-    /// before did, and stops early when the Mac answered "ended" into `answer` and XCTest still
-    /// does not see it within `staleStateWait` s: then XCTest ends it at once, as it did after the
-    /// whole wait. Device test07 in the full UI run 45865545486 (job 140074115643): the Mac ended
+    /// before did. When the Mac answered "ended" into `answer` it still waits out the whole wait
+    /// (at least `staleStateWait` s) and says `.staleAfterMacEnd` if XCTest never saw it gone:
+    /// then XCTest ends it, as it did after the whole wait. Device test07 in the full UI run 45865545486 (job 140074115643): the Mac ended
     /// the app 12 s after the request ("ended by SIGTERM (10 s)"), XCTest read it as running for
     /// 60 s and its own terminate then took 17 s (77 s for the end).
     private static func waitForEnd(_ app: XCUIApplication, answer: String?) -> MacEnd {
@@ -153,7 +154,12 @@ enum UITestAppEnd {
             if app.wait(for: .notRunning, timeout: min(2, left)) { return .gone }
             guard let answer, let text = try? String(contentsOfFile: answer, encoding: .utf8),
                   text.trimmingCharacters(in: .whitespacesAndNewlines) == "ended" else { continue }
-            return app.wait(for: .notRunning, timeout: staleStateWait) ? .gone : .staleAfterMacEnd
+            // The rest of the whole wait, not a short one: XCTest can read the app as running
+            // for half a minute after the Mac ended it, and its own terminate then fails ("Failed
+            // to terminate app.albumist.ios:0", flow-full test1b in UI run 45927648277, 29 s
+            // after the request with 5 s here). The answer only names the case in the log.
+            let rest = macEndWait - Date().timeIntervalSince(start)
+            return app.wait(for: .notRunning, timeout: max(rest, staleStateWait)) ? .gone : .staleAfterMacEnd
         }
     }
 

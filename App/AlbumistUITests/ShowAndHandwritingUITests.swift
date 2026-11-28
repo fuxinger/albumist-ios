@@ -5,9 +5,9 @@ import UIKit
 /// 100 % (DS-08), the sorting show's count (DS-17), a suggestion's page in its cover's calm
 /// colour, light and dark (DS-11), and the app's icon with its name in Settings › "Über".
 ///
-/// A class of its own, so it runs in the UI group "flow-other" (`.github/ui-groups.json`: every
-/// test the other groups do not run), after the flow, locked, search and frame tests (XCTest
-/// runs the classes in alphabetical order, and the tests of a class too). Each test brings the
+/// A class of its own, in the UI group "device" since 28.11. (`.github/ui-groups.json`; before in
+/// "flow-other"), after the device-condition tests (XCTest runs the classes in alphabetical
+/// order, and the tests of a class too; test10 before it gives the photo access back). Each test brings the
 /// app to an onboarded, analysed demo library by itself (`prepare`). Test 1 rebuilds the
 /// database twice, without the backup copy: the tests after it find every suggestion open.
 /// Tests 3 and 4, the "Handschrift" half (DS-11), are an extension of this class in

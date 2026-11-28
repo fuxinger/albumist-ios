@@ -451,7 +451,7 @@ final class AlbumistFlowUITests: XCTestCase {
         let ready = waitStable("demo library analysed", timeout: 900) {
             if !demoTapped, Date() < demoUntil, demo.exists, !anything("Beispielfotos werden angelegt").exists {
                 demoTapped = true
-                demo.tap()
+                tapDemoUnlessSeeded(demo)
                 return false
             }
             return preparedLibraryReady(demo)
@@ -470,6 +470,29 @@ final class AlbumistFlowUITests: XCTestCase {
         }
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
         if let extra { launch(extra) }
+    }
+
+    /// The fast start seeds the demo library by itself once the model has loaded
+    /// (`UITestSwitches.didLaunch`), so the button can go between its look and the tap: UI run
+    /// 46081123330 (device, load 560-780) failed test1c with "Failed to tap Button ... No matches
+    /// found ... Beispiel-Mediathek anlegen" while the seeding it would have started had started.
+    /// Only that miss of this button is taken as expected (non-strict) and counted as a flaky
+    /// retry; the wait in `prepare` still asserts that the library is created and analysed.
+    private func tapDemoUnlessSeeded(_ demo: XCUIElement) {
+        final class Seen: @unchecked Sendable { var gone = false }
+        let seen = Seen()
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = false
+        options.issueMatcher = { issue in
+            let text = issue.compactDescription
+            let match = text.contains("Failed to tap") && text.contains("No matches found") && text.contains("Beispiel-Mediathek anlegen")
+            if match { seen.gone = true }
+            return match
+        }
+        XCTExpectFailure("The fast start's own seeding took the demo button away before the tap", options: options) {
+            demo.tap()
+        }
+        if seen.gone { print("UI_FLAKY_RETRY \(UITestWait.testID(self)) the demo button went before its tap (the fast start seeds by itself)") }
     }
 
     /// What `prepare` waits for: the demo library is created and analysed and nothing runs.
